@@ -2,6 +2,7 @@
 //! objects exposed to Python. Cache mutation and list aliases stay observable.
 use crate::StrOwner;
 mod source;
+pub(crate) use source::{SourceDecodeError, decode_compile_source};
 
 use std::cell::{Cell, RefCell};
 use std::fs;

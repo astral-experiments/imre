@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 86 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 41 modules with recorded suites, 112 complete test executions pass natively at both optimization levels; 15,141 of 15,288 upstream executions have a classification.
+**At a glance:** 89 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 42 modules with recorded suites, 119 complete test executions pass natively at both optimization levels; 15,152 of 15,299 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 439 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,574 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 443 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,574 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -51,14 +51,17 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `io` | Yes | In-memory `StringIO` and `BytesIO` streams. [Evidence](../benchmarks/cpython_stdlib/full/doctest/stringio/README.md) | — | — | — |
 | `itertools` | Yes | Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/README.md) | [0 / 138](../benchmarks/cpython_stdlib/full/itertools/) | 11 | 0 |
 | `json` | Yes | Decode and encode supported JSON values via `loads`, `load`, `dumps` and `dump`. [Evidence](../benchmarks/cpython_stdlib/full/json/README.md) | [0 / 216](../benchmarks/cpython_stdlib/full/json/) | 38 | 45 |
+| `keyword` | Yes | Check hard and soft keywords with `iskeyword` and `issoftkeyword`. [Evidence](../benchmarks/cpython_stdlib/full/keyword/README.md) | [6 / 11](../benchmarks/cpython_stdlib/full/keyword/) | 3 | 0 |
 | `linecache` | Yes | Filesystem-backed `getline`, cache population and invalidation. [Evidence](../benchmarks/cpython_stdlib/full/linecache/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/linecache/) | 8 | 10 |
 | `logging` | Yes | Send runtime-loaded log messages to `sys.stderr` with `getLogger` and `StreamHandler`, change the handler stream, and rotate log files by size or time. [Evidence](../benchmarks/cpython_stdlib/full/logging/README.md) | [0 / 272](../benchmarks/cpython_stdlib/full/logging/) | 25 | 55 |
+| `marshal` | Yes | Decode integer, bytes, boolean, and None records with `loads`. [Evidence](../tests/fixtures/boxed_bytecache.py) | — | — | — |
 | `math` | Yes | `prod` multiplies integer factors from iterables with an optional integer start. [Evidence](../tests/fixtures/iterables/math_product.py) | — | — | — |
 | `mimetypes` | Yes | Guess the MIME type and encoding of a filename or URL with POSIX host tables or a custom database. [Evidence](../benchmarks/cpython_stdlib/full/mimetypes/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/mimetypes/) | 7 | 10 |
 | `numbers` | Yes | Check typed numeric values and builtin classes against `Number` with `isinstance` and `issubclass`. [Evidence](../tests/fixtures/unions/numeric_membership.py) | — | — | — |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 30 | 15 |
 | `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 136 | 63 |
+| `pickle` | Yes | Encode integers and booleans with `dumps(value, protocol=2)`. [Evidence](../tests/fixtures/boxed_bytecache.py) | — | — | — |
 | `pkgutil` | Yes | No API example recorded. | — | — | — |
 | `platform` | Yes | Read `system()`, `machine()`, and the running Python version from `python_version()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — | — |
@@ -76,7 +79,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `socketserver` | Yes | Serve consecutive TCP clients with a polled listener and buffered request streams. [Evidence](../tests/fixtures/socketserver/boxed_stream.py) | [0 / 27](../benchmarks/cpython_stdlib/full/socketserver/) | 2 | 1 |
 | `stat` | Yes | POSIX mode constants and predicates, permission masks and `filemode`. [Evidence](../benchmarks/cpython_stdlib/full/stat/README.md) | [0 / 22](../benchmarks/cpython_stdlib/full/stat/) | 0 | 18 |
 | `string` | Yes | Selected `Template` substitution, validation and identifier operations. [Evidence](../benchmarks/cpython_stdlib/full/string/README.md) | [15 / 54](../benchmarks/cpython_stdlib/full/string/) | 0 | 0 |
-| `struct` | Yes | Unpack an unsigned 64-bit big-endian integer with `unpack(">Q", data)`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
+| `struct` | Yes | Pack and unpack unsigned timestamps with bound methods of `Struct(">Q")`, or read them with `unpack(">Q", data)`. [Evidence](../tests/imports.py) | — | — | — |
 | `subprocess` | Yes | Launch with `Popen` and `run`, capture streams and handle deadlines. `getoutput` and `getstatusoutput` capture combined shell output. [Evidence](../benchmarks/cpython_stdlib/full/subprocess/README.md) | [0 / 353](../benchmarks/cpython_stdlib/full/subprocess/) | 54 | 97 |
 | `sys` | Yes | Process arguments, streams, interpreter flags, and `sys.setrecursionlimit(2000)`. [Evidence](../benchmarks/cpython_stdlib/full/sys/README.md) | [0 / 97](../benchmarks/cpython_stdlib/full/sys/) | 7 | 5 |
 | `sysconfig` | Yes | `get_path("scripts")`. [Evidence](../tests/fixtures/paths/executables.py) | — | — | — |
@@ -90,7 +93,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `typing` | Yes | Use selected annotations and aliases; register, look up and clear overloads for supported named functions. [Evidence](../benchmarks/cpython_stdlib/full/typing/README.md) | [0 / 712](../benchmarks/cpython_stdlib/full/typing/) | 3 | 2 |
 | `unicodedata` | Yes | Normalize Unicode scalar strings in NFC, NFD, NFKC and NFKD, and check whether they are normalized using Unicode 16. [Evidence](../tests/fixtures/text/unicodedata_normalize.py) | — | — | — |
 | `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [17 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 11 | 12 |
-| `urllib` | Yes | `urllib.parse.urlsplit` with named result fields, and `quote` and `unquote` with codec options for strings and bytes. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [1 / 178](../benchmarks/cpython_stdlib/full/urllib/) | 3 | 5 |
+| `urllib` | Yes | `urllib.parse.urlsplit` exposes named result fields. `quote` and `unquote` accept codec options, and `quote_from_bytes` escapes octets. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [2 / 178](../benchmarks/cpython_stdlib/full/urllib/) | 4 | 5 |
 | `uuid` | Yes | Construct a `UUID` from hexadecimal text or a 128-bit integer and read its canonical spelling, `hex` and `int`. [Evidence](../tests/fixtures/text/uuid_conversion.py) | — | — | — |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
 | `weakref` | Yes | Callback-free proxy for source-defined records, including cached identity, attribute and call forwarding, and ReferenceError after the referent is released. [Evidence](../tests/fixtures/classes/weak_proxy.py) | — | — | — |
@@ -141,11 +144,9 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `html` |
 | `imaplib` |
 | `ipaddress` |
-| `keyword` |
 | `locale` |
 | `lzma` |
 | `mailbox` |
-| `marshal` |
 | `mmap` |
 | `modulefinder` |
 | `msvcrt` |
@@ -157,7 +158,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `opcode` |
 | `optparse` |
 | `pdb` |
-| `pickle` |
 | `pickletools` |
 | `plistlib` |
 | `poplib` |

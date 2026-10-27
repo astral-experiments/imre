@@ -8,10 +8,10 @@
   "denominator": 77,
   "distinct_ids": 77,
   "counts": {
-    "fully-native": 1,
+    "fully-native": 2,
     "host-driven-native-operation": 5,
     "mixed": 1,
-    "reference-only": 70
+    "reference-only": 69
   },
   "records": [
     {"id": "test.test_urlparse.DeprecationTest.test_splitattr_deprecation", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -58,7 +58,7 @@
     {"id": "test.test_urlparse.UrlParseTestCase.test_qs", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_qsl", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_quote_errors", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
-    {"id": "test.test_urlparse.UrlParseTestCase.test_quote_from_bytes", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
+    {"id": "test.test_urlparse.UrlParseTestCase.test_quote_from_bytes", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "imre"}, "evidence": {"operation": "quote_from_bytes returning escaped octets and rejecting a text operand", "fixture": "default TestCase lifecycle in native unittest.main", "source_blob": "b2bde5a9b1d696ea07dd4cc18d5816eec225058f", "method_sha256": "818ad8c13519ef1f8248a4a14d5797f56083fa7e9fc2c8731c4852fb2beceadd", "entry_sha256": "5fa1edf526389701e0092607c78532697f0f77d30c083fa668dda0555b267c38", "staged_id": "__main__.UrlParseTestCase.test_quote_from_bytes", "stdout": "", "stderr": "test_quote_from_bytes (__main__.UrlParseTestCase.test_quote_from_bytes) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n", "status": 0, "reachable_only": false}, "classification": "fully-native"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_result_pairs", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_roundtrips", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_roundtrips_normalization", "occurrence": 1, "opt_level": 0, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -102,10 +102,10 @@
   "denominator": 77,
   "distinct_ids": 77,
   "counts": {
-    "fully-native": 1,
+    "fully-native": 2,
     "host-driven-native-operation": 5,
     "mixed": 1,
-    "reference-only": 70
+    "reference-only": 69
   },
   "records": [
     {"id": "test.test_urlparse.DeprecationTest.test_splitattr_deprecation", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -152,7 +152,7 @@
     {"id": "test.test_urlparse.UrlParseTestCase.test_qs", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_qsl", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_quote_errors", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
-    {"id": "test.test_urlparse.UrlParseTestCase.test_quote_from_bytes", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
+    {"id": "test.test_urlparse.UrlParseTestCase.test_quote_from_bytes", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "imre"}, "evidence": {"operation": "quote_from_bytes returning escaped octets and rejecting a text operand", "fixture": "default TestCase lifecycle in native unittest.main", "source_blob": "b2bde5a9b1d696ea07dd4cc18d5816eec225058f", "method_sha256": "818ad8c13519ef1f8248a4a14d5797f56083fa7e9fc2c8731c4852fb2beceadd", "entry_sha256": "5fa1edf526389701e0092607c78532697f0f77d30c083fa668dda0555b267c38", "staged_id": "__main__.UrlParseTestCase.test_quote_from_bytes", "stdout": "", "stderr": "test_quote_from_bytes (__main__.UrlParseTestCase.test_quote_from_bytes) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in <elapsed>s\n\nOK\n", "status": 0, "reachable_only": false}, "classification": "fully-native"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_result_pairs", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_roundtrips", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urlparse.UrlParseTestCase.test_roundtrips_normalization", "occurrence": 1, "opt_level": 3, "fixture_variant": "upstream", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},

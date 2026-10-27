@@ -62,7 +62,10 @@ pub(super) struct Trace {
     pub instance: Option<Id>,
     pub context: Option<Id>,
     pub cause: Option<Id>,
-    pub fields: HashMap<String, Id>,
+    pub import_message: Option<Id>,
+    pub source_syntax: Option<[Id; 2]>,
+    pub import_names: Option<[Id; 3]>,
+    pub dictionary: Option<Id>,
     stop_value: Id,
     cached: Option<(usize, Id)>,
 }
@@ -79,7 +82,7 @@ pub(super) struct Error {
     pub kind: String,
     pub class: Option<Id>,
     pub message: String,
-    pub args: Option<Vec<Id>>,
+    pub args: Option<Id>,
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
@@ -135,9 +138,7 @@ impl Error {
 
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
-            .iter()
-            .flatten()
-            .copied()
+            .into_iter()
             .chain(self.class)
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
@@ -148,7 +149,10 @@ impl Error {
                     .chain(trace.instance)
                     .chain(trace.context)
                     .chain(trace.cause)
-                    .chain(trace.fields.values().copied())
+                    .chain(trace.import_message)
+                    .chain(trace.source_syntax.into_iter().flatten())
+                    .chain(trace.import_names.into_iter().flatten())
+                    .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
             }))
     }
@@ -245,7 +249,8 @@ impl Context {
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Slice(_) => "slice",
-            Value::Range { .. } => "range",
+            Value::Range(_) => "range",
+            Value::RangeIterator(iter) => iter.kind,
             Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
             Value::DictIterator(iter) => match iter.kind {
@@ -261,11 +266,17 @@ impl Context {
             Value::Function { .. } => "function",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
-            Value::Cell { .. } => "cell",
+            Value::Cell(_) => "cell",
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
+            Value::Union(_) => "Union",
             Value::Class { .. } => "type",
+            Value::MappingView { kind, .. } => match kind {
+                DictViewKind::Keys => "KeysView",
+                DictViewKind::Values => "ValuesView",
+                DictViewKind::Items => "ItemsView",
+            },
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
             Value::ThreadLocal(_) => super::thread_local::CLASS,
@@ -278,12 +289,18 @@ impl Context {
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
-            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
+            Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::Raised(error) => &error.kind,
             Value::Traceback { .. } => "traceback",
             Value::PythonFrame { .. } => "frame",
-            Value::Module { .. } => "module",
-            Value::Instance { class, .. } => match self.heap.get(*class) {
+            Value::Module {
+                constructor: None, ..
+            } => "module",
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => match self.heap.get(*class) {
                 Value::Class { name, .. } | Value::Native(name) => name,
                 _ => "object",
             },
@@ -291,19 +308,27 @@ impl Context {
         }
     }
 
-    pub(super) fn lookup_error(&self, kind: &str, key: Id) -> Error {
+    /// Return the exact arguments retained by a Python exception.
+    pub(super) fn exception_arguments(&self, error: &Error) -> Option<&[Id]> {
+        let Value::Tuple(args) = self.heap.get(error.args?) else {
+            unreachable!("exception arguments must be an exact tuple")
+        };
+        Some(args)
+    }
+
+    pub(super) fn lookup_error(&mut self, kind: &str, key: Id) -> Error {
         let mut error = Error::new(kind, self.repr(key));
-        error.args = Some(vec![key]);
+        error.args = Some(self.alloc(Value::Tuple(vec![key])));
         error
     }
 
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let mut error = Error::new(kind, "");
-        error.args = Some(args.to_vec());
+        error.args = Some(self.alloc(Value::Tuple(args.to_vec())));
         if kind == "StopIteration" {
             error.set_stop_value(args.first().copied().unwrap_or(NONE));
         }
-        error.message = self.exception_message(&error, &mut Vec::new());
+        error.message = self.exception_message(&error);
         if kind == "SystemExit" {
             error.exit_status = match args {
                 [] | [NONE] => Some(ExitStatus::Code(0)),
@@ -343,7 +368,11 @@ impl fmt::Display for Error {
                 writeln!(f, "  File {:?}, line {}", loc.file, loc.line)?;
             }
         }
-        write!(f, "{}: {}", self.kind, self.message)
+        if self.message.is_empty() {
+            f.write_str(&self.kind)
+        } else {
+            write!(f, "{}: {}", self.kind, self.message)
+        }
     }
 }
 
@@ -355,6 +384,8 @@ pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
     pub annotation_thunks: Option<Id>,
+    /// Slot names consumed when the class is created, independent of later namespace mutations.
+    pub slot_names: Option<std::rc::Rc<[String]>>,
 }
 
 #[derive(Clone)]
@@ -405,11 +436,8 @@ pub(super) enum Value {
     },
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
-    Range {
-        start: i64,
-        stop: i64,
-        step: i64,
-    },
+    Range(super::range::Range),
+    RangeIterator(super::range::Cursor),
     Str(String),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
@@ -441,6 +469,10 @@ pub(super) enum Value {
     },
     Dict(super::dictionary::Entries),
     MappingProxy(Id),
+    MappingView {
+        mapping: Id,
+        kind: DictViewKind,
+    },
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -451,10 +483,7 @@ pub(super) enum Value {
         entries: super::dictionary::Entries,
     },
     Scope(Scope),
-    Cell {
-        scope: Id,
-        name: String,
-    },
+    Cell(Option<Id>),
     ClassCell(Option<Id>),
     Super {
         start: Id,
@@ -466,6 +495,8 @@ pub(super) enum Value {
         scope: Id,
         origin: Option<Id>,
         initializing: bool,
+        // Imported modules are resolved separately from independently constructed ones.
+        constructor: Option<Id>,
     },
     Function {
         fields: super::function_fields::FunctionFields,
@@ -478,6 +509,7 @@ pub(super) enum Value {
     },
     Code(CodeObject),
     Generator {
+        owner: FrameOwner,
         code: Id,
         scope: Id,
         iterators: Vec<Id>,
@@ -492,11 +524,14 @@ pub(super) enum Value {
     },
     TypeVar(super::typing::TypeVariable),
     GenericAlias(super::typing::Alias),
+    Union(super::union::Union),
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
+        property: Option<Box<super::property::Property>>,
+        weak_reference: Option<Box<super::weakref::Reference>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -528,6 +563,7 @@ pub(super) enum Value {
         dictionary: Id,
     },
     Property(super::property::Property),
+    WeakrefDescriptor(Id),
     ReadOnlyDescriptor {
         get: Id,
         owner: &'static str,
@@ -626,6 +662,14 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    pub(super) fn instance_class(&self) -> Option<Id> {
+        match self {
+            Self::Instance { class, .. } => Some(*class),
+            Self::Module { constructor, .. } => *constructor,
+            _ => None,
+        }
+    }
+
     fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut Vec<Id>) {
         for (key, value) in bindings {
             visit.extend([*key, *value]);
@@ -672,6 +716,7 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
+            Self::MappingView { mapping, .. } => visit.push(*mapping),
             Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
@@ -692,7 +737,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
-            Self::Range { .. } => {}
+            Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
@@ -728,11 +773,17 @@ impl Value {
                 receiver,
                 owner,
             } => visit.extend([*start, *receiver, *owner]),
-            Self::Module { scope, origin, .. } => {
+            Self::Module {
+                scope,
+                origin,
+                constructor,
+                ..
+            } => {
                 visit.push(*scope);
                 visit.extend(origin);
+                visit.extend(constructor);
             }
-            Self::Cell { scope, .. } => visit.push(*scope),
+            Self::Cell(value) => visit.extend(value),
             Self::Function {
                 closure,
                 scope,
@@ -758,12 +809,13 @@ impl Value {
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
             }
             Self::Generator {
+                owner,
                 code,
                 scope,
                 iterators,
                 ..
             } => {
-                visit.extend([*code, *scope]);
+                visit.extend([*code, *scope, owner.root()]);
                 visit.extend(iterators);
             }
             Self::Class {
@@ -774,13 +826,25 @@ impl Value {
             }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
+            Self::Union(union) => {
+                visit.extend([union.args, union.members, union.parameters]);
+                visit.extend(union.unhashable);
+            }
             Self::Instance {
                 class,
                 fields,
                 dictionary,
                 scalar,
+                weak_reference,
                 memory_stream,
+                property,
             } => {
+                if let Some(property) = property {
+                    property.children(visit);
+                }
+                if let Some(reference) = weak_reference {
+                    visit.push(reference.callback);
+                }
                 if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
                     visit.extend(stream.snapshot.get());
                 }
@@ -798,6 +862,7 @@ impl Value {
             } => visit.extend([*callable, *dictionary]),
             Self::Property(property) => property.children(visit),
             Self::Weak(wr) => visit.push(wr.callback),
+            Self::WeakrefDescriptor(owner) => visit.push(*owner),
             Self::ReadOnlyDescriptor { get, .. } => visit.push(*get),
             Self::Partial {
                 function,
@@ -929,6 +994,8 @@ impl DictIterator {
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
     slots: Vec<Option<Value>>,
+    // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
+    pub(super) abc_registrations: Vec<[Id; 2]>,
     free: Vec<usize>,
     pub(super) immutable_hashes: HashMap<Id, i64>,
     frames: Vec<Frame>,
@@ -939,7 +1006,23 @@ pub(super) struct Heap {
     weak_edge_removed: bool,
 }
 
+/// A Python call observes its mutable function, while bare code keeps its entry module.
+#[derive(Clone, Copy)]
+pub(super) enum FrameOwner {
+    Function(Id),
+    Module(Id),
+}
+
+impl FrameOwner {
+    fn root(self) -> Id {
+        match self {
+            Self::Function(id) | Self::Module(id) => id,
+        }
+    }
+}
+
 struct Frame {
+    owner: FrameOwner,
     scope: Id,
     code: Id,
     live: Vec<Id>,
@@ -950,8 +1033,9 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(scope: Id, code: Id, inherited: Id) -> Self {
+    fn new(scope: Id, code: Id, owner: FrameOwner, inherited: Id) -> Self {
         Self {
+            owner,
             scope,
             code,
             live: Vec::new(),
@@ -973,9 +1057,10 @@ impl Heap {
                 Some(Value::Ellipsis),
                 Some(Value::NotImplemented),
             ],
+            abc_registrations: Vec::new(),
             free: Vec::new(),
             immutable_hashes: HashMap::new(),
-            frames: vec![Frame::new(NONE, NONE, NONE)],
+            frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             next_collection: 4096,
             weak: HashMap::new(),
             has_weak_values: false,
@@ -992,9 +1077,10 @@ impl Heap {
         target: Id,
         callback: Id,
         kind: super::weakref::Kind,
+        subclass: Option<Id>,
     ) -> Id {
         let references = self.weak_references(target);
-        if callback == NONE
+        if subclass.is_none() && callback == NONE
             && let Some(&id) = references.iter().find(|&&id|
                 matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
         {
@@ -1003,19 +1089,31 @@ impl Heap {
         // Callback-free canonical references precede proxies, then callbacks in newest-first order.
         let index = references
             .iter()
-            .position(|&id| {
-                let Value::Weak(wr) = self.get(id) else {
-                    unreachable!()
-                };
-                wr.callback != NONE || (callback == NONE && kind == super::weakref::Kind::Reference)
+            .position(|&id| match self.get(id) {
+                Value::Weak(wr) => {
+                    wr.callback != NONE
+                        || (subclass.is_none()
+                            && callback == NONE
+                            && kind == super::weakref::Kind::Reference)
+                }
+                _ => true,
             })
             .unwrap_or(references.len());
-        let id = self.alloc(Value::Weak(super::weakref::Reference {
+        let reference = super::weakref::Reference {
             target: Some(target),
             callback,
             kind,
             hash: None,
-        }));
+        };
+        let id = if let Some(owner) = subclass {
+            let Value::Instance { weak_reference, .. } = self.get_mut(owner) else {
+                unreachable!()
+            };
+            *weak_reference = Some(Box::new(reference));
+            owner
+        } else {
+            self.alloc(Value::Weak(reference))
+        };
         self.weak.entry(target).or_default().insert(index, id);
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
@@ -1025,7 +1123,10 @@ impl Heap {
 
     fn weak_edge(&self, value: Id) -> bool {
         self.weak.contains_key(&value)
-            || matches!(self.get(value), Value::Weak(wr) if wr.target.is_some())
+            || self
+                .get(value)
+                .weak_reference()
+                .is_some_and(|wr| wr.target.is_some())
     }
 
     /// A name in a surviving frame keeps this object alive until that binding changes.
@@ -1075,9 +1176,9 @@ impl Heap {
             .as_mut()
             .expect("live native handle")
     }
-    pub fn enter(&mut self, scope: Id, code: Id) {
+    pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
         self.frames
-            .push(Frame::new(scope, code, self.active_exception()));
+            .push(Frame::new(scope, code, owner, self.active_exception()));
     }
     pub fn leave(&mut self, value: Id) {
         let frame = self.frames.pop().expect("returning native activation");
@@ -1139,6 +1240,18 @@ impl Heap {
         Some((location, object))
     }
 
+    pub fn caller_module(&self) -> Id {
+        match self.frames.last().unwrap().owner {
+            FrameOwner::Module(module) => module,
+            FrameOwner::Function(function) => {
+                let Value::Function { fields, .. } = self.get(function) else {
+                    unreachable!("executing Python function")
+                };
+                fields.module
+            }
+        }
+    }
+
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
     }
@@ -1176,7 +1289,13 @@ impl Heap {
         let mut pending: Vec<_> = globals.collect();
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         for frame in &self.frames {
-            pending.extend([frame.scope, frame.code, frame.active, frame.inherited]);
+            pending.extend([
+                frame.scope,
+                frame.code,
+                frame.owner.root(),
+                frame.active,
+                frame.inherited,
+            ]);
             pending.extend(frame.object);
             pending.extend(&frame.live);
         }
@@ -1195,9 +1314,11 @@ impl Heap {
                 return !refs.is_empty();
             }
             for &id in refs.iter() {
-                let Some(Value::Weak(wr)) = &mut self.slots[id as usize] else {
-                    unreachable!()
-                };
+                let wr = self.slots[id as usize]
+                    .as_mut()
+                    .unwrap()
+                    .weak_reference_mut()
+                    .unwrap();
                 wr.target = None;
                 let callback = std::mem::replace(&mut wr.callback, NONE);
                 if callback != NONE {
@@ -1206,6 +1327,8 @@ impl Heap {
             }
             false
         });
+        self.abc_registrations
+            .retain(|&[owner, member]| marked[owner as usize] && marked[member as usize]);
         for (id, alive) in marked.into_iter().enumerate() {
             if !alive && self.slots[id].take().is_some() {
                 self.immutable_hashes.remove(&(id as Id));

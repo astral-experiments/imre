@@ -4,8 +4,10 @@ use super::Context;
 use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
+mod dir;
 mod exceptions;
 mod float;
+mod round;
 pub(super) use float::from_numeric;
 mod integer;
 mod print;
@@ -39,6 +41,8 @@ exception_kinds!(
     TypeError,
     ValueError,
     EOFError,
+    SyntaxError,
+    IndentationError,
     UnicodeError,
     UnicodeDecodeError,
     UnicodeEncodeError,
@@ -78,11 +82,14 @@ exception_kinds!(
 
 const FUNCTIONS: &[&str] = &[
     "len",
+    "hash",
     "reversed",
+    "dir",
     "sorted",
     "ord",
     "chr",
     "divmod",
+    "round",
     "callable",
     "abs",
     "all",
@@ -142,6 +149,17 @@ pub(super) fn is_exception(name: &str) -> bool {
     exception_kind(name).is_some()
 }
 
+pub(super) const IMPORT_KEYWORDS: [&str; 3] = ["name", "path", "name_from"];
+
+/// Return the initializer inherited from the built-in exception class.
+pub(super) fn exception_initializer(kind: &str) -> &'static str {
+    match kind {
+        "StopIteration" => "StopIteration.__init__",
+        "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
+        _ => "BaseException.__init__",
+    }
+}
+
 /// Return the exception that declares the inherited CPython allocation slot.
 pub(super) fn exception_new_owner(name: &str) -> &str {
     match name {
@@ -188,12 +206,14 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__repr__",
     "__init__",
     "__len__",
     "__iter__",
     "__contains__",
     "__getitem__",
     "__setitem__",
+    "__delitem__",
     "clear",
     "copy",
     "get",
@@ -212,7 +232,9 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "isalnum",
     "isspace",
+    "isupper",
     "join",
     "lower",
     "lstrip",
@@ -238,9 +260,15 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
+        Value::Range(_) if matches!(attr, "__iter__" | "__reversed__") => "range",
+        Value::RangeIterator(iter)
+            if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
+        {
+            iter.kind
+        }
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
-        Value::Property(_) if attr == "setter" => "property",
+        Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_)
             if matches!(
@@ -310,7 +338,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "list"
         }
         Value::Set { frozen: false, .. }
-            if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
+            if matches!(
+                attr,
+                "add" | "copy" | "update" | "issuperset" | "__contains__"
+            ) =>
         {
             "set"
         }
@@ -488,15 +519,20 @@ pub(super) fn bind_method_arguments<const N: usize>(
     Ok(values)
 }
 
-/// Bind the positional or named operands of `pow` before selecting its numeric operation.
-fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let names = ["base", "exp", "mod"];
+/// Bind built-in arguments in the order Argument Clinic reports missing and invalid names.
+fn bind_builtin_arguments<const N: usize>(
+    builtin: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+    required: usize,
+) -> Result<[Option<Id>; N]> {
     if args.len() + kwargs.len() <= names.len() {
         // Argument Clinic diagnoses missing required operands before duplicate or unknown names.
-        for (index, &name) in names[..2].iter().enumerate().skip(args.len()) {
+        for (index, &name) in names[..required].iter().enumerate().skip(args.len()) {
             if !kwargs.iter().any(|(key, _)| key == name) {
                 return Err(type_error(format!(
-                    "pow() missing required argument '{name}' (pos {})",
+                    "{builtin}() missing required argument '{name}' (pos {})",
                     index + 1
                 )));
             }
@@ -507,11 +543,17 @@ fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> 
             && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
         {
             return Err(type_error(format!(
-                "pow() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
+                "{builtin}() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
             )));
         }
     }
-    let [Some(base), Some(exp), modulus] = bind_method_arguments("pow", args, kwargs, names, 3)?
+    bind_method_arguments(builtin, args, kwargs, names, N)
+}
+
+/// Bind the positional or named operands of `pow` before selecting its numeric operation.
+fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(base), Some(exp), modulus] =
+        bind_builtin_arguments("pow", args, kwargs, ["base", "exp", "mod"], 2)?
     else {
         unreachable!("required pow operands were checked above")
     };
@@ -626,37 +668,6 @@ fn delete_attribute(
     Ok(NONE)
 }
 
-/// Compute Python's range length without overflowing at either i64 endpoint.
-pub(super) fn range_len(start: i64, stop: i64, step: i64) -> Result<usize> {
-    if step == 0 {
-        return Err(Error::new("ValueError", "range() arg 3 must not be zero"));
-    }
-    let delta = if step > 0 {
-        i128::from(stop) - i128::from(start)
-    } else {
-        i128::from(start) - i128::from(stop)
-    };
-    let len = if delta <= 0 {
-        0
-    } else {
-        1 + (delta - 1) / i128::from(step).abs()
-    };
-    usize::try_from(len).map_err(|_| Error::new("OverflowError", "range length is too large"))
-}
-
-pub(super) fn range_items(ctx: &mut Context, start: i64, stop: i64, step: i64) -> Result<Vec<Id>> {
-    let size = range_len(start, stop, step)?;
-    let mut result = Vec::new();
-    result
-        .try_reserve_exact(size)
-        .map_err(|_| Error::new("MemoryError", "range is too large to materialize"))?;
-    for index in 0..size {
-        let value = i128::from(start) + i128::from(step) * index as i128;
-        result.push(ctx.int(value as i64));
-    }
-    Ok(result)
-}
-
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -694,7 +705,9 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(owner @ ("BaseException" | "StopIteration")) = name.strip_suffix(".__init__") {
+    if let Some(owner @ ("BaseException" | "StopIteration" | "ImportError")) =
+        name.strip_suffix(".__init__")
+    {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
     if name == "object.__init__" {
@@ -707,6 +720,7 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "module" => ctx.module_method(method, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
@@ -733,8 +747,11 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
+            "range" | "range_iterator" | "longrange_iterator" => {
+                super::range::method(ctx, owner, method, args, kwargs)
+            }
             "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
-            "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
+            "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
@@ -778,6 +795,12 @@ pub(super) fn call(
                 explicit: true,
             }))
         }
+        "module" => {
+            let class = ctx.builtin("module");
+            let instance = ctx.allocate_module(class);
+            ctx.init_module(instance, args, kwargs)?;
+            Ok(instance)
+        }
         "object" => {
             if !args.is_empty() || !kwargs.is_empty() {
                 return Err(type_error("object() takes no arguments"));
@@ -815,7 +838,7 @@ pub(super) fn call(
         "exec" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
-            ctx.exec_source(args[0], args[1], args.get(2).copied())
+            ctx.exec_source(args[0], args[1], args.get(2).copied(), None)
         }
         "abs" => {
             if !kwargs.is_empty() {
@@ -833,6 +856,14 @@ pub(super) fn call(
             let scalar = ctx.scalar_value(value);
             match ctx.heap.get(scalar) {
                 Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
+                Value::Complex(number) => {
+                    let magnitude = number.real.hypot(number.imag);
+                    if magnitude.is_infinite() && number.real.is_finite() && number.imag.is_finite()
+                    {
+                        return Err(Error::new("OverflowError", "absolute value too large"));
+                    }
+                    Ok(ctx.alloc(Value::Float(magnitude)))
+                }
                 Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
                 Value::Int(number) => {
                     let zero = crate::Int::from(0);
@@ -849,6 +880,7 @@ pub(super) fn call(
                 ))),
             }
         }
+        "round" => round::call(ctx, args, kwargs),
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -908,6 +940,12 @@ pub(super) fn call(
             let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
             Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
         }
+        "hash" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let hash = ctx.dictionary_hash(args[0])?;
+            Ok(ctx.int(hash))
+        }
         "chr" | "ord" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!("{name}() takes no keyword arguments")));
@@ -962,6 +1000,7 @@ pub(super) fn call(
             }
         }
         "pow" => power(ctx, args, kwargs),
+        "dir" => dir::call(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
@@ -978,6 +1017,9 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let object = args[0];
+            if let Value::Range(range) = ctx.heap.get(object) {
+                return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
+            }
             if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::Iterator {
                     sequence: Some(object),
@@ -1036,6 +1078,10 @@ pub(super) fn call(
                     ..
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
+                Value::MappingView { mapping, .. } => {
+                    let mapping = *mapping;
+                    return call(ctx, "len", &[mapping], &[]);
+                }
                 Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
                     collections::entries(ctx, *dict)?.len()
                 }
@@ -1045,12 +1091,27 @@ pub(super) fn call(
                 }
                 Value::Str(v) => v.chars().count(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::Range { start, stop, step } => range_len(*start, *stop, *step)?,
+                Value::Range(range) => {
+                    return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
+                        Error::new(
+                            "OverflowError",
+                            "Python int too large to convert to C ssize_t",
+                        )
+                    });
+                }
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
                 }
                 Value::Instance { .. } => {
-                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
+                    if let Some(size) = ctx.instance_len(args[0])? {
+                        size
+                    } else {
+                        let scalar = ctx.scalar_value(args[0]);
+                        if matches!(ctx.heap.get(scalar), Value::Str(_) | Value::Bytes(_)) {
+                            return call(ctx, "len", &[scalar], &[]);
+                        }
+                        return Err(no_length(ctx));
+                    }
                 }
                 _ => return Err(no_length(ctx)),
             };
@@ -1064,19 +1125,18 @@ pub(super) fn call(
         "range" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 3)?;
-            let first = ctx.as_integer(args[0])?;
+            let first = ctx.index_integer(args[0])?;
             let (start, stop) = if let Some(&stop) = args.get(1) {
-                (first, ctx.as_integer(stop)?)
+                (first, ctx.index_integer(stop)?)
             } else {
-                (0, first)
+                (crate::Int::from(0), first)
             };
             let step = args
                 .get(2)
-                .map(|&x| ctx.as_integer(x))
+                .map(|&x| ctx.index_integer(x))
                 .transpose()?
-                .unwrap_or(1);
-            range_len(start, stop, step)?;
-            Ok(ctx.alloc(Value::Range { start, stop, step }))
+                .unwrap_or_else(|| crate::Int::from(1));
+            Ok(ctx.alloc(Value::Range(super::range::Range::new(start, stop, step)?)))
         }
         "dict" | "list" | "tuple" | "set" | "frozenset" => {
             collections::construct(ctx, name, args, kwargs)
@@ -1113,10 +1173,7 @@ pub(super) fn call(
             };
             super::static_method::construct(ctx, *callable)
         }
-        "property" => {
-            let fields = bind(name, args, kwargs, ["fget", "fset", "fdel", "doc"])?;
-            super::property::construct(ctx, fields)
-        }
+        "property" => super::property::construct(ctx, args, kwargs),
         "open" => {
             arity(name, args, 0, 2)?;
             let [path, mode, encoding] = bind(name, args, kwargs, ["file", "mode", "encoding"])?;
@@ -1217,6 +1274,11 @@ pub(super) fn call(
             })
         }
         "function" => ctx.construct_function(args, kwargs),
+        "ImportError" | "ModuleNotFoundError" => {
+            let mut error = ctx.exception(name, args);
+            exceptions::initialize_import(&mut error, args, kwargs)?;
+            Ok(ctx.alloc(Value::Raised(error)))
+        }
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

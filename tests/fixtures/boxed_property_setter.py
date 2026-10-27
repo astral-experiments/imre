@@ -81,3 +81,74 @@ def current():
         print(exc.args)
     stream.close()
     print(stream.closed)
+
+    class Parent(property):
+        def __init__(self, fget, fset=None, fdel=None, doc=None):
+            super().__init__(fget, fset, fdel, doc=doc)
+            self.accessor = fget
+
+    class Sub(Parent):
+        pass
+
+    class Owner:
+        saved = 5
+
+        @Sub
+        def managed(self):
+            "managed doc"
+            return self.saved
+
+        @managed.setter
+        def managed(self, value):
+            self.saved = value
+
+    descriptor = Owner.managed
+    obj = Owner()
+    assert type(descriptor) is Sub and descriptor.fget is descriptor.accessor
+    assert descriptor.__doc__ == "managed doc" and descriptor.__name__ == "managed"
+    assert descriptor.__get__(None, Owner) is descriptor and obj.managed == 5
+    obj.managed = 13
+    assert obj.saved == 13 and descriptor.__get__(obj) == 13
+    assert property.__init__(descriptor, child, doc="new doc") is None
+    assert descriptor.fget is child and descriptor.fset is None and descriptor.__doc__ == "new doc"
+
+    for call in (
+        lambda: property.__init__(obj),
+        lambda: property.__init__(descriptor, 1, fget=2),
+        lambda: descriptor.__get__(None, None),
+        lambda: descriptor.__set_name__(Owner),
+        lambda: object.__init__(object(), 1),
+    ):
+        try:
+            call()
+        except TypeError as exc:
+            print(exc.args)
+
+    def discard(owner):
+        owner.saved = "removed"
+        return "ignored"
+
+    class Managed:
+        saved = 5
+        original = Sub(Cell.first.fget, Cell.value.fset)
+        replaced = original.deleter(discard)
+
+    original, replaced = Managed.original, Managed.replaced
+    assert original.fdel is None and type(replaced) is Sub
+    assert replaced.fget is original.fget and replaced.fset is original.fset
+    assert replaced is not original and replaced.fdel is discard
+    assert replaced.deleter(None).fdel is discard
+    managed = Managed()
+    managed.replaced = 8
+    assert managed.replaced == 8
+    del managed.replaced
+    assert managed.saved == "removed" and replaced.__delete__(managed) is None
+    for call in (
+        lambda: property.deleter(),
+        lambda: property.deleter(1, discard),
+        lambda: replaced.deleter(fdel=discard),
+    ):
+        try:
+            call()
+        except TypeError as exc:
+            print(exc.args)

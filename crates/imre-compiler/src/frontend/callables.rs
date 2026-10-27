@@ -133,7 +133,7 @@ impl Checker<'_> {
     ) -> Expr {
         let mut locals = vec![receiver.ty];
         locals.extend(&parameters);
-        let arguments = locals
+        let mut arguments: Vec<_> = locals
             .iter()
             .enumerate()
             .map(|(slot, &ty)| Expr {
@@ -141,6 +141,10 @@ impl Checker<'_> {
                 kind: ExprKind::Local(slot),
             })
             .collect();
+        // Membership IR takes the needle first, while a saved method binds its receiver first.
+        if matches!(builtin, Builtin::SetContains) {
+            arguments.swap(0, 1);
+        }
         let id = self.helpers.reserve();
         self.helpers.finish(
             id,

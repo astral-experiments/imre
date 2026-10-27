@@ -29,17 +29,27 @@ pub(super) mod io;
 mod json;
 mod logging;
 mod marshal;
+mod math;
 mod operator;
 mod pickle;
+mod pkgutil;
 mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
+mod secrets;
 mod socket;
 mod structure;
 mod traceback;
 pub(super) mod urllib;
+mod zipimport;
 
 pub(super) fn is_module(name: &str) -> bool {
+    if name == "stat" {
+        return cfg!(any(target_os = "linux", target_os = "macos"));
+    }
+    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
+        return true;
+    }
     matches!(
         name,
         "sys"
@@ -59,6 +69,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "posix"
             | "posixpath"
             | "_imre_posixpath"
+            | "_imre_pkgutil"
             | "fnmatch"
             | "itertools"
             | "operator"
@@ -68,6 +79,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "binascii"
+            | "math"
             | "unicodedata"
             | "json"
             | "_imre_logging"
@@ -80,11 +92,16 @@ pub(super) fn is_module(name: &str) -> bool {
             | "tempfile"
             | "time"
             | "random"
+            | "secrets"
             | "hashlib"
             | "hmac"
             | "re"
             | "importlib"
             | "importlib.machinery"
+            | "importlib.util"
+            | "_frozen_importlib"
+            | "_frozen_importlib_external"
+            | "_imre_importlib"
             | "functools"
             | "_string"
             | "inspect"
@@ -177,6 +194,8 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         class,
         dictionary: None,
         scalar: None,
+        property: None,
+        weak_reference: None,
         memory_stream: None,
         fields: fields
             .iter()
@@ -271,18 +290,22 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
-        ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
+        ("_imre_importlib", "find_spec" | "get_code" | "loader_fields")
+        | ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
-        ("traceback", "print_exc") => ctx.builtin("traceback.print_exc"),
-        ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
+        ("traceback", "format_exc" | "format_exception" | "print_exc" | "print_exception") => {
+            ctx.builtin(&format!("traceback.{name}"))
+        }
+        ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),
@@ -297,7 +320,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
+        ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
+        (
+            "_collections_abc",
+            abc
+            @ ("Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"),
+        ) => super::mapping_abc::class(ctx, abc)?,
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")
         }
@@ -336,6 +365,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 })?;
             ctx.int(i64::from(value))
         }
+        ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
@@ -405,6 +435,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
+        ("posixpath", "normpath") | ("posix", "_path_normpath") => {
+            ctx.builtin("posix._path_normpath")
+        }
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
@@ -439,7 +472,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
+        | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_posixpath", "extension_start" | "isfile")
+        | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -451,7 +486,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "urllib.parse",
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
-            | "quote_plus" | "quote_from_bytes",
+            | "quote_plus" | "quote_from_bytes" | "urlencode",
         )
         | ("hashlib", "sha1" | "sha256")
         | ("hmac", "new" | "HMAC" | "compare_digest")
@@ -594,6 +629,9 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
     }
+    if name == "secrets.choice" {
+        return secrets::choice(ctx, args, kwargs);
+    }
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);
     }
@@ -651,14 +689,25 @@ pub(super) fn call(
             },
         );
     }
+    if let Some(operation) = name.strip_prefix("math.") {
+        return math::round(ctx, operation, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
     }
-    if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
+    if let Some(op) = name.strip_prefix("_imre_zipimport.") {
+        return zipimport::call(ctx, op, args, kwargs);
+    }
+    if matches!(name, "posix.fspath" | "posix._path_normpath")
+        || name.starts_with("_imre_posixpath.")
+    {
         return posixpath::call(ctx, name, args, kwargs);
+    }
+    if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
+        return pkgutil::call(ctx, operation, args, kwargs);
     }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
@@ -680,6 +729,33 @@ pub(super) fn call(
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imre_importlib.") {
+        match (method, args, kwargs) {
+            ("find_spec", [fullname, original], []) => {
+                let fullname = ctx.str_value(*fullname)?.to_owned();
+                let original = ctx.str_value(*original)?.to_owned();
+                return ctx.find_spec(&fullname, &original, false);
+            }
+            ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
+            ("loader_fields", [object], []) => {
+                if let Value::Instance { fields, .. } = ctx.heap.get(*object) {
+                    let fields = fields
+                        .clone()
+                        .into_iter()
+                        .map(|(key, value)| (ctx.text(key), value))
+                        .collect();
+                    return Ok(ctx.dict(fields));
+                }
+                return Err(Error::new("TypeError", "expected a source loader"));
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("invalid arguments to {name}"),
+                ));
+            }
+        }
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
@@ -718,6 +794,9 @@ pub(super) fn call(
     }
     if let Some(name) = name.strip_prefix("ast.") {
         return ast::call(ctx, name, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("abc.") {
+        return super::mapping_abc::call(ctx, method, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
@@ -900,6 +979,8 @@ pub(super) fn call(
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "traceback.print_exc" => return traceback::print_active(ctx, args, kwargs),
+        "traceback.format_exc" => return traceback::format_active(ctx, args, kwargs),
+        "traceback.format_exception" => return traceback::format(ctx, args, kwargs),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
         | "sysconfig.get_config_var"
@@ -928,6 +1009,20 @@ pub(super) fn call(
                 .iter()
                 .any(|(key, _)| !keywords.contains(&key.as_str())))
     {
+        if name == "file.flush"
+            && let Some((&receiver, positional)) = args.split_first()
+        {
+            let class = ctx.type_name(receiver).trim_start_matches("_io.");
+            let message = if kwargs.is_empty() {
+                format!(
+                    "{class}.flush() takes no arguments ({} given)",
+                    positional.len()
+                )
+            } else {
+                format!("{class}.flush() takes no keyword arguments")
+            };
+            return Err(Error::new("TypeError", message));
+        }
         return Err(Error::new(
             "TypeError",
             format!("unsupported arguments to {name}"),

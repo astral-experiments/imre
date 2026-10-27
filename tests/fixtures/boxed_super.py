@@ -32,6 +32,19 @@ class D(C, B):
             return __class__ is D, super().walk()
         return nested(self)
 
+    def captured(self, replacement):
+        def receiver():
+            return self
+
+        original = super().__self__ is receiver()
+        self = replacement
+        rebound = super().__self__ is replacement and receiver() is replacement
+        del self
+        try:
+            super()
+        except RuntimeError as error:
+            return original, rebound, error.args
+
     def deleted(self):
         try:
             raise ValueError()
@@ -62,6 +75,7 @@ def current():
     obj = D()
     obj.label = "instance"
     print(obj.walk(), D.walk(obj), obj.enclosing())
+    print(obj.captured(D()))
     proxy = obj.saved()
     for _ in range(6000):
         []

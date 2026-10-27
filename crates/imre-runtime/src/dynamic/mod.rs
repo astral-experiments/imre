@@ -9,9 +9,13 @@ mod dictionary;
 mod enums;
 mod ffi;
 mod function_fields;
+mod importlib;
 mod iterators;
+mod mapping_abc;
+mod module_type;
 mod operators;
 mod property;
+mod range;
 mod slice;
 mod source_code;
 mod static_method;
@@ -20,8 +24,10 @@ mod super_object;
 mod thread_local;
 mod thread_lock;
 mod typing;
+mod union;
 mod value;
 mod weakref;
+mod wrapper_descriptor;
 mod zip;
 
 use std::collections::HashMap;
@@ -29,7 +35,8 @@ use std::path::PathBuf;
 
 use crate::objects::exceptions::string_repr;
 use value::{
-    Code, DictIterator, DictViewKind, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value,
+    Code, DictIterator, DictViewKind, Error, FALSE, FrameOwner, Heap, Id, NONE, Result, Scope,
+    TRUE, Value,
 };
 
 struct SourceModule {
@@ -41,7 +48,6 @@ enum IteratorSlice<'a> {
     Values(&'a [Id]),
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
-    Range { value: i128, len: usize },
 }
 
 impl IteratorSlice<'_> {
@@ -50,7 +56,6 @@ impl IteratorSlice<'_> {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
-            Self::Range { len, .. } => *len,
         }
     }
 }
@@ -67,9 +72,12 @@ pub(crate) struct Context {
     bytearray_exports: Vec<Id>,
     // Active sorts temporarily detach their list storage while Python callbacks run.
     sorting_lists: Vec<Id>,
+    // Container ancestors visible to a reentrant Python __repr__.
+    repr_ancestors: Vec<Id>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
+    zip_directories: HashMap<String, crate::objects::ZipArchive>,
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
@@ -82,6 +90,15 @@ pub(crate) struct Context {
     pending: Option<Error>,
     // Fallback for targets whose native stack bounds cannot be queried.
     slot_depth: usize,
+}
+
+fn copy_ids(values: &[Id]) -> Result<Vec<Id>> {
+    let mut copied = Vec::new();
+    copied
+        .try_reserve_exact(values.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    copied.extend_from_slice(values);
+    Ok(copied)
 }
 
 impl Context {
@@ -217,6 +234,7 @@ impl Context {
         matches!(
             self.heap.get(id),
             Value::Iterator { .. }
+                | Value::RangeIterator(_)
                 | Value::DictIterator(_)
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
@@ -251,7 +269,9 @@ impl Context {
             Value::Tuple(_) => (id, "tuple_iterator"),
             Value::Bytes(_) => (id, "bytes_iterator"),
             Value::ByteArray(_) => (id, "bytearray_iterator"),
-            Value::Range { .. } => (id, "range_iterator"),
+            Value::Range(ref range) => {
+                return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
+            }
             Value::Dict(_) | Value::DefaultDict { .. } => {
                 return Ok(self.dict_iterator(id, DictViewKind::Keys));
             }
@@ -348,10 +368,6 @@ impl Context {
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
             }
-            Value::Range { start, stop, step } => IteratorSlice::Range {
-                value: i128::from(*start) + i128::from(*step) * *offset as i128,
-                len: builtins::range_len(*start, *stop, *step)?.saturating_sub(*offset),
-            },
             _ => unreachable!("iterator sequence"),
         })
     }
@@ -363,6 +379,9 @@ impl Context {
         }
         if matches!(self.heap.get(id), Value::Count { .. }) {
             return Ok(true);
+        }
+        if let Value::RangeIterator(iter) = self.heap.get(id) {
+            return Ok(iter.remaining.as_small() != Some(0));
         }
         if let Value::Repeat(repeat) = self.heap.get(id) {
             return Ok(repeat.remaining != Some(0));
@@ -439,6 +458,10 @@ impl Context {
                 return self.next_enumerated(id, input);
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
+            Value::RangeIterator(iter) => {
+                let item = iter.next()?;
+                return Ok(item.map(|n| self.alloc(Value::Int(n))));
+            }
             Value::Repeat(repeat) => return Ok(repeat.next()),
             Value::Map { .. } => return self.next_zip_or_map(id),
             Value::Zip { .. } => {
@@ -487,7 +510,6 @@ impl Context {
             IteratorSlice::Values(values) => values[0],
             IteratorSlice::Reversed(values) => values[values.len() - 1],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
-            IteratorSlice::Range { value, .. } => self.int(value as i64),
         };
         if let Value::Iterator {
             offset, reverse, ..
@@ -536,17 +558,39 @@ impl Context {
         if let Value::MappingProxy(dict) = *self.heap.get(id) {
             return self.items(dict);
         }
+        if let Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
+            self.heap.get(id)
+        {
+            return copy_ids(items);
+        }
         match self.heap.get(id).clone() {
-            Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
-                Ok(items)
-            }
             Value::Set { entries, .. }
             | Value::Dict(entries)
             | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
             }
             Value::Context(bindings) => Ok(bindings.keys().copied().collect()),
-            Value::Range { start, stop, step } => builtins::range_items(self, start, stop, step),
+            Value::Range(_) | Value::RangeIterator(_) => {
+                let iter = self.iterator(id)?;
+                let Value::RangeIterator(cursor) = self.heap.get(iter) else {
+                    unreachable!()
+                };
+                let size = cursor.remaining.to_i64().ok_or_else(|| {
+                    Error::new(
+                        "OverflowError",
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+                let mut items = Vec::new();
+                items
+                    .try_reserve_exact(size as usize)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                while let Some(item) = self.next_item(iter)? {
+                    items.push(item);
+                }
+                Ok(items)
+            }
+            Value::MappingView { mapping, kind } => mapping_abc::view_items(self, mapping, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
@@ -555,7 +599,7 @@ impl Context {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
                     IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    remaining @ (IteratorSlice::Bytes(_) | IteratorSlice::Range { .. }) => {
+                    remaining @ IteratorSlice::Bytes(_) => {
                         let mut values = Vec::new();
                         values.try_reserve_exact(remaining.len()).map_err(|_| {
                             Error::new("MemoryError", "iterator is too large to materialize")
@@ -613,43 +657,63 @@ impl Context {
         };
         s
     }
-    fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+    fn root_scope(&self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        scope
+    }
+    fn binding_scope(&self, scope: Id, name: &str) -> Id {
         if self.scope_data(scope).closure.nonlocals.contains(name) {
             let mut cursor = self.scope_data(scope).parent;
             while let Some(parent) = cursor {
                 let frame = self.scope_data(parent);
-                if let Some(&cell) = frame.closure.cells.get(name)
-                    && let Value::Cell { scope, .. } = self.heap.get(cell)
-                {
-                    return *scope;
-                }
-                if frame.closure.declared.contains(name) {
+                if frame.closure.cells.contains_key(name) || frame.closure.declared.contains(name) {
                     return parent;
                 }
                 cursor = frame.parent;
             }
         }
         if self.scope_data(scope).globals.contains(name) {
-            while let Some(parent) = self.scope_data(scope).parent {
-                scope = parent;
-            }
+            return self.root_scope(scope);
         }
         scope
     }
 
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
+        if let Some(&cell) = scope.closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get(cell)
+        {
+            return *contents;
+        }
         if let Some(namespace) = scope.namespace {
             return self.dict_named_item(namespace, name);
         }
         scope.names.get(name).copied()
     }
 
-    /// Materialize once and keep that exact dict as the module's binding storage.
-    fn module_globals(&mut self, mut scope: Id) -> Id {
-        while let Some(parent) = self.scope_data(scope).parent {
-            scope = parent;
+    /// Link a function's free-variable cells to its globals without retaining its caller's frame.
+    fn closure_environment(&mut self, globals: Id, names: Vec<String>, cells: &[Id]) -> Id {
+        if cells.is_empty() {
+            return globals;
         }
+        let module = self.scope_data(globals).module.clone();
+        let environment = self.scope(&module, Some(globals));
+        let Value::Scope(frame) = self.heap.get_mut(environment) else {
+            unreachable!()
+        };
+        frame.closure.declared_complete = true;
+        frame
+            .closure
+            .cells
+            .extend(names.into_iter().zip(cells.iter().copied()));
+        environment
+    }
+
+    /// Materialize once and keep that exact dict as the module's binding storage.
+    fn module_globals(&mut self, scope: Id) -> Id {
+        let scope = self.root_scope(scope);
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
@@ -673,6 +737,11 @@ impl Context {
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get_mut(cell)
+        {
+            return Ok(contents.take().is_some());
+        }
         if let Some(locals) = self.scope_data(scope).exec_locals {
             return Ok(self.delete_item(locals, key).is_ok());
         }
@@ -699,6 +768,12 @@ impl Context {
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get_mut(cell)
+        {
+            *contents = Some(value);
+            return;
+        }
         if let Some(namespace) = self.scope_data(scope).namespace {
             let key = self.text(name);
             let storage = self.dict_storage(namespace).expect("module namespace");
@@ -720,7 +795,31 @@ impl Context {
             self.heap.weak_edge_removed(previous);
         }
     }
+    /// Describe a missing binding in the scope that owns it.
+    fn missing_binding(&self, origin: Id, scope: Id, name: &str) -> Error {
+        let frame = self.scope_data(scope);
+        let declared = frame.class_body.is_none() && frame.closure.declared.contains(name);
+        if declared && origin == scope {
+            Error::new(
+                "UnboundLocalError",
+                format!(
+                    "cannot access local variable '{name}' where it is not associated with a value"
+                ),
+            )
+        } else if declared || frame.closure.cells.contains_key(name) {
+            Error::new(
+                "NameError",
+                format!(
+                    "cannot access free variable '{name}' where it is not associated with a value in enclosing scope"
+                ),
+            )
+        } else {
+            Error::new("NameError", format!("name '{name}' is not defined"))
+        }
+    }
+
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
+        let origin = scope;
         loop {
             scope = self.binding_scope(scope, name);
             if let Some(locals) = self.scope_data(scope).exec_locals {
@@ -730,24 +829,19 @@ impl Context {
                 }
             }
             let s = self.scope_data(scope);
-            if let Some(&cell) = s.closure.cells.get(name)
-                && let Value::Cell {
-                    scope: owner,
-                    name: cell_name,
-                } = self.heap.get(cell)
-            {
-                return self.scope_name(*owner, cell_name).ok_or_else(|| {
-                    Error::new(
-                        "NameError",
-                        format!("free variable '{name}' is not associated with a value"),
-                    )
-                });
+            if s.closure.cells.contains_key(name) {
+                return self
+                    .scope_name(scope, name)
+                    .ok_or_else(|| self.missing_binding(origin, scope, name));
             }
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
             if let Some(id) = self.scope_name(scope, name) {
                 return Ok(id);
+            }
+            if s.class_body.is_none() && s.closure.declared.contains(name) {
+                return Err(self.missing_binding(origin, scope, name));
             }
             if name == "__class__"
                 && s.class_body.is_none()
@@ -771,10 +865,7 @@ impl Context {
         if builtins::is_builtin(name) {
             return Ok(self.builtin(name));
         }
-        Err(Error::new(
-            "NameError",
-            format!("name '{name}' is not defined"),
-        ))
+        Err(self.missing_binding(origin, scope, name))
     }
     fn builtin(&mut self, name: &str) -> Id {
         if let Some(&value) = self.builtins.get(name) {
@@ -784,18 +875,17 @@ impl Context {
         self.builtins.insert(name.to_owned(), value);
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
-            self.builtin("BaseException.__init__");
-            if name == "StopIteration" {
-                self.builtin("StopIteration.__init__");
-            }
+            self.builtin(builtins::exception_initializer(name));
         }
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
+            "property" => property::METHODS,
             "int" => &["to_bytes"],
             "str" => {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
+            weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
         for method in methods {
@@ -803,14 +893,14 @@ impl Context {
         }
         value
     }
-    fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
+    fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
         let entry = match &self.code_object(code).body {
             value::Body::Native(entry) => *entry,
             value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                return self.call_source(code, scope);
+                return self.call_source(code, scope, owner);
             }
         };
-        self.heap.enter(scope, code);
+        self.heap.enter(scope, code, owner);
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
         let result = unsafe { entry(self, scope) };
@@ -936,17 +1026,33 @@ impl Context {
         first.is_ok_and(|first| first == root)
     }
 
+    fn missing_module(name: &str) -> Error {
+        Error::new(
+            "ModuleNotFoundError",
+            format!("No module named {}", string_repr(name)),
+        )
+        .with_import(Some(name), None, None)
+    }
+
     fn module(&mut self, name: &str) -> Result<Id> {
+        self.find_module(name, false)?
+            .ok_or_else(|| Self::missing_module(name))
+    }
+
+    /// Package resource lookups can initialize filesystem sources added after compilation.
+    fn find_module(&mut self, name: &str, filesystem: bool) -> Result<Option<Id>> {
         if let Some(value) = self.modules.get(name) {
-            return Ok(*value);
+            return Ok(Some(*value));
         }
         // Execute the package initializer before its child. A regular package
         // constrains child modules to its __path__; namespace packages combine
         // their locations in search order.
         let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-            let id = self.module(parent)?;
+            let id = self
+                .find_module(parent, filesystem)?
+                .ok_or_else(|| Self::missing_module(parent))?;
             if let Some(id) = self.modules.get(name) {
-                return Ok(*id);
+                return Ok(Some(*id));
             }
             Some((id, child))
         } else {
@@ -957,9 +1063,9 @@ impl Context {
             self.sources
                 .get(name)
                 .and_then(|sources| sources.first())
-                .map(|m| (m.path.clone(), m.code))
+                .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
         } else if stdlib::is_module(name) {
-            if matches!(name, "email" | "urllib") {
+            if matches!(name, "email" | "importlib" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
@@ -971,7 +1077,12 @@ impl Context {
                 sources
                     .iter()
                     .find(|source| source.path.starts_with(root))
-                    .map(|source| (source.path.clone(), source.code))
+                    .map(|source| {
+                        (
+                            source.path.clone(),
+                            importlib::SourceBody::Compiled(source.code),
+                        )
+                    })
             })
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
@@ -992,53 +1103,17 @@ impl Context {
             } else {
                 (self.sys_path, name)
             };
-            let mut selected = None;
-            let mut namespace = None;
-            // A bundled package contributes its own __path__. A first-party
-            // regular package can never acquire one of its children implicitly.
-            let search = self.items(search)?;
-            let bundle = self.config["bundled_root"]
-                .as_str()
-                .map(std::path::Path::new);
-            let roots = search
-                .iter()
-                .filter_map(|&id| self.str_value(id).ok().map(std::path::Path::new));
-            for root in roots.chain(bundle.filter(|_| parent.is_none())) {
-                let root = if root.as_os_str().is_empty() {
-                    std::env::current_dir()
-                } else if bundle.is_some_and(|dir| root.starts_with(dir)) {
-                    Ok(root.to_owned())
-                } else {
-                    std::path::absolute(root)
-                };
-                let Ok(root) = root else { continue };
-                let stem = root.join(child);
-                let Some(choices) = self.sources.get(name) else {
-                    continue;
-                };
-                if let Some(module) = choices.iter().find(|m| {
-                    m.path == stem.join("__init__.py") || m.path == stem.with_extension("py")
-                }) {
-                    locations.clear();
-                    if module.path.ends_with("__init__.py") {
-                        locations.push(stem);
-                    }
-                    selected = Some((module.path.clone(), module.code));
-                    break;
-                }
-                if let Some(module) = choices.iter().find(|m| m.path == stem) {
-                    locations.push(stem);
-                    namespace.get_or_insert((module.path.clone(), module.code));
-                }
-            }
-            selected.or(namespace)
+            self.source_on_path(
+                name,
+                child,
+                search,
+                parent.is_none(),
+                filesystem,
+                &mut locations,
+            )?
         };
         if source.is_none() && !stdlib::is_module(name) {
-            return Err(Error::new(
-                "ModuleNotFoundError",
-                format!("No module named {}", string_repr(name)),
-            )
-            .with_import(Some(name), None, None));
+            return Ok(None);
         }
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
@@ -1082,6 +1157,7 @@ impl Context {
             scope,
             origin,
             initializing: source.is_some(),
+            constructor: None,
         });
         self.modules.insert(name.to_owned(), module);
         match name {
@@ -1098,6 +1174,10 @@ impl Context {
                 }
                 self.bind(scope, "path", path);
                 self.modules.insert("os.path".to_owned(), path);
+            }
+            "_frozen_importlib" => {
+                let external = self.module("_frozen_importlib_external")?;
+                self.bind(scope, "_bootstrap_external", external);
             }
             "io" => stdlib::io::install(self, scope),
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
@@ -1128,24 +1208,34 @@ impl Context {
             }
             _ => {}
         }
-        if let Some((path, entry)) = source {
-            let filename = self.text(path.to_string_lossy());
-            let name_id = self.text("<module>");
-            let code = self.alloc(Value::Code(value::CodeObject {
-                body: value::Body::Native(entry),
-                parameters: NONE,
-                nested: Vec::new(),
-                freevars: Vec::new(),
-                closure_supported: false,
-                name: name_id,
-                qualname: name_id,
-                doc: NONE,
-                filename,
-                first_line: 1,
-                module_definition: true,
-                coroutine: false,
-            }));
-            let result = self.execute(code, scope);
+        if let Some((path, body)) = source {
+            let result = match body {
+                importlib::SourceBody::Zip(NONE) => Err(Error::new(
+                    "NotImplementedError",
+                    "ZIP namespace packages are unsupported",
+                )),
+                importlib::SourceBody::Zip(loader) => self.initialize_source(
+                    module,
+                    scope,
+                    name_id,
+                    origin.expect("ZIP source has a filename"),
+                    loader,
+                ),
+                importlib::SourceBody::Compiled(_) | importlib::SourceBody::Filesystem
+                    if let Some(origin) = origin
+                        && name != "__main__"
+                        && !stdlib::is_module(name)
+                        && self.sources.contains_key("importlib")
+                        && path.is_absolute() =>
+                {
+                    self.initialize_source(module, scope, name_id, origin, NONE)
+                }
+                importlib::SourceBody::Compiled(entry) => {
+                    let code = self.module_code(entry, &path);
+                    self.execute(code, scope, FrameOwner::Module(name_id))
+                }
+                importlib::SourceBody::Filesystem => Ok(NONE),
+            };
             let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
                 unreachable!()
             };
@@ -1154,10 +1244,18 @@ impl Context {
                 self.modules.remove(name);
                 return Err(error);
             }
+            if name == "decimal"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("decimal.py"))
+                && let Some(class) = self.scope_name(scope, "Decimal")
+            {
+                self.classes.insert("decimal.Decimal".into(), class);
+            }
         }
         if let Some((parent, child)) = parent {
             self.set_attr(parent, child, module)?;
         }
-        Ok(module)
+        Ok(Some(module))
     }
 }

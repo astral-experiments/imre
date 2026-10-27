@@ -78,3 +78,45 @@ def current():
     except RecursionError:
         print("recursive hook caught")
     print("recursive hook recovered")
+
+    flags = []
+
+    class MapKey:
+        def __init__(self, label):
+            self.label = label
+
+        def __hash__(self):
+            if flags:
+                raise AssertionError("mapping comparison rehashed its key")
+            return 17
+
+        def __eq__(self, other):
+            print("key comparison", self.label, other.label)
+            if "raise" in flags:
+                raise ValueError("stored key")
+            if "delete" in flags:
+                flags.clear()
+                del left[left_key]
+                for i in range(4096):
+                    temporary = [i]
+            return True
+
+    left_key = MapKey("left")
+    left = {left_key: [7]}
+    right = {MapKey("right"): [7]}
+    flags.append("cached")
+    print(left == right, right != left)
+    flags.append("raise")
+    try:
+        print(left == right)
+    except ValueError as exc:
+        print("caught", exc)
+    flags.pop()
+    flags.append("delete")
+    print(left == right, len(left), len(right))
+    from types import GenericAlias
+    print(GenericAlias(list, (Candidate(),)) == GenericAlias(list, (17,)))
+    try:
+        print(GenericAlias(list, (Boom(),)) == GenericAlias(list, (17,)))
+    except ValueError as error:
+        print(type(error).__name__, str(error))

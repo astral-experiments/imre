@@ -59,14 +59,14 @@ pub(crate) fn normalize_unicode(form: &str, text: &str) -> Result<Option<Str>> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_unicode_normalize(form: *const Str, text: *const Str) -> *const Str {
     // SAFETY: both arguments are immutable, rooted strings.
-    let (form, text) = unsafe { (&*form, &*text) };
-    let result = normalize_unicode(form.as_str(), text.as_str()).and_then(|normalized| {
+    let normalized = unsafe { normalize_unicode((&*form).as_str(), (&*text).as_str()) };
+    let result = normalized.and_then(|normalized| {
         if let Some(normalized) = normalized {
             crate::checked_owned_str(normalized)
         } else {
-            // SAFETY: acquire a return reference while the caller retains its original.
+            // SAFETY: the original raw handle names the allocation containing the strong count.
             unsafe { StrOwner::increment_strong_count(text) };
-            Ok(text as *const Str)
+            Ok(text)
         }
     });
     finish(result, std::ptr::null())

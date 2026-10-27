@@ -5,6 +5,7 @@ use crate::dynamic::builtins::bind;
 use crate::objects::{UrlInput, urlquote, urlsplit};
 
 mod quote;
+mod urlencode;
 
 const FIELDS: [&str; 5] = ["scheme", "netloc", "path", "query", "fragment"];
 const SPLIT: &str = "SplitResult";
@@ -45,6 +46,7 @@ pub(super) fn call(
 ) -> Result<Id> {
     match name {
         "quote" | "quote_plus" | "quote_from_bytes" => quote::call(ctx, name, args, kwargs),
+        "urlencode" => urlencode::call(ctx, args, kwargs),
         "unquote" => {
             let [text, encoding, errors] =
                 bind(name, args, kwargs, ["string", "encoding", "errors"])?;

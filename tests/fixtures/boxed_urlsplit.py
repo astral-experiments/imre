@@ -39,7 +39,9 @@ def current():
         except (TypeError, AttributeError) as error:
             print(str(error))
 
-    from urllib.parse import quote, quote_from_bytes, quote_plus
+    from urllib.parse import quote, quote_from_bytes, quote_plus, urlencode
 
     print(quote("Málaga <&> 東京", safe="!$&'()*+,/:;=@"), quote("/", safe="%!$&'()*+,/:=@"))
     print(quote_from_bytes(bytearray(b"/%\xff")), quote_plus("a b+c"))
+    print(urlencode([("suffix", "a b"), ("suffix", "Málaga/+")]))
+    print(parse.urlencode({b"q": [b"a/", b"\xff"]}, doseq=True, safe="/", quote_via=quote))

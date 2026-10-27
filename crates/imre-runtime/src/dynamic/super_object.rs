@@ -1,7 +1,7 @@
 use super::*;
 
 impl Context {
-    fn class_name(&self, class: Id) -> &str {
+    pub(super) fn class_name(&self, class: Id) -> &str {
         match self.heap.get(class) {
             Value::Class { name, .. } | Value::Native(name) => name,
             _ => self.type_name(class),
@@ -86,16 +86,16 @@ impl Context {
     pub(super) fn make_super(&mut self, args: &[Id]) -> Result<Id> {
         let (start, receiver) = match args {
             [] => {
-                let Value::Scope(frame) = self.heap.get(self.heap.current_scope()) else {
+                let scope = self.heap.current_scope();
+                let Value::Scope(frame) = self.heap.get(scope) else {
                     return Err(Error::new("RuntimeError", "super(): no arguments"));
                 };
                 let first = frame
                     .first_argument
                     .as_ref()
                     .ok_or_else(|| Error::new("RuntimeError", "super(): no arguments"))?;
-                let receiver = *frame
-                    .names
-                    .get(first)
+                let receiver = self
+                    .scope_name(scope, first)
                     .ok_or_else(|| Error::new("RuntimeError", "super(): arg[0] deleted"))?;
                 let cell = frame.class_cell.ok_or_else(|| {
                     Error::new("RuntimeError", "super(): __class__ cell not found")
@@ -131,10 +131,10 @@ impl Context {
         ) && self.subclass(receiver, start)
         {
             receiver
-        } else if let Value::Instance { class, .. } = self.heap.get(receiver)
-            && self.subclass(*class, start)
+        } else if let Some(class) = self.heap.get(receiver).instance_class()
+            && self.subclass(class, start)
         {
-            *class
+            class
         } else if self.instance_of(receiver, start) {
             self.exact_type(receiver)?
         } else {

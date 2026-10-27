@@ -16,6 +16,16 @@ class Text(str):
     pass
 
 
+class CustomAlnum(str):
+    def isalnum(self):
+        return "override"
+
+
+class CustomUpper(str):
+    def isupper(self):
+        return "override"
+
+
 class FailingFlag:
     def __bool__(self):
         raise ValueError("keepends")
@@ -51,6 +61,9 @@ def current():
             print(type(error).__name__)
     number = FormatNumber()
     assert "%x %i %u %o %X %d" % ((number,) * 6) == "-3 5 5 -3 -3 5"
+    assert "%(n)d %(n)i %(n)u %(n)o %(n)x %(n)X" % {"n": number} == "5 5 5 -3 -3 -3"
+    fields = {"name": "Imre", "count": 3, "ratio": 2.5}
+    assert "%(name)s/%(count)d/%(ratio).1f" % fields == "Imre/3/2.5"
     print("%04x %04i %04u" % (number, number, 2.75))
     for field in ("%02d", "%02x"):
         try:
@@ -94,6 +107,22 @@ def current():
     print("Host: localhost".find(":"), "localhost".find(":"))
     for value in ("", " ", "\t\n", "\x1c\x1f", " x", Text("\r")):
         print(value.isspace(), str.isspace(value))
+    for value in ("", "0Ab", "aa b", "²", "𑁦", "𝟜", "🦊", Text("東"), CustomAlnum("!")):
+        print(value.isalnum(), str.isalnum(value))
+    for call in (lambda: str.isalnum(), lambda: str.isalnum(1), lambda: "a".isalnum(1),
+                 lambda: "a".isalnum(value="x")):
+        try:
+            call()
+        except TypeError as error:
+            print(error)
+    for value in ("", "7_東", "É_7東", "Éa", "Aǅ", "Ⅰ", "Aʕ", Text("𐐀"), CustomUpper("a")):
+        print(value.isupper(), str.isupper(value))
+    for call in (lambda: str.isupper(), lambda: str.isupper(1), lambda: "A".isupper(1),
+                 lambda: "A".isupper(value="x")):
+        try:
+            call()
+        except TypeError as error:
+            print(error)
     for value in ("\0", "A", "é", "東", "🦊", b"\xff", bytearray(b"Z"), "", "é🦊", b"", bytearray(b"ab"), None, 4):
         try:
             print(ord(value))

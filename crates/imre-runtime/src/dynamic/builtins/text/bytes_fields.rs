@@ -8,7 +8,7 @@ pub(super) fn is_mapping(ctx: &Context, rhs: Id) -> bool {
         | Value::MappingProxy(_)
         | Value::Context(_)
         | Value::List(_)
-        | Value::Range { .. } => true,
+        | Value::Range(_) => true,
         Value::Instance { class, .. } => {
             ctx.namedtuple_fields(*class).is_none()
                 && (ctx.slot(rhs, "__getitem__").is_some() || ctx.dict_storage(rhs).is_some())

@@ -15,6 +15,15 @@ struct ClosureNames {
     locals_incomplete: bool,
 }
 
+pub(super) fn class_locals(body: &[ast::Stmt]) -> std::collections::BTreeSet<String> {
+    let mut names = ClosureNames::default();
+    names.visit_body(body);
+    names
+        .locals
+        .retain(|name| !names.globals.contains(name) && !names.nonlocals.contains(name));
+    names.locals
+}
+
 impl<'a> Visitor<'a> for ClosureNames {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         match stmt {
@@ -89,8 +98,17 @@ impl<'a> Visitor<'a> for ClosureNames {
                 }
                 _ => {}
             },
-            ast::Expr::Lambda(_)
-            | ast::Expr::ListComp(_)
+            ast::Expr::Lambda(lambda) => {
+                self.incomplete = true;
+                if let Some(parameters) = &lambda.parameters {
+                    for parameter in parameters.iter_non_variadic_params() {
+                        if let Some(default) = &parameter.default {
+                            self.visit_expr(default);
+                        }
+                    }
+                }
+            }
+            ast::Expr::ListComp(_)
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_)
             | ast::Expr::Generator(_) => {
@@ -192,10 +210,10 @@ impl Function<'_, '_> {
                         self.assign(&v.target, &value);
                     }
                     if let ast::Expr::Name(name) = &*v.target
-                        && (!self.class_body || v.simple)
+                        && (self.class_locals.is_none() || v.simple)
                     {
                         let key = self.text(name.id.as_str());
-                        if self.class_body && !self.source.string_annotations {
+                        if self.class_locals.is_some() && !self.source.string_annotations {
                             // Class annotations may refer to a name bound after the class body.
                             let code = self.output.definition(
                                 self.source,
@@ -209,11 +227,12 @@ impl Function<'_, '_> {
                             let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
                             self.op("annotate_deferred", &[&self.scope.clone(), &key, &thunk]);
                         } else {
-                            let value = if self.class_body && self.source.string_annotations {
-                                self.text(&crate::frontend::annotation_spelling(&v.annotation))
-                            } else {
-                                "0".into()
-                            };
+                            let value =
+                                if self.class_locals.is_some() && self.source.string_annotations {
+                                    self.text(&crate::frontend::annotation_spelling(&v.annotation))
+                                } else {
+                                    "0".into()
+                                };
                             self.op("annotate", &[&self.scope.clone(), &key, &value]);
                         }
                     }

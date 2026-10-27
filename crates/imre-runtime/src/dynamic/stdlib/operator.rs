@@ -38,7 +38,11 @@ pub(super) fn attrgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
 
 pub(super) fn itemgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     check_args("itemgetter", args, kwargs, 1..=usize::MAX)?;
-    let keys = ctx.alloc(Value::Tuple(args.to_vec()));
+    let mut keys = Vec::new();
+    keys.try_reserve_exact(args.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    keys.extend_from_slice(args);
+    let keys = ctx.alloc(Value::Tuple(keys));
     Ok(ctx.alloc(Value::ItemGetter(keys)))
 }
 
@@ -134,7 +138,10 @@ impl Context {
         if count == 1 {
             return lookup(self, args[0], 0);
         }
-        let mut values = Vec::with_capacity(count);
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
         for i in 0..count {
             let value = lookup(self, args[0], i)?;
             self.heap.keep(value);
@@ -299,6 +306,15 @@ impl Context {
                 )
             })?;
             return Ok(self.int(length));
+        }
+        if let Value::RangeIterator(iter) = self.heap.get(value) {
+            let n = iter.remaining.to_i64().ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            return Ok(self.int(n));
         }
         if let Value::DictIterator(iter) = self.heap.get(value) {
             return Ok(self.int(iter.length_hint(self) as i64));

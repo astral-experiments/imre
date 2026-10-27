@@ -3,12 +3,16 @@
 use super::*;
 
 /// Evaluate the supplied call operands in order, then raise the checked TypeError.
-pub(super) fn type_error(ty: Type, mut values: Vec<Expr>, message: String) -> Expr {
+pub(super) fn type_error(ty: Type, values: Vec<Expr>, message: String) -> Expr {
+    type_error_message(ty, values, unpacking::string(message))
+}
+
+fn type_error_message(ty: Type, mut values: Vec<Expr>, message: Expr) -> Expr {
     values.push(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind("TypeError").unwrap(),
-            message: Some(Box::new(unpacking::string(message))),
+            message: Some(Box::new(message)),
         },
     });
     Expr {
@@ -262,6 +266,26 @@ pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(),
 }
 
 impl Checker<'_> {
+    /// Format an unexpected keyword using the runtime's CPython spelling rules.
+    pub(super) fn keyword_error_message(
+        &self,
+        prefix: String,
+        key: impl Into<String>,
+        candidates: Vec<Expr>,
+    ) -> Expr {
+        let tuple = Expr {
+            ty: self.types.tuple(vec![Type::Str; candidates.len()]),
+            kind: ExprKind::Tuple(candidates),
+        };
+        Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(
+                Builtin::ExceptionKeywordSuggestion,
+                vec![unpacking::string(prefix), unpacking::string(key), tuple],
+            ),
+        }
+    }
+
     /// Evaluate the supplied arguments before raising a positional arity or
     /// keyword error. Only the spans belonging to this exact call are proved.
     pub(super) fn one_positional_error(
@@ -280,7 +304,7 @@ impl Checker<'_> {
         } else {
             format!("{name}() takes no keyword arguments")
         };
-        self.positional_argument_error(call, &[parameter], returns, message)
+        self.positional_argument_error(call, &[parameter], returns, unpacking::string(message))
     }
 
     pub(super) fn positional_argument_error(
@@ -288,7 +312,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         parameters: &[&str],
         returns: Type,
-        message: String,
+        message: Expr,
     ) -> Result<Expr, String> {
         let args = &call.arguments;
         self.graph
@@ -316,7 +340,7 @@ impl Checker<'_> {
         for kw in &args.keywords {
             values.push(self.expr(&kw.value)?);
         }
-        Ok(type_error(returns, values, message))
+        Ok(type_error_message(returns, values, message))
     }
 
     /// Return a Python class name only when the concrete receiver type is known.

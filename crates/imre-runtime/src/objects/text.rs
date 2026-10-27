@@ -230,7 +230,7 @@ pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str)
 }
 
 /// CPython 3.14's alphanumeric characters are Unicode 16 letters and numbers.
-pub(super) fn python_alnum(text: &str) -> bool {
+pub(crate) fn python_alnum(text: &str) -> bool {
     if text.is_ascii() {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
     }
@@ -268,36 +268,40 @@ pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     u32::from(python_isspace(value))
 }
 
-/// Return true when text contains a cased character and every cased character is uppercase.
-///
-/// # Safety
-/// The caller roots an immutable native string for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
+/// Returns whether the string has a cased character and every cased character is uppercase.
+pub(crate) fn python_isupper(text: &str) -> bool {
     use icu_properties::{
         CodePointSetData,
         props::{Cased, Uppercase},
     };
-    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
-    let text = unsafe { &*value };
     let mut seen = false;
     for c in text.chars() {
         if c.is_ascii_uppercase() {
             seen = true;
         } else if c.is_ascii_lowercase() || c == '\u{295}' {
             // U+0295 was lowercase in Unicode 16, uncased in newer ICU data.
-            return 0;
+            return false;
         } else if !c.is_ascii()
             && CodePointSetData::new::<Cased>().contains(c)
             && !crate::integer_text::newer_printable(c)
         {
             if !CodePointSetData::new::<Uppercase>().contains(c) {
-                return 0;
+                return false;
             }
             seen = true;
         }
     }
-    u32::from(seen)
+    seen
+}
+
+/// Tests a native string with Python's uppercase predicate.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    u32::from(python_isupper(unsafe { &*value }))
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.
@@ -1090,6 +1094,21 @@ mod tests {
                 StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(actual.as_str(), message);
         }
+    }
+
+    #[test]
+    fn unchanged_normalization_retains_the_input() {
+        let form = StrOwner::new(Str::new("NFC"));
+        let input = StrOwner::new(Str::new("already normalized"));
+        let raw = StrOwner::as_ptr(&input);
+        // SAFETY: both input owners outlive the call.
+        let normalized =
+            unsafe { normalization::imre_unicode_normalize(StrOwner::as_ptr(&form), raw) };
+        assert_eq!(normalized, raw);
+        assert_eq!(StrOwner::strong_count(&input), 2);
+        // SAFETY: normalization transferred the second strong reference.
+        unsafe { StrOwner::decrement_strong_count(normalized) };
+        assert_eq!(StrOwner::strong_count(&input), 1);
     }
 
     #[test]

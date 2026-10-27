@@ -1,0 +1,19 @@
+{
+  "module": "test.test_keyword",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 11,
+  "reference": {
+    "test.test_keyword.Test_iskeyword.test_all_keywords_fail_to_be_used_as_names": "pass",
+    "test.test_keyword.Test_iskeyword.test_all_soft_keywords_can_be_used_as_names": "pass",
+    "test.test_keyword.Test_iskeyword.test_async_and_await_are_keywords": "pass",
+    "test.test_keyword.Test_iskeyword.test_changing_the_kwlist_does_not_affect_iskeyword": "pass",
+    "test.test_keyword.Test_iskeyword.test_changing_the_softkwlist_does_not_affect_issoftkeyword": "pass",
+    "test.test_keyword.Test_iskeyword.test_keywords_are_sorted": "pass",
+    "test.test_keyword.Test_iskeyword.test_none_value_is_not_a_keyword": "pass",
+    "test.test_keyword.Test_iskeyword.test_soft_keywords": "pass",
+    "test.test_keyword.Test_iskeyword.test_softkeywords_are_sorted": "pass",
+    "test.test_keyword.Test_iskeyword.test_true_is_a_keyword": "pass",
+    "test.test_keyword.Test_iskeyword.test_uppercase_true_is_not_a_keyword": "pass"
+  }
+}

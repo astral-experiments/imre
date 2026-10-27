@@ -8,8 +8,8 @@
   "denominator": 101,
   "distinct_ids": 101,
   "counts": {
-    "mixed": 9,
-    "native-body-host-fixture": 3,
+    "mixed": 8,
+    "native-body-host-fixture": 4,
     "reference-only": 87,
     "reference-skip": 2
   },
@@ -37,7 +37,7 @@
     {"id": "test.test_urllib.QuotingTests.test_default_quoting", "occurrence": 1, "opt_level": 0, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "cpython", "assertions": "cpython", "operation": "mixed", "fixture": "cpython"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 94} calls. Other urllib entry points run on CPython.", "fixture": "CPython runs the original test and assertions."}, "classification": "mixed"},
     {"id": "test.test_urllib.QuotingTests.test_default_safe", "occurrence": 1, "opt_level": 0, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urllib.QuotingTests.test_never_quote", "occurrence": 1, "opt_level": 0, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "cpython", "assertions": "cpython", "operation": "mixed", "fixture": "cpython"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 2} calls. Other urllib entry points run on CPython.", "fixture": "CPython runs the original test and assertions."}, "classification": "mixed"},
-    {"id": "test.test_urllib.QuotingTests.test_quote_bytes", "occurrence": 1, "opt_level": 0, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "cpython", "assertions": "cpython", "operation": "mixed", "fixture": "cpython"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 2} calls. Other urllib entry points run on CPython.", "fixture": "CPython runs the original test and assertions."}, "classification": "mixed"},
+    {"id": "test.test_urllib.QuotingTests.test_quote_bytes", "occurrence": 1, "opt_level": 0, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 2} calls. The native test body also calls quote_from_bytes.", "fixture": "The native harness supplies the isolated TestCase entry and its two imports."}, "classification": "native-body-host-fixture"},
     {"id": "test.test_urllib.QuotingTests.test_quote_plus_with_unicode", "occurrence": 1, "opt_level": 0, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urllib.QuotingTests.test_quote_with_unicode", "occurrence": 1, "opt_level": 0, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 7} calls. ", "fixture": "The native harness supplies the isolated TestCase entry and its two imports."}, "classification": "native-body-host-fixture"},
     {"id": "test.test_urllib.QuotingTests.test_quoting_plus", "occurrence": 1, "opt_level": 0, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -126,8 +126,8 @@
   "denominator": 101,
   "distinct_ids": 101,
   "counts": {
-    "mixed": 9,
-    "native-body-host-fixture": 3,
+    "mixed": 8,
+    "native-body-host-fixture": 4,
     "reference-only": 87,
     "reference-skip": 2
   },
@@ -155,7 +155,7 @@
     {"id": "test.test_urllib.QuotingTests.test_default_quoting", "occurrence": 1, "opt_level": 3, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "cpython", "assertions": "cpython", "operation": "mixed", "fixture": "cpython"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 94} calls. Other urllib entry points run on CPython.", "fixture": "CPython runs the original test and assertions."}, "classification": "mixed"},
     {"id": "test.test_urllib.QuotingTests.test_default_safe", "occurrence": 1, "opt_level": 3, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urllib.QuotingTests.test_never_quote", "occurrence": 1, "opt_level": 3, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "cpython", "assertions": "cpython", "operation": "mixed", "fixture": "cpython"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 2} calls. Other urllib entry points run on CPython.", "fixture": "CPython runs the original test and assertions."}, "classification": "mixed"},
-    {"id": "test.test_urllib.QuotingTests.test_quote_bytes", "occurrence": 1, "opt_level": 3, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "cpython", "assertions": "cpython", "operation": "mixed", "fixture": "cpython"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 2} calls. Other urllib entry points run on CPython.", "fixture": "CPython runs the original test and assertions."}, "classification": "mixed"},
+    {"id": "test.test_urllib.QuotingTests.test_quote_bytes", "occurrence": 1, "opt_level": 3, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 2} calls. The native test body also calls quote_from_bytes.", "fixture": "The native harness supplies the isolated TestCase entry and its two imports."}, "classification": "native-body-host-fixture"},
     {"id": "test.test_urllib.QuotingTests.test_quote_plus_with_unicode", "occurrence": 1, "opt_level": 3, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_urllib.QuotingTests.test_quote_with_unicode", "occurrence": 1, "opt_level": 3, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}, "evidence": {"operation": "Native public quote/unquote results for {'quote': 7} calls. ", "fixture": "The native harness supplies the isolated TestCase entry and its two imports."}, "classification": "native-body-host-fixture"},
     {"id": "test.test_urllib.QuotingTests.test_quoting_plus", "occurrence": 1, "opt_level": 3, "fixture_variant": "default Linux regrtest resources", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},

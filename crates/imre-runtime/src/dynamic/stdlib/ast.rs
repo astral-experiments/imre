@@ -3,6 +3,7 @@ use std::collections::{HashMap, VecDeque};
 
 use super::super::{Context, Error, Id, NONE, Result, Value, builtins};
 
+mod literal;
 mod parse;
 
 #[derive(Clone, Copy)]
@@ -35,6 +36,8 @@ const NODES: &[Node] = &[
     node!(stmt: AST, true;),
     node!(expr: AST, true;),
     node!(expr_context: AST, false;),
+    node!(operator: AST, false;),
+    node!(unaryop: AST, false;),
     node!(Module: mod, false; body: List, type_ignores: List),
     node!(Expression: mod, false; body: Required),
     node!(FunctionDef: stmt, true; name: Required, args: Required, body: List, decorator_list: List, returns: Optional, type_comment: Optional, type_params: List),
@@ -54,6 +57,27 @@ const NODES: &[Node] = &[
     node!(IfExp: expr, true; test: Required, body: Required, orelse: Required),
     node!(Tuple: expr, true; elts: List, ctx: Load),
     node!(List: expr, true; elts: List, ctx: Load),
+    node!(Set: expr, true; elts: List),
+    node!(Dict: expr, true; keys: List, values: List),
+    node!(UnaryOp: expr, true; op: Required, operand: Required),
+    node!(BinOp: expr, true; left: Required, op: Required, right: Required),
+    node!(Add: operator, false;),
+    node!(Sub: operator, false;),
+    node!(Mult: operator, false;),
+    node!(MatMult: operator, false;),
+    node!(Div: operator, false;),
+    node!(FloorDiv: operator, false;),
+    node!(Mod: operator, false;),
+    node!(Pow: operator, false;),
+    node!(LShift: operator, false;),
+    node!(RShift: operator, false;),
+    node!(BitOr: operator, false;),
+    node!(BitXor: operator, false;),
+    node!(BitAnd: operator, false;),
+    node!(UAdd: unaryop, false;),
+    node!(USub: unaryop, false;),
+    node!(Not: unaryop, false;),
+    node!(Invert: unaryop, false;),
     node!(JoinedStr: expr, true; values: List),
     node!(FormattedValue: expr, true; value: Required, conversion: Required, format_spec: Optional),
     node!(Load: expr_context, false;),
@@ -105,11 +129,14 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         ctx.builtins.insert(format!("ast.{}", spec.name), class);
         ctx.bind(module, spec.name, class);
     }
-    for kind in ["Load", "Store"] {
-        let singleton = parsed_instance(ctx, kind, &[], None);
-        ctx.builtins.insert(format!("ast._{kind}"), singleton);
+    for spec in NODES {
+        if matches!(spec.base, "expr_context" | "operator" | "unaryop") {
+            let singleton = parsed_instance(ctx, spec.name, &[], None);
+            ctx.builtins
+                .insert(format!("ast._{}", spec.name), singleton);
+        }
     }
-    for name in ["parse", "walk"] {
+    for name in ["parse", "walk", "literal_eval"] {
         let callable = ctx.builtin(&format!("ast.{name}"));
         ctx.bind(module, name, callable);
     }
@@ -203,6 +230,8 @@ fn parsed_instance(
         fields,
         dictionary: None,
         scalar: None,
+        property: None,
+        weak_reference: None,
         memory_stream: None,
     })
 }
@@ -298,6 +327,7 @@ pub(super) fn call(
             }))
         }
         "parse" => parse::parse(ctx, args, kwargs),
+        "literal_eval" => literal::evaluate(ctx, args, kwargs),
         _ => Err(Error::new(
             "NotImplementedError",
             format!("unsupported AST operation {name}"),
