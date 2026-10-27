@@ -75,6 +75,7 @@ const FUNCTIONS: &[&str] = &[
     "len",
     "reversed",
     "ord",
+    "chr",
     "callable",
     "any",
     "isinstance",
@@ -709,16 +710,20 @@ pub(super) fn call(
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
         }
-        "ord" => {
+        "chr" | "ord" => {
             if !kwargs.is_empty() {
-                return Err(type_error("ord() takes no keyword arguments"));
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
             }
             let [value] = args else {
                 return Err(type_error(format!(
-                    "ord() takes exactly one argument ({} given)",
+                    "{name}() takes exactly one argument ({} given)",
                     args.len()
                 )));
             };
+            if name == "chr" {
+                let code = ctx.index_integer(*value)?;
+                return Ok(ctx.text(crate::objects::chr_scalar(&code)?.to_string()));
+            }
             let code = match ctx.heap.get(*value) {
                 Value::Bytes(b) | Value::ByteArray(b) => crate::objects::ord_byte(b)?,
                 _ => {
