@@ -1,0 +1,73 @@
+{
+  "fixture_sha256": "5a156138212bbf9b06cfe6aa1cf068d739ae47fc1f10382ac09953241fe85af7",
+  "wheel": "click-8.4.2-py3-none-any.whl",
+  "wheel_sha256": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+  "member_sha256": "80f36d5d0f6af86e908a5d9bf8c0b90ac1ec186710e2ee98496cbdfed966ba17",
+  "original_functions_and_classes": {
+    "_make_text_stream": {
+      "member": "click/_compat.py",
+      "lines": [
+        19,
+        37
+      ],
+      "sha256": "e9496c5aa38ce96735b2b2c2c136da24d7725ebe519d1e2b8f7f0cd6c3c41eb2"
+    },
+    "is_ascii_encoding": {
+      "member": "click/_compat.py",
+      "lines": [
+        40,
+        45
+      ],
+      "sha256": "254eb2bb4d44de16d5d8481de9bc9be2dc7dc03ecf38acfc6ab9f99969f7f357"
+    },
+    "get_best_encoding": {
+      "member": "click/_compat.py",
+      "lines": [
+        48,
+        53
+      ],
+      "sha256": "e231708042b44d63e08f34ffcdb5db9d8cbdf7bd23db99fd11e895871957f49f"
+    },
+    "_NonClosingTextIOWrapper": {
+      "member": "click/_compat.py",
+      "lines": [
+        56,
+        79
+      ],
+      "sha256": "fca58b5d89784cb3080f5c41eecbc1b6caf81e63edc17310d59f2d854ae9c3d3"
+    },
+    "_FixupStream": {
+      "member": "click/_compat.py",
+      "lines": [
+        82,
+        148
+      ],
+      "sha256": "f8e0e6d2a6fefc91974dc1dede42d64abac284a729e819bd361f44d3372eaf26"
+    }
+  },
+  "cases": [
+    {
+      "name": "original_class_identity"
+    },
+    {
+      "name": "write_line_buffering_and_detach"
+    },
+    {
+      "name": "read_seek_replace_and_newlines"
+    },
+    {
+      "name": "strict_unicode_error"
+    },
+    {
+      "name": "defaults_and_forced_wrapper"
+    },
+    {
+      "name": "supplied_binary_read1_fallback"
+    },
+    {
+      "name": "drop_keeps_original_buffer_open"
+    }
+  ],
+  "wire_trace_sha256": "d2e174b2b475524d15e0d1513cfdc45ddbeb4a5e93e51a0b13a63f9c008cc1b5",
+  "scope": "The complete unchanged wheel definitions and true public io.BytesIO run under both the extracted and installed original Click. The actual app defines the subclass once and never constructs it during the ten transfers. The Reader fixture deliberately lacks read1."
+}
