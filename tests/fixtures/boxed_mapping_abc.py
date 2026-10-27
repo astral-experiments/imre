@@ -1,3 +1,4 @@
+from collections import ChainMap, defaultdict
 from collections.abc import Collection, Mapping, MutableMapping, MutableSet, Set
 
 
@@ -52,6 +53,17 @@ def current():
     data["b"] = 3
     print(next(values))
 
+    first, last = defaultdict(list), {"late": [2]}
+    chain = ChainMap(first, last)
+    saved = chain.maps
+    print("late" in chain, chain.get("absent"), first)
+    print(chain["late"] is first["late"], last["late"])
+    chain["new"] = [3]
+    print(list(chain), len(chain), saved[0]["new"])
+    chain.maps = []
+    print(bool(chain), repr(chain), len(saved))
+    chain.maps.append({"owner": chain})
+    print(repr(chain))
 
     class Registered:
         pass
