@@ -82,7 +82,7 @@ def main():
                 stderr = run.stderr
                 if mode == "failed":
                     progress = stderr.split(b"Traceback (most recent call last):")[0]
-                    progress = progress.split(b"CalledProcessError:")[0]
+                    progress = progress.removesuffix(stderr.splitlines(keepends=True)[-1])
                     last = stderr.splitlines()[-1].removeprefix(b"subprocess.")
                     assert (
                         last.startswith(b"CalledProcessError:")
