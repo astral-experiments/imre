@@ -206,12 +206,15 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
-    TYPES.contains(&name)
-        || is_exception(name)
-        || matches!(
-            name,
-            "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
-        )
+    TYPES.contains(&name) || is_exception(name) || is_enum_base(name)
+}
+
+/// Recognize the native classes that provide Enum's member methods.
+pub(super) fn is_enum_base(name: &str) -> bool {
+    matches!(
+        name,
+        "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
+    )
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
@@ -545,7 +548,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
 }
 
 /// Bind built-in arguments in the order Argument Clinic reports missing and invalid names.
-fn bind_builtin_arguments<const N: usize>(
+pub(super) fn bind_builtin_arguments<const N: usize>(
     builtin: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
