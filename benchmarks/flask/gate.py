@@ -184,7 +184,19 @@ def native_build(compiler, runtime, site, binary, opt, flags, timeout):
             os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        stdout, stderr = p.communicate()
+        try:
+            stdout, stderr = p.communicate(timeout=0.25)
+        except subprocess.TimeoutExpired as exc:
+            # A process outside the killed group may still hold a captured pipe.
+            # Stop waiting for EOF and preserve the output collected so far.
+            stdout = (exc.stdout or b"").decode(errors="replace")
+            stderr = (exc.stderr or b"").decode(errors="replace")
+            p.stdout.close()
+            p.stderr.close()
+            try:
+                p.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                pass
         build = {"outcome": "compile_timeout", "status": None, "stdout": stdout, "stderr": stderr}
     else:
         build = {"outcome": "compile_error" if p.returncode else "compiled",
