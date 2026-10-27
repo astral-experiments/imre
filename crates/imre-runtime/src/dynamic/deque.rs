@@ -157,37 +157,225 @@ fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Result<()> {
 
 /// Compare through live cursors so a callback can mutate either deque or raise.
 pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Result<bool> {
+    use std::collections::HashMap;
+
     if left == right {
         return Ok(op == "==");
     }
-    let (Value::Deque(a), Value::Deque(b)) = (ctx.heap.get(left), ctx.heap.get(right)) else {
-        unreachable!()
-    };
-    if a.items.len() != b.items.len() {
-        return Ok(op == "!=");
+
+    enum Cursor {
+        Deque(Id, Id),
+        Sequence(usize),
     }
+    struct Frame {
+        left: Id,
+        right: Id,
+        cursor: Cursor,
+        equal_op: bool,
+        roots: usize,
+        element_roots: usize,
+        pending: Option<(Id, Id, bool)>,
+    }
+
     ctx.check_call_depth(0)?;
     ctx.call_depth += 1;
     let roots = ctx.heap.temporary_mark();
     let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-        let a = ctx.iterator(left)?;
-        ctx.heap.keep(a);
-        let b = ctx.iterator(right)?;
-        ctx.heap.keep(b);
-        let elements = ctx.heap.temporary_mark();
+        let mut active: HashMap<(Id, Id), usize> = HashMap::new();
+        let mut frames: Vec<Frame> = Vec::new();
+        let mut deque_depth = 0;
+        let mut request = Some((left, right, op == "=="));
+        let mut answer: Option<bool> = None;
         loop {
-            ctx.heap.release_temporaries_since(elements);
-            let x = ctx.next_item(a)?;
-            let y = ctx.next_item(b)?;
+            if let Some((a, b, equal_op)) = request.take() {
+                if a == b {
+                    answer = Some(equal_op);
+                    continue;
+                }
+                let is_deque = matches!(
+                    (ctx.heap.get(a), ctx.heap.get(b)),
+                    (Value::Deque(_), Value::Deque(_))
+                );
+                let unequal = match (ctx.heap.get(a), ctx.heap.get(b)) {
+                    (Value::Deque(x), Value::Deque(y)) => x.items.len() != y.items.len(),
+                    (Value::List(x), Value::List(y)) | (Value::Tuple(x), Value::Tuple(y)) => {
+                        x.len() != y.len()
+                    }
+                    _ => unreachable!(),
+                };
+                if unequal {
+                    answer = Some(!equal_op);
+                    continue;
+                }
+                active
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                let repeats = active.get(&(a, b)).copied().unwrap_or(0);
+                if repeats > 0 {
+                    let previous = frames
+                        .iter()
+                        .rposition(|frame| frame.left == a && frame.right == b)
+                        .unwrap();
+                    let crosses_deque = is_deque
+                        || frames[previous + 1..]
+                            .iter()
+                            .any(|frame| matches!(frame.cursor, Cursor::Deque(..)));
+                    if !crosses_deque || deque_depth + ctx.call_depth >= 1000 {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum comparison depth exceeded",
+                        ));
+                    }
+                }
+                active.insert((a, b), repeats + 1);
+                if is_deque {
+                    deque_depth += 1;
+                }
+                frames
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                let mark = ctx.heap.temporary_mark();
+                ctx.heap.keep(a);
+                ctx.heap.keep(b);
+                let cursor = if is_deque {
+                    let left_iter = ctx.iterator(a)?;
+                    ctx.heap.keep(left_iter);
+                    let right_iter = ctx.iterator(b)?;
+                    ctx.heap.keep(right_iter);
+                    Cursor::Deque(left_iter, right_iter)
+                } else {
+                    Cursor::Sequence(0)
+                };
+                frames.push(Frame {
+                    left: a,
+                    right: b,
+                    cursor,
+                    equal_op,
+                    roots: mark,
+                    element_roots: ctx.heap.temporary_mark(),
+                    pending: None,
+                });
+                continue;
+            }
+            if let Some(value) = answer.take() {
+                let Some(parent) = frames.last_mut() else {
+                    return Ok(value);
+                };
+                let (x, y, final_pass) = parent.pending.take().expect("waiting parent");
+                if !final_pass && !value {
+                    if matches!(parent.cursor, Cursor::Sequence(_)) {
+                        let value = !parent.equal_op;
+                        let parent = frames.pop().unwrap();
+                        if matches!(parent.cursor, Cursor::Deque(..)) {
+                            deque_depth -= 1;
+                        }
+                        let count = active.get_mut(&(parent.left, parent.right)).unwrap();
+                        *count -= 1;
+                        if *count == 0 {
+                            active.remove(&(parent.left, parent.right));
+                        }
+                        ctx.heap.release_temporaries_since(parent.roots);
+                        answer = Some(value);
+                    } else {
+                        parent.pending = Some((x, y, true));
+                        request = Some((x, y, parent.equal_op));
+                    }
+                } else if !final_pass {
+                    ctx.heap.release_temporaries_since(parent.element_roots);
+                } else {
+                    let parent = frames.pop().unwrap();
+                    if matches!(parent.cursor, Cursor::Deque(..)) {
+                        deque_depth -= 1;
+                    }
+                    let count = active.get_mut(&(parent.left, parent.right)).unwrap();
+                    *count -= 1;
+                    if *count == 0 {
+                        active.remove(&(parent.left, parent.right));
+                    }
+                    ctx.heap.release_temporaries_since(parent.roots);
+                    answer = Some(value);
+                }
+                continue;
+            }
+            let frame = frames.last_mut().expect("active comparison");
+            ctx.heap.release_temporaries_since(frame.element_roots);
+            let (x, y) = match &mut frame.cursor {
+                Cursor::Deque(left_iter, right_iter) => {
+                    (ctx.next_item(*left_iter)?, ctx.next_item(*right_iter)?)
+                }
+                Cursor::Sequence(index) => {
+                    let (a, b) = match (ctx.heap.get(frame.left), ctx.heap.get(frame.right)) {
+                        (Value::List(a), Value::List(b)) | (Value::Tuple(a), Value::Tuple(b)) => {
+                            (a, b)
+                        }
+                        _ => unreachable!(),
+                    };
+                    if a.len() != b.len() {
+                        let value = !frame.equal_op;
+                        let frame = frames.pop().unwrap();
+                        if matches!(frame.cursor, Cursor::Deque(..)) {
+                            deque_depth -= 1;
+                        }
+                        let count = active.get_mut(&(frame.left, frame.right)).unwrap();
+                        *count -= 1;
+                        if *count == 0 {
+                            active.remove(&(frame.left, frame.right));
+                        }
+                        ctx.heap.release_temporaries_since(frame.roots);
+                        answer = Some(value);
+                        continue;
+                    }
+                    let result = (a.get(*index).copied(), b.get(*index).copied());
+                    *index += 1;
+                    result
+                }
+            };
             let (Some(x), Some(y)) = (x, y) else {
-                return Ok(if op == "==" { x == y } else { x != y });
+                let value = if frame.equal_op { x == y } else { x != y };
+                let frame = frames.pop().unwrap();
+                if matches!(frame.cursor, Cursor::Deque(..)) {
+                    deque_depth -= 1;
+                }
+                let count = active.get_mut(&(frame.left, frame.right)).unwrap();
+                *count -= 1;
+                if *count == 0 {
+                    active.remove(&(frame.left, frame.right));
+                }
+                ctx.heap.release_temporaries_since(frame.roots);
+                answer = Some(value);
+                continue;
             };
             ctx.heap.keep(x);
             ctx.heap.keep(y);
+            if matches!(
+                (ctx.heap.get(x), ctx.heap.get(y)),
+                (Value::Deque(_), Value::Deque(_))
+                    | (Value::List(_), Value::List(_))
+                    | (Value::Tuple(_), Value::Tuple(_))
+            ) {
+                frame.pending = Some((x, y, false));
+                request = Some((x, y, true));
+                continue;
+            }
             if !ctx.checked_equal(x, y)? {
-                // The first differing pair answers the originally requested operation.
-                let result = ctx.binary(op, x, y)?;
-                return ctx.truth(result);
+                let value = if matches!(frame.cursor, Cursor::Sequence(_)) {
+                    !frame.equal_op
+                } else {
+                    let operation = if frame.equal_op { "==" } else { "!=" };
+                    let value = ctx.binary(operation, x, y)?;
+                    ctx.truth(value)?
+                };
+                let frame = frames.pop().unwrap();
+                if matches!(frame.cursor, Cursor::Deque(..)) {
+                    deque_depth -= 1;
+                }
+                let count = active.get_mut(&(frame.left, frame.right)).unwrap();
+                *count -= 1;
+                if *count == 0 {
+                    active.remove(&(frame.left, frame.right));
+                }
+                ctx.heap.release_temporaries_since(frame.roots);
+                answer = Some(value);
             }
         }
     });
