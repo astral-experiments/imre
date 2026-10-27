@@ -69,24 +69,6 @@ pub(super) fn flag_attribute(ctx: &mut Context, name: &str) -> Result<Id> {
     }
 }
 
-pub(in crate::dynamic) fn flag_repr(bits: i64) -> String {
-    if bits == 0 {
-        return "re.NOFLAG".into();
-    }
-    let mut words = Vec::new();
-    let mut rest = bits;
-    for &(name, _, flag) in FLAGS {
-        if bits & flag != 0 {
-            words.push(format!("re.{name}"));
-            rest &= !flag;
-        }
-    }
-    if rest != 0 {
-        words.push(format!("{rest:#x}"));
-    }
-    words.join("|")
-}
-
 pub(in crate::dynamic) struct Pattern {
     pub(in crate::dynamic) source: Id,
     pub(in crate::dynamic) flags: i64,
@@ -111,7 +93,17 @@ impl Pattern {
         if flags == 0 {
             format!("re.compile({source})")
         } else {
-            format!("re.compile({source}, {})", flag_repr(flags))
+            let mut names: Vec<_> = FLAGS
+                .iter()
+                .filter(|(_, _, flag)| flags & flag != 0)
+                .collect();
+            names.sort_unstable_by_key(|(_, _, flag)| flag);
+            let flags = names
+                .into_iter()
+                .map(|(name, _, _)| format!("re.{name}"))
+                .collect::<Vec<_>>()
+                .join("|");
+            format!("re.compile({source}, {flags})")
         }
     }
 
@@ -180,12 +172,16 @@ fn byte_pattern(bytes: &[u8]) -> String {
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
-fn python_escapes(pattern: &str, ascii: bool) -> String {
+fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
     let mut result = String::with_capacity(pattern.len());
-    let mut chars = pattern.chars();
+    let mut chars = pattern.chars().peekable();
     let mut in_class = false;
     while let Some(c) = chars.next() {
         if c != '\\' {
+            if c == '$' && !in_class && !multiline && chars.peek().is_none() {
+                result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
+                continue;
+            }
             if c == '[' {
                 in_class = true;
             } else if c == ']' {
@@ -270,11 +266,16 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     };
     let ascii = bytes || flags & ASCII != 0;
     let engine_source = if flags & VERBOSE != 0 {
-        imre_regex::translate_with_ascii(&source, true, ascii)
+        let mut source = imre_regex::translate_with_ascii(&source, true, ascii)
             .map_err(|message| Error::new("re.error", message))?
-            .source
+            .source;
+        if flags & MULTILINE != 0 && source.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
+            source.truncate(source.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
+            source.push('$');
+        }
+        source
     } else {
-        python_escapes(&source, ascii)
+        python_escapes(&source, ascii, flags & MULTILINE != 0)
     };
     let engine_source = if flags & IGNORECASE != 0 && !bytes {
         casefold::expand(&engine_source, ascii)

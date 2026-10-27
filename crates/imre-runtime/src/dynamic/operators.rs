@@ -330,9 +330,22 @@ impl Context {
         let value = self.heap.get(id);
         if let Value::Instance { class, .. } = value
             && self.classes.get("re.RegexFlag") == Some(class)
-            && let Ok(bits) = self.as_integer(id)
+            && let Some((_, name, bits)) = self.enum_member(id)
         {
-            return super::stdlib::regex::flag_repr(bits);
+            return match self.str_value(name) {
+                Ok(names) => names
+                    .split('|')
+                    .map(|name| {
+                        if name.starts_with("0x") {
+                            name.to_owned()
+                        } else {
+                            format!("re.{name}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|"),
+                Err(_) => format!("re.RegexFlag({})", self.repr(bits)),
+            };
         }
         if let Value::Instance { scalar, .. } = value
             && (repr || scalar.is_none())
@@ -1095,7 +1108,12 @@ impl Context {
             };
             crate::integer_binary(&x, &y, code)?
         };
-        Ok(self.alloc(Value::Int(result)))
+        let class = if matches!(op, "&" | "|" | "^") {
+            self.flag_class(a).or_else(|| self.flag_class(b))
+        } else {
+            None
+        };
+        self.flag_or_integer(class, result)
     }
 }
 

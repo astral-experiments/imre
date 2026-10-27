@@ -248,7 +248,7 @@ impl Context {
         a == b
             || matches!((self.heap.get(a),self.heap.get(b)),(Value::Native(x),Value::Native(y)) if x==y)
     }
-    fn has_base(&self, class: Id, target: &str) -> bool {
+    pub(super) fn has_base(&self, class: Id, target: &str) -> bool {
         match self.heap.get(class) {
             Value::Class { ancestors, .. } => ancestors
                 .iter()
@@ -1834,7 +1834,10 @@ impl Context {
         self.init_abstract_class(class, &name, scope)?;
         self.classes.insert(name, class);
         if self.has_base(class, "enum.Enum") {
-            self.populate_enum(class, None)?;
+            let scalar = self
+                .has_base(class, "enum.IntFlag")
+                .then(|| self.builtin("enum.IntFlag"));
+            self.populate_enum(class, scalar)?;
         }
         Ok(class)
     }
