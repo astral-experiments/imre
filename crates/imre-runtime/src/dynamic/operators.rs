@@ -681,7 +681,20 @@ impl Context {
         {
             return Err(Error::new("TypeError", "unhashable key"));
         }
-        let iterator = self.iterator(container)?;
+        let iterator = self.iterator(container).map_err(|error| {
+            let ty = self.builtin("TypeError");
+            if self.raised_error_matches(&error, ty) {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "argument of type '{}' is not a container or iterable",
+                        self.type_name(container)
+                    ),
+                )
+            } else {
+                error
+            }
+        })?;
         self.heap.keep(iterator);
         while let Some(value) = self.next_item(iterator)? {
             if self.checked_equal(value, item)? {
