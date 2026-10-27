@@ -93,6 +93,19 @@ def check_boxed_call_allocation(imre, root, run):
             0, expected, b"refused\n" if size else b"",
         ), result
 
+    # Check the small result, the base-1e9 scratch, the coefficient text, and the output copy.
+    for wide, size, ordinal in ((False, 0, 1), (False, 8, 2), (True, 0, 1), (True, 568, 1), (True, 1235, 1), (True, 1235, 2)):
+        source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_recursive_repr as fixture; fixture.integer_allocation({wide})"
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        digits = b"1235 -2088 80635\n" if wide else b"2 23 23\n"
+        expected = (b"caught ()\n" if size else b"value " + digits) + b"retry " + digits
+        assert (result.returncode, result.stdout, result.stderr) == (0, expected, b"refused\n" if size else b""), result
+
+
 
 
 def check_slice_stack(imre, imports, root, env):

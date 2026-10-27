@@ -1357,6 +1357,12 @@ impl Context {
                         _ => {}
                     }
                     let (start, end, placeholder, contents) = match ctx.heap.get(id) {
+                        Value::Int(value) => {
+                            let text = crate::integer_text::try_decimal_coefficient(value)
+                                .ok_or_else(|| Error::new("MemoryError", ""))?;
+                            append_rendered_text(&mut output, &text)?;
+                            continue;
+                        }
                         Value::List(_) => ("[", "]", "[...]", Part::Sequence(id, 0)),
                         Value::Tuple(items) => (
                             "(",
