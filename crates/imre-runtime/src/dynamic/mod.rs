@@ -26,6 +26,7 @@ mod typing;
 mod union;
 mod value;
 mod weakref;
+mod wrapper_descriptor;
 mod zip;
 
 use std::collections::HashMap;

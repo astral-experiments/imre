@@ -6,6 +6,7 @@ use super::*;
 
 enum RenderRoot<'a> {
     Object(Id),
+    Dictionary { object: Id, storage: Id },
     Exception(&'a Error),
 }
 
@@ -726,13 +727,19 @@ impl Context {
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
     pub(super) fn checked_format(&mut self, root: Id, quoted: bool) -> Result<String> {
-        Self::render_containers(
-            self,
-            RenderRoot::Object(root),
-            quoted,
-            true,
-            |ctx, id, work, ancestors| ctx.element_repr(id, work, ancestors),
-        )
+        self.checked_render(RenderRoot::Object(root), quoted)
+    }
+
+    /// Bypass the receiver's repr override for an explicit dict slot. Its keys and values
+    /// still use their own hooks, including when one refers back to the receiver.
+    pub(super) fn checked_dict_repr(&mut self, object: Id, storage: Id) -> Result<String> {
+        self.checked_render(RenderRoot::Dictionary { object, storage }, true)
+    }
+
+    fn checked_render(&mut self, root: RenderRoot<'_>, quoted: bool) -> Result<String> {
+        Self::render_containers(self, root, quoted, true, |ctx, id, work, ancestors| {
+            ctx.element_repr(id, work, ancestors)
+        })
     }
 
     /// Invoke the special method once and preserve an accepted string subclass.
@@ -875,18 +882,27 @@ impl Context {
         use FormatPart as Part;
         let mut output = String::new();
         let mut work = Vec::new();
-        match root {
-            RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
-            RenderRoot::Exception(error) => {
-                ctx.render_exception(error, quoted, &mut output, &mut work)?;
-            }
-        }
         let mut active = Vec::new();
         let mut ancestors: std::collections::HashSet<Id> = if checked {
             ctx.repr_ancestors.iter().copied().collect()
         } else {
             Default::default()
         };
+        match root {
+            RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
+            RenderRoot::Dictionary { object, storage } => {
+                if !ancestors.insert(object) {
+                    return Ok("{...}".to_owned());
+                }
+                output.push('{');
+                active.push(object);
+                work.push(Part::Leave(object, "}"));
+                work.push(Part::Entries(storage, 0, true));
+            }
+            RenderRoot::Exception(error) => {
+                ctx.render_exception(error, quoted, &mut output, &mut work)?;
+            }
+        }
         // CPython guards nested slice formatting against the thread's native stack.
         // The pinned x86-64 Linux reference build uses 624 bytes per slice
         // and keeps two native-stack margins before raising RecursionError.
@@ -968,7 +984,9 @@ impl Context {
                 }
                 Part::Entries(id, index, include_values) => {
                     let entry = match ctx.heap.get(id) {
-                        Value::Dict(entries) => entries.at(index),
+                        Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+                            entries.at(index)
+                        }
                         Value::Set { entries, .. } => {
                             entries.get(index).map(|&(k, v)| (index, k, v))
                         }
