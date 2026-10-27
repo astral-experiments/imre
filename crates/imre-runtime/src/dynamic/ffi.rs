@@ -371,6 +371,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         sources: HashMap::new(),
         call_depth: 0,
         pending: None,
+        slot_depth: 0,
     };
     // SAFETY: ABI main supplies argc pointers, valid to the end of the call.
     let args = unsafe { slice::from_raw_parts(argv, argc as usize) }

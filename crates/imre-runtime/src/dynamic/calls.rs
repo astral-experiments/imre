@@ -1806,18 +1806,51 @@ impl Context {
                 }
                 Ok(value)
             }
-            _ => {
-                if let Some(method) = self.bound_slot(callable, "__call__")? {
-                    self.call(method, args, kwargs)
-                } else {
-                    Err(Error::new(
-                        "TypeError",
-                        format!("'{}' object is not callable", self.type_name(callable)),
-                    ))
+            Value::Instance { .. } => {
+                // Binding a descriptor can call Python before it returns its target.
+                let exhausted = stacker::remaining_stack()
+                    .map_or(self.slot_depth >= 128, |remaining| remaining < 64 * 1024);
+                if exhausted {
+                    return Err(Error::new(
+                        "RecursionError",
+                        "maximum recursion depth exceeded while calling a Python object",
+                    ));
                 }
+                self.slot_depth += 1;
+                let result = self.call_instance(callable, args, kwargs);
+                self.slot_depth -= 1;
+                result
             }
+            _ => Err(Error::new(
+                "TypeError",
+                format!("'{}' object is not callable", self.type_name(callable)),
+            )),
         }
     }
+
+    fn call_instance(
+        &mut self,
+        mut callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        // A finite delegation chain only needs one Rust frame per batch. The
+        // next call checks the available stack again, including on cyclic chains.
+        for _ in 0..32 {
+            let Some(next) = self.bound_slot(callable, "__call__")? else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("'{}' object is not callable", self.type_name(callable)),
+                ));
+            };
+            callable = next;
+            if !matches!(self.heap.get(callable), Value::Instance { .. }) {
+                break;
+            }
+        }
+        self.call(callable, args, kwargs)
+    }
+
     fn require_scalar(&self, value: Id, expected: &str, context: &str) -> Result<()> {
         if matches!(
             (expected, self.heap.get(value)),
