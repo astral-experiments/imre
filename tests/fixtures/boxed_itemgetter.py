@@ -78,5 +78,31 @@ def constructor_allocation():
     print(len(getter.__reduce__()[1]))
 
 
+def result_allocation(kind):
+    from operator import attrgetter
+
+    class Target:
+        def __getitem__(self, key):
+            visits.append(key)
+            return key
+
+        @property
+        def field(self):
+            visits.append("field")
+            return "field"
+
+    visits = []
+    target = Target()
+    getter = itemgetter(*((0,) * 113)) if kind == "item" else attrgetter(*(("field",) * 113))
+    marker = {}
+    marker["probe"] = True
+    try:
+        result = getter(target)
+    except MemoryError as error:
+        print("caught", error.args, len(visits))
+        result = getter(target)
+    print(len(result), len(visits))
+
+
 if __name__ == "__main__":
     current()
