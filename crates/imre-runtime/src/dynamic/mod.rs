@@ -178,15 +178,25 @@ impl Context {
         }
     }
 
-    /// Keep a mutable input exported while Python coerces a buffer API's flag.
-    fn truth_with_buffer_export(&mut self, input: Id, flag: Id) -> Result<bool> {
+    /// Keep the underlying bytearray exported while an argument conversion runs Python.
+    fn with_buffer_export<T>(
+        &mut self,
+        input: Id,
+        convert: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let input = self.scalar_value(input);
         if !matches!(self.heap.get(input), Value::ByteArray(_)) {
-            return self.truth(flag);
+            return convert(self);
         }
         self.bytearray_exports.push(input);
-        let result = self.truth(flag);
+        let result = convert(self);
         self.bytearray_exports.pop();
         result
+    }
+
+    /// Keep a mutable input exported while Python coerces a buffer API's flag.
+    fn truth_with_buffer_export(&mut self, input: Id, flag: Id) -> Result<bool> {
+        self.with_buffer_export(input, |ctx| ctx.truth(flag))
     }
 
     fn exported_bytearray_error() -> Error {
