@@ -632,21 +632,38 @@ impl Context {
                 .is_some_and(|&base| self.raised_error_matches(error, base))
     }
 
-    fn attribute_hook(&mut self, hook: Id, obj: Id, class: Id, name: &str) -> Result<Id> {
+    fn attribute_hook(
+        &mut self,
+        hook: Id,
+        obj: Id,
+        class: Id,
+        name: &str,
+        original: Option<Id>,
+    ) -> Result<Id> {
         let callable = self.bind_attribute(hook, obj, class)?;
-        let key = self.text(name);
+        let key = original.unwrap_or_else(|| self.text(name));
         self.call(callable, vec![key], Vec::new())
     }
 
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        self.lookup_named_attr(obj, name, None)
+    }
+
+    /// Preserve a Python name object when an attribute builtin invokes a hook.
+    pub(super) fn lookup_named_attr(
+        &mut self,
+        obj: Id,
+        name: &str,
+        original: Option<Id>,
+    ) -> Result<Id> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.local_attribute(obj, name);
+            return self.local_attribute(obj, name, original);
         }
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return self.default_get_attr(obj, name);
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
-            self.attribute_hook(hook, obj, class, name)
+            self.attribute_hook(hook, obj, class, name, original)
         } else {
             self.default_get_attr(obj, name)
         };
@@ -655,7 +672,7 @@ impl Context {
                 let Some(hook) = self.class_attr(class, "__getattr__") else {
                     return Err(error);
                 };
-                self.attribute_hook(hook, obj, class, name)
+                self.attribute_hook(hook, obj, class, name, original)
             }
             result => result,
         }
@@ -1187,8 +1204,18 @@ impl Context {
         Err(self.missing_attribute(obj, name))
     }
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        self.delete_named_attr(obj, name, None)
+    }
+
+    /// Preserve a Python name object when an attribute builtin invokes a hook.
+    pub(super) fn delete_named_attr(
+        &mut self,
+        obj: Id,
+        name: &str,
+        original: Option<Id>,
+    ) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, None);
+            return self.update_local_attribute(obj, name, original, None);
         }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
@@ -1196,7 +1223,7 @@ impl Context {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         if let Some(hook) = self.bound_slot(obj, "__delattr__")? {
-            let name = self.text(name);
+            let name = original.unwrap_or_else(|| self.text(name));
             self.call(hook, vec![name], Vec::new())?;
             return Ok(());
         }
@@ -1377,8 +1404,19 @@ impl Context {
     }
 
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        self.set_named_attr(obj, name, None, value)
+    }
+
+    /// Preserve a Python name object when an attribute builtin invokes a hook.
+    pub(super) fn set_named_attr(
+        &mut self,
+        obj: Id,
+        name: &str,
+        original: Option<Id>,
+        value: Id,
+    ) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, Some(value));
+            return self.update_local_attribute(obj, name, original, Some(value));
         }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
@@ -1386,7 +1424,7 @@ impl Context {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
-            let name = self.text(name);
+            let name = original.unwrap_or_else(|| self.text(name));
             self.call(hook, vec![name, value], Vec::new())?;
             return Ok(());
         }
