@@ -247,6 +247,11 @@ pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
     u32::from(python_alnum(unsafe { &*value }))
 }
 
+/// Returns whether the string contains one or more Python whitespace characters and nothing else.
+pub(crate) fn python_isspace(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(python_whitespace)
+}
+
 /// Tests a nonempty Python string against the shared Unicode whitespace table.
 ///
 /// # Safety
@@ -255,7 +260,7 @@ pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive and no character reference escapes.
     let value = unsafe { &*value };
-    u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+    u32::from(python_isspace(value))
 }
 
 /// Return true when text contains a cased character and every cased character is uppercase.
