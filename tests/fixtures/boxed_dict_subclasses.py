@@ -7,6 +7,13 @@ def ordered_dictionary():
     source = OrderedDict(b=[2], a=[1])
     assert source != OrderedDict(a=[1], b=[2])
     assert source == {"a": [1], "b": [2]}
+    dense = OrderedDict([(2, "two"), (0, "zero"), (1, "one")])
+    assert list(reversed(dense)) == [1, 0, 2]
+    items = reversed(dense.items())
+    assert next(items) == (1, "one")
+    dense[0] = "updated"
+    assert list(items) == [(0, "updated"), (2, "two")]
+
     class NoKeys(OrderedDict):
         def keys(self):
             raise AssertionError("comparison called keys")

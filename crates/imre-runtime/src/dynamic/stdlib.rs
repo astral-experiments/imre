@@ -1424,7 +1424,8 @@ pub(super) fn call(
                 vec![factory]
             }));
             let class = ctx.exact_type(receiver)?;
-            let items = ctx.dict_iterator(receiver, super::value::DictViewKind::Items, false);
+            let items =
+                ctx.dict_iterator(receiver, super::value::DictViewKind::Items, false, false);
             ctx.alloc(Value::Tuple(vec![class, args, NONE, NONE, items]))
         }
         "contextlib.contextmanager" => {

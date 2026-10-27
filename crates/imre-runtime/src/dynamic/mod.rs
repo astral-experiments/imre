@@ -336,13 +336,13 @@ impl Context {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
             }
             Value::Dict(_) | Value::DefaultDict { .. } => {
-                return Ok(self.dict_iterator(id, DictViewKind::Keys, false));
+                return Ok(self.dict_iterator(id, DictViewKind::Keys, false, false));
             }
             Value::DictView {
                 dict,
                 kind,
                 ordered,
-            } => return Ok(self.dict_iterator(dict, kind, ordered)),
+            } => return Ok(self.dict_iterator(dict, kind, ordered, false)),
             Value::MappingView { mapping, kind } => {
                 return Ok(self.alloc(Value::MappingViewIterator {
                     mapping: Some(mapping),
@@ -391,7 +391,7 @@ impl Context {
     }
 
     /// Start a cursor at the first entry without copying keys or values.
-    fn dict_iterator(&mut self, dict: Id, kind: DictViewKind, ordered: bool) -> Id {
+    fn dict_iterator(&mut self, dict: Id, kind: DictViewKind, ordered: bool, reverse: bool) -> Id {
         let storage = self.dict_storage(dict).expect("dictionary iterator source");
         let entries = self.stored_entries(storage);
         let iter = DictIterator::new(
@@ -399,6 +399,7 @@ impl Context {
             kind,
             entries.len(),
             ordered.then(|| entries.order_state()),
+            reverse.then(|| entries.insertion_end()),
         );
         self.alloc(Value::DictIterator(iter))
     }

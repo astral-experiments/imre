@@ -277,10 +277,14 @@ impl Context {
             Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
             Value::MappingViewIterator { .. } => "generator",
-            Value::DictIterator(iter) => match iter.kind {
-                DictViewKind::Keys => "dict_keyiterator",
-                DictViewKind::Values => "dict_valueiterator",
-                DictViewKind::Items => "dict_itemiterator",
+            Value::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
+                (Some(_), _, _) => "odict_iterator",
+                (_, false, DictViewKind::Keys) => "dict_keyiterator",
+                (_, false, DictViewKind::Values) => "dict_valueiterator",
+                (_, false, DictViewKind::Items) => "dict_itemiterator",
+                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
+                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
+                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
             },
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
@@ -1075,6 +1079,7 @@ pub(super) struct DictIterator {
     kind: DictViewKind,
     expected_len: Option<usize>,
     position: usize,
+    reverse: bool,
     remaining: usize,
     order_state: Option<(usize, usize)>,
 }
@@ -1086,23 +1091,28 @@ impl DictIterator {
         kind: DictViewKind,
         size: usize,
         order_state: Option<(usize, usize)>,
+        reverse_end: Option<usize>,
     ) -> Self {
         Self {
             dict: Some(dict),
             kind,
             expected_len: Some(size),
-            position: 0,
+            position: reverse_end.unwrap_or(0),
+            reverse: reverse_end.is_some(),
             remaining: size,
             order_state,
         }
     }
 
     /// An invalid or exhausted iterator has no remaining length hint.
-    pub(super) fn length_hint(&self, ctx: &Context) -> usize {
+    pub(super) fn length_hint(&self, ctx: &Context, default: i64) -> i64 {
+        if self.order_state.is_some() {
+            return default;
+        }
         self.dict
             .and_then(|dict| ctx.dict_entries(dict))
             .filter(|entries| Some(entries.len()) == self.expected_len)
-            .map_or(0, |_| self.remaining)
+            .map_or(0, |_| self.remaining as i64)
     }
 
     /// Check the live size before each pull, including the one that reaches exhaustion.
@@ -1135,19 +1145,24 @@ impl DictIterator {
                 "dictionary changed size during iteration",
             ));
         }
-        let Some((position, key, value)) = entries.at(self.position) else {
+        let entry = if self.reverse {
+            entries.before(self.position)
+        } else {
+            entries.at(self.position)
+        };
+        let Some((position, key, value)) = entry else {
             self.dict = None;
             return Ok(None);
         };
-        if self.remaining == 0 {
+        if !self.reverse && self.remaining == 0 {
             self.dict = None;
             return Err(Error::new(
                 "RuntimeError",
                 "dictionary keys changed during iteration",
             ));
         }
-        self.position = position + 1;
-        self.remaining -= 1;
+        self.position = if self.reverse { position } else { position + 1 };
+        self.remaining = self.remaining.saturating_sub(1);
         Ok(Some(match self.kind {
             DictViewKind::Keys => key,
             DictViewKind::Values => value,

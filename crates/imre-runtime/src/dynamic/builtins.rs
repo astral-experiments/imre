@@ -1116,6 +1116,20 @@ pub(super) fn call(
                 if hook != NONE {
                     return ctx.call(hook, Vec::new(), Vec::new());
                 }
+            } else if let Value::DictView {
+                dict,
+                kind,
+                ordered,
+            } = *ctx.heap.get(object)
+            {
+                return Ok(ctx.dict_iterator(dict, kind, ordered, true));
+            } else if ctx.dict_storage(object).is_some() {
+                return Ok(ctx.dict_iterator(
+                    object,
+                    super::value::DictViewKind::Keys,
+                    false,
+                    true,
+                ));
             } else if matches!(ctx.heap.get(object), Value::Instance { .. })
                 && (ctx.slot(object, "__getitem__").is_some()
                     || matches!(

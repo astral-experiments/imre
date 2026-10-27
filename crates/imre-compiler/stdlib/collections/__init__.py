@@ -52,6 +52,9 @@ class OrderedDict(dict):
     def __iter__(self):
         return iter(_ordered_dict_view(self, "keys"))
 
+    def __reversed__(self):
+        return reversed(_ordered_dict_view(self, "keys"))
+
     def keys(self):
         return _ordered_dict_view(self, "keys")
 
