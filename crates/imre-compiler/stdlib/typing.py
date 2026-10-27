@@ -20,6 +20,18 @@ class TextIO(IO[str]):
     __slots__ = ()
 
 
+# Runtime assertion from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+_ASSERT_NEVER_REPR_MAX_LENGTH = 100
+
+
+def assert_never(arg, /):
+    """Statically assert that a line of code is unreachable."""
+    value = repr(arg)
+    if len(value) > _ASSERT_NEVER_REPR_MAX_LENGTH:
+        value = value[:_ASSERT_NEVER_REPR_MAX_LENGTH] + "..."
+    raise AssertionError(f"Expected code to be unreachable, but got: {value}")
+
+
 # Optional and the special form protocol from CPython 3.14.5 Lib/typing.py.
 # See stdlib/docstrings/LICENSE. Union and the type parameters are native exports.
 class _Final:
