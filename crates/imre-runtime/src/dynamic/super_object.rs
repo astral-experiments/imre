@@ -3,7 +3,15 @@ use super::*;
 impl Context {
     pub(super) fn class_name(&self, class: Id) -> &str {
         match self.heap.get(class) {
-            Value::Class { name, .. } | Value::Native(name) => name,
+            Value::Class { name, scope, .. } => self
+                .scope_data(*scope)
+                .class_namespace
+                .as_ref()
+                .and_then(|namespace| namespace.name_override)
+                .map_or(name.as_str(), |id| {
+                    self.str_value(id).expect("class name is a string")
+                }),
+            Value::Native(name) => name,
             _ => self.type_name(class),
         }
     }
