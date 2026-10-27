@@ -294,7 +294,9 @@ fn imports(source: &str, kind: SourceKind) -> Result<Imports, String> {
     let parsed = ruff_python_parser::parse_module(&normalized).map_err(|e| e.to_string())?;
     crate::analysis::check_indentation(&normalized, parsed.tokens())?;
     let mut imports = Imports::default();
-    imports.visit_body(&parsed.syntax().body);
+    let mut body = parsed.into_syntax().body;
+    imre_ast::lower(&mut body);
+    imports.visit_body(&body);
     Ok(imports)
 }
 
