@@ -116,6 +116,7 @@ def exercise(path):
         lambda: stream.readinto(bytearray(1)),
         lambda: stream.seek(0),
         lambda: stream.__enter__(),
+        lambda: stream.flush(),
         lambda: stream.tell(),
     ):
         try:
