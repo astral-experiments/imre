@@ -29,7 +29,7 @@ impl FunctionFields {
             qualname,
             doc,
             annotate,
-            module: ctx.text(ctx.scope_data(scope).module.clone()),
+            module: ctx.function_module(scope),
             annotations: None,
             type_params: ctx.alloc(Value::Tuple(Vec::new())),
             dict: ctx.dict(Vec::new()),
@@ -51,6 +51,19 @@ impl FunctionFields {
 }
 
 impl Context {
+    fn function_module(&mut self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        let root = self.scope_data(scope);
+        if let Some(globals) = root.exec_globals {
+            return self
+                .dict_named_item(globals.dict, "__name__")
+                .unwrap_or(NONE);
+        }
+        self.text(root.module.clone())
+    }
+
     pub(super) fn function_attr(
         &mut self,
         fun: Id,
@@ -101,11 +114,59 @@ impl Context {
         Ok(Some(value))
     }
 
+    pub(super) fn delete_function_attr(
+        &mut self,
+        fun: Id,
+        fields: FunctionFields,
+        name: &str,
+    ) -> Result<()> {
+        match name {
+            "__globals__" | "__builtins__" | "__closure__" => {
+                Err(Error::new("AttributeError", "readonly attribute"))
+            }
+            "__dict__" => Err(Error::new("TypeError", "cannot delete __dict__")),
+            "__annotate__" => Err(Error::new("TypeError", "__annotate__ cannot be deleted")),
+            "__code__" => Err(Error::new(
+                "TypeError",
+                "__code__ must be set to a code object",
+            )),
+            "__module__" | "__doc__" | "__annotations__" | "__name__" | "__qualname__"
+            | "__type_params__" => self.set_function_attr(fun, name, NONE),
+            _ => {
+                let storage = self.dict_storage(fields.dict).expect("function namespace");
+                self.delete_dict_attribute(fun, storage, name)
+            }
+        }
+    }
+
     pub(super) fn set_function_attr(&mut self, fun: Id, name: &str, value: Id) -> Result<()> {
         if name == "__globals__" {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         let object = self.heap.get(value);
+        if name == "__code__" {
+            let Value::Code(new) = object else {
+                return Err(Error::new(
+                    "TypeError",
+                    "__code__ must be set to a code object",
+                ));
+            };
+            let Value::Function { code, .. } = *self.heap.get(fun) else {
+                unreachable!()
+            };
+            if value != code && !(new.module_definition && self.code_object(code).module_definition)
+            {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "replacing nested function code requires closure layout",
+                ));
+            }
+            let Value::Function { code, .. } = self.heap.get_mut(fun) else {
+                unreachable!()
+            };
+            *code = value;
+            return Ok(());
+        }
         let invalid = match name {
             "__name__" | "__qualname__" if !matches!(object, Value::Str(_)) => {
                 Some(format!("{name} must be set to a string object"))

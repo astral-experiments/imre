@@ -920,6 +920,8 @@ pub(crate) enum Builtin {
     AnnotationRef,
     AnnotationIs,
     StaticFunction(usize),
+    IsCoroutineFunction,
+    MarkCoroutine(usize),
     FunctionWrappedSet,
     FunctionWrappedGet,
     StrEnumValue,

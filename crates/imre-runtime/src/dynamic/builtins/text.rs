@@ -1,13 +1,16 @@
 use num_traits::Signed;
 
-use ruff_python_literal::cformat::{CFormatPart, CFormatString};
+use ruff_python_literal::cformat::{
+    CFormatContext, CFormatError, CFormatErrorType, CFormatPart, CFormatPrecision, CFormatQuantity,
+    CFormatSpec, CFormatString,
+};
 use ruff_python_literal::format::{
     FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
 };
 
 use super::*;
 
-use crate::objects::{python_whitespace, split_parts, visit_line_fields as split_lines};
+use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
 
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
@@ -61,6 +64,12 @@ pub(super) fn construct(
         "repr" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
+            if let Value::Instance { class, .. } = *ctx.heap.get(args[0])
+                && ctx.enum_values(class).is_some()
+                && let Some(repr) = ctx.bound_slot(args[0], "__repr__")?
+            {
+                return ctx.call(repr, Vec::new(), Vec::new());
+            }
             Ok(ctx.text(ctx.repr(args[0])))
         }
         "int" => {
@@ -100,28 +109,44 @@ pub(super) fn construct(
         "str" => {
             let [value, encoding, errors] =
                 bind(name, args, kwargs, ["object", "encoding", "errors"])?;
-            let rendered = if encoding.is_some() || errors.is_some() {
-                decode(
-                    ctx,
-                    value.ok_or_else(|| type_error("decoding requires bytes"))?,
-                    encoding,
-                    errors,
-                )?
-            } else if let Some(value) = value
-                && let Some(method) = ctx.bound_slot(value, "__str__")?
-            {
-                let result = ctx.call(method, Vec::new(), Vec::new())?;
-                if !matches!(ctx.heap.get(result), Value::Str(_)) {
+            for (name, argument) in [("encoding", encoding), ("errors", errors)] {
+                if let Some(argument) = argument
+                    && ctx.string_storage(argument).is_none()
+                {
                     return Err(type_error(format!(
-                        "__str__ returned non-string (type {})",
+                        "str() argument '{name}' must be str, not {}",
+                        ctx.type_name(argument)
+                    )));
+                }
+            }
+            let Some(value) = value else {
+                return Ok(ctx.text(""));
+            };
+            if encoding.is_some() || errors.is_some() {
+                let decoded = decode(ctx, value, encoding, errors)?;
+                return Ok(ctx.text(decoded));
+            }
+            if matches!(ctx.heap.get(value), Value::Str(_)) {
+                return Ok(value);
+            }
+            let (name, method) = match ctx.bound_slot(value, "__str__")? {
+                Some(method) => ("__str__", Some(method)),
+                None if ctx.string_storage(value).is_none() => {
+                    ("__repr__", ctx.bound_slot(value, "__repr__")?)
+                }
+                None => ("__str__", None),
+            };
+            if let Some(method) = method {
+                let result = ctx.call(method, Vec::new(), Vec::new())?;
+                if ctx.string_storage(result).is_none() {
+                    return Err(type_error(format!(
+                        "{name} returned non-string (type {})",
                         ctx.type_name(result)
                     )));
                 }
                 return Ok(result);
-            } else {
-                value.map(|id| ctx.display(id)).unwrap_or_default()
-            };
-            Ok(ctx.text(rendered))
+            }
+            Ok(ctx.text(ctx.display(value)))
         }
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
@@ -343,6 +368,181 @@ fn ascii(s: &str) -> String {
     out
 }
 
+fn percent_args(ctx: &mut Context, rhs: Id) -> Result<std::vec::IntoIter<Id>> {
+    let values = match ctx.heap.get(rhs) {
+        Value::Tuple(values) | Value::NamedTuple { values, .. } => values.clone(),
+        Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
+            ctx.items(rhs)?
+        }
+        _ => vec![rhs],
+    };
+    Ok(values.into_iter())
+}
+
+/// CPython reads a format character as unsigned immediately after decimal digits.
+/// Elsewhere it promotes the platform's C char when constructing the diagnostic.
+fn negative_format_char(prefix: &[u8], ch: char) -> bool {
+    let after_quantity = prefix.last().is_some_and(u8::is_ascii_digit)
+        && prefix.iter().any(|b| matches!(b, b'.' | b'1'..=b'9'));
+    !after_quantity && i32::from(ch as u8 as std::ffi::c_char).is_negative()
+}
+
+/// Decimal conversions accept real numbers. Octal and hex require the integer-index protocol.
+fn render_percent_integer(
+    ctx: &mut Context,
+    value: Id,
+    spec: &CFormatSpec,
+    field: &str,
+) -> Result<String> {
+    let conversion = spec.format_char;
+    let decimal = matches!(conversion, 'd' | 'i' | 'u');
+    let mut convert = || {
+        if decimal {
+            if let Ok(integer) = ctx.as_int(value) {
+                return Ok(integer);
+            }
+            if let Value::Float(number) = ctx.heap.get(value) {
+                return Ok(crate::Int::new(crate::floats::float_to_integer(*number)?));
+            }
+            if let Some(method) = ctx.bound_slot(value, "__int__")? {
+                let result = ctx.call(method, Vec::new(), Vec::new())?;
+                return ctx.as_int(result);
+            }
+        }
+        ctx.index_integer(value)
+    };
+    let integer = convert().map_err(|error| {
+        if error.kind == "TypeError" {
+            let required = if decimal {
+                "a real number"
+            } else {
+                "an integer"
+            };
+            type_error(format!(
+                "%{conversion} format: {required} is required, not {}",
+                ctx.type_name(value)
+            ))
+        } else {
+            error
+        }
+    })?;
+    // CPython leaves room for an integer sign and a two-character base prefix.
+    if let Some(CFormatPrecision::Quantity(CFormatQuantity::Amount(precision))) = spec.precision
+        && precision > (i32::MAX - 3) as usize
+    {
+        return Err(Error::new("OverflowError", "precision too large"));
+    }
+    crate::objects::percent_integer_field(field, integer).map_err(|e| {
+        let error = Error::from(e);
+        if error.kind == "MemoryError" {
+            Error::new("MemoryError", "")
+        } else {
+            error
+        }
+    })
+}
+
+/// Format positional octal fields while preserving all literal bytes.
+pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id) -> Result<Id> {
+    let mut args = percent_args(ctx, rhs)?;
+    let mut input = format.iter().copied().enumerate().peekable();
+    let mut output = Vec::new();
+    let memory = |_| Error::new("MemoryError", "");
+    output.try_reserve(format.len()).map_err(memory)?;
+    while let Some((start, byte)) = input.next() {
+        if byte != b'%' || input.next_if(|&(_, next)| next == b'%').is_some() {
+            output.push(byte);
+            continue;
+        }
+        let mut parsed = CFormatSpec::parse(&mut input, CFormatContext::Bytes);
+        // Ruff limits both quantities to i32. CPython's bytes width fits Py_ssize_t.
+        if let Err((CFormatErrorType::IntTooBig, index)) = parsed
+            && !format[start..index].contains(&b'.')
+        {
+            let digits = format[..index]
+                .iter()
+                .rposition(|b| !b.is_ascii_digit())
+                .unwrap()
+                + 1;
+            while input.next_if(|(_, b)| b.is_ascii_digit()).is_some() {}
+            let tail = input.peek().map_or(format.len(), |&(i, _)| i);
+            let width = std::str::from_utf8(&format[digits..tail]).unwrap();
+            if width.parse::<isize>().is_ok() {
+                // Validate the suffix with the same parser. The renderer uses the original width.
+                let mut suffix = std::iter::once(b'1')
+                    .chain(format[tail..].iter().copied())
+                    .enumerate()
+                    .peekable();
+                parsed = CFormatSpec::parse(&mut suffix, CFormatContext::Bytes)
+                    .map_err(|(kind, i)| (kind, tail - 1 + i));
+                let end = suffix.peek().map_or(format.len(), |&(i, _)| tail - 1 + i);
+                while input.next_if(|&(i, _)| i < end).is_some() {}
+            }
+        }
+        let spec = parsed.map_err(|(typ, index)| match typ {
+            CFormatErrorType::IntTooBig => {
+                let message = if format[start..index].contains(&b'.') {
+                    "prec too big"
+                } else {
+                    "width too big"
+                };
+                Error::new("ValueError", message)
+            }
+            CFormatErrorType::UnsupportedFormatChar(_) if args.len() == 0 => {
+                type_error("not enough arguments for format string")
+            }
+            CFormatErrorType::UnsupportedFormatChar(c)
+                if negative_format_char(&format[start + 1..index], c) =>
+            {
+                Error::new("OverflowError", "character argument not in range(0x110000)")
+            }
+            _ => Error::new("ValueError", CFormatError { typ, index }.to_string()),
+        })?;
+        if spec.format_char != 'o'
+            || format.get(start + 1) == Some(&b'(')
+            || matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple))
+            || matches!(
+                spec.precision,
+                Some(CFormatPrecision::Quantity(CFormatQuantity::FromValuesTuple))
+            )
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "bytes formatting supports positional octal fields with static width and precision",
+            ));
+        }
+        let value = args
+            .next()
+            .ok_or_else(|| type_error("not enough arguments for format string"))?;
+        let end = input.peek().map_or(format.len(), |&(i, _)| i);
+        let field = std::str::from_utf8(&format[start + 1..end])
+            .expect("positional octal fields are ASCII");
+        let rendered = render_percent_integer(ctx, value, &spec, field)?;
+        // Keep space for the unprocessed literal bytes as well as this field.
+        output
+            .try_reserve(rendered.len().saturating_add(format.len() - end))
+            .map_err(memory)?;
+        output.extend_from_slice(rendered.as_bytes());
+    }
+    if args.len() != 0 {
+        let mapping = match ctx.heap.get(rhs) {
+            Value::Dict(_) | Value::DefaultDict { .. } | Value::List(_) | Value::Range { .. } => {
+                true
+            }
+            Value::Instance { class, .. } => {
+                ctx.class_attr(*class, "__getitem__").is_some() || ctx.dict_storage(rhs).is_some()
+            }
+            _ => false,
+        };
+        if !mapping {
+            return Err(type_error(
+                "not all arguments converted during bytes formatting",
+            ));
+        }
+    }
+    Ok(ctx.alloc(Value::Bytes(output)))
+}
+
 /// Old-style interpolation accepts a single operand, a positional tuple or a mapping.
 pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Result<Id> {
     let parsed = format
@@ -352,23 +552,23 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
         ctx.heap.get(rhs),
         Value::Dict(_) | Value::DefaultDict { .. }
     );
-    let values = match ctx.heap.get(rhs) {
-        Value::Tuple(values) | Value::NamedTuple { values, .. } => values.clone(),
-        Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
-            ctx.items(rhs)?
-        }
-        _ => vec![rhs],
-    };
-    let mut args = values.into_iter();
+    let mut args = percent_args(ctx, rhs)?;
     let mut output = String::new();
-    for (_, part) in parsed.iter() {
+    let mut positions = format.char_indices().enumerate();
+    for (position, part) in parsed.iter() {
         match part {
             CFormatPart::Literal(literal) => output.push_str(literal),
             CFormatPart::Spec(spec) => {
-                if spec.precision.is_some()
+                let decorated = spec.precision.is_some()
                     || spec.min_field_width.is_some()
-                    || !spec.flags.is_empty()
-                {
+                    || !spec.flags.is_empty();
+                let number_field = matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X')
+                    && !matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple))
+                    && !matches!(
+                        spec.precision,
+                        Some(CFormatPrecision::Quantity(CFormatQuantity::FromValuesTuple))
+                    );
+                if decorated && !number_field {
                     return Err(Error::new(
                         "ValueError",
                         "unsupported flags, width or precision for percent interpolation",
@@ -386,6 +586,17 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     args.next()
                         .ok_or_else(|| type_error("not enough arguments for format string"))?
                 };
+                if decorated {
+                    let (_, (start, _)) = positions
+                        .find(|(i, _)| i == position)
+                        .expect("parsed percent fields follow their source character positions");
+                    let rendered = render_percent_integer(ctx, arg, spec, &format[start + 1..])?;
+                    output
+                        .try_reserve(rendered.len())
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    output.push_str(&rendered);
+                    continue;
+                }
                 let rendered = match spec.format_char {
                     's' => ctx.display(arg),
                     'r' => ctx.repr(arg),
@@ -419,35 +630,6 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     Ok(ctx.text(output))
 }
 
-fn bytes_rsplit_args(args: &[Id], kwargs: &[(String, Id)]) -> Result<[Option<Id>; 2]> {
-    let count = args.len() + kwargs.len();
-    if count > 2 {
-        let kind = if args.is_empty() { "keyword " } else { "" };
-        return Err(type_error(format!(
-            "rsplit() takes at most 2 {kind}arguments ({count} given)"
-        )));
-    }
-    let mut values = [args.first().copied(), args.get(1).copied()];
-    for (key, value) in kwargs {
-        let index = match key.as_str() {
-            "sep" => 0,
-            "maxsplit" => 1,
-            _ => {
-                return Err(type_error(format!(
-                    "rsplit() got an unexpected keyword argument '{key}'"
-                )));
-            }
-        };
-        if values[index].replace(*value).is_some() {
-            return Err(type_error(format!(
-                "argument for rsplit() given by name ('{key}') and position ({})",
-                index + 1
-            )));
-        }
-    }
-    Ok(values)
-}
-
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -456,12 +638,17 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let (&receiver, args) = args.split_first().ok_or_else(|| {
-        if owner == "str" {
+        if name == "__new__" {
+            type_error("str.__new__(): not enough arguments")
+        } else if owner == "str" {
             type_error(format!("unbound method str.{name}() needs an argument"))
         } else {
             type_error("missing string receiver")
         }
     })?;
+    if name == "__new__" {
+        return ctx.new_str(receiver, args, kwargs);
+    }
     if owner == "str" && ctx.str_value(receiver).is_err() {
         return Err(type_error(format!(
             "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
@@ -477,6 +664,34 @@ pub(super) fn method(
             let b = encode(ctx, receiver, encoding, errors)?;
             Ok(ctx.alloc(Value::Bytes(b)))
         };
+    }
+    if name == "expandtabs" {
+        let [tabsize] = bind_method_arguments(name, args, kwargs, ["tabsize"], 1)?;
+        let width = match tabsize {
+            None => 8,
+            Some(id) => {
+                let index = ctx
+                    .index_value_with_bool_result(id, false)?
+                    .ok_or_else(|| {
+                        type_error(format!(
+                            "'{}' object cannot be interpreted as an integer",
+                            ctx.type_name(id)
+                        ))
+                    })?;
+                index
+                    .to_i64()
+                    .and_then(|n| i32::try_from(n).ok())
+                    .ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C int")
+                    })?
+            }
+        };
+        return Ok(
+            match crate::objects::expand_tabs(ctx.str_value(receiver)?, width)? {
+                Some(text) => ctx.text(text.into_string()),
+                None => ctx.string_storage(receiver).unwrap(),
+            },
+        );
     }
     if name == "find" {
         if !kwargs.is_empty() {
@@ -535,7 +750,8 @@ pub(super) fn method(
         });
     }
     if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
-        let [sep, max] = bytes_rsplit_args(args, kwargs)?;
+        let [sep, max] =
+            super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
         let limit = match max {
             None => usize::MAX,
             Some(id) => {
@@ -565,6 +781,51 @@ pub(super) fn method(
             .map(|part| part.map_or(receiver, |bytes| ctx.alloc(Value::Bytes(bytes))))
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
+    }
+    if name == "isspace" {
+        if !kwargs.is_empty() {
+            return Err(type_error("str.isspace() takes no keyword arguments"));
+        }
+        if !args.is_empty() {
+            return Err(type_error(format!(
+                "str.isspace() takes no arguments ({} given)",
+                args.len()
+            )));
+        }
+        return Ok(boolean(crate::objects::python_isspace(
+            ctx.str_value(receiver)?,
+        )));
+    }
+    if name == "translate" {
+        positional(name, kwargs)?;
+        arity(name, args, 1, 1)?;
+        let Value::Dict(table) = ctx.heap.get(args[0]) else {
+            return Err(type_error("str.translate requires a plain dictionary"));
+        };
+        let text = translate::text(ctx.str_value(receiver)?, |ch| {
+            let ordinal = i64::from(u32::from(ch));
+            let entry = table
+                .iter()
+                .find(|&&(key, _)| match ctx.heap.get(ctx.scalar_value(key)) {
+                    Value::Int(key) => key.to_i64() == Some(ordinal),
+                    Value::Bool(key) => i64::from(*key) == ordinal,
+                    _ => false,
+                });
+            let Some(&(_, id)) = entry else {
+                return Ok(translate::Piece::Character(ch));
+            };
+            match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::None => Ok(translate::Piece::Text("")),
+                Value::Str(value) => Ok(translate::Piece::Text(value)),
+                Value::Int(value) => translate::Piece::ordinal(value),
+                Value::Bool(value) => Ok(translate::Piece::Character(char::from(u8::from(*value)))),
+                _ => Err(crate::Error::new(
+                    crate::Kind::TypeError,
+                    translate::INVALID_VALUE,
+                )),
+            }
+        })?;
+        return Ok(ctx.text(text.into_string()));
     }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
@@ -626,7 +887,7 @@ pub(super) fn method(
         }
         "splitlines" => {
             let [keep] = bind(name, args, kwargs, ["keepends"])?;
-            let keep = keep.map(|x| ctx.as_integer(x)).transpose()?.unwrap_or(0) != 0;
+            let keep = ctx.optional_truth(keep, false)?;
             let mut values = Vec::new();
             split_lines(&source, keep, |field| values.push(ctx.text(field)));
             Ok(ctx.alloc(Value::List(values)))
@@ -718,13 +979,13 @@ pub(super) fn method(
                 .collect::<Result<Vec<_>>>()?;
             Ok(ctx.text(parts.join(&source)))
         }
-        "lower" | "upper" => {
+        "capitalize" | "lower" | "upper" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
-            Ok(ctx.text(if name == "lower" {
-                source.to_lowercase()
-            } else {
-                source.to_uppercase()
+            Ok(ctx.text(match name {
+                "capitalize" => crate::objects::capitalize(&source)?.into_string(),
+                "lower" => source.to_lowercase(),
+                _ => source.to_uppercase(),
             }))
         }
         "removeprefix" | "removesuffix" => {

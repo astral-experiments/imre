@@ -39,32 +39,39 @@ fn output_size(source: &str, width: usize, max_chars: usize) -> Result<usize> {
     Ok(bytes)
 }
 
+/// Expands tabs at code-point columns, returning `None` to reuse tab-free text.
+pub(crate) fn expand_tabs(text: &str, tabsize: i32) -> Result<Option<Str>> {
+    if !text.as_bytes().contains(&b'\t') {
+        return Ok(None);
+    }
+    let width = tabsize.max(0) as usize;
+    let bytes = output_size(text, width, isize::MAX as usize)?;
+    let mut result = Str::try_with_capacity(bytes).map_err(|_| Error::memory_error())?;
+    const SPACES: &str = "                                                                ";
+    for (part, mut spaces) in spans(text, width) {
+        result.push_str(part);
+        while spaces >= SPACES.len() {
+            result.push_str(SPACES);
+            spaces -= SPACES.len();
+        }
+        result.push_str(&SPACES[..spaces]);
+    }
+    Ok(Some(result))
+}
+
 /// # Safety
 /// The caller keeps the string and tagged Python integer rooted through the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_expandtabs(source: *const Str, tabsize: usize) -> *const Str {
     finish(
         (|| {
-            // CPython converts to C int before even a no-tab or empty-string result.
-            let width = c_int(tabsize)?.max(0) as usize;
-            // SAFETY: the caller holds this immutable string.
-            let text = unsafe { &*source };
-            if !text.as_bytes().contains(&b'\t') {
+            let width = c_int(tabsize)?;
+            // SAFETY: the caller keeps this immutable string rooted.
+            let Some(result) = expand_tabs(unsafe { &*source }, width)? else {
                 // SAFETY: transfer one additional reference to the original owner.
                 unsafe { crate::imre_str_retain(source) };
                 return Ok(source);
-            }
-            let bytes = output_size(text, width, isize::MAX as usize)?;
-            let mut result = Str::try_with_capacity(bytes).map_err(|_| Error::memory_error())?;
-            const SPACES: &str = "                                                                ";
-            for (part, mut spaces) in spans(text, width) {
-                result.push_str(part);
-                while spaces >= SPACES.len() {
-                    result.push_str(SPACES);
-                    spaces -= SPACES.len();
-                }
-                result.push_str(&SPACES[..spaces]);
-            }
+            };
             let handle = if result.len() <= 2 {
                 owned_string(&result)
             } else {

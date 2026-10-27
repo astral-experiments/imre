@@ -136,6 +136,11 @@ pub(crate) struct FunctionSite {
     pub qualname: String,
     pub line: u32,
 }
+#[derive(Clone, Copy)]
+pub(crate) enum CoroutineTarget {
+    Coroutine,
+    Partial(usize),
+}
 #[derive(Default)]
 struct Storage {
     shapes: Vec<Shape>,
@@ -144,6 +149,7 @@ struct Storage {
     cache_adapters: HashMap<usize, CachePolicy>,
     source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
     function_sites: HashMap<usize, Rc<FunctionSite>>,
+    coroutine_targets: HashMap<usize, CoroutineTarget>,
     plain_callbacks: HashSet<Type>,
     constructor_targets: HashMap<usize, usize>,
     constructor_slots: BTreeMap<usize, usize>,
@@ -456,6 +462,13 @@ impl Types {
     }
     pub(crate) fn function_site(&self, id: usize) -> Option<Rc<FunctionSite>> {
         self.0.borrow().function_sites.get(&id).cloned()
+    }
+    pub(crate) fn set_coroutine_target(&self, id: usize, target: CoroutineTarget) {
+        self.0.borrow_mut().coroutine_targets.insert(id, target);
+    }
+
+    pub(crate) fn coroutine_target(&self, id: usize) -> Option<CoroutineTarget> {
+        self.0.borrow().coroutine_targets.get(&id).copied()
     }
     pub(crate) fn set_exception_declarations(&self, declarations: Vec<NamedException>) {
         self.0.borrow_mut().exceptions = declarations;

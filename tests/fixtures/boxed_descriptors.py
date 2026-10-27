@@ -1,5 +1,7 @@
 """Compare data descriptors, callable instances, and attribute fallback with CPython."""
 
+from functools import update_wrapper
+
 
 def current():
     order = []
@@ -90,3 +92,25 @@ def current():
         later = Forward()
 
     print(Names.later is None, order[-1])
+
+    class Missing(AttributeError, Exception):
+        pass
+
+    class Hidden:
+        @property
+        def field(self):
+            raise Missing("absent")
+
+    class Recover(Hidden):
+        def __getattr__(self, name):
+            return "fallback " + name
+
+    hidden = Hidden()
+    print(getattr(hidden, "field", 17), hasattr(hidden, "field"), Recover().field)
+
+    def wrapper():
+        pass
+
+    wrapper.field = {"kept": 1}
+    update_wrapper(wrapper, hidden, ("field",), ("field",))
+    print(wrapper.field, wrapper.__wrapped__ is hidden)

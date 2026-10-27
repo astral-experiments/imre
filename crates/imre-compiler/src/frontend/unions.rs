@@ -412,7 +412,7 @@ impl Checker<'_> {
                 .definitions
                 .iter()
                 .enumerate()
-                .filter(|(id, record)| *id == class || record.bases.contains(&class))
+                .filter(|(id, _)| records.subclass(self.graph, *id, class))
                 .map(|(id, _)| InstanceType::Exact(records.instance(id)))
                 .collect());
         }

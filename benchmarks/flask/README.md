@@ -38,6 +38,19 @@ Both commands verify the wheel and app hashes and unpack into a fresh module roo
 
 Add `--runtime-imports` to the gate to try the same entry at O0 and O3 with Imre's native runtime imports enabled. Those two rows retain the original `serve.py` as `__main__` and report its real startup or HTTP result.
 
+Each native compilation has a 120-second limit. Use `--build-timeout 420` to give an individual build up to seven minutes. Each mode's `build` record includes the limit, elapsed time and compiler output.
+
 On Linux, add `--prove-native` to the compiler invocation to require runtime evidence. This opt-in mode requires procfs, `strace`, `readelf` (or `llvm-readelf`) and permission to trace child processes. It verifies that the server process runs the generated ELF, holds an incomplete HTTP request open to identify the process which owns the accepted socket, and checks the listener and process tree. The syscall trace follows worker threads and forked workers, rejects an exec of an unverified image or a mapped `libpython` (including a renamed shared library identified by its ELF SONAME or exported CPython symbols), and must record termination of the traced processes. The output contains the executable and trace hashes and the socket owners. Full traces are saved beside the JSON report. Missing proof fails the gate.
 
 A separate [typed WSGI environment fixture](../../tests/fixtures/files/boxed_memory_streams.py) stores real memory streams alongside strings, tuples and flags in `dict[str, object]`. The application checks a retrieved value with `isinstance(value, BytesIO)` or `isinstance(value, StringIO)` before using its stream methods. `typing.cast` returns its operand and supplies no runtime class check. Ordinary binary file descriptors and unannotated heterogeneous dictionary inference are outside this fixture's scope.
+
+The [handler scan probe](emit_werkzeug_handler_scan.py) copies `_has_level_handler` from the locked Werkzeug wheel. It tests four handler chains, including a property that must remain unevaluated after a match. The logger and handler inputs are fixture classes. Run the emitted file under CPython and with `imre build --runtime-imports` at O0 and O3.
+
+### Werkzeug access logging
+
+The comparison imports the locked wheel’s complete `werkzeug/_internal.py` under a neutral module name. Its fixture calls the original `_log` twice and checks the registered logger, its INFO level, the identity of its one cached StreamHandler and its `sys.stderr` stream, and the exact bytes written. It runs against the same seven wheels and native compiler/runtime pair as the TCP gate. [Fixture](werkzeug_access_log_consumer.py) · [Driver](werkzeug_access_log.py)
+
+```sh
+python3.14 benchmarks/flask/werkzeug_access_log.py --compiler /path/to/imre \
+  --runtime /path/to/libimre_runtime.a --wheelhouse /path/to/wheels --output access-log.json
+```

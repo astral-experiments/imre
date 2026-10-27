@@ -1,5 +1,6 @@
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
+use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
 use super::{Body, Cleanup, Function, LoopTarget};
@@ -8,23 +9,62 @@ enum Place {
     Name(String),
     Attr(String, String),
     Item(String, String),
-    Slice(String, String),
 }
 
 impl Function<'_, '_> {
+    /// A global declaration applies to the entire code block, even in an untaken branch.
+    pub(super) fn declare_globals(&mut self, suite: &[ast::Stmt]) {
+        #[derive(Default)]
+        struct Globals<'a>(std::collections::BTreeSet<&'a str>);
+
+        impl<'a> Visitor<'a> for Globals<'a> {
+            fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+                match statement {
+                    ast::Stmt::Global(global) => {
+                        self.0.extend(global.names.iter().map(|name| name.as_str()));
+                    }
+                    ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
+                    _ => visitor::walk_stmt(self, statement),
+                }
+            }
+
+            fn visit_expr(&mut self, _: &'a ast::Expr) {}
+        }
+
+        let mut globals = Globals::default();
+        globals.visit_body(suite);
+        for name in globals.0 {
+            let name = self.text(name);
+            self.op("declare_global", &[&self.scope.clone(), &name]);
+        }
+    }
+
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
             if self.terminated {
                 break;
             }
             self.checkpoint(stmt);
+            self.simple_call = match stmt {
+                ast::Stmt::Assign(v)
+                    if matches!(v.targets.as_slice(), [ast::Expr::Name(_)])
+                        && matches!(&*v.value, ast::Expr::Call(_)) =>
+                {
+                    Some(v.value.range())
+                }
+                ast::Stmt::Return(v) => v.value.as_deref().and_then(|e| match e {
+                    ast::Expr::Call(c) if matches!(&*c.func, ast::Expr::Name(_)) => Some(e.range()),
+                    _ => None,
+                }),
+                _ => None,
+            };
             match stmt {
                 ast::Stmt::Expr(v) => {
                     if !matches!(&*v.value, ast::Expr::StringLiteral(_)) {
                         self.expr(&v.value);
                     }
                 }
-                ast::Stmt::Pass(_) => {}
+                ast::Stmt::Pass(_) | ast::Stmt::Global(_) => {}
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     for t in &v.targets {
@@ -39,6 +79,9 @@ impl Function<'_, '_> {
                             }
                             Some(Place::Item(obj, key)) => {
                                 self.op("delitem", &[&obj, &key]);
+                            }
+                            Some(Place::Attr(obj, name)) => {
+                                self.op("delattr", &[&obj, &name]);
                             }
                             _ => {
                                 self.unsupported("deletion target");
@@ -70,19 +113,26 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
+                    let generator = is_generator(&v.body);
                     let body = if v.is_async {
                         Body::Unsupported(stmt, "async function")
-                    } else if is_generator(&v.body) {
-                        Body::Unsupported(stmt, "generator function")
+                    } else if generator {
+                        Body::GeneratorFunction(&v.body)
                     } else {
                         Body::Statements(&v.body)
                     };
                     let function = self.define(
+                        v.decorator_list.first().map_or(v.start(), Ranged::start),
                         v.name.as_str(),
                         Some(&v.parameters),
                         v.returns.as_deref(),
                         body,
                     );
+                    if v.is_async && !generator {
+                        // Set CO_COROUTINE on the definition before any decorator
+                        // can inspect it. Async generators use a different flag.
+                        self.op("coroutine_function", &[&function]);
+                    }
                     self.decorated(&v.name, &decorators, function);
                 }
                 ast::Stmt::ClassDef(v) => {
@@ -99,7 +149,13 @@ impl Function<'_, '_> {
                     } else {
                         self.op("list", &[])
                     };
-                    let init = self.define(v.name.as_str(), None, None, Body::Namespace(&v.body));
+                    let init = self.define(
+                        v.start(),
+                        v.name.as_str(),
+                        None,
+                        None,
+                        Body::Namespace(&v.body),
+                    );
                     let name = self.text(v.name.as_str());
                     let class = self.op("class", &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
@@ -221,11 +277,8 @@ impl Function<'_, '_> {
                     } else {
                         self.caught.last().cloned().unwrap_or_else(|| "0".into())
                     };
-                    let cause = v
-                        .cause
-                        .as_deref()
-                        .map_or_else(|| "0".into(), |e| self.expr(e));
-                    self.raise(&exc, &cause, v.exc.is_none());
+                    let cause = v.cause.as_deref().map(|e| self.expr(e));
+                    self.raise(&exc, cause.as_deref(), v.exc.is_none());
                 }
                 ast::Stmt::Assert(v) => {
                     let test = self.expr(&v.test);
@@ -241,7 +294,7 @@ impl Function<'_, '_> {
                     } else {
                         self.invoke(&cls, &[])
                     };
-                    self.raise(&error, "0", false);
+                    self.raise(&error, None, false);
                     self.label(&pass);
                 }
                 _ => {
@@ -258,6 +311,7 @@ impl Function<'_, '_> {
 
     pub(super) fn define(
         &mut self,
+        start: TextSize,
         name: &str,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
@@ -285,14 +339,17 @@ impl Function<'_, '_> {
         let annotate = if entries.is_empty() {
             "0".into()
         } else {
-            let code = self
-                .output
-                .code(self.source, String::new(), Body::Annotations(entries));
+            let code = self.output.definition(
+                self.source,
+                String::new(),
+                Body::Annotations(entries),
+                params.map_or(start, Ranged::start),
+            );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
             let sig = self.text(r#"{"posonly":["format"]}"#);
             let defaults = self.op("dict", &[]);
-            self.checked(&format!("call i64 @imre_dyn_def_with_metadata(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
+            self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
         };
         let qualname = self.text(&qualname);
         let mut signature =
@@ -300,7 +357,23 @@ impl Function<'_, '_> {
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
-        let code = self.output.code(self.source, prefix, body);
+        let generator = if let Body::GeneratorFunction(stmts) = &body {
+            let first = stmts[0].start();
+            let start = first.to_usize();
+            let end = stmts.last().unwrap().end().to_usize();
+            let prefix = self.source.text[..start].rsplit('\n').next().unwrap();
+            let indent = if prefix.chars().all(char::is_whitespace) {
+                prefix
+            } else {
+                " "
+            };
+            // Slice the suite as written so indentation inside multiline strings survives.
+            let text = format!("def _():\n{indent}{}", &self.source.text[start..end]);
+            Some((self.output.data(text.as_bytes()), self.source.line(first)))
+        } else {
+            None
+        };
+        let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
         signature["return_type"] = json!(returns.and_then(scalar_annotation));
@@ -333,7 +406,11 @@ impl Function<'_, '_> {
         }
         let sig = self.text(&signature.to_string());
         let name = self.text(name);
-        self.checked(&format!("call i64 @imre_dyn_def_with_metadata(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope))
+        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope));
+        if let Some((source, line)) = generator {
+            self.line(&format!("call void @imre_dyn_generator_body(ptr %ctx, i64 {function}, ptr {source}, i32 {line})"));
+        }
+        function
     }
 
     pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
@@ -347,7 +424,7 @@ impl Function<'_, '_> {
         self.branch(&condition, &bad, &good);
         self.label(&bad);
         let error = self.lookup("NotImplementedError");
-        self.raise(&error, "0", false);
+        self.raise(&error, None, false);
         self.label(&good);
         let values = self.op("dict", &[]);
         for &(name, expression) in entries {
@@ -378,11 +455,7 @@ impl Function<'_, '_> {
             }
             ast::Expr::Subscript(s) => {
                 let obj = self.expr(&s.value);
-                if let ast::Expr::Slice(slice) = &*s.slice {
-                    Place::Slice(obj, self.slice_bounds(slice))
-                } else {
-                    Place::Item(obj, self.expr(&s.slice))
-                }
+                Place::Item(obj, self.expr(&s.slice))
             }
             _ => {
                 self.unsupported("assignment target");
@@ -396,7 +469,6 @@ impl Function<'_, '_> {
             Place::Name(n) => self.op("lookup", &[&self.scope.clone(), n]),
             Place::Attr(v, n) => self.op("attr", &[v, n]),
             Place::Item(v, k) => self.op("get", &[v, k]),
-            Place::Slice(v, bounds) => self.op("slice", &[v, bounds]),
         }
     }
 
@@ -405,7 +477,6 @@ impl Function<'_, '_> {
             Place::Name(n) => self.op("assign", &[&self.scope.clone(), n, value]),
             Place::Attr(v, n) => self.op("setattr", &[v, n, value]),
             Place::Item(v, k) => self.op("put", &[v, k, value]),
-            Place::Slice(v, bounds) => self.op("setslice", &[v, bounds, value]),
         };
     }
 
@@ -481,13 +552,15 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
-    fn raise(&mut self, exc: &str, cause: &str, reraise: bool) {
+    fn raise(&mut self, exc: &str, cause: Option<&str>, reraise: bool) {
         // Raising always transfers control to the enclosing handler.
         let op = self
             .output
             .data(if reraise { b"reraise" } else { b"raise" });
+        let explicit = if cause.is_some() { 2 } else { 0 };
+        let cause = cause.unwrap_or("0");
         self.line(&format!(
-            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 0)"
+            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit})"
         ));
         self.jump(&self.error.clone());
     }
@@ -529,7 +602,7 @@ impl Function<'_, '_> {
             self.jump(&done);
             self.label(&next);
         }
-        self.raise(&exc, "0", true);
+        self.raise(&exc, None, true);
         self.live.pop();
         self.label(&done);
     }
@@ -563,7 +636,7 @@ impl Function<'_, '_> {
         self.caught.pop();
         self.live.pop();
         if !self.terminated {
-            self.raise(&exception, "0", true);
+            self.raise(&exception, None, true);
         }
         self.label(&done);
     }
@@ -622,7 +695,7 @@ impl Function<'_, '_> {
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);
         self.label(&propagate);
-        self.raise(&exc, "0", true);
+        self.raise(&exc, None, true);
         self.label(&done);
     }
 }
@@ -689,8 +762,14 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     }
     let mut captures = ClassCell(false);
     match body {
-        Body::Statements(stmts) => captures.visit_body(stmts),
+        Body::Statements(stmts) | Body::GeneratorFunction(stmts) => captures.visit_body(stmts),
         Body::Expression(expr) => captures.visit_expr(expr),
+        Body::Generator(generator, element) => {
+            for filter in &generator.ifs {
+                captures.visit_expr(filter);
+            }
+            captures.visit_expr(element);
+        }
         Body::Namespace(_) | Body::Annotations(_) | Body::Unsupported(..) => {}
     }
     captures.0

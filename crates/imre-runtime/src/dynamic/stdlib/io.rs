@@ -1,12 +1,22 @@
-//! Native base classes for binary input streams defined by runtime-loaded modules.
+//! Native I/O classes for runtime-loaded modules.
 
 use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+
+mod bytes_io;
+
+#[derive(Clone)]
+pub(in crate::dynamic) enum MemoryStream {
+    Text(crate::objects::TextFile),
+    Bytes(std::rc::Rc<bytes_io::BytesIo>),
+}
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
 /// Install canonical class objects so subclasses inherit the same methods across imports.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
+    let unsupported = ctx.builtin("UnsupportedOperation");
+    ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
     let object = ctx.builtin("object");
@@ -33,22 +43,44 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         io,
         &["read", "readall", "readinto"],
     );
+    let buffered = class(ctx, module, "BufferedIOBase", io, &[]);
+    let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
+    ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
+    let text = class(ctx, module, "TextIOBase", io, &[]);
+    let string_io = class(
+        ctx,
+        module,
+        "StringIO",
+        text,
+        &["__init__", "write", "getvalue", "read", "tell", "isatty"],
+    );
+    ctx.builtins.insert("_io.StringIO".into(), string_io);
 }
 
 fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'static str]) -> Id {
     let scope = ctx.scope("io", Some(module));
-    let ancestors = ctx.lineage(base);
-    let owner = ctx.alloc(Value::Class {
-        name: format!("io.{name}"),
-        scope,
-        ancestors,
+    let owner = ctx
+        .allocate_class(name.into(), scope, vec![base])
+        .expect("a single I/O base has a linearization");
+    let module_name = ctx.text(if matches!(name, "StringIO" | "BytesIO") {
+        "_io"
+    } else {
+        "io"
     });
+    ctx.bind(scope, "__module__", module_name);
+    let qualname = ctx.text(name);
+    ctx.bind(scope, "__qualname__", qualname);
+    let descriptor_owner = if name == "BytesIO" {
+        "_io.BytesIO"
+    } else {
+        "_io._IOBase"
+    };
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
         let attr = if name == "closed" {
             ctx.alloc(Value::ReadOnlyDescriptor {
                 get: method,
-                owner: "_io._IOBase",
+                owner: descriptor_owner,
                 name,
             })
         } else {
@@ -68,19 +100,71 @@ pub(in super::super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let bytes_io = ctx.builtins.get("_io.BytesIO").copied();
+    let Some((&receiver, rest)) = args.split_first() else {
+        let message = if bytes_io == Some(owner) {
+            if name == "__init__" {
+                "descriptor '__init__' of '_io.BytesIO' object needs an argument".into()
+            } else {
+                format!("unbound method BytesIO.{name}() needs an argument")
+            }
+        } else {
+            format!("unbound I/O method {name} needs a receiver")
+        };
+        return Err(Error::new("TypeError", message));
+    };
+    if !ctx.instance_of(receiver, owner) {
+        let message = if bytes_io == Some(owner) {
+            let actual = ctx.type_name(receiver);
+            if name == "__init__" {
+                format!(
+                    "descriptor '__init__' requires a '_io.BytesIO' object but received a '{actual}'"
+                )
+            } else {
+                format!(
+                    "descriptor '{name}' for '_io.BytesIO' objects doesn't apply to a '{actual}' object"
+                )
+            }
+        } else {
+            format!("invalid receiver for {name}")
+        };
+        return Err(Error::new("TypeError", message));
+    }
+    if bytes_io == Some(owner)
+        || matches!(name, "__enter__" | "__exit__")
+            && bytes_io.is_some_and(|class| ctx.instance_of(receiver, class))
+    {
+        return bytes_io::call(ctx, receiver, name, rest, kwargs);
+    }
+    if name == "__init__" {
+        return string_io_init(ctx, receiver, rest, kwargs);
+    }
+    if ctx
+        .builtins
+        .get("_io.StringIO")
+        .is_some_and(|&class| ctx.instance_of(receiver, class))
+    {
+        let Value::Instance { memory_stream, .. } = ctx.heap.get(receiver) else {
+            unreachable!("StringIO methods have an instance receiver");
+        };
+        let file = match memory_stream {
+            Some(MemoryStream::Text(file)) => Some(file.clone()),
+            _ => None,
+        };
+        return string_io_method(ctx, file, receiver, name, rest, kwargs);
+    }
     let arity = match name {
         "read" => 1..=2,
         "readinto" => 2..=2,
         "__exit__" => 4..=4,
         _ => 1..=1,
     };
-    if !arity.contains(&args.len()) || !kwargs.is_empty() || !ctx.instance_of(args[0], owner) {
+    if !arity.contains(&args.len()) || !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
             format!("invalid arguments to {name}"),
         ));
     }
-    let receiver = args[0];
     let Value::Instance { fields, .. } = ctx.heap.get(receiver) else {
         return Err(Error::new("TypeError", "expected an IOBase instance"));
     };
@@ -159,5 +243,183 @@ pub(in super::super) fn call(
         }
         "readinto" => Err(Error::new("NotImplementedError", "")),
         _ => unreachable!("registered IOBase method"),
+    }
+}
+
+/// Bind the C StringIO signature before installing the owned stream on the Python instance.
+fn string_io_init(
+    ctx: &mut Context,
+    receiver: Id,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 2 {
+        return Err(Error::new(
+            "TypeError",
+            format!("StringIO() takes at most 2 arguments ({count} given)"),
+        ));
+    }
+    let mut values = [None; 2];
+    for (slot, arg) in values.iter_mut().zip(args) {
+        *slot = Some(*arg);
+    }
+    for (key, value) in kwargs {
+        let index = match key.as_str() {
+            "initial_value" => 0,
+            "newline" => 1,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("StringIO() got an unexpected keyword argument '{key}'"),
+                ));
+            }
+        };
+        if values[index].replace(*value).is_some() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "argument for StringIO() given by name ('{key}') and position ({})",
+                    index + 1
+                ),
+            ));
+        }
+    }
+    let text = |id, name| match ctx.heap.get(id) {
+        Value::None => Ok(None),
+        Value::Str(value) => Ok(Some(value.as_str())),
+        _ => Err(Error::new(
+            "TypeError",
+            format!("{name} must be str or None, not {}", ctx.type_name(id)),
+        )),
+    };
+    let newline = match values[1] {
+        None => Some("\n"),
+        Some(id) => text(id, "newline")?,
+    };
+    let file = match text(values[0].unwrap_or(NONE), "initial_value") {
+        Ok(initial) => crate::objects::TextFile::string_io(initial, newline)?,
+        Err(error) => {
+            // The C constructor validates the newline before the initial contents.
+            crate::objects::TextFile::string_io(None, newline)?;
+            return Err(error);
+        }
+    };
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!("StringIO.__init__ has an instance receiver");
+    };
+    *memory_stream = Some(MemoryStream::Text(file));
+    Ok(NONE)
+}
+
+fn string_io_method(
+    ctx: &mut Context,
+    file: Option<crate::objects::TextFile>,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("StringIO.{name}() takes no keyword arguments"),
+        ));
+    }
+    let expected = match name {
+        "write" if args.len() != 1 => Some("exactly one argument"),
+        "read" if args.len() > 1 => {
+            return Err(Error::new(
+                "TypeError",
+                format!("read expected at most 1 argument, got {}", args.len()),
+            ));
+        }
+        "write" | "read" | "__exit__" => None,
+        _ if !args.is_empty() => Some("no arguments"),
+        _ => None,
+    };
+    if let Some(expected) = expected {
+        return Err(Error::new(
+            "TypeError",
+            format!("StringIO.{name}() takes {expected} ({} given)", args.len()),
+        ));
+    }
+    if name == "__exit__" {
+        let close = ctx.lookup_attr(receiver, "close")?;
+        return ctx.call(close, Vec::new(), Vec::new());
+    }
+    let Some(file) = file else {
+        return match name {
+            "close" | "flush" => Ok(NONE),
+            _ => Err(Error::new(
+                "ValueError",
+                "I/O operation on uninitialized object",
+            )),
+        };
+    };
+    match name {
+        "write" => {
+            let Value::Str(text) = ctx.heap.get(args[0]) else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("string argument expected, got '{}'", ctx.type_name(args[0])),
+                ));
+            };
+            file.write(text)?;
+            Ok(ctx.int(text.chars().count() as i64))
+        }
+        "getvalue" => Ok(ctx.text(file.getvalue()?.into_string())),
+        "tell" => Ok(ctx.int(file.memory_position()? as i64)),
+        "read" => {
+            let size = match args.first().copied() {
+                None | Some(NONE) => None,
+                Some(id) => {
+                    let integer = match ctx.heap.get(id) {
+                        Value::Int(_) | Value::Bool(_) => id,
+                        _ => {
+                            let index = ctx.bound_slot(id, "__index__")?.ok_or_else(|| {
+                                Error::new(
+                                    "TypeError",
+                                    format!(
+                                        "argument should be integer or None, not '{}'",
+                                        ctx.type_name(id)
+                                    ),
+                                )
+                            })?;
+                            ctx.call(index, vec![], vec![])?
+                        }
+                    };
+                    Some(ctx.as_int(integer).map_err(|_| {
+                        Error::new(
+                            "TypeError",
+                            format!(
+                                "__index__ returned non-int (type {})",
+                                ctx.type_name(integer)
+                            ),
+                        )
+                    })?)
+                }
+            };
+            Ok(ctx.text(file.read_memory(size.as_ref())?.into_string()))
+        }
+        "closed" => Ok(if file.closed() { TRUE } else { FALSE }),
+        "flush" => {
+            file.flush()?;
+            Ok(NONE)
+        }
+        "close" => {
+            file.close()?;
+            Ok(NONE)
+        }
+        "__enter__" | "isatty" if file.closed() => {
+            Err(Error::new("ValueError", "I/O operation on closed file."))
+        }
+        "__enter__" => Ok(receiver),
+        "isatty" => Ok(FALSE),
+        "readable" | "writable" | "seekable" if file.closed() => {
+            Err(Error::new("ValueError", "I/O operation on closed file"))
+        }
+        "readable" | "writable" | "seekable" => Ok(TRUE),
+        _ => unreachable!("registered StringIO method"),
     }
 }
