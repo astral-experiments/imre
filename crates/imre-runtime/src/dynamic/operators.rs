@@ -475,7 +475,7 @@ impl Context {
                             Some(items.as_slice()),
                             None,
                         ),
-                        Value::Dict(items) => ("{", "}", "{...}", None, Some(items.as_slice())),
+                        Value::Dict(items) => ("{", "}", "{...}", None, Some(&items[..])),
                         Value::Set { items, frozen } => {
                             if items.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });
