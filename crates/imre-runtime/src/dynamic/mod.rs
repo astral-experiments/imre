@@ -155,6 +155,17 @@ impl Context {
         }
     }
 
+    /// Keep a mutable input exported while Python coerces a buffer API's flag.
+    fn truth_with_buffer_export(&mut self, input: Id, flag: Id) -> Result<bool> {
+        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
+            return self.truth(flag);
+        }
+        self.bytearray_exports.push(input);
+        let result = self.truth(flag);
+        self.bytearray_exports.pop();
+        result
+    }
+
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
         if self.bytearray_exports.contains(&id) {
             Err(Error::new(
