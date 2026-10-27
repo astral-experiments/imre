@@ -4,6 +4,7 @@ import posix
 import posixpath
 from os import altsep, fspath, sep
 from os.path import altsep as path_altsep, sep as path_sep
+from posixpath import normpath
 
 
 class Path:
@@ -39,6 +40,18 @@ class Raises:
 
 
 def current():
+    assert normpath is os.path.normpath is posix._path_normpath
+    assert normpath.__name__ == "_path_normpath" and normpath.__self__ is posix
+    for value, expected in (
+        ("", "."),
+        ("//a/../../b", "//b"),
+        ("///../x/", "/x"),
+        (Text("../a/./b"), "../a/b"),
+        (Raw(b"../\xff/./a/.."), b"../\xff"),
+        (b"a\0b/../c", b"c"),
+    ):
+        result = normpath(path=Path(value))
+        assert result == expected and type(result) is type(expected)
     assert os.path is posixpath and os.path.__name__ == "posixpath"
     assert sep is os.sep is path_sep is posixpath.sep and sep == "/"
     assert altsep is os.altsep is path_altsep is posixpath.altsep is None

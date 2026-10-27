@@ -613,7 +613,10 @@ impl Context {
                     || builtins::constructor_owner(name).is_some()
                     || matches!(
                         name.as_str(),
-                        "binascii.a2b_base64" | "binascii.b2a_base64" | "posix.fspath"
+                        "binascii.a2b_base64"
+                            | "binascii.b2a_base64"
+                            | "posix.fspath"
+                            | "posix._path_normpath"
                     )
                     || name.starts_with("_weakref.")
                 {
@@ -1007,12 +1010,17 @@ impl Context {
                     return Ok(attribute);
                 }
             }
-            Value::Native(symbol) if symbol == "posix.fspath" => match name {
-                "__name__" | "__qualname__" => return Ok(self.text("fspath")),
-                "__module__" => return Ok(self.text("posix")),
-                "__self__" => return self.module("posix"),
-                _ => {}
-            },
+            Value::Native(symbol)
+                if matches!(symbol.as_str(), "posix.fspath" | "posix._path_normpath") =>
+            {
+                let (module, function) = symbol.split_once('.').unwrap();
+                match name {
+                    "__name__" | "__qualname__" => return Ok(self.text(function)),
+                    "__module__" => return Ok(self.text(module)),
+                    "__self__" => return self.module(module),
+                    _ => {}
+                }
+            }
             Value::Native(class) if class == "staticmethod" && name == "__get__" => {
                 return Ok(self.builtin("staticmethod.__get__"));
             }
