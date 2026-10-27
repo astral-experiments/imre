@@ -1789,6 +1789,16 @@ impl Heap {
         true
     }
 
+    /// A named expression retains earlier operands and its result after replacing the binding.
+    pub(super) fn named_assignment(&mut self, mark: usize, value: Id) -> bool {
+        if !self.has_unbound_writer(value) {
+            return false;
+        }
+        self.release_temporaries_since(mark);
+        self.keep(value);
+        true
+    }
+
     pub fn statement(
         &mut self,
         globals: impl Iterator<Item = Id>,

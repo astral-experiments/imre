@@ -65,7 +65,7 @@ impl Function<'_, '_> {
                 self.op(v.op.as_str(), &[&left, &right])
             }
             ast::Expr::UnaryOp(v) => {
-                let mark = (v.op == ast::UnaryOp::Not).then(|| self.truth_mark());
+                let mark = (v.op == ast::UnaryOp::Not).then(|| self.temporary_mark());
                 let operand = self.expr(&v.operand);
                 let result = self.op(
                     match v.op {
@@ -94,9 +94,13 @@ impl Function<'_, '_> {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");
                 };
+                let mark = self.temporary_mark();
                 let value = self.expr(&v.value);
                 let name = self.code_name(target.id.as_str());
-                self.op("assign_expr", &[&self.scope.clone(), &name, &value])
+                let replaced =
+                    self.op("assign_named_target", &[&self.scope.clone(), &name, &value]);
+                self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
+                value
             }
             ast::Expr::Call(v) => {
                 let callable = self.expr(&v.func);
@@ -183,7 +187,7 @@ impl Function<'_, '_> {
         let done = self.name("b");
         let mut incoming = Vec::with_capacity(count);
         for i in 0..count {
-            let mark = (discard_operand && i + 1 < count).then(|| self.truth_mark());
+            let mark = (discard_operand && i + 1 < count).then(|| self.temporary_mark());
             let v = value(self, i);
             if i + 1 == count {
                 incoming.push(format!("[ {v}, %{} ]", self.block));

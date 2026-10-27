@@ -137,9 +137,9 @@ impl Context {
                 }
                 self.lookup(a, &name)
             }
-            "assign" | "assign_expr" | "assign_target" => {
+            "assign" | "assign_expr" | "assign_target" | "assign_named_target" => {
                 let mut scope = a;
-                if op == "assign_expr" {
+                if matches!(op, "assign_expr" | "assign_named_target") {
                     while self.scope_data(scope).is_comprehension {
                         scope = self
                             .scope_data(scope)
@@ -149,13 +149,16 @@ impl Context {
                 }
                 let name = self.str_value(b)?.to_owned();
                 let value = self.enum_assignment(scope, &name, c)?;
-                let result = if op == "assign_target" {
-                    flag(self.replacing_writer(scope, &name, value))
-                } else {
-                    c
-                };
+                let replaced = self.replacing_writer(scope, &name, value);
                 self.bind_source_name(scope, &name, value)?;
-                Ok(result)
+                if matches!(op, "assign_target" | "assign_named_target") {
+                    Ok(flag(replaced))
+                } else {
+                    if replaced {
+                        self.heap.release_unbound_writers();
+                    }
+                    Ok(c)
+                }
             }
             "declare_global" => {
                 let name = self.str_value(b)?.to_owned();
@@ -1084,7 +1087,7 @@ pub(super) unsafe extern "C" fn imre_dyn_failed(ctx: *const Context) -> bool {
     unsafe { (*ctx).pending.is_some() }
 }
 
-/// Record the caller's temporary root boundary before a truth operand runs.
+/// Record the caller's temporary root boundary before an expression runs.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usize {
     // SAFETY: the generated caller owns this context for the entire expression.
@@ -1096,6 +1099,22 @@ pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usiz
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
     // SAFETY: the mark comes from the same active Python frame.
     unsafe { (&mut *ctx).discard_truth(mark) }
+}
+
+/// Publish the named expression's result before the caller evaluates its next operand.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_named_assignment(
+    ctx: *mut Context,
+    mark: usize,
+    value: Id,
+    replaced: Id,
+) {
+    // SAFETY: the mark and result belong to the current generated expression.
+    let ctx = unsafe { &mut *ctx };
+    if replaced == TRUE && ctx.heap.named_assignment(mark, value) {
+        ctx.collect_unreachable();
+        ctx.heap.release_unbound_writers();
+    }
 }
 
 /// Borrow the explicitly live handles in the generated caller's temporary array.
