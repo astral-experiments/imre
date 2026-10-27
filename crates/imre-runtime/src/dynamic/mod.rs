@@ -833,6 +833,36 @@ impl Context {
         environment
     }
 
+    /// Expose the class's own unbound members through a fresh read-only proxy.
+    fn class_dictionary(&mut self, scope: Id) -> Id {
+        let frame = self.scope_data(scope);
+        let dictionary = match frame
+            .class_namespace
+            .as_ref()
+            .and_then(|class| class.dictionary)
+        {
+            Some(existing) => existing,
+            None => {
+                let names = frame.names.clone();
+                let entries = names
+                    .into_iter()
+                    .filter(|(name, _)| name != "__qualname__")
+                    .map(|(name, value)| (self.text(name), value))
+                    .collect();
+                let dictionary = self.dict(entries);
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!()
+                };
+                frame
+                    .class_namespace
+                    .get_or_insert_with(Default::default)
+                    .dictionary = Some(dictionary);
+                dictionary
+            }
+        };
+        self.alloc(Value::MappingProxy(dictionary))
+    }
+
     /// Materialize once and keep that exact dict as the module's binding storage.
     fn module_globals(&mut self, scope: Id) -> Id {
         let scope = self.root_scope(scope);
@@ -880,6 +910,15 @@ impl Context {
             order.retain(|member| member != name);
         }
         let previous = data.names.shift_remove(name);
+        if previous.is_some()
+            && name != "__qualname__"
+            && let Some(dictionary) = data
+                .class_namespace
+                .as_ref()
+                .and_then(|class| class.dictionary)
+        {
+            self.delete_item(dictionary, key)?;
+        }
         if let Some(value) = previous {
             self.heap.weak_edge_removed(value);
         }
@@ -911,7 +950,19 @@ impl Context {
         {
             order.push(name.to_owned());
         }
-        if let Some(previous) = s.names.insert(name.to_owned(), value)
+        let dictionary = s
+            .class_namespace
+            .as_ref()
+            .and_then(|class| class.dictionary);
+        let previous = s.names.insert(name.to_owned(), value);
+        if let Some(dictionary) = dictionary
+            && name != "__qualname__"
+        {
+            let key = self.text(name);
+            self.put_item(dictionary, key, value)
+                .expect("class dictionary has string keys");
+        }
+        if let Some(previous) = previous
             && previous != value
         {
             self.heap.weak_edge_removed(previous);

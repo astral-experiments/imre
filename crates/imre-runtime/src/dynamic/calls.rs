@@ -636,6 +636,7 @@ impl Context {
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
+            Value::MappingProxy(_) => "mappingproxy",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
@@ -673,6 +674,7 @@ impl Context {
                             | "bytearray_iterator"
                             | "range_iterator"
                             | "getset_descriptor"
+                            | "mappingproxy"
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
                             | "operator.itemgetter"
@@ -1713,6 +1715,9 @@ impl Context {
                 scope,
                 ..
             } => {
+                if name == "__dict__" {
+                    return Ok(self.class_dictionary(scope));
+                }
                 if name == "__annotations__"
                     && let Some(thunks) = self
                         .scope_data(scope)
@@ -2336,6 +2341,12 @@ impl Context {
                 }
             }
             Value::Class { scope, .. } => {
+                if name == "__dict__" {
+                    return Err(Error::new(
+                        "AttributeError",
+                        "attribute '__dict__' of 'type' objects is not writable",
+                    ));
+                }
                 let scope = *scope;
                 if name == "__annotations__"
                     && let Value::Scope(data) = self.heap.get_mut(scope)
