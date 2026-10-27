@@ -68,6 +68,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "binascii"
+            | "unicodedata"
             | "json"
             | "_imre_logging"
             | "_imre_dataclasses"
@@ -272,6 +273,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
+        ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
@@ -613,6 +615,39 @@ pub(super) fn call(
     }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
+    }
+    if name == "unicodedata.normalize" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "unicodedata.normalize() takes no keyword arguments",
+            ));
+        }
+        let [form, text] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("normalize expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let string = |value, position| {
+            ctx.str_value(value).map_err(|_| {
+                let kind = if value == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(value)
+                };
+                Error::new(
+                    "TypeError",
+                    format!("normalize() argument {position} must be str, not {kind}"),
+                )
+            })
+        };
+        return Ok(
+            match crate::objects::normalize_unicode(string(*form, 1)?, string(*text, 2)?)? {
+                Some(normalized) => ctx.text(normalized.into_string()),
+                None => ctx.scalar_value(*text),
+            },
+        );
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
