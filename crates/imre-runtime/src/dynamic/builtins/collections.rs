@@ -289,7 +289,16 @@ pub(in super::super) fn remove_dict_item(
     dict: Id,
     key: Id,
 ) -> Result<Option<Id>> {
-    let Some(index) = ctx.find_dictionary_key(dict, key, None)?.1 else {
+    remove_dict_item_hashed(ctx, dict, key, None)
+}
+
+pub(in super::super) fn remove_dict_item_hashed(
+    ctx: &mut Context,
+    dict: Id,
+    key: Id,
+    hash: Option<i64>,
+) -> Result<Option<Id>> {
+    let Some(index) = ctx.find_dictionary_key(dict, key, hash)?.1 else {
         return Ok(None);
     };
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {

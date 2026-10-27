@@ -31,6 +31,34 @@ pub(super) fn call(
                 ordered: true,
             }))
         }
+        ("popitem", [last]) => {
+            let last = ctx.truth(*last)?;
+            let entries = ctx.stored_entries(storage);
+            let Some(end) = entries.len().checked_sub(1) else {
+                let message = ctx.text("dictionary is empty");
+                return Err(ctx.lookup_error("KeyError", message));
+            };
+            let dense = if last { end } else { 0 };
+            let key = entries[dense].0;
+            let cached = entries.stored_hash(dense);
+            let (hash, found) = ctx.find_dictionary_key(storage, key, cached)?;
+            if found.is_none() {
+                return Err(ctx.lookup_error("KeyError", key));
+            }
+            // Finding the order node, unlinking it, and removing the mapping entry
+            // each resolve colliding keys. A callback may change the mapping.
+            if ctx
+                .find_dictionary_key(storage, key, Some(hash))?
+                .1
+                .is_none()
+            {
+                return Err(ctx.lookup_error("KeyError", key));
+            }
+            let value =
+                super::super::builtins::remove_dict_item_hashed(ctx, storage, key, Some(hash))?
+                    .ok_or_else(|| ctx.lookup_error("KeyError", key))?;
+            Ok(ctx.alloc(Value::Tuple(vec![key, value])))
+        }
         ("repr", []) => {
             if ctx.repr_ancestors.contains(&owner) {
                 return Ok(ctx.text("..."));
