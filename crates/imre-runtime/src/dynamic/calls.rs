@@ -1097,7 +1097,8 @@ impl Context {
             Value::Native(class)
                 if class == "dict"
                     || (class == "int" && name == "to_bytes")
-                    || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+                    || (class == "str"
+                        && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
@@ -1186,6 +1187,9 @@ impl Context {
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
         let base = self.scalar_value(obj);
+        if name == "maketrans" && matches!(self.heap.get(base), Value::Str(_)) {
+            return Ok(self.builtin("str.maketrans"));
+        }
         if name == "__new__" {
             match self.heap.get(base) {
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),

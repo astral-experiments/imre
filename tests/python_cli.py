@@ -455,6 +455,7 @@ def report(text):
             "boxed_logging.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
+            "boxed_str_maketrans.py",
             "boxed_map_capwords.py",
             "boxed_module_globals.py",
             "boxed_frozenset.py",

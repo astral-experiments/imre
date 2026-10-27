@@ -12,6 +12,8 @@ use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
 
+mod maketrans;
+
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
         && ctx.str_value(id)? != "strict"
@@ -667,6 +669,9 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if owner == "str" && name == "maketrans" {
+        return maketrans::table(ctx, args, kwargs);
+    }
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {
             type_error("str.__new__(): not enough arguments")
