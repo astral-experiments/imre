@@ -195,6 +195,17 @@ impl Context {
                 }
                 let a = self.dict_storage(a).unwrap_or(a);
                 let b = self.dict_storage(b).unwrap_or(b);
+                if matches!(
+                    (self.heap.get(a), self.heap.get(b)),
+                    (Value::Set { .. }, Value::Set { .. })
+                ) {
+                    self.heap.keep(a);
+                    self.heap.keep(b);
+                    if !self.dictionary_equal(a, b)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
                 let children = match (self.heap.get(a), self.heap.get(b)) {
                     (Value::List(_), right) if !matches!(right, Value::List(_)) => {
                         return Ok(false);

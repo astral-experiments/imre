@@ -419,7 +419,7 @@ impl Context {
         Ok(normalized(hash))
     }
 
-    fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
+    pub(in super::super) fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
         if left == right {
             return Ok(true);
         }
