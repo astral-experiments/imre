@@ -387,16 +387,19 @@ pub(super) fn bind_method_arguments<const N: usize>(
     names: [&str; N],
     max_positional: usize,
 ) -> Result<[Option<Id>; N]> {
+    let arguments = |n| if n == 1 { "argument" } else { "arguments" };
     let count = args.len() + kwargs.len();
     if count > N {
         let kind = if args.is_empty() { "keyword " } else { "" };
         return Err(type_error(format!(
-            "{name}() takes at most {N} {kind}arguments ({count} given)"
+            "{name}() takes at most {N} {kind}{} ({count} given)",
+            arguments(N)
         )));
     }
     if args.len() > max_positional {
         return Err(type_error(format!(
-            "{name}() takes at most {max_positional} positional arguments ({} given)",
+            "{name}() takes at most {max_positional} positional {} ({} given)",
+            arguments(max_positional),
             args.len()
         )));
     }

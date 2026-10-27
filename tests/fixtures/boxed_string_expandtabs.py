@@ -25,3 +25,9 @@ def current():
             plain.expandtabs(value)
         except (TypeError, OverflowError) as error:
             print(type(error).__name__)
+    try:
+        plain.expandtabs(2, tabsize=3)
+    except TypeError as error:
+        assert error.args == ("expandtabs() takes at most 1 argument (2 given)",)
+    else:
+        raise AssertionError("expected a type error")
