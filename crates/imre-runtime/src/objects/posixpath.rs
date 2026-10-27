@@ -178,6 +178,15 @@ pub unsafe extern "C" fn imre_posix_component(path: *const (), bytes: u32, head:
     }
 }
 
+/// Byte offset of the last extension, ignoring leading dots in the final component.
+pub(crate) fn extension_start(spelling: &[u8]) -> usize {
+    let last = spelling.rsplit(|&b| b == b'/').next().unwrap();
+    last.iter()
+        .rposition(|&b| b == b'.')
+        .filter(|&dot| last[..dot].iter().any(|&b| b != b'.'))
+        .map_or(spelling.len(), |dot| spelling.len() - last.len() + dot)
+}
+
 /// # Safety
 /// Root a str or bytes handle and a fresh zeroed two-field tuple of the corresponding type.
 #[unsafe(no_mangle)]
@@ -185,12 +194,7 @@ pub unsafe extern "C" fn imre_posix_splitext(path: *const (), bytes: u32, out: *
     // SAFETY: the caller roots the argument with its exact string or bytes tag.
     let path = unsafe { Spelling::borrow(path, bytes) };
     let spelling = path.bytes();
-    let last = spelling.rsplit(|&b| b == b'/').next().unwrap();
-    let cut = last
-        .iter()
-        .rposition(|&b| b == b'.')
-        .filter(|&dot| last[..dot].iter().any(|&b| b != b'.'))
-        .map_or(spelling.len(), |dot| spelling.len() - last.len() + dot);
+    let cut = extension_start(spelling);
     // Keep both slices owned here until the complete tuple can be published.
     let parts = path.slice(0..cut).and_then(|root| {
         let ext = path.slice(cut..spelling.len())?;

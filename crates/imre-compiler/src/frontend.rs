@@ -496,6 +496,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
         "ReferenceError" => return Some(53),
+        "BufferError" => return Some(54),
         "BlockingIOError" => return Some(44),
         "ConnectionError" => return Some(45),
         "BrokenPipeError" => return Some(46),

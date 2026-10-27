@@ -12,6 +12,7 @@ mod argparse;
 mod args;
 mod asyncio;
 mod binascii;
+pub(crate) use binascii::{binascii_decode, binascii_encode};
 pub(crate) use binascii::{urlsafe_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
@@ -57,6 +58,7 @@ pub(crate) use json::{
     write_string as write_json_string,
 };
 mod linecache;
+pub(crate) mod locks;
 pub(crate) mod logging;
 pub(crate) use logging::record::percent_integer_field;
 mod mappings;
@@ -65,6 +67,7 @@ mod namespaces;
 mod os;
 mod patchset;
 mod paths;
+pub(crate) use paths::is_file;
 pub(crate) mod posixpath;
 mod processes;
 mod random;
@@ -77,12 +80,14 @@ pub(crate) mod socket;
 mod source_modules;
 pub(crate) mod stdio;
 mod stdlib;
+pub(crate) use stdlib::comparator::sort_by_less;
 mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+pub(crate) use text::translate;
 pub(crate) mod time;
-pub(crate) use text::{UrlInput, urlquote, urlsplit};
+pub(crate) use text::{UrlInput, capitalize, urlquote, urlsplit};
 pub(crate) use text::{
     expand_tabs, find_text, ord_byte, ord_char, partition_text, python_isspace, split_parts,
 };

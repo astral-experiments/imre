@@ -186,7 +186,7 @@ impl Encoder {
         if self.sort_keys {
             let mut error = None;
             entries.sort_by(|(a, _), (b, _)| {
-                ctx.compare(*a, *b)
+                ctx.compare("<", *a, *b)
                     .unwrap_or_else(|e| {
                         error.get_or_insert(e);
                         None

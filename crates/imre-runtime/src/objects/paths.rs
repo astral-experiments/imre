@@ -836,15 +836,20 @@ pub unsafe extern "C" fn imre_path_exists(path: *const Object) -> u32 {
     }
 }
 
+/// Test the target of a filesystem spelling, following symlinks and suppressing stat errors.
+pub(crate) fn is_file(path: &std::path::Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
 /// # Safety
 /// Root an exact Path. This follows symlinks and suppresses metadata errors.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_is_file(path: *const Object) -> u32 {
     // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
     unsafe {
-        object(path).0.with(|storage| {
-            u32::from(fs::metadata(storage.path()).is_ok_and(|metadata| metadata.is_file()))
-        })
+        object(path)
+            .0
+            .with(|storage| u32::from(is_file(storage.path().as_ref())))
     }
 }
 

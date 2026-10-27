@@ -43,6 +43,10 @@ def _canonical(value: str) -> str:
             return sign + "sNaN" + _digits(text[4:]).lstrip("0")
         return sign + "NaN" + _digits(text[3:]).lstrip("0")
     mantissa, marker, exp_text = lowered.partition("e")
+    whole, dot, fraction = mantissa.partition(".")
+    if not whole and not fraction:
+        return _invalid()
+    digits = _digits(whole + fraction).lstrip("0") or "0"
     exp = 0
     if marker:
         neg = exp_text.startswith("-")
@@ -57,10 +61,6 @@ def _canonical(value: str) -> str:
             exp = int(exp_digits)
             if neg:
                 exp = -exp
-    whole, dot, fraction = mantissa.partition(".")
-    if not whole and not fraction:
-        return _invalid()
-    digits = _digits(whole + fraction).lstrip("0") or "0"
     exp -= len(fraction)
     point = len(digits) + exp
     if point - 1 > 999999999999999999 or exp < -1999999999999999997:

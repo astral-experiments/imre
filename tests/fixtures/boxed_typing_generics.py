@@ -129,6 +129,22 @@ print(PlainCallable.__bases__ == (cabc.Callable, t.Generic))
 print(PlainCallable.__mro__ == (PlainCallable, cabc.Callable, t.Generic, object))
 print(t.Callable.__mro_entries__((t.Callable,)) == (cabc.Callable, t.Generic))
 
+
+class AddsGeneric:
+    def __mro_entries__(self, bases):
+        return (t.Generic,)
+
+
+adds_generic = AddsGeneric()
+print(t.Callable.__mro_entries__((t.Callable, adds_generic)) == (cabc.Callable,))
+
+
+class CallableWithHook(t.Callable, adds_generic):
+    pass
+
+
+print(CallableWithHook.__bases__ == (cabc.Callable, t.Generic))
+
 bound = t.TypeVar("F", bound=cabc.Callable[..., t.Any])
 print(bound.__bound__.__origin__ is cabc.Callable, type(bound.__bound__).__module__)
 print(t.get_origin(t.Callable) is cabc.Callable, type(t.Callable[..., int]).__module__)

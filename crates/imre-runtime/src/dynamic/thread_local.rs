@@ -126,7 +126,7 @@ mod tests {
         let ready = Barrier::new(2);
         local.lock().unwrap().insert(parent);
         std::thread::scope(|scope| {
-            scope.spawn(|| {
+            let handle = scope.spawn(|| {
                 {
                     let mut local = local.lock().unwrap();
                     assert_eq!(local.current(), None);
@@ -143,6 +143,7 @@ mod tests {
                 assert_eq!(local.live().collect::<Vec<_>>(), [parent, worker]);
             }
             ready.wait();
+            handle.join().unwrap();
         });
         let object = heap.alloc(Value::ThreadLocal(local.into_inner().unwrap()));
         // Cross the ordinary statement collection threshold with only the local rooted.

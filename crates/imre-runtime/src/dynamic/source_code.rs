@@ -25,6 +25,7 @@ enum Instruction {
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
     Return(Option<ast::Expr>),
+    Raise(ast::StmtRaise),
     Unless(ast::Expr, usize),
     Iter(ast::Expr),
     Next(Option<ast::Expr>, usize),
@@ -98,6 +99,7 @@ impl Program {
                     }
                     Instruction::Return(s.value.as_deref().cloned())
                 }
+                Stmt::Raise(s) => Instruction::Raise(s.clone()),
                 Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
                     let module = s
                         .module
@@ -595,6 +597,17 @@ impl Context {
             Instruction::Eval(e) => {
                 eval(self, e)?;
             }
+            Instruction::Raise(s) => {
+                let (op, exception) = match &s.exc {
+                    Some(exc) => ("raise", eval(self, exc)?),
+                    None => ("reraise", NONE),
+                };
+                let (cause, explicit) = match &s.cause {
+                    Some(cause) => (eval(self, cause)?, TRUE),
+                    None => (NONE, FALSE),
+                };
+                self.op(op, exception, cause, explicit)?;
+            }
             Instruction::Assign(n, e) => {
                 let value = eval(self, e)?;
                 self.bind_source_name(scope, n, value)?;
@@ -847,6 +860,15 @@ impl Context {
                 let a = eval(self, &v.left)?;
                 let b = eval(self, &v.right)?;
                 self.op(v.op.as_str(), a, b, NONE)
+            }
+            Expr::UnaryOp(v) => {
+                let value = eval(self, &v.operand)?;
+                let op = match v.op {
+                    ast::UnaryOp::UAdd => "pos",
+                    ast::UnaryOp::USub => "neg",
+                    op => op.as_str(),
+                };
+                self.op(op, value, NONE, NONE)
             }
             Expr::Compare(v) => {
                 let mut left = eval(self, &v.operands[0])?;

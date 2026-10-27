@@ -48,17 +48,10 @@ impl Context {
                 let name = self.str_value(b)?.to_owned();
                 self.module(&name)
             }
-            "from" | "attr" => {
+            "from" => self.import_from(a, b),
+            "attr" => {
                 let name = self.str_value(b)?.to_owned();
-                match self.lookup_attr(a, &name) {
-                    Err(error) if op == "from" && error.kind == "AttributeError" => {
-                        let Value::Module { name: module, .. } = self.heap.get(a) else {
-                            return Err(error);
-                        };
-                        self.module(&format!("{module}.{name}"))
-                    }
-                    value => value,
-                }
+                self.lookup_attr(a, &name)
             }
             "setattr" => {
                 let name = self.str_value(b)?.to_owned();
@@ -361,6 +354,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         argv: NONE,
         sys_path: NONE,
         contexts: Vec::new(),
+        bytearray_exports: Vec::new(),
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,
@@ -763,6 +757,7 @@ impl Context {
                 .chain(self.codec_entries.roots())
                 .copied()
                 .chain(self.contexts.iter().copied())
+                .chain(self.bytearray_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
                 .chain([self.argv, self.sys_path, self.token_missing]),

@@ -142,6 +142,8 @@ impl Context {
                             | "object.__init__"
                             | "int.to_bytes"
                             | "list.pop"
+                            | "map.__iter__"
+                            | "map.__next__"
                     ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
@@ -210,6 +212,7 @@ impl Context {
                 "issubclass() arg 2 must be a class, a tuple of classes, or a union",
             ));
         }
+        self.require_checkable_protocol(parent)?;
         Ok(self.subclass(child, parent))
     }
 
@@ -297,8 +300,10 @@ impl Context {
             | Value::Code(_)
             | Value::Generator { .. }
             | Value::Module { .. }
-            | Value::ThreadLocal(_) => self.type_name(obj),
+            | Value::ThreadLocal(_)
+            | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
+            Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
             Value::Count { .. } => "itertools.count",
@@ -345,6 +350,7 @@ impl Context {
                             | "itertools.count"
                             | "itertools.repeat"
                             | super::thread_local::CLASS
+                            | super::thread_lock::CLASS
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -357,7 +363,12 @@ impl Context {
                     )
                 {
                     "type"
-                } else if builtins::is_builtin(name) || builtins::constructor_owner(name).is_some()
+                } else if builtins::is_builtin(name)
+                    || builtins::constructor_owner(name).is_some()
+                    || matches!(
+                        name.as_str(),
+                        "binascii.a2b_base64" | "binascii.b2a_base64" | "posix.fspath"
+                    )
                 {
                     "builtin_function_or_method"
                 } else {
@@ -438,6 +449,7 @@ impl Context {
             | ("frozenset", Value::Set { frozen: true, .. })
             | ("slice", Value::Slice(_))
             | ("range", Value::Range { .. })
+            | ("map", Value::Map { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
@@ -447,6 +459,7 @@ impl Context {
             | ("itertools.count", Value::Count { .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
+            | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 "urllib.parse.SplitResult",
@@ -648,6 +661,12 @@ impl Context {
                     return Ok(attribute);
                 }
             }
+            Value::Native(symbol) if symbol == "posix.fspath" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("fspath")),
+                "__module__" => return Ok(self.text("posix")),
+                "__self__" => return self.module("posix"),
+                _ => {}
+            },
             Value::Native(class) if class == "staticmethod" && name == "__get__" => {
                 return Ok(self.builtin("staticmethod.__get__"));
             }
@@ -697,9 +716,23 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
+            Value::Native(class) if class == "map" => match name {
+                "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text("map")),
+                "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
             Value::Native(class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
+            Value::Native(class) if class == super::thread_lock::CLASS => match name {
+                "__module__" => return Ok(self.text("_thread")),
+                "__name__" | "__qualname__" => return Ok(self.text("lock")),
+                attr if super::thread_lock::is_method(attr) => {
+                    return Ok(self.builtin(&format!("{class}.{attr}")));
+                }
                 _ => {}
             },
             Value::Native(class) if class == super::thread_local::CLASS => match name {
@@ -786,6 +819,27 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::Raised(error)
+                if matches!(error.kind.as_str(), "ImportError" | "ModuleNotFoundError")
+                    && matches!(name, "msg" | "name" | "path" | "name_from") =>
+            {
+                if name == "msg" {
+                    return Ok(match error.args.as_deref() {
+                        Some([one]) => *one,
+                        Some(_) => NONE,
+                        None => self.text(error.message),
+                    });
+                }
+                let Some(fields) = error.import else {
+                    return Ok(NONE);
+                };
+                let value = match name {
+                    "name" => fields.name.as_deref(),
+                    "path" => fields.path.as_deref(),
+                    _ => fields.name_from.as_deref(),
+                };
+                return Ok(value.map_or(NONE, |value| self.text(value)));
+            }
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {
@@ -825,6 +879,28 @@ impl Context {
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
                 return Ok(old.unwrap_or(self.token_missing));
+            }
+            Value::Native(builtin)
+                if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>
+            {
+                let short = builtin.rsplit('.').next().unwrap();
+                match name {
+                    "__name__" | "__qualname__" => return Ok(self.text(short)),
+                    "__module__" => return Ok(self.text("binascii")),
+                    "__base__" | "__bases__" => {
+                        let base = self.builtin(if short == "Error" {
+                            "ValueError"
+                        } else {
+                            "Exception"
+                        });
+                        return Ok(if name == "__base__" {
+                            base
+                        } else {
+                            self.alloc(Value::Tuple(vec![base]))
+                        });
+                    }
+                    _ => {}
+                }
             }
             Value::Native(builtin)
                 if name == "__name__" && self.builtins.get(&builtin) == Some(&obj) =>
@@ -869,6 +945,7 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
                 if name == "__dict__" {
                     return Ok(self.module_globals(scope));
@@ -922,7 +999,7 @@ impl Context {
     }
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
-        let base = self.string_storage(obj).unwrap_or(obj);
+        let base = self.scalar_value(obj);
         if name == "__new__" {
             match self.heap.get(base) {
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
@@ -1199,6 +1276,7 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
@@ -1235,46 +1313,47 @@ impl Context {
         self.alloc(Value::Instance {
             class,
             dictionary,
-            text_memory: None,
+            memory_stream: None,
             fields: HashMap::new(),
             scalar: None,
         })
     }
 
-    /// Allocate the immutable str payload while retaining the actual Python class.
-    pub(super) fn new_str(
+    /// Allocate the immutable string or bytes payload while retaining the Python class.
+    pub(super) fn new_string(
         &mut self,
+        kind: &str,
         class: Id,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let base = self.builtin("str");
+        let base = self.builtin(kind);
         if !self.subclass(class, base) {
             let message = match self.heap.get(class) {
                 Value::Class { name, .. } => {
-                    format!("str.__new__({name}): {name} is not a subtype of str")
+                    format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
                 }
                 Value::Native(name) if builtins::is_builtin_type(name) => {
-                    format!("str.__new__({name}): {name} is not a subtype of str")
+                    format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
                 }
                 _ => format!(
-                    "str.__new__(X): X is not a type object ({})",
+                    "{kind}.__new__(X): X is not a type object ({})",
                     self.type_name(class)
                 ),
             };
             return Err(Error::new("TypeError", message));
         }
-        let text = builtins::call(self, "str", args, kwargs)?;
+        let text = builtins::call(self, kind, args, kwargs)?;
         if class == base {
             return Ok(text);
         }
-        let text = self.string_storage(text).expect("str() returns a string");
+        let text = self.scalar_value(text);
         Ok(self.alloc(Value::Instance {
             class,
             fields: HashMap::new(),
             dictionary: None,
             scalar: Some(text),
-            text_memory: None,
+            memory_stream: None,
         }))
     }
 
@@ -1306,6 +1385,7 @@ impl Context {
                             "str"
                                 | "dict"
                                 | "list"
+                                | "map"
                                 | "set"
                                 | "int"
                                 | "frozenset"
@@ -1407,6 +1487,11 @@ impl Context {
                 if self.scope_data(scope).is_abstract {
                     return Err(self.abstract_class_error(scope, &name)?);
                 }
+                if self.is_protocol_declaration(callable)
+                    && self.class_attr(callable, "__init__").is_none()
+                {
+                    return Err(Error::new("TypeError", "Protocols cannot be instantiated"));
+                }
                 if self.classes.get("collections.abc.Callable") == Some(&callable) {
                     return Err(Error::new(
                         "TypeError",
@@ -1449,11 +1534,13 @@ impl Context {
                         fields,
                         dictionary: None,
                         scalar: None,
-                        text_memory: None,
+                        memory_stream: None,
                     }));
                 }
                 let new = self.class_attr(callable, "__new__");
-                let str_subclass = self.has_base(callable, "str");
+                let string_base = ["str", "bytes"]
+                    .into_iter()
+                    .find(|kind| self.has_base(callable, kind));
                 let instance = if let Some(new) = new {
                     let allocate = self.bind_attribute(new, NONE, callable)?;
                     let positional = std::iter::once(callable)
@@ -1464,8 +1551,8 @@ impl Context {
                         return Ok(instance);
                     }
                     instance
-                } else if str_subclass {
-                    self.new_str(callable, &args, &kwargs)?
+                } else if let Some(kind) = string_base {
+                    self.new_string(kind, callable, &args, &kwargs)?
                 } else {
                     let dictionary = self
                         .has_base(callable, "dict")
@@ -1476,7 +1563,9 @@ impl Context {
                     if self.call(init, args, kwargs)? != NONE {
                         return Err(Error::new("TypeError", "__init__ must return None"));
                     }
-                } else if new.is_none() && !str_subclass && (!args.is_empty() || !kwargs.is_empty())
+                } else if new.is_none()
+                    && string_base.is_none()
+                    && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(
                         "TypeError",
@@ -1657,6 +1746,20 @@ impl Context {
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
+        // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.
+        if let Some(&protocol) = self.classes.get("typing.Protocol")
+            && bases.iter().any(|&base| self.subclass(base, protocol))
+        {
+            self.bind(
+                scope,
+                "_is_protocol",
+                if bases.contains(&protocol) {
+                    TRUE
+                } else {
+                    FALSE
+                },
+            );
+        }
         super::typing::class_parameters(self, scope, original, &bases)?;
         let class = self.allocate_class(name.clone(), scope, bases)?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));

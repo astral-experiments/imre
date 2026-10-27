@@ -4,11 +4,12 @@ use crate::StrOwner;
 mod expandtabs;
 mod lowercase;
 mod normalization;
-mod translate;
+pub(crate) mod translate;
 pub(crate) mod urlquote;
 pub(crate) mod urlsplit;
 
 pub(crate) use expandtabs::expand_tabs;
+pub(crate) use lowercase::capitalize;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
@@ -878,19 +879,28 @@ pub unsafe extern "C" fn imre_str_find(
     let (source, needle) = unsafe { (&*value, &*needle) };
     // SAFETY: a nonzero start is an exact canonical integer handle.
     let start = (start != 0).then(|| unsafe { Int::borrow(start) });
-    find_text(source, needle, start.as_deref(), None).into_raw()
+    find_text(source, needle, start.as_deref(), None, false).into_raw()
 }
 
 /// Search a Python slice without converting its Unicode-scalar bounds to byte indices twice.
-pub(crate) fn find_text(source: &str, needle: &str, start: Option<&Int>, end: Option<&Int>) -> Int {
+pub(crate) fn find_text(
+    source: &str,
+    needle: &str,
+    start: Option<&Int>,
+    end: Option<&Int>,
+    reverse: bool,
+) -> Int {
     let found = search_start(source, start).and_then(|(begin, scalar)| {
         let end = end
             .and_then(|i| search_start(source, Some(i)))
             .map_or(source.len(), |(b, _)| b);
         let window = source.get(begin..end)?;
-        window
-            .find(needle)
-            .map(|offset| scalar + window[..offset].chars().count())
+        let offset = if reverse {
+            window.rfind(needle)
+        } else {
+            window.find(needle)
+        }?;
+        Some(scalar + window[..offset].chars().count())
     });
     found.map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)
 }
