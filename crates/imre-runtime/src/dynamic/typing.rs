@@ -65,7 +65,19 @@ pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
     match ctx.heap.get(id) {
         Value::Ellipsis => "...".to_owned(),
         Value::Native(name) => name.clone(),
-        Value::Class { name, scope, .. } => format!("{}.{name}", ctx.scope_data(*scope).module),
+        Value::Class { name, scope, .. } => {
+            let class_name = |attr| {
+                ctx.own_class_attr(id, attr)
+                    .and_then(|id| ctx.str_value(id).ok())
+            };
+            let module = class_name("__module__").unwrap_or(&ctx.scope_data(*scope).module);
+            let qualname = class_name("__qualname__").unwrap_or(name);
+            if module == "builtins" {
+                qualname.to_owned()
+            } else {
+                format!("{module}.{qualname}")
+            }
+        }
         Value::Instance { .. } if ctx.module_value("typing", "Final") == Some(id) => {
             "typing.Final".to_owned()
         }
