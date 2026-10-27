@@ -874,6 +874,7 @@ impl Context {
             self.builtin(builtins::exception_initializer(name));
         }
         let methods = match name {
+            "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
             "property" => property::METHODS,
             "int" => &["to_bytes"],

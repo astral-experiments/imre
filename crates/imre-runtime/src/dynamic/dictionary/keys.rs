@@ -334,6 +334,11 @@ impl Context {
         }
     }
 
+    /// Hash the stable arena handle without calling any Python special methods.
+    pub(in super::super) fn identity_hash(key: Id) -> i64 {
+        normalized(data_hash(&key.to_ne_bytes()))
+    }
+
     pub(in super::super) fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self);
@@ -349,6 +354,9 @@ impl Context {
         {
             if slot == NONE {
                 return Err(self.unhashable(key));
+            }
+            if matches!(self.heap.get(slot), Value::Native(name) if name == "object.__hash__") {
+                return Ok(Self::identity_hash(key));
             }
             let method = self.bind_attribute(slot, key, class)?;
             let returned = self.call(method, vec![], vec![])?;
@@ -445,6 +453,9 @@ impl Context {
                 Value::Float(f) => float_hash(*f, key),
                 Value::Complex(z) => normalized(float_hash(z.real, key))
                     .wrapping_add(1_000_003_i64.wrapping_mul(normalized(float_hash(z.imag, key)))),
+                Value::Native(_) if self.builtin_type_name(key) == Some("type") => {
+                    Self::identity_hash(key)
+                }
                 Value::Str(text) | Value::Native(text) => data_hash(text.as_bytes()),
                 Value::Bytes(bytes) => data_hash(bytes),
                 Value::None => 0xfca8_6420,
@@ -500,7 +511,7 @@ impl Context {
                 _ if !super::super::builtins::hashable(self, key) => {
                     return Err(self.unhashable(key));
                 }
-                _ => data_hash(&key.to_ne_bytes()),
+                _ => Self::identity_hash(key),
             }
         };
         Ok(normalized(hash))
