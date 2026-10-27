@@ -66,6 +66,32 @@ impl Context {
         }
     }
 
+    /// The base object wrappers see the class descriptor, but no instance dictionary.
+    pub(super) fn update_base_local_attribute(
+        &self,
+        obj: Id,
+        name: &str,
+        value: Option<Id>,
+    ) -> Result<()> {
+        if name != "__class__" {
+            return Err(self.missing_attribute(obj, name));
+        }
+        let message = match value {
+            None => "can't delete __class__ attribute".to_owned(),
+            Some(value) if self.builtin_type_name(value) != Some("type") => {
+                format!(
+                    "__class__ must be set to a class, not '{}' object",
+                    self.type_name(value)
+                )
+            }
+            Some(_) => {
+                "__class__ assignment only supported for mutable types or ModuleType subclasses"
+                    .to_owned()
+            }
+        };
+        Err(Error::new("TypeError", message))
+    }
+
     pub(super) fn update_local_attribute(
         &mut self,
         obj: Id,
@@ -79,20 +105,7 @@ impl Context {
             ));
         }
         if name == "__class__" {
-            let message = match value {
-                None => "can't delete __class__ attribute".to_owned(),
-                Some(value) if self.builtin_type_name(value) != Some("type") => {
-                    format!(
-                        "__class__ must be set to a class, not '{}' object",
-                        self.type_name(value)
-                    )
-                }
-                Some(_) => {
-                    "__class__ assignment only supported for mutable types or ModuleType subclasses"
-                        .to_owned()
-                }
-            };
-            return Err(Error::new("TypeError", message));
+            return self.update_base_local_attribute(obj, name, value);
         }
         let dict = self.local_dict(obj);
         if let Some(value) = value {
