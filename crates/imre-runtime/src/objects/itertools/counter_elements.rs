@@ -4,7 +4,7 @@ use super::*;
 /// repetition only when it reaches that entry.
 pub(in crate::objects) struct Elements {
     items: Option<crate::ObjectOwner>,
-    repeat: Option<Repeat>,
+    repeat: Option<Repeat<OwnedWord>>,
 }
 
 impl Elements {

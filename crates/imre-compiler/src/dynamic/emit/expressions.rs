@@ -1,4 +1,5 @@
 use ruff_python_ast as ast;
+use ruff_text_size::Ranged;
 
 use super::{Body, Function};
 
@@ -11,10 +12,14 @@ impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         match expr {
             ast::Expr::NoneLiteral(_) => "0".into(),
+            ast::Expr::EllipsisLiteral(_) => "3".into(),
             ast::Expr::BooleanLiteral(v) => if v.value { "2" } else { "1" }.into(),
             ast::Expr::NumberLiteral(v) => match &v.value {
                 ast::Number::Int(n) => self.integer(n),
-                _ => self.unsupported("non-integer numeric literal"),
+                ast::Number::Float(value) => self.lit(3, &value.to_le_bytes()),
+                ast::Number::Complex { real, imag } => {
+                    self.lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat())
+                }
             },
             ast::Expr::StringLiteral(v) => self.text(&v.value.to_string()),
             ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),
@@ -25,17 +30,14 @@ impl Function<'_, '_> {
             }
             ast::Expr::Subscript(v) => {
                 let object = self.expr(&v.value);
-                if let ast::Expr::Slice(s) = &*v.slice {
-                    let indices = self.op("list", &[]);
-                    for x in [&s.lower, &s.upper, &s.step] {
-                        let i = x.as_deref().map_or_else(|| "0".into(), |e| self.expr(e));
-                        self.op("append", &[&indices, &i]);
-                    }
-                    self.op("slice", &[&object, &indices])
-                } else {
-                    let key = self.expr(&v.slice);
-                    self.op("get", &[&object, &key])
-                }
+                let key = self.expr(&v.slice);
+                let span = self.expression_span(expr, &v.value, b'[');
+                self.op_at("get", &[&object, &key], span)
+            }
+            ast::Expr::Slice(slice) => {
+                let [start, stop, step] = [&slice.lower, &slice.upper, &slice.step]
+                    .map(|e| e.as_deref().map_or_else(|| "0".into(), |e| self.expr(e)));
+                self.op("slice_object", &[&start, &stop, &step])
             }
             ast::Expr::List(v) => self.display("list", &v.elts),
             ast::Expr::Set(v) => self.display("set", &v.elts),
@@ -92,9 +94,11 @@ impl Function<'_, '_> {
             ast::Expr::Call(v) => {
                 let callable = self.expr(&v.func);
                 let (args, kwargs) = self.arguments(&v.arguments);
-                self.op("call", &[&callable, &args, &kwargs])
+                let span = self.expression_span(expr, &v.func, b'(');
+                self.op_at("call", &[&callable, &args, &kwargs], span)
             }
             ast::Expr::Lambda(v) => self.define(
+                v.start(),
                 "<lambda>",
                 v.parameters.as_deref(),
                 None,
@@ -110,6 +114,24 @@ impl Function<'_, '_> {
                     result = self.op("+", &[&result, &part]);
                 }
                 result
+            }
+            ast::Expr::Generator(v) => {
+                let [generator] = v.generators.as_slice() else {
+                    return self.unsupported("generator expression with multiple for clauses");
+                };
+                if generator.is_async {
+                    return self.unsupported("async generator expression");
+                }
+                let iterable = self.expr(&generator.iter);
+                let iter = self.op("iter", &[&iterable]);
+                let step = self.define(
+                    v.start(),
+                    "<genexpr>",
+                    None,
+                    None,
+                    Body::Generator(generator, &v.elt),
+                );
+                self.op("generator", &[&step, &iter])
             }
             ast::Expr::ListComp(v) => {
                 self.comprehension("list", &v.generators, Element::Value(&v.elt))
@@ -240,6 +262,35 @@ impl Function<'_, '_> {
             out = self.op("+", &[&out, &value]);
         }
         out
+    }
+
+    /// Each resume uses the same lexical scope and advances the outer iterator before
+    /// evaluating filters or the yielded expression. None marks natural exhaustion.
+    pub(super) fn generator_step(&mut self, generator: &ast::Comprehension, element: &ast::Expr) {
+        let iter = self.lookup(".iterator");
+        let step = self.name("b");
+        let body = self.name("b");
+        let done = self.name("b");
+        self.jump(&step);
+        self.label(&step);
+        let more = self.op("more", &[&iter]);
+        let cond = self.value(&format!("icmp eq i64 {more}, 2"));
+        self.branch(&cond, &body, &done);
+        self.label(&body);
+        self.checkpoint(element);
+        let item = self.op("next", &[&iter]);
+        self.assign(&generator.target, &item);
+        for filter in &generator.ifs {
+            let value = self.expr(filter);
+            let yes = self.truth(&value);
+            let keep = self.name("b");
+            self.branch(&yes, &keep, &step);
+            self.label(&keep);
+        }
+        let item = self.expr(element);
+        let yielded = self.op("yielded", &[&item]);
+        self.end(&format!("ret i64 {yielded}"));
+        self.label(&done);
     }
 
     fn comprehension(

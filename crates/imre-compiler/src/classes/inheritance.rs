@@ -44,7 +44,16 @@ pub(super) fn resolve(
                 {
                     continue;
                 }
-                match graph.resolve(definition.module, argument) {
+                let origin = match argument {
+                    ast::Expr::Subscript(subscript)
+                        if matches!(graph.resolve(definition.module, &subscript.value),
+                        Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) =>
+                    {
+                        &*subscript.value
+                    }
+                    other => other,
+                };
+                match graph.resolve(definition.module, origin) {
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}
@@ -163,6 +172,82 @@ fn literal_field_annotation(
         .then_some(annotation)
 }
 
+/// Fold a constructor attribute annotation into the fixed layout. Python does not
+/// evaluate this annotation, so the checked method subsequently performs a normal store.
+pub(super) fn annotated_fields(
+    graph: &SourceGraph,
+    module: usize,
+    init: &mut ast::StmtFunctionDef,
+    fields: &mut Vec<Field>,
+) {
+    let Some(receiver) = init.parameters.iter_non_variadic_params().next() else {
+        return;
+    };
+    let params = init
+        .parameters
+        .iter_non_variadic_params()
+        .map(|p| (p.name().as_str(), p.annotation()))
+        .collect::<HashMap<_, _>>();
+    let locals = crate::narrowing::assigned_names(&init.body);
+    for statement in &mut init.body {
+        let (target, value, annotation) = match &*statement {
+            ast::Stmt::AnnAssign(a)
+                if let (ast::Expr::Attribute(target), Some(value)) = (&*a.target, &a.value) =>
+            {
+                (target, &**value, Some(&*a.annotation))
+            }
+            ast::Stmt::Assign(a) if let [ast::Expr::Attribute(target)] = a.targets.as_slice() => {
+                (target, &*a.value, None)
+            }
+            _ => continue,
+        };
+        if !matches!(&*target.value, ast::Expr::Name(n) if n.id.as_str() == receiver.name().as_str())
+        {
+            continue;
+        }
+        let proxy_arg = if let ast::Expr::Call(call) = value
+            && graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::WeakProxy))
+        {
+            let mut root = &*call.func;
+            while let ast::Expr::Attribute(attr) = root {
+                root = &attr.value;
+            }
+            root.as_name_expr()
+                .filter(|n| !params.contains_key(n.id.as_str()) && !locals.contains(n.id.as_str()))
+                .and_then(|_| call.arguments.args.first())
+        } else {
+            None
+        };
+        if let Some(field) = fields.iter_mut().find(|f| f.name == target.attr.as_str()) {
+            field.weak_proxy |= proxy_arg.is_some();
+        } else if let Some(annotation) = annotation.or_else(|| {
+            let name = proxy_arg?.as_name_expr()?.id.as_str();
+            params.get(name).copied().flatten()
+        }) {
+            fields.push(Field {
+                module,
+                name: target.attr.to_string(),
+                annotation: annotation.clone(),
+                weak_proxy: proxy_arg.is_some(),
+                default: None,
+                kw_only: false,
+                repr: true,
+                compare: true,
+            });
+        }
+        if let ast::Stmt::AnnAssign(assign) = statement
+            && let Some(value) = &assign.value
+        {
+            *statement = ast::Stmt::Assign(ast::StmtAssign {
+                node_index: ast::AtomicNodeIndex::NONE,
+                range: assign.range,
+                targets: vec![(*assign.target).clone()],
+                value: value.clone(),
+            });
+        }
+    }
+}
+
 pub(super) fn infer_fields(
     graph: &SourceGraph,
     module: usize,
@@ -239,6 +324,7 @@ pub(super) fn infer_fields(
                 module,
                 name: target.attr.to_string(),
                 annotation,
+                weak_proxy: false,
                 default: None,
                 kw_only: false,
                 repr: true,

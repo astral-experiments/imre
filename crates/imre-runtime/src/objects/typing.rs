@@ -21,6 +21,16 @@ static ATTRIBUTES: AttributeLayout = AttributeLayout(RecordDescriptor {
 });
 
 type Groups = HashMap<String, HashMap<String, Vec<(usize, OwnedWord)>>>;
+pub(crate) const OVERLOAD_DUMMY_ERROR: &str = "You should not call an overloaded function. A series of @overload-decorated functions outside a stub module should always be followed by an implementation that is not @overload-ed.";
+
+/// Re-executing a source site replaces its function without reordering other overloads.
+pub(crate) fn register_overload<L: Eq, F>(group: &mut Vec<(L, F)>, line: L, function: F) {
+    if let Some((_, previous)) = group.iter_mut().find(|(existing, _)| *existing == line) {
+        *previous = function;
+    } else {
+        group.push((line, function));
+    }
+}
 thread_local! {
     // Source ordinals are compiler-assigned and independent of native code folding.
     // These defaults contain strings and scalars only, never function owners.
@@ -99,13 +109,7 @@ pub unsafe extern "C" fn imre_typing_overload(function: *const usize) {
                     .entry(name.into())
                     .or_default();
                 let owner = WordKind::new(14).acquire(function as usize);
-                if let Some((_, previous)) =
-                    group.iter_mut().find(|(existing, _)| *existing == line)
-                {
-                    *previous = owner;
-                } else {
-                    group.push((line, owner));
-                }
+                register_overload(group, line, owner);
             })
         });
     }
@@ -176,8 +180,11 @@ pub extern "C" fn imre_typing_overload_dummy() -> *const Object {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_typing_call_stub() -> u8 {
-    super::exceptions::Error::new(super::exceptions::Kind::NotImplementedError,
-        "You should not call an overloaded function. A series of @overload-decorated functions outside a stub module should always be followed by an implementation that is not @overload-ed.").raise();
+    super::exceptions::Error::new(
+        super::exceptions::Kind::NotImplementedError,
+        OVERLOAD_DUMMY_ERROR,
+    )
+    .raise();
     0
 }
 

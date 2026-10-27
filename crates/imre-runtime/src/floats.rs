@@ -244,6 +244,14 @@ pub unsafe extern "C" fn imre_float_parse(value: *const Str) -> f64 {
     )
 }
 
+/// Apply the float grammar to ASCII buffer contents.
+pub(crate) fn parse_bytes(bytes: &[u8]) -> Option<f64> {
+    bytes
+        .is_ascii()
+        .then(|| std::str::from_utf8(bytes).expect("ASCII is valid UTF-8"))
+        .and_then(parse)
+}
+
 /// Parses the ASCII byte grammar without applying Unicode text normalization.
 ///
 /// # Safety
@@ -252,10 +260,7 @@ pub unsafe extern "C" fn imre_float_parse(value: *const Str) -> f64 {
 pub unsafe extern "C" fn imre_bytes_float(value: *const Bytes) -> f64 {
     // SAFETY: the caller keeps this immutable bytes allocation alive.
     let bytes = unsafe { &*value };
-    let parsed = bytes
-        .is_ascii()
-        .then(|| std::str::from_utf8(bytes).expect("ASCII is valid UTF-8"))
-        .and_then(parse);
+    let parsed = parse_bytes(bytes);
     finish(
         parsed.ok_or_else(|| Error::new(Kind::ValueError, "could not convert bytes to float")),
         0.0,
@@ -338,7 +343,7 @@ pub unsafe extern "C" fn imre_int_float_compare(integer: usize, float: f64) -> i
 /// ties to even. Scaling the integers, rather than converting both operands,
 /// permits finite results such as `10**400 / 10**400` and avoids double rounding
 /// at the subnormal boundary. Only the final sign bit is applied afterward.
-fn ratio(left: &Int, right: &Int) -> Result<f64> {
+pub(super) fn ratio(left: &Int, right: &Int) -> Result<f64> {
     // Both integer conversions are exact in this range, so hardware division
     // has the same single rounding as the arbitrary-precision path below.
     if let (Some(left), Some(right)) = (left.as_small(), right.as_small())

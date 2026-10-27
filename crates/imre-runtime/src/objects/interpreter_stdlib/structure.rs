@@ -2,19 +2,20 @@
 
 #[derive(Clone, Copy)]
 struct Field {
+    code: u8,
     offset: usize,
     count: usize,
     width: usize,
 }
 
-struct Format {
+pub(crate) struct StructFormat {
     little_endian: bool,
-    size: usize,
+    pub(crate) size: usize,
     fields: Vec<Field>,
 }
 
-impl Format {
-    fn parse(format: &str) -> Result<Self, String> {
+impl StructFormat {
+    pub(crate) fn parse(format: &str) -> Result<Self, String> {
         let mut chars = format.bytes().peekable();
         let prefix = if matches!(chars.peek(), Some(b'@' | b'=' | b'<' | b'>' | b'!')) {
             chars.next().unwrap()
@@ -69,6 +70,7 @@ impl Format {
                 .filter(|&size| size <= isize::MAX as usize)
                 .ok_or(overflow)?;
             result.fields.push(Field {
+                code: c,
                 offset,
                 count,
                 width,
@@ -79,37 +81,65 @@ impl Format {
         }
         Ok(result)
     }
+
+    pub(crate) fn item_count(&self) -> usize {
+        self.fields.iter().map(|field| field.count).sum()
+    }
+
+    /// Fill the checked, zero-padded output in Python argument order.
+    pub(crate) fn write_words<E>(
+        &self,
+        output: &mut [u8],
+        mut word: impl FnMut(u8, usize) -> Result<u64, E>,
+    ) -> Result<(), E> {
+        for field in &self.fields {
+            let end = field.offset + field.count * field.width;
+            for target in output[field.offset..end].chunks_exact_mut(field.width) {
+                let value = word(field.code, field.width)?;
+                if self.little_endian {
+                    target.copy_from_slice(&value.to_le_bytes()[..field.width]);
+                } else {
+                    target.copy_from_slice(&value.to_be_bytes()[8 - field.width..]);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn unpack(&self, buffer: &[u8]) -> Result<Vec<u64>, String> {
+        if buffer.len() != self.size {
+            return Err(format!("unpack requires a buffer of {} bytes", self.size));
+        }
+        let mut result = Vec::new();
+        for &Field {
+            offset,
+            count,
+            width,
+            ..
+        } in &self.fields
+        {
+            for field in buffer[offset..offset + count * width].chunks_exact(width) {
+                let mut word = [0u8; 8];
+                let value = if self.little_endian {
+                    word[..width].copy_from_slice(field);
+                    u64::from_le_bytes(word)
+                } else {
+                    word[8 - width..].copy_from_slice(field);
+                    u64::from_be_bytes(word)
+                };
+                result.push(value);
+            }
+        }
+        Ok(result)
+    }
 }
 
 pub(crate) fn struct_calcsize(format: &str) -> Result<usize, String> {
-    Ok(Format::parse(format)?.size)
+    Ok(StructFormat::parse(format)?.size)
 }
 
 pub(crate) fn struct_unpack(format: &str, buffer: &[u8]) -> Result<Vec<u64>, String> {
-    let format = Format::parse(format)?;
-    if buffer.len() != format.size {
-        return Err(format!("unpack requires a buffer of {} bytes", format.size));
-    }
-    let mut result = Vec::new();
-    for Field {
-        offset,
-        count,
-        width,
-    } in format.fields
-    {
-        for field in buffer[offset..offset + count * width].chunks_exact(width) {
-            let mut word = [0u8; 8];
-            let value = if format.little_endian {
-                word[..width].copy_from_slice(field);
-                u64::from_le_bytes(word)
-            } else {
-                word[8 - width..].copy_from_slice(field);
-                u64::from_be_bytes(word)
-            };
-            result.push(value);
-        }
-    }
-    Ok(result)
+    StructFormat::parse(format)?.unpack(buffer)
 }
 
 #[cfg(test)]

@@ -24,6 +24,8 @@ for value in [1, 0, 432, -1, 0xFFFF, 0xFFFF0000, 1 << 100, -(1 << 100) + 7]:
 print(adler32(b"abc"))
 print(adler32(b"def", adler32(b"abc")) == adler32(b"abcdef"))
 print(adler32(b"x" * 8193, True))
+# zlib's one-byte fast path preserves a noncanonical high half.
+print(adler32(b"\x00", 0xFFFF_FFF0))
 print(adler32(data(), seed()))
 try:
     print(adler32("not bytes", seed()))

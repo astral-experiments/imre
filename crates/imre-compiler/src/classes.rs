@@ -98,13 +98,61 @@ pub(crate) struct Field {
     pub(crate) module: usize,
     pub(crate) name: String,
     pub(crate) annotation: ast::Expr,
+    pub(crate) weak_proxy: bool,
     pub(crate) default: Option<FieldDefault>,
     pub(crate) kw_only: bool,
     pub(crate) repr: bool,
     pub(crate) compare: bool,
 }
 
+fn context_method(name: &str) -> bool {
+    matches!(name, "__enter__" | "__exit__")
+}
+
+fn empty_slots(name: &str, value: &ast::Expr) -> bool {
+    name == "__slots__" && matches!(value, ast::Expr::Tuple(t) if t.elts.is_empty())
+}
+
 impl Classes {
+    pub(crate) fn has_empty_slots(&self, child: usize) -> bool {
+        std::iter::once(&child)
+            .chain(&self.definitions[child].bases)
+            .all(|&id| {
+                self.definitions[id].node.body.iter().any(|statement| {
+                    let ast::Stmt::Assign(a) = statement else { return false };
+                    matches!(a.targets.as_slice(), [ast::Expr::Name(n)] if empty_slots(n.id.as_str(), &a.value))
+                })
+            })
+    }
+
+    pub(crate) fn subclass(&self, graph: &SourceGraph, child: usize, parent: usize) -> bool {
+        let bases = &self.definitions[child].bases;
+        if child == parent || bases.contains(&parent) {
+            return true;
+        }
+        graph.is_abstract_context_manager(self.definitions[parent].definition)
+            && ["__enter__", "__exit__"].iter().all(|&name| {
+                std::iter::once(&child).chain(bases).find_map(|&id| {
+                    self.definitions[id]
+                        .node
+                        .body
+                        .iter()
+                        .rev()
+                        .find_map(|stmt| match stmt {
+                            ast::Stmt::FunctionDef(f) if f.name.as_str() == name => Some(true),
+                            ast::Stmt::Assign(a)
+                                if a.targets.iter().any(|target| {
+                                    target.as_name_expr().is_some_and(|n| n.id.as_str() == name)
+                                }) =>
+                            {
+                                Some(!matches!(&*a.value, ast::Expr::NoneLiteral(_)))
+                            }
+                            _ => None,
+                        })
+                }) == Some(true)
+            })
+    }
+
     /// The entry module may need to execute class bodies even without module globals.
     pub(crate) fn has_class_values(&self, module: usize) -> bool {
         self.definitions.iter().any(|class| {
@@ -348,6 +396,10 @@ fn collect_class(
             && let Some(binding) = base.and_then(|(_, parent)| parent.static_bindings.get(name))
         {
             match (binding, statement) {
+                (_, ast::Stmt::Assign(a)) if empty_slots(name, &a.value) => {}
+                (_, ast::Stmt::FunctionDef(_)) if context_method(name) => {
+                    static_bindings.remove(name);
+                }
                 (ClassValue::Runtime { .. }, ast::Stmt::Assign(_)) => {}
                 (ClassValue::String(_), ast::Stmt::Assign(assign))
                     if matches!(&*assign.value, ast::Expr::StringLiteral(_)) => {}
@@ -465,14 +517,17 @@ fn collect_class(
                         || matches!(stmt, ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_) | ast::Expr::EllipsisLiteral(_)))) {
                         return Err(module.error(method, "an abstract record method must be a declaration on an ABC"));
                     }
-                    if !names.insert(name.to_owned()) {
-                        return Err(module.error(method, "duplicate abstract method"));
-                    }
                     abstract_methods.insert(name.to_owned());
-                    class_bindings.insert(name.to_owned());
-                    continue;
+                    if !graph.is_abstract_context_manager(definition) {
+                        if !names.insert(name.to_owned()) {
+                            return Err(module.error(method, "duplicate abstract method"));
+                        }
+                        class_bindings.insert(name.to_owned());
+                        continue;
+                    }
+                } else {
+                    abstract_methods.remove(name);
                 }
-                abstract_methods.remove(name);
                 if name == "__hash__" {
                     if hash.is_some() || !dataclass.is_some_and(|d| d.frozen && d.eq) {
                         return Err(module
@@ -493,27 +548,32 @@ fn collect_class(
                     name,
                     "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 ) || (mapping && name == "__len__");
-                let close_context = module.closes_context(node.name.as_str())
-                    && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
                     && !matches!(
                         name,
-                        "__init__" | "__fspath__" | "__getitem__" | "__setitem__"
+                        "__init__" | "__call__" | "__fspath__" | "__getitem__" | "__setitem__"
                     )
                     && !(name == "__getattr__" && graph.is_http_handler(definition))
                     && !unary_protocol
-                    && !close_context
+                    && !context_method(name)
                     && !(mapping && name == "__contains__")
                     && !(name == "__post_init__" && dataclass.is_some())
-                    && !(module.is_bundled("socketserver")
-                        && node.name.as_str() == "TCPServer"
-                        && matches!(name, "__enter__" | "__exit__"))
                 {
                     return Err(
                         module.error(method, "unsupported special method on a fixed-layout class")
                     );
                 }
-                let kind = method_kind(graph, definition.module, method, &class_bindings)?;
+                let kind = if abstract_method {
+                    MethodKind::Instance
+                } else {
+                    method_kind(graph, definition.module, method, &class_bindings)?
+                };
+                if name == "__call__" && kind != MethodKind::Instance {
+                    return Err(module.error(
+                        method,
+                        "a fixed callable record requires an instance __call__ method",
+                    ));
+                }
                 if name == "__setitem__"
                     && (kind != MethodKind::Instance
                         || method.parameters.len() != 3
@@ -680,19 +740,21 @@ fn collect_class(
                         })
                     }) =>
             {
-                if !names.insert(name.id.to_string())
-                    || name.id.starts_with("__")
+                let member = name.id.as_str();
+                let protocol = context_method(member);
+                let slots = empty_slots(member, &assign.value);
+                if !names.insert(member.to_owned())
+                    || (member.starts_with("__") && !protocol && !slots)
                     || base.is_some_and(|(_, b)| {
-                        b.fields.iter().any(|f| f.name == name.id.as_str())
-                            || b.methods
-                                .iter()
-                                .any(|m| m.name.as_str() == name.id.as_str())
-                            || b.exception_aliases.contains_key(name.id.as_str())
+                        b.fields.iter().any(|f| f.name == member)
+                            || (!protocol && b.methods.iter().any(|m| m.name.as_str() == member))
+                            || b.exception_aliases.contains_key(member)
                     })
                 {
                     return Err(module.error(name, "duplicate or reserved static class binding"));
                 }
-                class_bindings.insert(name.id.to_string());
+                abstract_methods.remove(member);
+                class_bindings.insert(member.to_owned());
                 static_bindings.insert(name.id.to_string(), binding);
             }
             ast::Stmt::Assign(assign)
@@ -737,6 +799,7 @@ fn collect_class(
                     module: definition.module,
                     name: name.clone(),
                     annotation: annotation.clone(),
+                    weak_proxy: false,
                     default: None,
                     kw_only: false,
                     repr: true,
@@ -747,17 +810,20 @@ fn collect_class(
     }
     if !is_enum
         && dataclass.is_none()
-        && fields.len() == inherited_fields.len()
         && let Some(init) = initializer
     {
-        inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
-        // A write to inherited or local class data creates an instance shadow.
-        fields.retain(|f| {
-            !matches!(
-                static_bindings.get(&f.name),
-                Some(ClassValue::Runtime { .. })
-            )
-        });
+        let infer = fields.len() == inherited_fields.len();
+        inheritance::annotated_fields(graph, definition.module, &mut methods[init], &mut fields);
+        if infer {
+            inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+            // A write to inherited or local class data creates an instance shadow.
+            fields.retain(|f| {
+                !matches!(
+                    static_bindings.get(&f.name),
+                    Some(ClassValue::Runtime { .. })
+                )
+            });
+        }
     }
     if fields
         .iter()

@@ -71,7 +71,7 @@ impl Checker<'_> {
         }))
     }
 
-    fn known_nonbuffer_type(&self, ty: Type) -> Option<&str> {
+    pub(super) fn known_nonbuffer_type(&self, ty: Type) -> Option<&str> {
         match ty {
             Type::Str | Type::StrLiteral(_) => Some("str"),
             // Python classes can implement the buffer protocol.

@@ -27,6 +27,14 @@ use super::{Object, Storage, StorageCell, Str, fail, object};
 mod os;
 pub(super) use os::Filename;
 
+#[derive(Clone, Debug)]
+pub(crate) struct OsErrorArgs {
+    pub(crate) errno: i64,
+    pub(crate) description: String,
+    /// Both path fields are available when the native exception contains text paths or no paths.
+    pub(crate) text_paths: Option<[Option<String>; 2]>,
+}
+
 #[repr(C)]
 pub struct NamedDescriptor {
     name: *const u8,
@@ -109,6 +117,8 @@ pub(crate) enum Kind {
     TimeoutError = 51,
     // Warning exception identities use a separate block from module errors and filter categories.
     UnidiffParseError = 52,
+    ReferenceError = 53,
+    BufferError = 54,
     Warning = 80,
     RuntimeWarning = 81,
     DeprecationWarning = 82,
@@ -181,6 +191,8 @@ impl Kind {
             50 => Self::InterruptedError,
             51 => Self::TimeoutError,
             52 => Self::UnidiffParseError,
+            53 => Self::ReferenceError,
+            54 => Self::BufferError,
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
             82 => Self::DeprecationWarning,
@@ -201,6 +213,8 @@ impl Kind {
             Self::ValueError => "ValueError",
             Self::AssertionError => "AssertionError",
             Self::RuntimeError => "RuntimeError",
+            Self::ReferenceError => "ReferenceError",
+            Self::BufferError => "BufferError",
             Self::EOFError => "EOFError",
             Self::OSError => "OSError",
             Self::ShutilError => "Error",
@@ -853,6 +867,38 @@ impl Error {
 
     pub(crate) fn index() -> Self {
         Self::new(Kind::IndexError, "list index out of range")
+    }
+
+    /// Copy the two original OS arguments when transferring a kernel error to boxed Python.
+    pub(crate) fn os_args(&self) -> Option<OsErrorArgs> {
+        if !self.kind.matches(Kind::OSError) {
+            return None;
+        }
+        let Some(Payload::Arguments(arguments)) = &self.payload else {
+            return None;
+        };
+        let [code, description] = arguments.args.as_slice() else {
+            return None;
+        };
+        if code.kind.raw() != 2 || description.kind.raw() != 3 {
+            return None;
+        }
+        let text_path = |path: Option<&Filename>| match path {
+            Some(Filename::Str(path)) => Some(Some(path.to_string())),
+            None => Some(None),
+            Some(_) => None,
+        };
+        let paths = arguments.os_paths.as_deref();
+        let first = text_path(paths.map(|paths| &paths.first));
+        let second = text_path(paths.and_then(|paths| paths.second.as_ref()));
+        // SAFETY: both owned argument words have the verified integer and string kinds.
+        unsafe {
+            Some(OsErrorArgs {
+                errno: crate::Int::borrow(code.word).to_i64()?,
+                description: (&*(description.word as *const Str)).to_string(),
+                text_paths: first.zip(second).map(|(first, second)| [first, second]),
+            })
+        }
     }
 
     /// Preserve the native exception class and its formatted Python message.

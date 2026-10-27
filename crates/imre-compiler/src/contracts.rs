@@ -66,6 +66,8 @@ impl Builtin {
             Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
             Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
+            Self::MarkCoroutine(_) => Contract::new(false, Unknown),
+            Self::IsCoroutineFunction => Contract::new(false, PreservesOwners),
             Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
             Self::Repr => Contract::new(true, Unknown),
             Self::DefaultRecordRepr => Contract::new(true, PreservesLists),
@@ -86,7 +88,7 @@ impl Builtin {
             Self::Str if args.first().is_some_and(|e| e.ty == Type::Int) => {
                 Contract::new(true, PreservesOwners)
             }
-            Self::Str => Contract::new(true, PreservesLists),
+            Self::Str | Self::DecimalIntegerText => Contract::new(true, PreservesLists),
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::Calendar(op) => Contract::new(
                 matches!(
@@ -108,6 +110,7 @@ impl Builtin {
                 PreservesOwners,
             ),
             Self::Adler32 => Contract::new(false, PreservesLists),
+            Self::HmacCompareDigest { text } => Contract::new(*text, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -613,6 +616,8 @@ impl Builtin {
             | Self::GzipOpen
             | Self::BytesIo
             | Self::StringIo(_)
+            | Self::WeakProxyNew
+            | Self::WeakProxyTarget
             | Self::ContextVar(_)
             | Self::BinarySeek
             | Self::BinaryTell
@@ -717,6 +722,7 @@ impl Builtin {
             | Self::DictIter(_)
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
+            | Self::WeakProxyCallable
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
@@ -814,6 +820,12 @@ impl Builtin {
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
             Self::FunctionWrappedSet => {
                 matches!(result, Type::Callable(_)) && signature(&[result, result], result)
+            }
+            Self::IsCoroutineFunction => {
+                matches!(args, [arg] if matches!(arg.ty, Type::Callable(_))) && result == Type::Bool
+            }
+            Self::MarkCoroutine(_) => {
+                matches!(result, Type::Callable(_)) && signature(&[result], result)
             }
             Self::FunctionWrappedGet => {
                 matches!(result, Type::Callable(_)) && signature(&[result], result)
@@ -998,7 +1010,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || name.starts_with("fn_")
         || matches!(
             name,
-            "imre_mktime"
+            "imre_weak_proxy_new"
+                | "imre_weak_proxy_target"
+                | "imre_mktime"
                 | "imre_mktime_indexed"
                 | "imre_mktime_offset"
                 | "imre_time_sequence_length"
@@ -1016,6 +1030,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_typing_call_stub"
                 | "imre_random_bits"
                 | "imre_random_choice_index"
+                | "imre_secrets_choice_index"
                 | "imre_random_progression"
                 | "imre_function_get_wrapped"
                 | "imre_int_pow"
@@ -1114,6 +1129,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_count"
                 | "imre_bytes_list"
                 | "imre_bytes_contains_int"
+                | "imre_hmac_compare_digest_str"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
@@ -1247,7 +1263,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_zip_namelist"
                 | "imre_zip_close"
                 | "imre_int_str"
+                | "imre_decimal_int_text"
                 | "imre_int_parse"
+                | "imre_int_parse_hex"
                 | "imre_int_float"
                 | "imre_float_int"
                 | "imre_float_parse"

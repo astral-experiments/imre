@@ -51,8 +51,15 @@ def current():
     print(first(), second())
     print(partial(getattr, first).func is getattr)
     hole = partial(combine, Placeholder, 2)
-    nested_hole = partial(hole, Placeholder)
+    nested_hole = partial(hole, Placeholder, 4)
     print(Placeholder is Placeholder, hole(1), nested_hole(3))
+    for function in (combine, hole):
+        try:
+            partial(function, Placeholder)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("accepted a trailing Placeholder")
     try:
         hole()
     except TypeError as error:

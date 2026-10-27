@@ -47,6 +47,8 @@ pub(crate) enum Type {
     /// Private, owning accumulator for a tuple display with runtime arity.
     TupleBuffer,
     Class(usize),
+    /// A weak proxy owns its handle independently of the target record.
+    WeakProxy(usize),
     List(usize),
     Dict(usize),
     /// A ChainMap owner, parameterized by the exact dictionary shape of its maps.
@@ -344,6 +346,7 @@ impl std::fmt::Display for Type {
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ObjectValue => "object value",
+            Self::WeakProxy(_) => "weakref.proxy",
             Self::ReadOnlyObjectMapping => "Mapping[str, object]",
             Self::ImportException => "ImportError",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
@@ -846,15 +849,16 @@ pub(crate) enum RandomOperation {
     Seed,
     Float,
     Bits,
-    ChoiceIndex,
+    ChoiceIndex { secure: bool },
     Randint,
     Randrange,
     RandrangeOne,
-    ChoiceRange,
+    ChoiceRange { secure: bool },
 }
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    DecimalIntegerText,
     Random(RandomOperation),
     Linecache(LinecacheOperation, Type, bool),
     Repeat,
@@ -916,6 +920,8 @@ pub(crate) enum Builtin {
     AnnotationRef,
     AnnotationIs,
     StaticFunction(usize),
+    IsCoroutineFunction,
+    MarkCoroutine(usize),
     FunctionWrappedSet,
     FunctionWrappedGet,
     StrEnumValue,
@@ -1180,6 +1186,9 @@ pub(crate) enum Builtin {
     Socket(SocketOp),
     CodecWriter(WriterOperation),
     Sha1Hex,
+    HmacCompareDigest {
+        text: bool,
+    },
     Sha1New,
     Sha256Hex,
     Sha256New,
@@ -1270,6 +1279,9 @@ pub(crate) enum Builtin {
     },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
+    WeakProxyNew,
+    WeakProxyTarget,
+    WeakProxyCallable,
     FormatCursor {
         split: bool,
     },

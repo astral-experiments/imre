@@ -1,6 +1,6 @@
 //! Scalar sorting, callback-based sorting, and UTF-8 builders.
 
-mod comparator;
+pub(super) mod comparator;
 
 use crate::StrOwner;
 use std::cmp::Ordering;

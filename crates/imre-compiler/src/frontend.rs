@@ -12,6 +12,7 @@ use crate::narrowing;
 use crate::types::Types;
 
 mod annotations;
+pub(crate) use annotations::{parameter_annotations, spelling as annotation_spelling};
 mod argparse;
 mod ascii;
 mod assertion_syntax;
@@ -130,6 +131,7 @@ mod unittest_setup;
 mod unpacking;
 mod urlsplit;
 mod warnings;
+mod weakref;
 mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
@@ -137,6 +139,7 @@ pub(crate) use caller_cache::CallerCache;
 pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
+pub(crate) use function_text::docstring;
 use module_values::{Initialization, ModuleValues};
 
 #[derive(Clone)]
@@ -255,6 +258,16 @@ impl ClassInfo {
                                     &field.annotation,
                                     "imre.struct fields must be float or bool",
                                 ));
+                            }
+                            if field.weak_proxy {
+                                let Type::Class(id) = ty else {
+                                    return Err(error(
+                                        &graph.modules[field.module].source,
+                                        &field.annotation,
+                                        "a weak proxy field requires a record annotation",
+                                    ));
+                                };
+                                return Ok(Type::WeakProxy(id));
                             }
                             records::field_default(
                                 field,
@@ -482,6 +495,8 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
+        "ReferenceError" => return Some(53),
+        "BufferError" => return Some(54),
         "BlockingIOError" => return Some(44),
         "ConnectionError" => return Some(45),
         "BrokenPipeError" => return Some(46),
@@ -617,7 +632,7 @@ pub(crate) fn lower_with_caller_cache(
                         graph.runtime_overload(module_id, function.name.range());
                         typing::strip_overload(&mut function);
                     }
-                    if cached.is_some() {
+                    if cached.is_some() || inspect::marks_function(graph, module_id, &function) {
                         function.decorator_list.clear();
                     }
                     let element = native_generators::item_type(
@@ -885,12 +900,15 @@ pub(crate) fn lower_with_caller_cache(
         }
     }
     let initializer_start = definitions.len();
-    let class_globals = classes.declarations.has_class_values(graph.entry);
-    let helpers = Helpers::new(definitions.len() + graph.initializers(class_globals).count());
+    let entry_declarations = classes.declarations.has_class_values(graph.entry)
+        || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
+            matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
+        });
+    let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for (module_id, range) in graph.initializers(class_globals) {
+    for (module_id, range) in graph.initializers(entry_declarations) {
         let checker = Checker::new(
             graph,
             module_id,
@@ -1882,6 +1900,9 @@ fn annotation_with_aliases(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(value) if matches!(graph.resolve_type(module, &value.value), Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) => {
+            nested(&value.value)
+        }
         ast::Expr::Subscript(value)
             if matches!(&*value.value, ast::Expr::Name(name) if name.id.as_str() == "type")
                 && graph.resolve_type(module, &value.value).is_none() =>
@@ -3107,7 +3128,7 @@ impl<'a> Checker<'a> {
                     let value = self.class_attribute(attribute, class, None, Some(concrete))?;
                     return self.coerce(value, expected, expression);
                 }
-                let receiver = self.expr(&attribute.value)?;
+                let receiver = Self::weak_target(self.expr(&attribute.value)?);
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return self.coerce(wrapped, expected, expression);
                 }
@@ -4543,7 +4564,7 @@ impl<'a> Checker<'a> {
                     self.expect(element, result, statement)?;
                     Some(Statement::AugmentItem(list, index, op, value))
                 } else if let ast::Expr::Attribute(target) = &*assign.target {
-                    let receiver = self.expr(&target.value)?;
+                    let receiver = Self::weak_target(self.expr(&target.value)?);
                     if let Some(class) = self.writable_property(receiver.ty, target) {
                         let slot = self.hidden(receiver.ty);
                         let old =
@@ -5898,6 +5919,15 @@ impl<'a> Checker<'a> {
         })
     }
 
+    fn object_runtime_export(&self, name: &str, node: &impl Ranged) -> String {
+        self.graph.needs_object_runtime.set(true);
+        error(
+            self.source,
+            node,
+            &format!("{name} requires native Python object operations"),
+        )
+    }
+
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Attribute(attribute) = expression
             && let Some(field) = self.mime_attribute(attribute)
@@ -5923,6 +5953,9 @@ impl<'a> Checker<'a> {
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
+        }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::AttrGetter)) {
+            return Err(self.runtime_attrgetter(expression));
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::PopenActive)) {
             return Ok(Expr {
@@ -6116,6 +6149,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::ObjectRuntimeExport(name) => {
+                    return Err(self.object_runtime_export(name, expression));
+                }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
                     return Ok(Expr {
@@ -6656,6 +6692,19 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if values.iter().any(|v| matches!(v.ty, Type::WeakProxy(_))) {
+                    return self.weak_proxy_comparison(values, &compare.ops, expression);
+                }
+                if values
+                    .iter()
+                    .any(|value| matches!(value.ty, Type::Class(id) if self.decimal_class(id)))
+                {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "native Decimal numeric comparisons are unsupported",
+                    ));
+                }
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
                     && values
                         .iter()
@@ -7380,6 +7429,16 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::WeakProxy(class) = receiver.ty
+                    && attribute.attr.as_str() == "__class__"
+                {
+                    return self.dispatch_record(
+                        class,
+                        Self::weak_target(receiver),
+                        attribute,
+                        |checker, layout, _| Ok(checker.record_class_object(layout)),
+                    );
+                }
                 if let Some(layout) = self.types.dispatcher(receiver.ty)
                     && let Some(value) =
                         self.dispatch_attribute(&receiver, layout, attribute.attr.as_str())
@@ -7569,7 +7628,7 @@ impl<'a> Checker<'a> {
                 } else {
                     Self::exception_record(receiver)
                 };
-                let receiver = self.checked_record_receiver(receiver, attribute);
+                let receiver = self.checked_record_receiver(Self::weak_target(receiver), attribute);
                 if let Type::IntEnum(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty
                 {
                     match attribute.attr.as_str() {
@@ -7966,6 +8025,16 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(local) = self.local_class(&call.func)?
+            && let Some(base) = local.abstract_base
+            && !local.abstract_methods.is_empty()
+        {
+            let message = mapping_abc::abstract_message(&local.name, &local.abstract_methods);
+            return self.abstract_class_call(base, call, message);
+        }
+        if let Some(value) = self.literal_attrgetter_call(call)? {
+            return Ok(value);
+        }
         if let Some(method) = self.request_method_lookup(call)? {
             return Ok(method);
         }
@@ -8597,6 +8666,9 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::WeakProxy)) => {
+                return self.weak_proxy(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::UnicodeNormalize { check })) => {
                 return self.unicode_normalize(call, check);
             }
@@ -8627,6 +8699,9 @@ impl<'a> Checker<'a> {
                 op @ (Intrinsic::Sha1 | Intrinsic::Sha256 | Intrinsic::HashNew),
             )) => {
                 return self.hash_constructor(call, op);
+            }
+            Some(Binding::Intrinsic(Intrinsic::HmacCompareDigest)) => {
+                return self.hmac_compare_digest(call);
             }
             Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
             Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
@@ -8672,6 +8747,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
+                return Err(self.object_runtime_export(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::AttrGetter)) => {
+                return Err(self.runtime_attrgetter(call));
+            }
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
@@ -8740,7 +8821,9 @@ impl<'a> Checker<'a> {
                 return self.subprocess_list2cmdline(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Random(op))) => return self.random_call(op, call),
-            Some(Binding::Intrinsic(Intrinsic::RandomChoice)) => return self.random_choice(call),
+            Some(Binding::Intrinsic(Intrinsic::RandomChoice { secure })) => {
+                return self.random_choice(call, secure);
+            }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
@@ -8822,6 +8905,9 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
                 return self.is_method_descriptor(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::InspectCoroutine { mark })) => {
+                return self.inspect_coroutine(call, mark);
             }
             Some(Binding::Intrinsic(Intrinsic::InspectGetattrStatic)) => {
                 return self.static_attribute(call);
@@ -9070,13 +9156,31 @@ impl<'a> Checker<'a> {
                 && let (Some(child), Some(parent)) =
                     (self.class_reference(child), self.class_reference(parent))
             {
-                let result = child == parent
-                    || self.classes.declarations.definitions[child]
-                        .bases
-                        .contains(&parent);
+                let result = self
+                    .classes
+                    .declarations
+                    .subclass(self.graph, child, parent);
                 return Ok(Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Bool(result),
+                });
+            }
+            if let [child, parent] = call.arguments.args.as_ref()
+                && call.arguments.keywords.is_empty()
+                && let Some(Binding::Definition(parent)) = self.resolve(parent)
+                && self.graph.is_abstract_context_manager(parent)
+                && let Some(local) = self.local_class(child)?
+            {
+                let nominal = local.abstract_base.is_some_and(|base| {
+                    let classes = &self.classes.declarations;
+                    classes.subclass(self.graph, base, classes.ids[&parent])
+                });
+                let protocol = ["__enter__", "__exit__"]
+                    .iter()
+                    .all(|name| local.attributes.get(*name) == Some(&Some(true)));
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(nominal || protocol),
                 });
             }
             if let Some(answer) = self.mapping_issubclass(call)? {
@@ -9211,7 +9315,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             let receiver = Self::exception_record(receiver);
-            let receiver = self.checked_record_receiver(receiver, attribute);
+            let receiver = self.checked_record_receiver(Self::weak_target(receiver), attribute);
             if attribute.attr.as_str() == "get" && self.dict_or_record(receiver.ty).is_some() {
                 return self.dict_or_record_get(receiver, attribute, call);
             }
@@ -9223,6 +9327,23 @@ impl<'a> Checker<'a> {
                     return self
                         .exception_alias_call(call, attribute, class, Some(receiver))
                         .map(Option::unwrap);
+                }
+                if let Some(field) = self.classes.declarations.definitions[class]
+                    .fields
+                    .iter()
+                    .position(|field| field.name == attribute.attr.as_str())
+                    && let ty @ (Type::Class(target) | Type::WeakProxy(target)) =
+                        self.classes.fields[class][field]
+                    && (matches!(ty, Type::WeakProxy(_))
+                        || self.classes.methods[target].contains_key("__call__"))
+                {
+                    return self.invoke(
+                        call,
+                        Expr {
+                            ty,
+                            kind: ExprKind::Field(Box::new(receiver), field),
+                        },
+                    );
                 }
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
@@ -9885,6 +10006,12 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [proxy] = args.as_slice()
+            && matches!(proxy.ty, Type::WeakProxy(_))
+            && let Some(value) = self.weak_proxy_builtin(name.id.as_str(), proxy.clone())
+        {
+            return Ok(value);
+        }
         if name.id == "tuple"
             && self.unshadowed_builtin(&call.func, "tuple")
             && let [value] = args.as_slice()
@@ -9999,9 +10126,18 @@ impl<'a> Checker<'a> {
         if args.len() == 1 && matches!(args[0].ty, Type::IntEnum(_)) && name.id == "int" {
             return Ok(Self::enum_integer(args.into_iter().next().unwrap()));
         }
+        if let [class] = args.as_slice()
+            && class.ty == Type::BuiltinClass
+            && name.id == "type"
+        {
+            return Ok(
+                self.evaluated_receiver(Some(class.clone()), annotations::class_value("type"))
+            );
+        }
         if args.len() == 1
             && matches!(args[0].ty, Type::Enum(_) | Type::BuiltinClass)
-            && matches!(name.id.as_str(), "str" | "print")
+            && (matches!(name.id.as_str(), "str" | "print")
+                || (args[0].ty == Type::BuiltinClass && name.id == "repr"))
         {
             let builtin = if args[0].ty == Type::BuiltinClass {
                 Builtin::Repr
@@ -10012,7 +10148,7 @@ impl<'a> Checker<'a> {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(builtin, args),
             };
-            return Ok(if name.id == "str" {
+            return Ok(if name.id != "print" {
                 text
             } else {
                 Expr {
@@ -10348,6 +10484,13 @@ impl<'a> Checker<'a> {
                     && args[0].ty == self.types.string_or_int() =>
             {
                 return Ok(self.integer_from_text_or_int(args.into_iter().next().unwrap()));
+            }
+            "int"
+                if let [text, base] = args.as_slice()
+                    && text.ty == Type::Str
+                    && matches!(&base.kind, ExprKind::Int(n) if n == "16") =>
+            {
+                (Builtin::Int, Type::Int)
             }
             "int"
                 if args.len() == 1

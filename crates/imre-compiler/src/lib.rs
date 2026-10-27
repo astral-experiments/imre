@@ -199,12 +199,11 @@ fn check_file_with(
     cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
-    let typed = (|| {
-        let mut graph = options.load_graph(path, module_root, filesystem)?;
-        let (module, _) = checked_lower_with(&mut graph, cache)?;
+    let typed = |graph: &mut modules::SourceGraph| {
+        let (module, _) = checked_lower_with(graph, cache)?;
         verify_after(&module, "lowering")
-    })();
-    object_fallback(path, module_root, options, typed, |_| ())
+    };
+    object_fallback(path, module_root, options, filesystem, typed, |_| ())
 }
 
 /// Compile runtime import paths with native object operations when static lowering cannot resolve them.
@@ -212,13 +211,22 @@ fn object_fallback<T>(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    typed: Result<T, String>,
+    filesystem: watch::FileSystem<'_>,
+    lower: impl FnOnce(&mut modules::SourceGraph) -> Result<T, String>,
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
+    let mut runtime_imports = options.runtime_imports;
+    let typed = options
+        .load_graph(path, module_root, filesystem)
+        .and_then(|mut graph| {
+            let result = lower(&mut graph);
+            runtime_imports |= graph.needs_object_runtime.get();
+            result
+        });
     match typed {
         Ok(value) => Ok(value),
         Err(error) if options.entry_profile.is_none() => {
-            match dynamic::compile(path, module_root, options)? {
+            match dynamic::compile(path, module_root, options, runtime_imports)? {
                 Some(compilation) => Ok(boxed(compilation)),
                 None => Err(error),
             }
@@ -233,9 +241,8 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let typed = (|| {
-        let mut graph = options.load_graph(path, module_root, Default::default())?;
-        let (mut module, _) = checked_lower(&mut graph)?;
+    let typed = |graph: &mut modules::SourceGraph| {
+        let (mut module, _) = checked_lower(graph)?;
         specialize(&mut module)?;
         let ranges = ranges::analyze(&module);
         let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
@@ -249,8 +256,8 @@ pub fn compile_file(
             source_inputs,
             input_paths,
         })
-    })();
-    object_fallback(path, module_root, options, typed, |c| c)
+    };
+    object_fallback(path, module_root, options, Default::default(), typed, |c| c)
 }
 
 pub struct CodegenUnit {
@@ -355,9 +362,8 @@ fn compile_file_units_with(
     options: &CompileOptions,
     cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let typed = (|| {
-        let mut graph = options.load_graph(path, module_root, Default::default())?;
-        let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
+    let typed = |graph: &mut modules::SourceGraph| {
+        let (mut module, mut owners) = checked_lower_with(graph, cache)?;
         for original in specialize(&mut module)? {
             owners.push(owners[original]);
         }
@@ -385,15 +391,17 @@ fn compile_file_units_with(
             input_paths,
             source_inputs,
         })
-    })();
-    object_fallback(path, module_root, options, typed, |c| UnitCompilation {
-        units: vec![CodegenUnit {
-            name: "__main__".into(),
-            llvm_ir: c.llvm_ir,
-        }],
-        input_paths: c.input_paths,
-        source_inputs: c.source_inputs,
-        extension_archives: c.extension_archives,
+    };
+    object_fallback(path, module_root, options, Default::default(), typed, |c| {
+        UnitCompilation {
+            units: vec![CodegenUnit {
+                name: "__main__".into(),
+                llvm_ir: c.llvm_ir,
+            }],
+            input_paths: c.input_paths,
+            source_inputs: c.source_inputs,
+            extension_archives: c.extension_archives,
+        }
     })
 }
 

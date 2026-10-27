@@ -4,9 +4,10 @@ use std::rc::Rc;
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 use crate::objects::HashState;
 
-fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
+/// Borrows the bytes of a boxed hash input, including mutable buffers.
+pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
     match ctx.heap.get(id) {
-        Value::Bytes(data) => Ok(data),
+        Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
         Value::Str(_) => Err(Error::new(
             "TypeError",
             "Strings must be encoded before hashing",
@@ -19,7 +20,14 @@ fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
 }
 
 pub(super) fn sha1(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let data = option(args, 0, kwargs, "data")?
+    let data = option(args, 0, kwargs, "data")?;
+    ctx.optional_truth(
+        kwargs
+            .iter()
+            .find_map(|(key, id)| (key == "usedforsecurity").then_some(*id)),
+        true,
+    )?;
+    let data = data
         .map(|id| buffer(ctx, id))
         .transpose()?
         .unwrap_or_default();

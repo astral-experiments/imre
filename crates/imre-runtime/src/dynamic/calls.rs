@@ -1,23 +1,71 @@
 use super::*;
 
 impl Context {
-    fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
-        let Value::Class { scope, bases, .. } = self.heap.get(class) else {
-            return None;
+    pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+            return self.own_class_attr(class, name);
         };
-        self.scope_data(*scope)
-            .names
-            .get(name)
-            .copied()
-            .or_else(|| bases.iter().find_map(|&base| self.class_attr(base, name)))
+        std::iter::once(&class)
+            .chain(ancestors)
+            .find_map(|&base| self.own_class_attr(base, name))
     }
 
+    pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        match self.heap.get(class) {
+            Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str") => {
+                self.builtins.get(&format!("{kind}.{name}")).copied()
+            }
+            _ => None,
+        }
+    }
     /// Special methods are looked up on the type, even if the instance shadows them.
-    fn slot(&self, object: Id, name: &str) -> Option<Id> {
+    pub(super) fn slot(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
             return None;
         };
         self.class_attr(*class, name)
+    }
+
+    /// Dict copying uses raw entries for a dict with its original iterator.
+    /// An overridden iterator opts into the mapping protocol, including key lookup.
+    pub(super) fn for_each_mapping_item(
+        &mut self,
+        input: Id,
+        mut visit: impl FnMut(&mut Self, Id, Id) -> Result<()>,
+    ) -> Result<bool> {
+        if self.slot(input, "__iter__").is_none_or(
+            |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
+        ) && let Some(entries) = self.dict_entries(input).map(<[_]>::to_vec)
+        {
+            for (key, value) in entries {
+                visit(self, key, value)?;
+            }
+            return Ok(true);
+        }
+        if matches!(
+            self.heap.get(input),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::Set { .. }
+                | Value::Str(_)
+                | Value::Bytes(_)
+                | Value::Range { .. }
+                | Value::Iterator { .. }
+        ) {
+            return Ok(false);
+        }
+        let keys = match self.lookup_attr(input, "keys") {
+            Ok(keys) => keys,
+            Err(error) if error.kind == "AttributeError" => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let result = self.call(keys, Vec::new(), Vec::new())?;
+        for key in self.items(result)? {
+            let value = self.get_item(input, key)?;
+            visit(self, key, value)?;
+        }
+        Ok(true)
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
@@ -33,35 +81,80 @@ impl Context {
         matches!(
             self.heap.get(value),
             Value::Class { .. }
+                | Value::GenericAlias(_)
                 | Value::Function { .. }
+                | Value::AttrGetter(_)
+                | Value::StaticMethod { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
+                | Value::CodecDecoder(_)
+                | Value::IoMethod { .. }
                 | Value::Method { .. }
         ) || self.slot(value, "__call__").is_some()
     }
 
+    fn native_data_descriptor(&self, descriptor: Id) -> bool {
+        matches!(
+            self.heap.get(descriptor),
+            Value::Property(_) | Value::ReadOnlyDescriptor { .. }
+        )
+    }
+
     fn data_descriptor(&self, descriptor: Id) -> bool {
-        matches!(self.heap.get(descriptor), Value::Property(_))
+        self.native_data_descriptor(descriptor)
             || self.slot(descriptor, "__set__").is_some()
             || self.slot(descriptor, "__delete__").is_some()
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
+        if let Value::ClassMethod(callable) = *self.heap.get(value) {
+            return Ok(self.alloc(Value::Method {
+                callable,
+                receiver: owner,
+                explicit: true,
+            }));
+        }
         if let Some(get) = self.slot(value, "__get__") {
             return self.call(get, vec![value, receiver, owner], Vec::new());
         }
+        if let Value::StaticMethod { callable, .. } = *self.heap.get(value) {
+            return Ok(callable);
+        }
         if receiver != NONE {
             let method = match self.heap.get(value) {
-                Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
-                Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. } => true,
-                Value::Native(name) => name == "object.__setattr__",
+                Value::Property(property) => return property.read(self, receiver),
+                Value::ReadOnlyDescriptor { get, .. } => {
+                    return self.call(*get, vec![receiver], Vec::new());
+                }
+                Value::Function { .. }
+                | Value::Cached { .. }
+                | Value::Partial { .. }
+                | Value::IoMethod { .. } => true,
+                Value::Native(name) => {
+                    matches!(
+                        name.as_str(),
+                        "ast.AST.__init__"
+                            | "object.__getattribute__"
+                            | "object.__setattr__"
+                            | "object.__delattr__"
+                            | "object.__init__"
+                            | "int.to_bytes"
+                            | "list.pop"
+                            | "map.__iter__"
+                            | "map.__next__"
+                    ) || name.starts_with("dict.")
+                        || name
+                            .strip_prefix("str.")
+                            .is_some_and(|method| builtins::STR_METHODS.contains(&method))
+                }
                 _ => false,
             };
             if method {
                 return Ok(self.alloc(Value::Method {
                     callable: value,
                     receiver,
+                    explicit: false,
                 }));
             }
         }
@@ -76,39 +169,78 @@ impl Context {
         name: &str,
     ) -> Result<Id> {
         let member = self.class_attr(class, name);
-        let attribute = match (member, field) {
+        match (member, field) {
             (Some(member), _)
                 if self.data_descriptor(member)
                     && (self.slot(member, "__get__").is_some()
-                        || matches!(self.heap.get(member), Value::Property(_))) =>
+                        || self.native_data_descriptor(member)) =>
             {
                 self.bind_attribute(member, object, class)
             }
+            // Without a Python class member, object.__class__ is a data descriptor.
+            (None, _) if name == "__class__" => Ok(class),
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
-            (None, None) => Err(Error::new(
-                "AttributeError",
-                format!("{} has no attribute {name:?}", self.display(object)),
-            )),
-        };
-        match attribute {
-            Err(error) if error.kind == "AttributeError" => {
-                let Some(hook) = self.class_attr(class, "__getattr__") else {
-                    return Err(error);
-                };
-                let callable = self.bind_attribute(hook, object, class)?;
-                let name = self.text(name);
-                self.call(callable, vec![name], Vec::new())
+            (None, None) if matches!(name, "__getattribute__" | "__delattr__") => {
+                let method = self.builtin(&format!("object.{name}"));
+                self.bind_attribute(method, object, class)
             }
-            value => value,
+            (None, None) => self.builtin_attribute(object, name),
         }
     }
-    fn subclass(&self, class: Id, target: Id) -> bool {
-        if self.equal_class(class, target) {
+
+    pub(super) fn python_subclass_check(&self, child: Id, parent: Id) -> Result<bool> {
+        if let Value::Tuple(classes) = self.heap.get(parent) {
+            for &class in classes {
+                if self.python_subclass_check(child, class)? {
+                    return Ok(true);
+                }
+            }
+            return Ok(false);
+        }
+        let is_class = |id| self.builtin_type_name(id) == Some("type");
+        if !is_class(child) {
+            return Err(Error::new(
+                "TypeError",
+                "issubclass() arg 1 must be a class",
+            ));
+        }
+        if !is_class(parent) {
+            return Err(Error::new(
+                "TypeError",
+                "issubclass() arg 2 must be a class, a tuple of classes, or a union",
+            ));
+        }
+        self.require_checkable_protocol(parent)?;
+        Ok(self.subclass(child, parent))
+    }
+
+    pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
+        if self.equal_class(class, target) || self.structural_context_manager(class, target) {
             return true;
         }
-        if let Value::Class { bases, .. } = self.heap.get(class) {
-            return bases.iter().any(|&b| self.subclass(b, target));
+        if let Value::Class { ancestors, .. } = self.heap.get(class) {
+            return ancestors.iter().any(|&base| {
+                self.equal_class(base, target)
+                    || (matches!(self.heap.get(base), Value::Native(_))
+                        && self.subclass(base, target))
+            });
+        }
+        if let (Value::Native(child), Value::Native(parent)) =
+            (self.heap.get(class), self.heap.get(target))
+        {
+            if parent == "object" {
+                return self.builtin_type_name(class) == Some("type");
+            }
+            if let Some(result) = builtins::exception_subclass(child, parent) {
+                return result;
+            }
+            return matches!(
+                (child.as_str(), parent.as_str()),
+                ("bool", "int")
+                    | ("enum.IntEnum", "int" | "enum.Enum")
+                    | ("enum.StrEnum", "str" | "enum.Enum")
+            );
         }
         false
     }
@@ -118,7 +250,9 @@ impl Context {
     }
     fn has_base(&self, class: Id, target: &str) -> bool {
         match self.heap.get(class) {
-            Value::Class { bases, .. } => bases.iter().any(|&b| self.has_base(b, target)),
+            Value::Class { ancestors, .. } => ancestors
+                .iter()
+                .any(|&b| matches!(self.heap.get(b), Value::Native(name) if name == target)),
             Value::Native(name) => name == target,
             _ => false,
         }
@@ -138,7 +272,149 @@ impl Context {
                 .collect(),
         )
     }
+    pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
+        Some(match self.heap.get(obj) {
+            Value::None
+            | Value::Ellipsis
+            | Value::NotImplemented
+            | Value::Bool(_)
+            | Value::Float(_)
+            | Value::Complex(_)
+            | Value::Int(_)
+            | Value::Str(_)
+            | Value::Bytes(_)
+            | Value::List(_)
+            | Value::Dict(_)
+            | Value::Set { .. }
+            | Value::Range { .. }
+            | Value::Slice(_)
+            | Value::Enumerate { .. }
+            | Value::Iterator { .. }
+            | Value::Tuple(_)
+            | Value::DictIterator(_)
+            | Value::Class { .. }
+            | Value::Function { .. }
+            | Value::Traceback { .. }
+            | Value::PythonFrame { .. }
+            | Value::Code(_)
+            | Value::Generator { .. }
+            | Value::Module { .. }
+            | Value::ThreadLocal(_)
+            | Value::PrimitiveLock(_) => self.type_name(obj),
+            Value::ByteArray(_) => "bytearray",
+            Value::Map { .. } => "map",
+            Value::Zip { .. } => "zip",
+            Value::ClassMethod(_) => "classmethod",
+            Value::Count { .. } => "itertools.count",
+            Value::Repeat(_) => "itertools.repeat",
+            Value::StaticMethod { .. } => "staticmethod",
+            Value::TypeVar(_) => "typing.TypeVar",
+            Value::GenericAlias(alias) => alias.kind.class(),
+            Value::Property(_) => "property",
+            Value::Super { .. } => "super",
+            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
+            Value::Method { explicit: true, .. } => "method",
+            Value::Method { callable, .. } => match self.heap.get(*callable) {
+                Value::Function { .. } => "method",
+                Value::Native(_) => "builtin_function_or_method",
+                _ => return None,
+            },
+            Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
+                if name == "typing.Any" {
+                    return Some("typing._AnyMeta");
+                }
+                if name == "typing.Callable" {
+                    return Some("typing._CallableType");
+                }
+                if builtins::is_builtin_type(name)
+                    || matches!(
+                        name.as_str(),
+                        "NoneType"
+                            | "NotImplementedType"
+                            | "ellipsis"
+                            | "float"
+                            | "code"
+                            | "function"
+                            | "module"
+                            | "method"
+                            | "builtin_function_or_method"
+                            | "generator"
+                            | "list_iterator"
+                            | "tuple_iterator"
+                            | "bytes_iterator"
+                            | "bytearray_iterator"
+                            | "range_iterator"
+                            | "getset_descriptor"
+                            | "operator.attrgetter"
+                            | "itertools.count"
+                            | "itertools.repeat"
+                            | super::thread_local::CLASS
+                            | super::thread_lock::CLASS
+                            | "traceback"
+                            | "frame"
+                            | "typing.TypeVar"
+                            | "typing._GenericAlias"
+                            | "typing._CallableGenericAlias"
+                            | "typing._CallableType"
+                            | "typing._AnyMeta"
+                            | "types.GenericAlias"
+                            | "collections.abc._CallableGenericAlias"
+                    )
+                {
+                    "type"
+                } else if builtins::is_builtin(name)
+                    || builtins::constructor_owner(name).is_some()
+                    || matches!(name.as_str(), "binascii.a2b_base64" | "binascii.b2a_base64")
+                {
+                    "builtin_function_or_method"
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        })
+    }
+
+    /// Return the actual class independently of an instance's Python-level __class__ attribute.
+    pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
+        match self.heap.get(obj) {
+            Value::Instance { class, .. } => Ok(*class),
+            Value::NamedTuple {
+                class: Some("time.struct_time"),
+                ..
+            } => Ok(self.builtin("time.struct_time")),
+            Value::Raised(error) => {
+                let name = error.kind.clone();
+                Ok(self
+                    .classes
+                    .get(&name)
+                    .copied()
+                    .unwrap_or_else(|| self.builtin(&name)))
+            }
+            Value::Calendar { value, .. } => {
+                let class = format!("datetime.{}", value.class());
+                Ok(self.builtin(&class))
+            }
+            _ => {
+                let name = self.builtin_type_name(obj).ok_or_else(|| {
+                    Error::new(
+                        "NotImplementedError",
+                        "type() is unsupported for this native object",
+                    )
+                })?;
+                if let Some(&class) = self.builtins.get(name) {
+                    return Ok(class);
+                }
+                let name = name.to_owned();
+                Ok(self.builtin(&name))
+            }
+        }
+    }
+
     pub(super) fn instance_of(&self, value: Id, class: Id) -> bool {
+        if self.classes.get("collections.abc.Callable") == Some(&class) {
+            return self.callable(value);
+        }
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
         }
@@ -152,40 +428,84 @@ impl Context {
             _ => return false,
         };
         match (name, self.heap.get(value)) {
-            ("object", _)
+            ("bytearray", Value::ByteArray(_))
+            | ("object", _)
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
+            | ("float", Value::Float(_))
+            | ("complex", Value::Complex(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
+            | ("struct.Struct", Value::Struct { .. })
+            | ("hmac.HMAC", Value::Hmac(_))
+            | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
-            | ("set", Value::Set(_))
+            | ("set", Value::Set { frozen: false, .. })
+            | ("frozenset", Value::Set { frozen: true, .. })
+            | ("slice", Value::Slice(_))
             | ("range", Value::Range { .. })
+            | ("map", Value::Map { .. })
+            | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
+            | ("operator.attrgetter", Value::AttrGetter(_))
+            | ("itertools.count", Value::Count { .. })
+            | ("itertools.repeat", Value::Repeat(_))
+            | (super::thread_local::CLASS, Value::ThreadLocal(_))
+            | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
+            (
+                "urllib.parse.SplitResult",
+                Value::NamedTuple {
+                    class: Some("SplitResult"),
+                    ..
+                },
+            )
+            | (
+                "urllib.parse.SplitResultBytes",
+                Value::NamedTuple {
+                    class: Some("SplitResultBytes"),
+                    ..
+                },
+            ) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            (
+                "time.struct_time",
+                Value::NamedTuple {
+                    class: Some("time.struct_time"),
+                    ..
+                },
+            ) => true,
+            (class, Value::Calendar { value, .. }) => {
+                class.strip_prefix("datetime.").is_some_and(|c| {
+                    c == value.class() || (c == "date" && value.class() == "datetime")
+                })
+            }
             (_, Value::Raised(Error { kind, .. })) => self.error_matches(kind, class),
-            _ => false,
+            _ => {
+                matches!(self.heap.get(class), Value::Native(_))
+                    && self.builtin_type_name(value) == Some(name)
+            }
         }
     }
     pub(super) fn error_matches(&self, kind: &str, class: Id) -> bool {
+        if let Value::Native(parent) = self.heap.get(class)
+            && let Some(result) = builtins::exception_subclass(kind, parent)
+        {
+            return result;
+        }
         match self.heap.get(class) {
             Value::Tuple(classes) => classes.iter().any(|&c| self.error_matches(kind, c)),
             Value::Class { name, .. } | Value::Native(name) => {
                 kind == name
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
-                    || (name == "RuntimeError" && kind == "RecursionError")
-                    || (name == "ImportError" && kind == "ModuleNotFoundError")
-                    || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
-                    || (name == "OSError"
-                        && matches!(
-                            kind,
-                            "FileNotFoundError" | "PermissionError" | "IsADirectoryError"
-                        ))
+                    || (name == "ValueError"
+                        && matches!(kind, "JSONDecodeError" | "binascii.Error"))
+                    || (name == "OSError" && kind == "socket.gaierror")
                     || self
                         .classes
                         .get(kind)
@@ -194,18 +514,322 @@ impl Context {
             _ => false,
         }
     }
+    pub(super) fn missing_attribute(&self, obj: Id, name: &str) -> Error {
+        Error::new(
+            "AttributeError",
+            format!("'{}' object has no attribute '{name}'", self.type_name(obj)),
+        )
+    }
+
+    /// Match an attribute lookup failure using the ordinary exception hierarchy.
+    pub(super) fn is_attribute_error(&self, error: &Error) -> bool {
+        self.is_builtin_error(error, "AttributeError")
+    }
+
+    /// Includes runtime-loaded subclasses of the named builtin exception.
+    pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
+        error.kind == kind
+            || self
+                .builtins
+                .get(kind)
+                .is_some_and(|&base| self.error_matches(&error.kind, base))
+    }
+
+    fn attribute_hook(&mut self, hook: Id, obj: Id, class: Id, name: &str) -> Result<Id> {
+        let callable = self.bind_attribute(hook, obj, class)?;
+        let key = self.text(name);
+        self.call(callable, vec![key], Vec::new())
+    }
+
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        let Value::Instance { class, .. } = *self.heap.get(obj) else {
+            return self.default_get_attr(obj, name);
+        };
+        let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
+            self.attribute_hook(hook, obj, class, name)
+        } else {
+            self.default_get_attr(obj, name)
+        };
+        match attribute {
+            Err(error) if self.is_attribute_error(&error) => {
+                let Some(hook) = self.class_attr(class, "__getattr__") else {
+                    return Err(error);
+                };
+                self.attribute_hook(hook, obj, class, name)
+            }
+            result => result,
+        }
+    }
+
+    /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
+    pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.local_attribute(obj, name);
+        }
+        if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
+            if matches!(name, "name" | "value")
+                && let Some((_, member_name, value)) = self.enum_member(obj)
+            {
+                return Ok(if name == "name" { member_name } else { value });
+            }
+            return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
+        }
+        if name == "__class__" {
+            return self.exact_type(obj);
+        }
+        if let Some(value) = super::typing::attribute(self, obj, name) {
+            return value;
+        }
         match self.heap.get(obj).clone() {
+            Value::Complex(z) if matches!(name, "real" | "imag") => {
+                return Ok(self.alloc(Value::Float(if name == "real" { z.real } else { z.imag })));
+            }
+            Value::Raised(error)
+                if matches!(
+                    name,
+                    "__traceback__" | "__context__" | "__cause__" | "__suppress_context__"
+                ) =>
+            {
+                match name {
+                    "__traceback__" => return self.exception_traceback(obj),
+                    "__context__" => {
+                        return Ok(error.trace.as_ref().and_then(|t| t.context).unwrap_or(NONE));
+                    }
+                    "__cause__" => {
+                        return Ok(error.trace.as_ref().and_then(|t| t.cause).unwrap_or(NONE));
+                    }
+                    "__suppress_context__" => {
+                        return Ok(if error.trace.as_ref().is_some_and(|t| t.cause.is_some()) {
+                            TRUE
+                        } else {
+                            FALSE
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            Value::Traceback {
+                frame,
+                next,
+                lineno,
+                ..
+            } => match name {
+                "tb_frame" => return Ok(frame),
+                "tb_next" => return Ok(next),
+                "tb_lineno" => return Ok(self.int(lineno)),
+                _ => {}
+            },
+            Value::PythonFrame { code, .. } if name == "f_code" => return Ok(code),
+            Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
+                return Ok(self.int(i64::from(lineno)));
+            }
+            Value::Native(class)
+                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float") =>
+            {
+                match name {
+                    "__name__" | "__qualname__" => return Ok(self.text(class)),
+                    "__module__" => return Ok(self.text("builtins")),
+                    _ => {}
+                }
+            }
+            Value::StaticMethod {
+                callable,
+                dictionary,
+            } => {
+                if let Some(value) =
+                    super::static_method::attribute(self, callable, dictionary, name)?
+                {
+                    return Ok(value);
+                }
+            }
+            Value::None if name == "__doc__" => {
+                return Ok(self.text("The type of the None singleton."));
+            }
+            Value::Slice(parts) if matches!(name, "start" | "stop" | "step") => {
+                return Ok(parts[match name {
+                    "start" => 0,
+                    "stop" => 1,
+                    _ => 2,
+                }]);
+            }
+            Value::Property(property) => {
+                if let Some(attribute) = property.attribute(self, name)? {
+                    return Ok(attribute);
+                }
+            }
+            Value::Native(class) if class == "staticmethod" && name == "__get__" => {
+                return Ok(self.builtin("staticmethod.__get__"));
+            }
+            Value::Native(class) if class == "property" && name == "setter" => {
+                return Ok(self.builtin("property.setter"));
+            }
+            Value::Code(code) => match name {
+                "co_name" => return Ok(code.name),
+                "co_filename" => return Ok(code.filename),
+                "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
+                _ => {}
+            },
+            Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
+            Value::Function { code, .. } if name == "__code__" => return Ok(code),
+            Value::Function { scope, fields, .. } => {
+                if name == "__globals__" {
+                    return Ok(self.module_globals(scope));
+                }
+                if let Some(value) = self.function_attr(obj, fields, name)? {
+                    return Ok(value);
+                }
+            }
+            Value::Method {
+                callable,
+                receiver,
+                explicit,
+            } => match name {
+                "__func__" => return Ok(callable),
+                "__self__" => return Ok(receiver),
+                _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
+                    return self.lookup_attr(callable, name);
+                }
+                _ => {}
+            },
+            Value::RegexPattern(pattern) if name == "flags" => return Ok(self.int(pattern.flags)),
+            Value::RegexPattern(pattern) if name == "groups" => {
+                return Ok(self.int(pattern.group_count() as i64));
+            }
+            Value::RegexPattern(pattern) if name == "pattern" => {
+                return Ok(pattern.source);
+            }
+            Value::Calendar { value, tzinfo } => {
+                return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
+            }
+            Value::Native(class)
+                if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
+            {
+                return Ok(self.builtin(&format!("datetime.datetime.{name}")));
+            }
+            Value::Native(class) if class == "map" => match name {
+                "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text("map")),
+                "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
+            Value::Native(class) if class == "datetime.time" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("time")),
+                "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
+            Value::Native(class) if class == super::thread_lock::CLASS => match name {
+                "__module__" => return Ok(self.text("_thread")),
+                "__name__" | "__qualname__" => return Ok(self.text("lock")),
+                attr if super::thread_lock::is_method(attr) => {
+                    return Ok(self.builtin(&format!("{class}.{attr}")));
+                }
+                _ => {}
+            },
+            Value::Native(class) if class == super::thread_local::CLASS => match name {
+                "__module__" => return Ok(self.text("_thread")),
+                "__name__" | "__qualname__" => return Ok(self.text("_local")),
+                _ => {}
+            },
+            Value::Native(class)
+                if matches!(class.as_str(), "itertools.count" | "itertools.repeat") =>
+            {
+                match name {
+                    "__name__" | "__qualname__" => {
+                        return Ok(self.text(class.trim_start_matches("itertools.").to_owned()));
+                    }
+                    "__module__" => return Ok(self.text("itertools")),
+                    _ => {}
+                }
+            }
+            Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
+                return Ok(stdlib::datetime::utc(self));
+            }
+            Value::MappingProxy(dict)
+                if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
+            {
+                return self.lookup_attr(dict, name);
+            }
+            Value::Native(symbol)
+                if name == "__self__"
+                    && let Some(owner) = builtins::constructor_owner(&symbol) =>
+            {
+                return Ok(self.builtin(owner));
+            }
+            Value::Native(class) if class == "int" && name == "__new__" => {
+                return Ok(self.builtin("int.__new__"));
+            }
+            Value::Super {
+                start,
+                receiver,
+                owner,
+            } => return self.super_attribute(start, receiver, owner, name),
+            Value::Partial {
+                coroutine_marker: Some(mark),
+                ..
+            } if name == "_is_coroutine_marker" => {
+                return Ok(mark);
+            }
             Value::Partial {
                 function,
                 args,
                 keywords,
+                ..
             } => match name {
                 "func" => return Ok(function),
                 "args" => return Ok(args),
                 "keywords" => return Ok(keywords),
                 _ => {}
             },
+            Value::File(handle) if name == "closed" => {
+                return Ok(if handle.closed() { TRUE } else { FALSE });
+            }
+            Value::Native(class) if class == "socket.socket" && name == "__name__" => {
+                return Ok(self.text("socket"));
+            }
+            Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
+            Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::TextFile(file) if name == "closed" => {
+                return Ok(if file.closed() { TRUE } else { FALSE });
+            }
+            Value::Raised(Error {
+                os_args: Some(args),
+                ..
+            }) => match name {
+                "errno" => return Ok(self.int(args.errno)),
+                "strerror" => return Ok(self.text(args.description)),
+                "args" => {
+                    let fields = vec![self.int(args.errno), self.text(args.description)];
+                    return Ok(self.alloc(Value::Tuple(fields)));
+                }
+                "filename" | "filename2" => {
+                    if let Some([first, second]) = args.text_paths {
+                        let path = if name == "filename" { first } else { second };
+                        return Ok(path.map_or(NONE, |path| self.text(path)));
+                    }
+                }
+                _ => {}
+            },
+            Value::Raised(error)
+                if matches!(error.kind.as_str(), "ImportError" | "ModuleNotFoundError")
+                    && matches!(name, "msg" | "name" | "path" | "name_from") =>
+            {
+                if name == "msg" {
+                    return Ok(match error.args.as_deref() {
+                        Some([one]) => *one,
+                        Some(_) => NONE,
+                        None => self.text(error.message),
+                    });
+                }
+                let Some(fields) = error.import else {
+                    return Ok(NONE);
+                };
+                let value = match name {
+                    "name" => fields.name.as_deref(),
+                    "path" => fields.path.as_deref(),
+                    _ => fields.name_from.as_deref(),
+                };
+                return Ok(value.map_or(NONE, |value| self.text(value)));
+            }
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {
@@ -216,10 +840,29 @@ impl Context {
                 });
                 return Ok(self.alloc(Value::Tuple(args)));
             }
+            Value::Struct { format, layout } => match name {
+                "format" => return Ok(self.text(format)),
+                "size" => return Ok(self.int(layout.size as i64)),
+                _ => {}
+            },
             Value::Hash(hash) => match name {
                 "name" => return Ok(self.text(hash.borrow().name())),
                 "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
                 "block_size" => return Ok(self.int(64)),
+                _ => {}
+            },
+            Value::CodecInfo { entry, decode } => match name {
+                "name" => return Ok(self.text(entry.codec().name())),
+                "decode" => return Ok(decode),
+                _ => {}
+            },
+            Value::Hmac(mac) => match name {
+                "digest_size" => return Ok(mac.digest_size),
+                "block_size" => return Ok(mac.block_size),
+                "name" => {
+                    let name = self.lookup_attr(mac.inner, "name")?;
+                    return Ok(self.text(format!("hmac-{}", self.str_value(name)?)));
+                }
                 _ => {}
             },
             Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),
@@ -227,18 +870,78 @@ impl Context {
             Value::ContextToken { old, .. } if name == "old_value" => {
                 return Ok(old.unwrap_or(self.token_missing));
             }
+            Value::Native(builtin)
+                if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>
+            {
+                let short = builtin.rsplit('.').next().unwrap();
+                match name {
+                    "__name__" | "__qualname__" => return Ok(self.text(short)),
+                    "__module__" => return Ok(self.text("binascii")),
+                    "__base__" | "__bases__" => {
+                        let base = self.builtin(if short == "Error" {
+                            "ValueError"
+                        } else {
+                            "Exception"
+                        });
+                        return Ok(if name == "__base__" {
+                            base
+                        } else {
+                            self.alloc(Value::Tuple(vec![base]))
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Value::Native(builtin)
+                if name == "__name__" && self.builtins.get(&builtin) == Some(&obj) =>
+            {
+                return Ok(self.text(builtin.rsplit('.').next().unwrap_or(&builtin)));
+            }
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
-            Value::Native(class) if class == "object" && name == "__setattr__" => {
-                return Ok(self.builtin("object.__setattr__"));
+            Value::Native(class) if class == "bool" && name == "to_bytes" => {
+                return Ok(self.builtin("int.to_bytes"));
+            }
+            Value::Native(class) if class == "list" && name == "pop" => {
+                return Ok(self.builtin("list.pop"));
+            }
+            Value::Native(class)
+                if class == "dict"
+                    || (class == "int" && name == "to_bytes")
+                    || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+            {
+                if let Some(method) = self.own_class_attr(obj, name) {
+                    return Ok(method);
+                }
+            }
+            Value::Native(class)
+                if class == "object"
+                    && matches!(
+                        name,
+                        "__getattribute__" | "__setattr__" | "__delattr__" | "__init__"
+                    ) =>
+            {
+                return Ok(self.builtin(&format!("object.{name}")));
+            }
+            Value::Native(class)
+                if class == "slice" && matches!(name, "indices" | "__reduce__") =>
+            {
+                return Ok(self.builtin(&format!("slice.{name}")));
+            }
+            Value::Native(class) if class == "str" && name == "__new__" => {
+                return Ok(self.builtin("str.__new__"));
             }
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
-                if let Some(value) = self.scope_data(scope).names.get(name) {
-                    return Ok(*value);
+                if name == "__dict__" {
+                    return Ok(self.module_globals(scope));
+                }
+                if let Some(value) = self.scope_name(scope, name) {
+                    return Ok(value);
                 }
                 if stdlib::is_module(&module) {
                     let value = stdlib::attribute(self, &module, name)?;
@@ -255,30 +958,223 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
+                if name == "__new__" && self.has_base(obj, "str") {
+                    return Ok(self.builtin("str.__new__"));
+                }
             }
-            Value::Instance { class, fields } => {
-                return self.instance_attribute(obj, class, fields.get(name).copied(), name);
-            }
-            Value::NamedTuple { names, values } => {
+            Value::NamedTuple {
+                class,
+                names,
+                values,
+                extras,
+            } => {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
+                }
+                if let Some((_, value)) = extras.iter().find(|(key, _)| *key == name) {
+                    return Ok(*value);
+                }
+                if class == Some("time.struct_time") && name == "__class__" {
+                    return Ok(self.builtin("time.struct_time"));
+                }
+                if matches!(class, Some("SplitResult" | "SplitResultBytes"))
+                    && let Some(property) = stdlib::urllib::property(self, values[1], name)?
+                {
+                    return Ok(property);
                 }
             }
             _ => {}
         }
-        if let Some(method) = builtins::method_name(self.heap.get(obj), name) {
+        self.builtin_attribute(obj, name)
+    }
+
+    fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+        let base = self.string_storage(obj).unwrap_or(obj);
+        if name == "__new__" {
+            match self.heap.get(base) {
+                Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::Str(_) => return Ok(self.builtin("str.__new__")),
+                _ => {}
+            }
+        }
+        if let Some(method) = builtins::method_name(self.heap.get(base), name) {
             let fun = self.alloc(Value::Native(method));
             return Ok(self.alloc(Value::Method {
                 callable: fun,
                 receiver: obj,
+                explicit: false,
             }));
         }
-        Err(Error::new(
-            "AttributeError",
-            format!("{} has no attribute {name:?}", self.display(obj)),
-        ))
+        Err(self.missing_attribute(obj, name))
     }
+    pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Slice(_))
+            && matches!(name, "start" | "stop" | "step")
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
+        if let Some(hook) = self.bound_slot(obj, "__delattr__")? {
+            let name = self.text(name);
+            self.call(hook, vec![name], Vec::new())?;
+            return Ok(());
+        }
+        self.default_delete_attr(obj, name)
+    }
+
+    pub(super) fn delete_dict_attribute(
+        &mut self,
+        obj: Id,
+        dictionary: Id,
+        name: &str,
+    ) -> Result<()> {
+        let key = self.text(name);
+        match self.delete_item(dictionary, key) {
+            Err(error) if error.kind == "KeyError" => Err(self.missing_attribute(obj, name)),
+            result => result,
+        }
+    }
+
+    /// Bypass the object's deletion hook, while honoring data descriptors on its class.
+    pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, None);
+        }
+        if let Some(descriptor) = self.slot(obj, name)
+            && self.data_descriptor(descriptor)
+        {
+            match *self.heap.get(descriptor) {
+                Value::Property(property) => return property.remove(self, obj),
+                Value::ReadOnlyDescriptor { owner, name, .. } => {
+                    return Err(Error::new(
+                        "AttributeError",
+                        format!("attribute '{name}' of '{owner}' objects is not writable"),
+                    ));
+                }
+                _ => {}
+            }
+            let delete = self
+                .bound_slot(descriptor, "__delete__")?
+                .ok_or_else(|| Error::new("AttributeError", "__delete__"))?;
+            self.call(delete, vec![obj], Vec::new())?;
+            return Ok(());
+        }
+        if name == "__class__" {
+            return Err(Error::new("TypeError", "can't delete __class__ attribute"));
+        }
+        match *self.heap.get(obj) {
+            Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
+            Value::Complex(_) if matches!(name, "real" | "imag") => {
+                Err(Error::new("AttributeError", "readonly attribute"))
+            }
+            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
+                Err(Error::new("AttributeError", "readonly attribute"))
+            }
+            Value::Property(_) if matches!(name, "__doc__" | "__name__") => {
+                let Value::Property(property) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                if name == "__doc__" {
+                    property.doc = NONE;
+                } else {
+                    property.name = None;
+                }
+                Ok(())
+            }
+            Value::StaticMethod { dictionary, .. } => {
+                super::static_method::update_attribute(self, obj, dictionary, name, None)
+            }
+            Value::Module { scope, .. } => {
+                if name == "__dict__" {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
+                let key = self.text(name);
+                if self.remove_binding(scope, name, key)? {
+                    Ok(())
+                } else {
+                    Err(self.missing_attribute(obj, name))
+                }
+            }
+            Value::Class {
+                scope,
+                name: ref class,
+                ..
+            } => {
+                let error = match name {
+                    "__name__" | "__qualname__" | "__bases__" | "__type_params__"
+                    | "__module__" | "__doc__" => Error::new(
+                        "TypeError",
+                        format!("cannot delete '{name}' attribute of immutable type '{class}'"),
+                    ),
+                    "__dict__" | "__mro__" => Error::new(
+                        "AttributeError",
+                        format!("attribute '{name}' of 'type' objects is not writable"),
+                    ),
+                    "__base__" => Error::new("AttributeError", "readonly attribute"),
+                    "__annotate__" => {
+                        Error::new("TypeError", "cannot delete __annotate__ attribute")
+                    }
+                    _ => {
+                        let key = self.text(name);
+                        if self.remove_binding(scope, name, key)? {
+                            if name == "__abstractmethods__"
+                                && let Value::Scope(data) = self.heap.get_mut(scope)
+                            {
+                                data.is_abstract = false;
+                            }
+                            return Ok(());
+                        }
+                        let Value::Class { name: class, .. } = self.heap.get(obj) else {
+                            unreachable!()
+                        };
+                        Error::new(
+                            "AttributeError",
+                            format!("type object '{class}' has no attribute '{name}'"),
+                        )
+                    }
+                };
+                Err(error)
+            }
+            Value::Instance { class, .. } if self.builtins.get("object") != Some(&class) => {
+                if self
+                    .namedtuple_fields(class)
+                    .is_some_and(|fields| fields.iter().any(|field| field == name))
+                {
+                    return Err(Error::new("AttributeError", "can't delete attribute"));
+                }
+                let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                if name == "__dict__" {
+                    fields.clear();
+                    return Ok(());
+                }
+                fields
+                    .remove(name)
+                    .map(|_| ())
+                    .ok_or_else(|| self.missing_attribute(obj, name))
+            }
+            Value::Native(ref class) if self.builtin_type_name(obj) == Some("type") => {
+                Err(Error::new(
+                    "TypeError",
+                    format!("cannot set '{name}' attribute of immutable type '{class}'"),
+                ))
+            }
+            _ => Err(Error::new(
+                "AttributeError",
+                format!(
+                    "'{}' object has no attribute '{name}' and no __dict__ for setting new attributes",
+                    self.type_name(obj)
+                ),
+            )),
+        }
+    }
+
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Slice(_))
+            && matches!(name, "start" | "stop" | "step")
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
             let name = self.text(name);
             self.call(hook, vec![name, value], Vec::new())?;
@@ -288,9 +1184,51 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, Some(value));
+        }
+        if name == "__abstractmethods__"
+            && let Value::Class { scope, .. } = *self.heap.get(obj)
+        {
+            return self.set_abstract_methods(scope, value);
+        }
+        if name == "__context__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            if value != NONE && !matches!(self.heap.get(value), Value::Raised(_)) {
+                return Err(Error::new(
+                    "TypeError",
+                    "exception context must be None or derive from BaseException",
+                ));
+            }
+            let Value::Raised(error) = self.heap.get_mut(obj) else {
+                unreachable!()
+            };
+            error.tracing().context = (value != NONE).then_some(value);
+            return Ok(());
+        }
+        if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
+            return super::static_method::update_attribute(
+                self,
+                obj,
+                dictionary,
+                name,
+                Some(value),
+            );
+        }
+        if matches!(self.heap.get(obj), Value::Function { .. }) {
+            return self.set_function_attr(obj, name, value);
+        }
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
+            if let Value::Property(property) = *self.heap.get(descriptor) {
+                return property.write(self, obj, value);
+            }
+            if let Value::ReadOnlyDescriptor { owner, name, .. } = *self.heap.get(descriptor) {
+                return Err(Error::new(
+                    "AttributeError",
+                    format!("attribute '{name}' of '{owner}' objects is not writable"),
+                ));
+            }
             if let Some(setter) = self.slot(descriptor, "__set__") {
                 self.call(setter, vec![descriptor, obj, value], Vec::new())?;
                 return Ok(());
@@ -300,18 +1238,46 @@ impl Context {
                 format!("attribute {name:?} cannot be set"),
             ));
         }
+        if let Value::Instance { class, .. } = self.heap.get(obj)
+            && self
+                .namedtuple_fields(*class)
+                .is_some_and(|fields| fields.iter().any(|field| field == name))
+        {
+            return Err(Error::new("AttributeError", "can't set attribute"));
+        }
+        let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
+            Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
+            Value::Partial {
+                coroutine_marker, ..
+            } if name == "_is_coroutine_marker" => {
+                *coroutine_marker = Some(value);
+            }
+            Value::Property(property) if name == "__name__" => property.name = Some(value),
+            Value::Property(property) if name == "__doc__" => property.doc = value,
+            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
+            Value::Complex(_) if matches!(name, "real" | "imag") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
+                if name == "__dict__" {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
                 if module == "sys" && name == "path" {
                     self.sys_path = value;
                 }
                 let scope = *scope;
                 self.bind(scope, name, value);
             }
-            Value::Instance { fields, .. } => {
+            Value::Instance { class, fields, .. } if Some(*class) != object_class => {
                 fields.insert(name.to_owned(), value);
             }
             Value::Class { scope, .. } => {
@@ -333,6 +1299,53 @@ impl Context {
         Ok(())
     }
 
+    pub(super) fn instance(&mut self, class: Id, dictionary: Option<Id>) -> Id {
+        self.alloc(Value::Instance {
+            class,
+            dictionary,
+            memory_stream: None,
+            fields: HashMap::new(),
+            scalar: None,
+        })
+    }
+
+    /// Allocate the immutable str payload while retaining the actual Python class.
+    pub(super) fn new_str(
+        &mut self,
+        class: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let base = self.builtin("str");
+        if !self.subclass(class, base) {
+            let message = match self.heap.get(class) {
+                Value::Class { name, .. } => {
+                    format!("str.__new__({name}): {name} is not a subtype of str")
+                }
+                Value::Native(name) if builtins::is_builtin_type(name) => {
+                    format!("str.__new__({name}): {name} is not a subtype of str")
+                }
+                _ => format!(
+                    "str.__new__(X): X is not a type object ({})",
+                    self.type_name(class)
+                ),
+            };
+            return Err(Error::new("TypeError", message));
+        }
+        let text = builtins::call(self, "str", args, kwargs)?;
+        if class == base {
+            return Ok(text);
+        }
+        let text = self.string_storage(text).expect("str() returns a string");
+        Ok(self.alloc(Value::Instance {
+            class,
+            fields: HashMap::new(),
+            dictionary: None,
+            scalar: Some(text),
+            memory_stream: None,
+        }))
+    }
+
     pub(super) fn call(
         &mut self,
         callable: Id,
@@ -340,6 +1353,18 @@ impl Context {
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
         match self.heap.get(callable).clone() {
+            Value::GenericAlias(alias) => {
+                let result = self.call(alias.origin, args, kwargs)?;
+                if matches!(self.heap.get(result), Value::Instance { .. })
+                    && let Err(error) = self.set_attr(result, "__orig_class__", callable)
+                    && !alias.kind.is_typing_alias()
+                    && !matches!(error.kind.as_str(), "AttributeError" | "TypeError")
+                {
+                    return Err(error);
+                }
+                Ok(result)
+            }
+            Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
                     || !name.contains('.')
@@ -349,22 +1374,34 @@ impl Context {
                             "str"
                                 | "dict"
                                 | "list"
+                                | "map"
                                 | "set"
+                                | "int"
+                                | "frozenset"
                                 | "tuple"
                                 | "bytes"
+                                | "bytearray"
                                 | "range"
+                                | "slice"
                                 | "function"
+                                | "method"
                                 | "object"
+                                | "property"
+                                | "staticmethod"
                         )
                     ) =>
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
+            Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
+            Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
                 function,
                 args: bound,
                 keywords,
+                ..
             } => {
                 let bound = self.items(bound)?;
                 let required = bound
@@ -400,12 +1437,15 @@ impl Context {
                 }
                 self.call(function, positional, merged)
             }
-            Value::Method { callable, receiver } => {
+            Value::Method {
+                callable, receiver, ..
+            } => {
                 let mut all = Vec::with_capacity(args.len() + 1);
                 all.push(receiver);
                 all.extend(args);
                 self.call(callable, all, kwargs)
             }
+            Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::Cached { function, entries } => {
                 if !args
                     .iter()
@@ -447,19 +1487,39 @@ impl Context {
                 });
                 Ok(result)
             }
-            Value::Class { name, .. } => {
-                if [
-                    "Exception",
-                    "ValueError",
-                    "RuntimeError",
-                    "OSError",
-                    "TypeError",
-                ]
-                .iter()
-                .any(|kind| self.has_base(callable, kind))
+            Value::Class {
+                name,
+                scope,
+                ancestors,
+            } => {
+                if let Some(values) = self.enum_values(callable) {
+                    return self.enum_lookup(callable, values, &args, &kwargs);
+                }
+                if self.scope_data(scope).is_abstract {
+                    return Err(self.abstract_class_error(scope, &name)?);
+                }
+                if self.is_protocol_declaration(callable)
+                    && self.class_attr(callable, "__init__").is_none()
                 {
-                    let message = args.first().map(|&x| self.display(x)).unwrap_or_default();
-                    return Ok(self.alloc(Value::Raised(Error::new(&name, message))));
+                    return Err(Error::new("TypeError", "Protocols cannot be instantiated"));
+                }
+                if self.classes.get("collections.abc.Callable") == Some(&callable) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "Can't instantiate abstract class Callable without an implementation for abstract method '__call__'",
+                    ));
+                }
+                if self.classes.get("typing.Generic") == Some(&callable) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "Can't instantiate typing.Generic directly",
+                    ));
+                }
+                if ancestors.iter().any(|&base| {
+                    matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
+                }) {
+                    let error = self.exception(&name, &args);
+                    return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
                     if args.len() > names.len() {
@@ -483,18 +1543,37 @@ impl Context {
                     return Ok(self.alloc(Value::Instance {
                         class: callable,
                         fields,
+                        dictionary: None,
+                        scalar: None,
+                        memory_stream: None,
                     }));
                 }
-                let instance = self.alloc(Value::Instance {
-                    class: callable,
-                    fields: HashMap::new(),
-                });
-                if self.class_attr(callable, "__init__").is_some() {
-                    let init = self.lookup_attr(instance, "__init__")?;
+                let new = self.class_attr(callable, "__new__");
+                let str_subclass = self.has_base(callable, "str");
+                let instance = if let Some(new) = new {
+                    let allocate = self.bind_attribute(new, NONE, callable)?;
+                    let positional = std::iter::once(callable)
+                        .chain(args.iter().copied())
+                        .collect();
+                    let instance = self.call(allocate, positional, kwargs.clone())?;
+                    if !self.instance_of(instance, callable) {
+                        return Ok(instance);
+                    }
+                    instance
+                } else if str_subclass {
+                    self.new_str(callable, &args, &kwargs)?
+                } else {
+                    let dictionary = self
+                        .has_base(callable, "dict")
+                        .then(|| self.dict(Vec::new()));
+                    self.instance(callable, dictionary)
+                };
+                if let Some(init) = self.bound_slot(instance, "__init__")? {
                     if self.call(init, args, kwargs)? != NONE {
                         return Err(Error::new("TypeError", "__init__ must return None"));
                     }
-                } else if !args.is_empty() || !kwargs.is_empty() {
+                } else if new.is_none() && !str_subclass && (!args.is_empty() || !kwargs.is_empty())
+                {
                     return Err(Error::new(
                         "TypeError",
                         format!("{name} takes no arguments"),
@@ -503,12 +1582,35 @@ impl Context {
                 Ok(instance)
             }
             Value::Function {
-                name,
+                fields,
                 scope,
+                class_cell,
                 code,
-                parameters,
                 defaults,
+                ..
             } => {
+                let parameters = self.code_object(code).parameters;
+                let name = self.str_value(fields.qualname)?.to_owned();
+                if parameters == NONE {
+                    if let Some((key, _)) = kwargs.first() {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!("{name}() got an unexpected keyword argument '{key}'"),
+                        ));
+                    }
+                    if !args.is_empty() {
+                        let verb = if args.len() == 1 { "was" } else { "were" };
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "{name}() takes 0 positional arguments but {} {verb} given",
+                                args.len()
+                            ),
+                        ));
+                    }
+                    let globals = self.module_globals(scope);
+                    return self.exec_source(code, globals, None);
+                }
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
@@ -582,19 +1684,29 @@ impl Context {
                         }
                     }
                 }
+                let Value::Scope(frame) = self.heap.get_mut(local) else {
+                    unreachable!()
+                };
+                frame.first_argument = pos.into_iter().next();
+                if sig["class_cell"] == true {
+                    frame.class_cell = class_cell;
+                }
                 let value = self.execute(code, local)?;
                 if let Some(expected) = sig["return_type"].as_str() {
                     self.require_scalar(value, expected, &format!("{name} return value"))?;
                 }
                 Ok(value)
             }
-            Value::Instance { .. } => {
-                let Some(method) = self.bound_slot(callable, "__call__")? else {
-                    return Err(Error::new("TypeError", "object is not callable"));
-                };
-                self.call(method, args, kwargs)
+            _ => {
+                if let Some(method) = self.bound_slot(callable, "__call__")? {
+                    self.call(method, args, kwargs)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!("'{}' object is not callable", self.type_name(callable)),
+                    ))
+                }
             }
-            _ => Err(Error::new("TypeError", "object is not callable")),
         }
     }
     fn require_scalar(&self, value: Id, expected: &str, context: &str) -> Result<()> {
@@ -602,6 +1714,7 @@ impl Context {
             (expected, self.heap.get(value)),
             ("None", Value::None)
                 | ("int", Value::Int(_))
+                | ("float", Value::Float(_))
                 | ("bytes", Value::Bytes(_))
                 | ("str", Value::Str(_))
                 | ("bool", Value::Bool(_))
@@ -617,7 +1730,7 @@ impl Context {
 
     pub(super) fn class(&mut self, name: Id, bases: Id, body: Id) -> Result<Id> {
         let name = self.str_value(name)?.to_owned();
-        let bases = self.items(bases)?;
+        let (original, bases) = super::typing::resolve_bases(self, bases)?;
         let Value::Function {
             scope: parent,
             code,
@@ -628,21 +1741,44 @@ impl Context {
         };
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
+        let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         body_scope.class_body = Some(Vec::new());
+        body_scope.class_cell = Some(cell);
+        if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
+            self.bind(scope, "__qualname__", qualname);
+        }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
-        let class = self.alloc(Value::Class {
-            name: name.clone(),
-            scope,
-            bases,
-        });
+        // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.
+        if let Some(&protocol) = self.classes.get("typing.Protocol")
+            && bases.iter().any(|&base| self.subclass(base, protocol))
+        {
+            self.bind(
+                scope,
+                "_is_protocol",
+                if bases.contains(&protocol) {
+                    TRUE
+                } else {
+                    FALSE
+                },
+            );
+        }
+        super::typing::class_parameters(self, scope, original, &bases)?;
+        let class = self.allocate_class(name.clone(), scope, bases)?;
+        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
+        // The class body can read the enclosing module's docstring before the
+        // type supplies a default for an undocumented class.
+        class_scope
+            .names
+            .entry("__doc__".to_owned())
+            .or_insert(NONE);
         let members = class_scope
             .class_body
             .take()
@@ -655,12 +1791,22 @@ impl Context {
             self.heap.keep(value);
         }
         for (value, name) in members {
-            if let Some(set_name) = self.slot(value, "__set_name__") {
+            if matches!(self.heap.get(value), Value::Property(_)) {
+                let name = self.text(name);
+                let Value::Property(property) = self.heap.get_mut(value) else {
+                    unreachable!()
+                };
+                property.name = Some(name);
+            } else if let Some(set_name) = self.slot(value, "__set_name__") {
                 let name = self.text(name);
                 self.call(set_name, vec![value, class, name], Vec::new())?;
             }
         }
+        self.init_abstract_class(class, &name, scope)?;
         self.classes.insert(name, class);
+        if self.has_base(class, "enum.Enum") {
+            self.populate_enum(class, None)?;
+        }
         Ok(class)
     }
 }

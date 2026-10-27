@@ -320,6 +320,15 @@ impl Checker<'_> {
             return Ok(scope.finish(raised(ty, vec![], message)));
         }
         self.reject_builtin_keywords(call)?;
+        if matches!(returns, Type::Coroutine(_)) && evaluated.is_empty() {
+            // No argument adaptation is needed. Retaining the cold adapter keeps
+            // the body deferred and exposes the same underlying definition.
+            let target = original.unwrap_or_else(|| captured[0].clone());
+            return Ok(scope.finish(Expr {
+                ty: target.ty,
+                kind: ExprKind::Builtin(Builtin::EmptyPartial, vec![target]),
+            }));
+        }
         if matches!(returns, Type::Coroutine(_)) || evaluated.len() > parameters.len() {
             return Err(error(
                 self.source,
@@ -409,6 +418,12 @@ impl Checker<'_> {
             ),
         };
         let id = self.helpers.reserve();
+        // A partial through an erased Callable keeps the original target in
+        // slot zero even when it cannot expose a typed public partial.func.
+        self.types.set_coroutine_target(
+            id,
+            crate::types::CoroutineTarget::Partial(func_slot.unwrap_or(0)),
+        );
         let locals: Vec<_> = [frame]
             .into_iter()
             .chain(remaining.iter().copied())

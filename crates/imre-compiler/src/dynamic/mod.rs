@@ -20,6 +20,7 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     sys_names: HashSet<String>,
+    operator_names: HashSet<String>,
     machinery_names: HashSet<String>,
     typed_machinery_receivers: HashSet<String>,
 }
@@ -96,12 +97,66 @@ impl Imports {
         if level == 0
             && matches!(
                 name,
-                "sysconfig" | "platform" | "site" | "importlib.machinery" | "struct"
+                "sysconfig" | "platform" | "site" | "importlib.machinery" | "struct" | "traceback"
             )
         {
             self.runtime_imports = true;
         }
     }
+}
+
+fn boxed_sys_export(name: &str) -> bool {
+    matches!(
+        name,
+        "path" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+    )
+}
+
+fn boxed_operator(name: &str) -> bool {
+    matches!(
+        name,
+        "attrgetter"
+            | "lt"
+            | "le"
+            | "eq"
+            | "ne"
+            | "gt"
+            | "ge"
+            | "add"
+            | "sub"
+            | "mul"
+            | "matmul"
+            | "truediv"
+            | "floordiv"
+            | "mod"
+            | "lshift"
+            | "rshift"
+            | "and_"
+            | "xor"
+            | "or_"
+            | "iadd"
+            | "isub"
+            | "imul"
+            | "imatmul"
+            | "itruediv"
+            | "ifloordiv"
+            | "imod"
+            | "ipow"
+            | "ilshift"
+            | "irshift"
+            | "iand"
+            | "ixor"
+            | "ior"
+            | "neg"
+            | "pos"
+            | "invert"
+            | "contains"
+            | "getitem"
+            | "setitem"
+            | "delitem"
+            | "index"
+            | "length_hint"
+    )
 }
 
 impl<'a> Visitor<'a> for Imports {
@@ -113,6 +168,7 @@ impl<'a> Visitor<'a> for Imports {
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
+                        "operator" => self.operator_names.insert(bound.to_string()),
                         "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
                         "importlib.machinery" => self.machinery_names.insert(bound.to_string()),
                         _ => false,
@@ -131,8 +187,8 @@ impl<'a> Visitor<'a> for Imports {
                             .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
                     }
                     if imp.level == 0
-                        && name == "sys"
-                        && matches!(suffix, "path" | "version_info" | "implementation" | "exit")
+                        && ((name == "operator" && boxed_operator(suffix))
+                            || (name == "sys" && boxed_sys_export(suffix)))
                     {
                         self.runtime_imports = true;
                     }
@@ -163,9 +219,15 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.typed_machinery_receivers.insert(receiver.to_string());
         }
-        if self.sys_path(e)
-            || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
-            || matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "version_info" | "implementation" | "exit") && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
+        if let Expr::Attribute(attr) = e
+            && boxed_operator(attr.attr.as_str())
+            && let Expr::Name(module) = &*attr.value
+            && self.operator_names.contains(module.id.as_str())
+        {
+            self.runtime_imports = true;
+        }
+        if matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
+            || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
             self.runtime_imports = true;
         }
@@ -219,6 +281,7 @@ pub(crate) fn compile(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
+    runtime_imports: bool,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -233,13 +296,15 @@ pub(crate) fn compile(
     };
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
-    if !options.runtime_imports
+    if !runtime_imports
         && ![
             "sys",
             "platform",
             "site",
             "importlib",
+            "operator",
             "struct",
+            "traceback",
             "SystemExit",
         ]
         .iter()
@@ -255,7 +320,7 @@ pub(crate) fn compile(
             SourceKind::File
         },
     ) {
-        Ok(i) if i.runtime_imports || (options.runtime_imports && !i.names.is_empty()) => i,
+        Ok(i) if i.runtime_imports || (runtime_imports && !i.names.is_empty()) => i,
         _ => return Ok(None),
     };
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -291,6 +356,7 @@ pub(crate) fn compile(
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
+    let bundled_root = "<imre stdlib>";
     let mut sources = vec![(
         "__main__".to_owned(),
         if command.is_some() {
@@ -327,6 +393,13 @@ pub(crate) fn compile(
                 if !seen.insert(prefix.clone()) {
                     continue;
                 }
+                if let Some((filename, source)) = crate::modules::bundled_runtime_source(&prefix) {
+                    let path = Path::new(bundled_root).join(filename);
+                    let package = path.ends_with("__init__.py");
+                    let imports = imports_for_module(&path, source)?;
+                    sources.push((prefix.clone(), path, source.to_owned()));
+                    work.push_back((prefix.clone(), package, imports));
+                }
                 for root in &roots {
                     let stem = root.join(prefix.replace('.', "/"));
                     let file = stem.with_extension("py");
@@ -362,6 +435,7 @@ pub(crate) fn compile(
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let config = serde_json::json!({
+        "bundled_root":bundled_root,
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),
         "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),
@@ -370,7 +444,8 @@ pub(crate) fn compile(
         "executable":startup.map(|(_, executable)| executable),
         "command":command.is_some(),"paths":paths,
     });
-    let llvm_ir = emit::emit(&sources, &config.to_string())?;
+    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),

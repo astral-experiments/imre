@@ -2,19 +2,20 @@
 //! Python code runs with an owner recorded, never with the Rust guard borrowed.
 
 use super::{Error, Int, Kind, Object, Result, Storage, StorageCell, finish, object};
+use crate::objects::locks::{timeout_float, timeout_int};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 #[derive(Default)]
-pub(in crate::objects) struct HandlerLock {
+pub(crate) struct HandlerLock {
     owner: Mutex<Option<(ThreadId, usize)>>,
     available: Condvar,
 }
 
 impl HandlerLock {
     /// An owner may acquire recursively; other callers wait for the final release.
-    fn acquire(&self, blocking: bool, timeout: Option<Duration>) -> Result<bool> {
+    pub(crate) fn acquire(&self, blocking: bool, timeout: Option<Duration>) -> Result<bool> {
         let id = thread::current().id();
         let mut owner = self.owner.lock().unwrap();
         if let Some((thread, depth)) = owner.as_mut()
@@ -47,7 +48,7 @@ impl HandlerLock {
     }
 
     /// Wake a waiting thread only after the matching outer release.
-    fn release(&self) -> Result<()> {
+    pub(crate) fn release(&self) -> Result<()> {
         let mut owner = self.owner.lock().unwrap();
         if let Some((id, depth)) = owner.as_mut()
             && *id == thread::current().id()
@@ -81,46 +82,6 @@ impl HandlerLock {
     }
 }
 
-/// Validate nanoseconds before inspecting the current owner, including nonblocking calls.
-fn wait_duration(blocking: bool, ns: i64) -> Result<Option<Duration>> {
-    if ns == -1_000_000_000 {
-        return Ok(None);
-    }
-    if !blocking {
-        return Err(Error::new(
-            Kind::ValueError,
-            "can't specify a timeout for a non-blocking call",
-        ));
-    }
-    if ns < 0 {
-        return Err(Error::new(
-            Kind::ValueError,
-            "timeout value must be a non-negative number",
-        ));
-    }
-    Ok(Some(Duration::from_nanos(ns as u64)))
-}
-
-/// CPython rounds fractional timeouts away from zero before converting to PyTime_t.
-fn timeout(blocking: bool, seconds: f64) -> Result<Option<Duration>> {
-    if seconds.is_nan() {
-        return Err(Error::new(
-            Kind::ValueError,
-            "Invalid value NaN (not a number)",
-        ));
-    }
-    const LIMIT: f64 = 9_223_372_036_854_775_808.0;
-    let ns = seconds * 1e9;
-    let ns = if ns < 0.0 { ns.floor() } else { ns.ceil() };
-    if !(-LIMIT..LIMIT).contains(&ns) {
-        return Err(Error::new(
-            Kind::OverflowError,
-            "timestamp out of range for platform time_t",
-        ));
-    }
-    wait_duration(blocking, ns as i64)
-}
-
 /// Allocate an unlocked handle owned independently of its handler.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_log_lock_new() -> *const Object {
@@ -149,7 +110,7 @@ pub unsafe extern "C" fn imre_log_lock_acquire(
     blocking: bool,
     seconds: f64,
 ) -> bool {
-    let result = timeout(blocking, seconds).and_then(|wait| {
+    let result = timeout_float(blocking, seconds).and_then(|wait| {
         // SAFETY: the caller supplies a live lock.
         unsafe { lock(value) }.acquire(blocking, wait)
     });
@@ -165,17 +126,8 @@ pub unsafe extern "C" fn imre_log_lock_acquire_int(
     seconds: usize,
 ) -> bool {
     // SAFETY: the integer word is borrowed only until its nanosecond value is extracted.
-    let ns = unsafe { Int::borrow(seconds) }
-        .as_small()
-        .and_then(|s| s.checked_mul(1_000_000_000));
-    let result = ns
-        .ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                "timestamp too large to convert to C PyTime_t",
-            )
-        })
-        .and_then(|ns| wait_duration(blocking, ns))
+    let seconds = unsafe { Int::borrow(seconds) };
+    let result = timeout_int(blocking, &seconds)
         // SAFETY: the caller supplies a live lock.
         .and_then(|wait| unsafe { lock(value) }.acquire(blocking, wait));
     finish(result, false)

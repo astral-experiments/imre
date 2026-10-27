@@ -1,0 +1,89 @@
+def exercise(path):
+    sample = "Málaga 東京🧪e\u0301\n"
+    with open(path, "w") as ready:
+        alias = ready
+        print(ready.closed, ready.__enter__() is ready)
+        print(ready.write(""), ready.write(sample))
+        with open(path, "rb") as observer:
+            print(observer.read() == b"")
+        print(ready.flush() is None)
+        with open(path, "rb") as observer:
+            print(observer.read().decode("utf-8") == sample)
+        for value in (b"wrong", bytearray(b"wrong"), ready):
+            try:
+                ready.write(value)
+            except TypeError as error:
+                print(error)
+        try:
+            ready.write()
+        except TypeError as error:
+            print(error)
+        try:
+            ready.write(s="wrong")
+        except TypeError as error:
+            print(error)
+        try:
+            ready.flush(1)
+        except TypeError as error:
+            print(error)
+    print(alias.closed, alias.close() is None)
+    try:
+        alias.write("closed")
+    except ValueError as error:
+        print(error)
+    try:
+        alias.flush()
+    except ValueError as error:
+        print(error)
+    try:
+        with alias:
+            pass
+    except ValueError as error:
+        print(error)
+
+    try:
+        with open(path, "w") as output:
+            output.write("4321")
+            raise ValueError("body")
+    except ValueError as error:
+        print(error, output.closed)
+    with open(path, "rb") as observer:
+        print(observer.read() == b"4321")
+    try:
+        open("missing-parent/port", "w")
+    except FileNotFoundError as error:
+        print(error, error.errno, error.strerror, error.filename, error.filename2, error.args)
+    try:
+        open(path + "/child", "w")
+    except OSError as error:
+        print(isinstance(error, NotADirectoryError), error.errno, error.filename, error.args)
+    try:
+        open(".", "w")
+    except OSError as error:
+        print(isinstance(error, IsADirectoryError), error, error.errno, error.strerror,
+              error.filename, error.filename2, error.args)
+
+
+    with open(path, "w", encoding="utf-8") as output:
+        output.write("h\u00e9llo\r\nsecond\rthird\n")
+    with open(path) as reader:
+        alias = reader
+        print(repr(alias.readline()), repr(reader.read()), repr(alias.read()))
+    print(alias.closed)
+    for mode in ("r", "rt"):
+        with open(path, mode, encoding="utf-8") as reader:
+            print(repr(reader.read()), repr(reader.readline()))
+
+
+def full_device():
+    output = open("/dev/full", "w")
+    print(output.write("x"))
+    try:
+        output.flush()
+    except OSError as error:
+        print(error, output.closed, error.errno, error.strerror, error.filename, error.args)
+    try:
+        output.close()
+    except OSError as error:
+        print(error, output.closed, error.errno, error.strerror, error.filename, error.args)
+    print(output.closed, output.close() is None)

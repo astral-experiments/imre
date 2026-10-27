@@ -5,6 +5,7 @@ import ast
 from pathlib import Path
 import sys
 import tempfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comprehensions import require_result, run
@@ -12,6 +13,7 @@ from comprehensions import require_result, run
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
 STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
+    "decimal_numeric_comparison": 'from decimal import Decimal\nprint(Decimal("1.00") == Decimal(1))',
     "formatter_unknown_export": "from _string import no_such_export",
     "formatter_unknown_neighbor": "import _string, missing_formatter_neighbor",
     "formatter_nested_argument": 'from _string import formatter_parser\ndef number(item: int) -> int:\n    return item\nformatter_parser(number("bad"))',
@@ -102,6 +104,13 @@ class Case:
         yield source
 
 
+def run_fixture(source: Path, command: list[str], directory: Path):
+    if source.name == "gettext_catalog.py":
+        with patch.dict("os.environ", LANGUAGE="fr:yy"):
+            return run(command, directory)
+    return run(command, directory)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -127,7 +136,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="imre-text-") as directory:
         temporary = Path(directory)
         for source in [*sorted(FIXTURES.glob("*.py")), *cpython_sub_cases(temporary)]:
-            expected = run([args.python, "-I", "-B", str(source)], temporary)
+            expected = run_fixture(source, [args.python, "-I", "-B", str(source)], temporary)
             require_result(expected, None)
             for level in args.opt_levels:
                 binary = temporary / f"{source.stem}-O{level}"
@@ -136,7 +145,7 @@ def main() -> None:
                     "-o", str(binary), "--opt-level", level, *flags,
                 ], temporary)
                 require_result(built, None)
-                actual = run([str(binary)], temporary)
+                actual = run_fixture(source, [str(binary)], temporary)
                 require_result(actual, None)
                 assert actual.stdout == expected.stdout, (source.name, level, actual.stdout, expected.stdout)
                 checks += 1

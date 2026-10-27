@@ -48,6 +48,35 @@ def main():
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
 
+        streams = root / "streams.py"
+        streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
+        expected = run(sys.executable, "-B", streams)
+        actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout == "stdout π\n".encode()
+        assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\n".encode()
+
+        string_io = root / "string_io.py"
+        string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
+        expected = run(sys.executable, "-B", string_io)
+        actual = run(imre, "run", string_io, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
+        exit_stack = Path(__file__).with_name("fixtures") / "boxed_exit_stack.py"
+        expected = run(sys.executable, "-B", exit_stack)
+        actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
+        exit_stack_import = root / "stack.py"
+        exit_stack_import.write_text("from contextlib import ExitStack\n"
+                                     "s = ExitStack()\nprint(isinstance(s, ExitStack))\n"
+                                     "print(s.__enter__() is s)\n")
+        for mode in ([], ["--reachable-only"]):
+            actual = run(imre, "run", exit_stack_import, *mode, "--quiet")
+            assert (actual.returncode, actual.stdout, actual.stderr) == (0, b"True\nTrue\n", b""), actual.stderr
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
@@ -73,9 +102,9 @@ def main():
             target["python_version"] + ".0",
         ]
 
-        def compare(*args, extra=None, status=0):
+        def compare(*args, extra=None, status=0, native_args=None):
             expected = run(sys.executable, *args, extra=extra)
-            actual = run(imre, *args, extra=extra)
+            actual = run(imre, *(args if native_args is None else native_args), extra=extra)
             assert actual.returncode == expected.returncode == status, (
                 args,
                 actual.stderr,
@@ -91,6 +120,21 @@ def main():
                 actual.stderr,
                 expected.stderr,
             )
+
+        getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
+        compare("-IB", getters / "fields.py")
+        compare("-B", getters / "main.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
+        (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
+        inspect_entry = root / "inspect_views.py"
+        inspect_entry.write_text("import view_inspection\n")
+        compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
+        compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
             "import sys\nfor arg in sys.argv:\n    print(arg)\nprint(__name__)\n"
@@ -124,6 +168,20 @@ def main():
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
+        cleanup = Path(__file__).resolve().parent / "fixtures/exceptions/boxed_finally.py"
+        compare(cleanup, extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"})
+
+        # Bundled children must respect the selected package's __path__.
+        shadow = root / "shadow"
+        (shadow / "http").mkdir(parents=True)
+        (shadow / "http" / "__init__.py").write_text("marker = 17\n")
+        shadow_entry = shadow / "entry.py"
+        shadow_entry.write_text(
+            "import sys, http\nsys.path\nassert http.marker == 17\n"
+            "try:\n    import http.client\nexcept ModuleNotFoundError:\n    print('local package')\n"
+        )
+        compare("-B", shadow_entry)
+
         # Accept genuine U+FFFD, raw text, and literal backslashes on the boxed path.
         compare(
             "-c",
@@ -154,6 +212,34 @@ sys.path.append("unused")""",
         assert surrogate in imported.stderr, imported.stderr
         assert run(imre, "-c").returncode == 2
         assert run(imre, "-I", "missing.py").returncode == 2
+
+        imports = root / "import_members"
+        imports.mkdir()
+        (imports / "__init__.py").write_text("")
+        (imports / "child.py").write_text("import missing_child_dependency\n")
+        (imports / "found.py").write_text("value = 37\n")
+        compare(
+            "-B", "-c",
+            """from sys import path
+try:
+    from import_members import absent
+except ModuleNotFoundError:
+    print("missing module")
+except ImportError as error:
+    print(error.args, error.name, error.path, error.name_from)
+try:
+    from sys import missing_export
+except ImportError as error:
+    print(error.msg, error.name, error.path, error.name_from)
+try:
+    from import_members import child
+except ModuleNotFoundError as error:
+    print(error.msg, error.name)
+from import_members import found
+print(found.value)
+""",
+        )
+
         diagnostic = run(imre, "-c", "print(__file__)")
         assert diagnostic.returncode != 0 and b"<string>" in diagnostic.stderr, (
             diagnostic.stderr
@@ -264,6 +350,12 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        (helpers / "uuid").mkdir()
+        uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
+        compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
+        (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
+        compare("-IB", "-c", uuid_import + "print(uuid.marker)")
+
         (root / "legacy.py").write_text(args_code)
         legacy = run(imre, "run", "legacy.py", "--quiet", "--", "--opt-level", "2")
         assert (
@@ -303,14 +395,98 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
+        fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
+            "boxed_ast.py",
+            "boxed_code_objects.py",
+            "boxed_source_exec.py",
+            "boxed_bytes_add.py",
+            "boxed_bytes_io.py",
+            "boxed_int_to_bytes.py",
+            "boxed_complex.py",
+            "boxed_float.py",
+            "boxed_bytes_octal.py",
             "boxed_contextvars.py",
+            "boxed_typing_protocol.py",
+            "boxed_formatter.py",
+            "boxed_re_ascii.py",
+            "boxed_re_verbose.py",
+            "boxed_datetime.py",
+            "boxed_email_dates.py",
+            "boxed_time.py",
+            "boxed_codecs.py",
+            "boxed_selector_wide_fds.py",
+            "boxed_urlsplit.py",
             "boxed_descriptors.py",
+            "boxed_exception_repr.py",
+            "boxed_type_identity.py",
+            "boxed_any_generator.py",
+            "boxed_global.py",
+            "boxed_logging.py",
+            "boxed_class_attribute.py",
+            "boxed_request_strings.py",
+            "boxed_map_capwords.py",
+            "boxed_module_globals.py",
+            "boxed_frozenset.py",
+            "boxed_attribute_deletion.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
+            "boxed_super.py",
+            "boxed_property_setter.py",
+            "boxed_staticmethod.py",
+            "boxed_item_assignment.py",
+            "boxed_bytecache.py",
+            "boxed_fnmatch.py",
+            "boxed_itertools_count.py",
+            "boxed_print_streams.py",
+            "boxed_redirect_streams.py",
+            "boxed_itertools_repeat.py",
+            "boxed_thread_local.py",
+            "boxed_threading_lock.py",
+            "boxed_dict_subclasses.py",
+            "boxed_dict_pop.py",
+            "boxed_list_pop.py",
+            "boxed_zip.py",
+            "boxed_map.py",
+            "boxed_python_iterators.py",
+            "boxed_sorted.py",
+            "boxed_generator_delegation.py",
+            "boxed_slice.py",
+            "boxed_binascii.py",
+            "boxed_bytes_separators.py",
+            "boxed_struct.py",
+            "boxed_reversed_list.py",
+            "boxed_string_new.py",
+            "boxed_string_repeat.py",
+            "boxed_string_expandtabs.py",
         ):
-            plugin.write_bytes((Path(__file__).with_name("fixtures") / fixture).read_bytes())
+            plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        if os.name == "posix":
+            plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+        plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
+        compare("-IB", "-c", imports)
+        plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
+        for flags in ("-IB", "-IBOO"):
+            compare(flags, "-c", imports + "arithmetic.current()")
+        for first_import in ("import collections", "import _collections_abc"):
+            plugin.write_text(f"""{first_import}
+import collections
+print(collections.abc.__name__, collections.__package__, bool(collections.__path__))
+import collections.abc as dotted
+from collections import abc
+import _collections_abc
+print(abc is dotted, abc is _collections_abc, repr(abc.__package__))
+try:
+    import collections.unknown_child
+except ImportError:
+    print('missing child')
+""")
+            compare("-IB", "-c", imports)
+        http = fixtures.parents[1] / "crates/imre-compiler/stdlib/http/__init__.py"
+        plugin.write_bytes(http.read_bytes())
+        compare("-IB", "-c", imports + (fixtures / "boxed_http_enums.py").read_text())
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",
@@ -321,16 +497,33 @@ def report(text):
             "errorcode[errno.EADDRINUSE] = 'changed'\n"
             "print(errno.errorcode is errorcode, errno.errorcode[errno.EADDRINUSE])\n",
         )
+        (root / "chunks.bin").write_bytes(b"0a\r\n\xffx!\n")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_io.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
         compare(
             "-IB", "-c",
             "import sys, hashlib\nsys.path\n"
             "def factory(data=b''):\n    return hashlib.sha1(data)\n"
+            "class Flag:\n    def __bool__(self):\n        raise ValueError('hash flag')\n"
             "h = factory(b'\\x00a')\nalias = h\nalias.update(b'\\xff')\n"
             "copy = h.copy()\ncopy.update(b'next')\n"
             "print(h.name, h.block_size, h.digest_size, list(h.digest()), h.hexdigest())\n"
             "print(list(h.digest()), list(copy.digest()), factory().hexdigest())\n"
+            "print(hashlib.sha1(usedforsecurity=False).hexdigest() == factory().hexdigest())\n"
+            "try:\n    hashlib.sha1(b'a', data=b'b', usedforsecurity=Flag())\n"
+            "except TypeError:\n    print('duplicate data')\n"
+            "try:\n    hashlib.sha1('bad', usedforsecurity=Flag())\n"
+            "except ValueError as exc:\n    print(str(exc))\n"
             "try:\n    h.update('text')\nexcept TypeError as exc:\n    print(str(exc))\n",
         )
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_hmac.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.check()")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_text_output.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.exercise('port.txt')")
+        if Path("/dev/full").exists():
+            compare("-IB", "-c", imports + "arithmetic.full_device()")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_urlsafe_base64.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.check()")
         checked = run(
             imre,
             "-IB",
@@ -359,6 +552,58 @@ try:
     high << -1
 except ValueError as err:
     print(err)
+""",
+        )
+        compare(
+            "-IB",
+            "-c",
+            """\
+import json, sysconfig
+
+def fallback(value):
+    return ["fallback", value.label]
+
+class Extra:
+    label = "π"
+
+data = json.loads(b'{"values": [39614081257132168796771975168, 3, -2]}')
+values = data["values"]
+options = {"default": fallback, "separators": (",", ":")}
+options.setdefault("default", None)
+options.setdefault("ensure_ascii", True)
+options.setdefault("sort_keys", True)
+print(json.dumps({"total": values[0] + values[1] + values[2], "count": len(values)}, **options))
+try:
+    json.loads(b"{}")["values"]
+except KeyError as err:
+    print(str(err))
+print(json.dumps({"ok": True}, **options))
+print(json.dumps({"z": Extra(), "a": json.loads("1.25")}, **options))
+print(json.dumps({2: False, json.loads("0.5"): True}, sort_keys=True))
+nan = json.loads("NaN")
+print(nan == nan, nan <= 1, [nan] == [nan])
+defaults = {"present": None}
+print(defaults.setdefault("missing"), defaults.setdefault("present", 1), len(defaults))
+cache = (Ellipsis, Ellipsis)
+print(cache[False] is ..., cache[True] is Ellipsis, repr(cache[False]))
+class BrokenFlag:
+    def __bool__(self):
+        raise ValueError("invalid JSON option")
+try:
+    json.dumps({"ok": True}, sort_keys=BrokenFlag())
+except ValueError as err:
+    print(str(err))
+try:
+    json.loads(Ellipsis)
+except TypeError as err:
+    print(str(err))
+data = json.loads('{"k": 1, "other": [true], "k": 2}')
+data["other"].append(False)
+print(json.dumps(data))
+try:
+    json.loads(b'{"values": [1,]}')
+except ValueError as err:
+    print(isinstance(err, json.JSONDecodeError), str(err))
 """,
         )
     print("Python script and command-line semantics match CPython")

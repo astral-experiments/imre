@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_gettext",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_gettext.py": "9ad37909a8ec4e015b0c6e6c98400aa3d001be79"
+  },
+  "reference_files": {
+    "Lib/gettext.py": "6c11ab2b1eb57091affba895a6fe8bc34de84ecc",
+    "Lib/locale.py": "dfedc6386cb891e0c0f312b4f52d880fa993bf31",
+    "Lib/encodings/aliases.py": "4ecb6b6e297a13b31b49394251c7a2a068752c71"
+  }
+}
