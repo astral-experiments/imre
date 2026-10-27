@@ -1600,6 +1600,9 @@ impl Heap {
 
     /// Compiled calls root their fresh argument list before evaluating its operands.
     pub(super) fn argument_mark(&self, arguments: Id) -> Option<usize> {
+        if self.file_writers.is_empty() {
+            return None;
+        }
         self.frames
             .last()?
             .live
@@ -1609,7 +1612,39 @@ impl Heap {
 
     /// Discard the evaluated operand while preserving earlier arguments in the same statement.
     pub(super) fn discard_truth(&mut self, mark: usize) -> bool {
-        if !self.has_unbound_writer(NONE) {
+        if self.file_writers.is_empty() {
+            return false;
+        }
+        // Scalar intermediates and the argument wrappers around them cannot own a writer.
+        let scalar = |id| {
+            matches!(
+                self.get(id),
+                Value::None
+                    | Value::Bool(_)
+                    | Value::Int(_)
+                    | Value::Float(_)
+                    | Value::Complex(_)
+                    | Value::Str(_)
+                    | Value::Bytes(_)
+                    | Value::ByteArray(_)
+                    | Value::Native(_)
+            )
+        };
+        let could_own_writer = self
+            .frames
+            .last()
+            .unwrap()
+            .live
+            .iter()
+            .skip(mark)
+            .any(|&id| match self.get(id) {
+                Value::List(values) | Value::Tuple(values) if values.len() <= 1 => {
+                    values.first().is_some_and(|&item| !scalar(item))
+                }
+                Value::Dict(entries) if entries.is_empty() => false,
+                _ => !scalar(id) && !self.bound_in_active_frame(id),
+            });
+        if !could_own_writer || !self.has_unbound_writer(NONE) {
             return false;
         }
         self.release_temporaries_since(mark);
