@@ -69,6 +69,15 @@ impl Context {
         self.class_attr(*class, name)
     }
 
+    /// Return dictionary storage when the receiver still uses the builtin iterator.
+    pub(super) fn raw_dict_source(&self, value: Id) -> Option<Id> {
+        self.dict_storage(value).filter(|_| {
+            self.slot(value, "__iter__").is_none_or(
+                |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
+            )
+        })
+    }
+
     /// Dict copying uses raw entries for a dict with its original iterator.
     /// An overridden iterator opts into the mapping protocol, including key lookup.
     pub(super) fn for_each_mapping_item(
@@ -90,10 +99,7 @@ impl Context {
                 Err(error)
             };
         }
-        if self.slot(input, "__iter__").is_none_or(
-            |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
-        ) && let Some(storage) = self.dict_storage(input)
-        {
+        if let Some(storage) = self.raw_dict_source(input) {
             if storage == target {
                 return Ok(true);
             }
@@ -1218,6 +1224,9 @@ impl Context {
             }
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
+            }
+            Value::Native(class) if class == "collections.defaultdict" && name == "copy" => {
+                return Ok(self.builtin("collections.defaultdict.copy"));
             }
             Value::Native(class)
                 if class == "list"

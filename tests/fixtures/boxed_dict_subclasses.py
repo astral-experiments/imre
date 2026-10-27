@@ -40,6 +40,13 @@ def current():
     print(groups.clear(), groups["key"], saved)
     print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
 
+    groups["visits"].append(1)
+    plain_copy = dict.copy(groups)
+    other = groups.copy()
+    other["visits"].append(2)
+    print(plain_copy["visits"], groups["visits"], other["fresh"], list(groups))
+    print(type(plain_copy) is dict, type(other) is type(groups), "fresh" in plain_copy)
+
     class ClearOnCompare:
         def __hash__(self):
             return 1
