@@ -392,7 +392,109 @@ impl Program {
     }
 }
 
+pub(super) fn syntax_member(name: &str) -> Option<usize> {
+    [
+        "msg",
+        "filename",
+        "lineno",
+        "offset",
+        "text",
+        "end_lineno",
+        "end_offset",
+        "print_file_and_line",
+        "_metadata",
+    ]
+    .iter()
+    .position(|field| *field == name)
+}
+
 impl Context {
+    pub(super) fn syntax_fields(&self, args: &[Id]) -> [Id; 9] {
+        let mut fields = [NONE; 9];
+        fields[0] = args.first().copied().unwrap_or(NONE);
+        if let [_, location] = args
+            && let Value::Tuple(values) = self.heap.get(*location)
+        {
+            for (field, value) in fields[1..7].iter_mut().zip(values) {
+                *field = *value;
+            }
+        }
+        fields
+    }
+
+    pub(super) fn retain_syntax_fields(&self, error: &mut Error, fields: [Id; 9]) -> Result<()> {
+        let fields = crate::shared::Shared::try_new(fields.map(std::cell::Cell::new))
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        if error.trace.is_none() {
+            let trace = allocator_api2::boxed::Box::try_new(super::value::Trace::default())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            error.trace = Some(trace);
+        }
+        error.tracing().source_syntax = Some(fields);
+        Ok(())
+    }
+
+    pub(super) fn update_syntax_member(&self, object: Id, name: &str, value: Id) -> bool {
+        let Value::Raised(error) = self.heap.get(object) else {
+            return false;
+        };
+        let Some(fields) = error
+            .trace
+            .as_ref()
+            .and_then(|trace| trace.source_syntax.as_ref())
+        else {
+            return false;
+        };
+        let Some(slot) = syntax_member(name) else {
+            return false;
+        };
+        fields[slot].set(value);
+        true
+    }
+
+    pub(super) fn syntax_suffix(&self, filename: Id, line: Id) -> Result<String> {
+        use std::fmt::Write;
+        let filename = self.string_storage(filename).map(|id| {
+            let Value::Str(path) = self.heap.get(id) else {
+                unreachable!()
+            };
+            path.rsplit(std::path::MAIN_SEPARATOR)
+                .next()
+                .unwrap_or(path)
+        });
+        let line = if let Value::Int(number) = self.heap.get(line) {
+            Some(if std::mem::size_of::<libc::c_long>() == 4 {
+                number
+                    .to_i64()
+                    .and_then(|n| i32::try_from(n).ok())
+                    .map(i64::from)
+                    .unwrap_or(-1)
+            } else {
+                number.to_i64().unwrap_or(-1)
+            })
+        } else {
+            None
+        };
+        let mut suffix = String::new();
+        if filename.is_some() || line.is_some() {
+            suffix
+                .try_reserve(filename.map_or(0, str::len).saturating_add(40))
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            suffix.push_str(" (");
+            if let Some(name) = filename {
+                suffix.push_str(name);
+            }
+            if let Some(n) = line {
+                if filename.is_some() {
+                    suffix.push_str(", ");
+                }
+                write!(&mut suffix, "line {n}").expect("writing to a string succeeds");
+            }
+            suffix.push(')');
+        }
+        Ok(suffix)
+    }
+
     pub(super) fn compile_source(&mut self, source: Id, filename: Id, mode: Id) -> Result<Id> {
         let mode = self.str_value(mode)?;
         if mode != "exec" {
@@ -480,10 +582,13 @@ impl Context {
         }
         let mut error = self.exception("SyntaxError", &args);
         error.message = rendered;
-        let args = error.args.expect("exception retains its arguments");
-        // SyntaxError's diagnostic fields survive reassignment of BaseException.args.
-        error.tracing().source_syntax = Some([if null { NONE } else { filename }, args]);
-        error
+        let mut fields = self.syntax_fields(&args);
+        // The tokenizer can omit the filename from args while compile exposes it on the exception.
+        fields[1] = if null { NONE } else { filename };
+        match self.retain_syntax_fields(&mut error, fields) {
+            Ok(()) => error,
+            Err(allocation) => allocation,
+        }
     }
 
     fn box_source_code(&mut self, program: Rc<Program>, parameters: Option<Id>) -> Id {
