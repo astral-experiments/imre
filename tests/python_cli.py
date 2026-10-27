@@ -689,6 +689,7 @@ def report(text):
             "boxed_redirect_streams.py",
             "boxed_itertools_repeat.py",
             "boxed_itertools_chain.py",
+            "boxed_itertools_groupby.py",
             "boxed_module_type.py",
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
