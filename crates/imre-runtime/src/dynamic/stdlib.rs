@@ -87,6 +87,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "_imre_dataclasses"
             | "marshal"
             | "pickle"
+            | "zlib"
             | "datetime"
             | "email"
             | "email.utils"
@@ -374,6 +375,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
+        ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
         ("binascii", "Error" | "Incomplete" | "a2b_base64" | "b2a_base64") => {
             ctx.builtin(&format!("binascii.{name}"))
         }
@@ -754,6 +756,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
+    }
+    if name == "zlib.adler32" {
+        return binascii::adler32(ctx, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
