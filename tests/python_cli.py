@@ -499,6 +499,14 @@ def report(text):
             "print(x, Decimal(value=x) is x, Decimal(True), len(str(Decimal(10 ** 5000))))\n"
         )
         compare("-IB", "-c", decimal_import + "import decimal_values")
+        (helpers / "decimal_subclass.py").write_text(
+            "from decimal import Decimal\n"
+            "class Amount(Decimal): pass\n"
+            "x = Amount('1.2300')\n"
+            "for result in (Amount(12), Amount(False), Amount(Decimal('1.2300')), Decimal(x), Amount(x)):\n"
+            "    print(type(result).__name__, result, result is x)\n"
+        )
+        compare("-IB", "-c", decimal_import + "import decimal_subclass")
         (helpers / "decimal_comparison.py").write_text(
             "from decimal import Decimal\nprint(Decimal('1.00') == Decimal(1))\n"
         )

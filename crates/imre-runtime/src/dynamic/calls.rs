@@ -2407,18 +2407,35 @@ impl Context {
                 });
                 Ok(result)
             }
-            Value::Class { name, scope, .. } => {
+            Value::Class {
+                name,
+                scope,
+                ancestors,
+                ..
+            } => {
                 let (mut args, mut kwargs) = (args, kwargs);
-                if name == "Decimal" && self.classes.get("decimal.Decimal") == Some(&callable) {
+                if let Some(&decimal) = self.classes.get("decimal.Decimal")
+                    && (callable == decimal
+                        || (ancestors.contains(&decimal)
+                            && self.class_attr(callable, "__new__").is_none()
+                            && self.class_attr(callable, "__init__")
+                                == self.class_attr(decimal, "__init__")))
+                {
                     let value = match (&mut args[..], &mut kwargs[..]) {
                         ([value], []) => Some(value),
                         ([], [(key, value)]) if key == "value" => Some(value),
                         _ => None,
                     };
                     if let Some(value) = value {
-                        if matches!(self.heap.get(*value), Value::Instance { class, .. } if *class == callable)
+                        if let Value::Instance { class, fields, .. } = self.heap.get(*value)
+                            && self.direct_subclass(*class, decimal)
                         {
-                            return Ok(*value);
+                            if *class == decimal && callable == decimal {
+                                return Ok(*value);
+                            }
+                            if let Some(&text) = fields.get("_text") {
+                                *value = text;
+                            }
                         }
                         if matches!(
                             self.heap.get(self.scalar_value(*value)),
