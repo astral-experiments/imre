@@ -247,6 +247,16 @@ impl Context {
                 }
                 let a = self.dict_storage(a).unwrap_or(a);
                 let b = self.dict_storage(b).unwrap_or(b);
+                if let (Value::GenericAlias(left), Value::GenericAlias(right)) =
+                    (self.heap.get(a), self.heap.get(b))
+                {
+                    if left.kind != right.kind || left.origin != right.origin {
+                        return Ok(false);
+                    }
+                    pair = Some((left.args, right.args));
+                    check_special = true;
+                    continue;
+                }
                 let children = match (self.heap.get(a), self.heap.get(b)) {
                     (Value::List(_), right) if !matches!(right, Value::List(_)) => {
                         return Ok(false);
