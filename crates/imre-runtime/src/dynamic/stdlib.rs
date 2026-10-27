@@ -29,6 +29,7 @@ pub(super) mod io;
 mod json;
 mod logging;
 mod marshal;
+mod math;
 mod operator;
 mod pickle;
 mod posixpath;
@@ -68,6 +69,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "binascii"
+            | "math"
             | "unicodedata"
             | "json"
             | "_imre_logging"
@@ -272,6 +274,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
@@ -651,6 +654,9 @@ pub(super) fn call(
                 None => ctx.scalar_value(*text),
             },
         );
+    }
+    if let Some(operation) = name.strip_prefix("math.") {
+        return math::round(ctx, operation, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
