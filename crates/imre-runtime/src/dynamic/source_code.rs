@@ -24,7 +24,7 @@ pub(super) struct Program {
 
 enum Instruction {
     Eval(ast::Expr),
-    Assign(ast::Expr, ast::Expr),
+    Assign(Vec<ast::Expr>, ast::Expr),
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
@@ -156,8 +156,10 @@ impl Program {
                 Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
                     strings.visit_expr(e)
                 }
-                Instruction::Assign(target, e) => {
-                    strings.visit_expr(target);
+                Instruction::Assign(targets, e) => {
+                    for target in targets {
+                        strings.visit_expr(target);
+                    }
                     strings.visit_expr(e);
                 }
                 Instruction::From(module, bindings) => {
@@ -238,13 +240,12 @@ impl Program {
                     }
                     e => Instruction::Eval(e.clone()),
                 },
-                Stmt::Assign(s) => match s.targets.as_slice() {
-                    [target] => {
+                Stmt::Assign(s) => {
+                    for target in &s.targets {
                         self.declare_target(target)?;
-                        Instruction::Assign(target.clone(), (*s.value).clone())
                     }
-                    _ => return Err(unsupported("assignment target")),
-                },
+                    Instruction::Assign(s.targets.clone(), (*s.value).clone())
+                }
                 Stmt::AnnAssign(s) if function => {
                     let ast::Expr::Name(name) = &*s.target else {
                         return Err(unsupported("annotated assignment target"));
@@ -252,7 +253,7 @@ impl Program {
                     self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = &s.value else { continue };
-                    Instruction::Assign((*s.target).clone(), (**value).clone())
+                    Instruction::Assign(vec![(*s.target).clone()], (**value).clone())
                 }
                 Stmt::Return(s) => {
                     if !function {
@@ -1167,9 +1168,11 @@ impl Context {
                 };
                 self.op(op, exception, cause, explicit)?;
             }
-            Instruction::Assign(target, e) => {
+            Instruction::Assign(targets, e) => {
                 let value = eval(self, e)?;
-                self.bind_target(code, scope, target, value)?;
+                for target in targets {
+                    self.bind_target(code, scope, target, value)?;
+                }
             }
             Instruction::Unless(e, destination) => {
                 if !self.source_condition(code, scope, e)? {

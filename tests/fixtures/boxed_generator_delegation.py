@@ -84,11 +84,19 @@ def stored(rows, box, cells):
         yield cells[0], cells[1], box.value
 
 
+def chained(values, box):
+    for value in values:
+        local = box.value = [value]
+        local.append(value + 1)
+        yield local is box.value, box.value
+
+
 def current():
     class Box:
         pass
 
     print(list(stored([(1, 2), (3, 4)], Box(), [0, 0])))
+    print(list(chained([2, 3], Box())))
     print(list(unpacked([(1, [2, 3]), (4, (5, 6))])))
     print(list(starred([[1, 2], [3, 4, 5, 6]])))
     for target in ('*left, *right', '*left'):
