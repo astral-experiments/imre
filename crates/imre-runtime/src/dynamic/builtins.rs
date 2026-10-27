@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use super::Context;
-use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
 mod float;
@@ -11,6 +11,7 @@ pub(super) use float::from_numeric;
 mod integer;
 mod print;
 mod text;
+mod translation;
 pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, update_set};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
@@ -81,7 +82,9 @@ const FUNCTIONS: &[&str] = &[
     "sorted",
     "ord",
     "chr",
+    "divmod",
     "callable",
+    "abs",
     "all",
     "any",
     "isinstance",
@@ -93,6 +96,7 @@ const FUNCTIONS: &[&str] = &[
     "hasattr",
     "open",
     "print",
+    "pow",
     "sum",
     "__import__",
     "repr",
@@ -152,6 +156,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
     match name {
+        "float.__new__" => Some("float"),
         "int.__new__" => Some("int"),
         "str.__new__" => Some("str"),
         _ => None,
@@ -161,7 +166,10 @@ pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
         || is_exception(name)
-        || matches!(name, "enum.Enum" | "enum.IntEnum" | "enum.StrEnum")
+        || matches!(
+            name,
+            "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
+        )
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
@@ -215,8 +223,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Bytes(_) if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip") => "bytes",
-        Value::ByteArray(_) if attr == "extend" => "bytearray",
+        Value::Bytes(_)
+            if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip" | "translate") =>
+        {
+            "bytes"
+        }
+        Value::ByteArray(_) if matches!(attr, "extend" | "translate") => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
@@ -249,6 +261,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "socket.socket"
         }
+        Value::BufferedRandom(_) if super::stdlib::tempfile::METHODS.contains(&attr) => {
+            "BufferedRandom"
+        }
         Value::TextFile(_)
             if matches!(
                 attr,
@@ -264,7 +279,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
-        Value::List(_) if matches!(attr, "append" | "extend" | "insert" | "pop" | "sort") => "list",
+        Value::List(_)
+            if matches!(
+                attr,
+                "append" | "clear" | "extend" | "insert" | "pop" | "reverse" | "sort"
+            ) =>
+        {
+            "list"
+        }
         Value::Set { frozen: false, .. }
             if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
         {
@@ -313,11 +335,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
-        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
+        Value::RegexPattern(_)
+            if matches!(attr, "findall" | "match" | "fullmatch" | "search" | "split") =>
+        {
             "pattern"
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
+        Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
@@ -399,16 +424,19 @@ pub(super) fn bind_method_arguments<const N: usize>(
     names: [&str; N],
     max_positional: usize,
 ) -> Result<[Option<Id>; N]> {
+    let arguments = |n| if n == 1 { "argument" } else { "arguments" };
     let count = args.len() + kwargs.len();
     if count > N {
         let kind = if args.is_empty() { "keyword " } else { "" };
         return Err(type_error(format!(
-            "{name}() takes at most {N} {kind}arguments ({count} given)"
+            "{name}() takes at most {N} {kind}{} ({count} given)",
+            arguments(N)
         )));
     }
     if args.len() > max_positional {
         return Err(type_error(format!(
-            "{name}() takes at most {max_positional} positional arguments ({} given)",
+            "{name}() takes at most {max_positional} positional {} ({} given)",
+            arguments(max_positional),
             args.len()
         )));
     }
@@ -430,6 +458,55 @@ pub(super) fn bind_method_arguments<const N: usize>(
         values[index] = Some(*value);
     }
     Ok(values)
+}
+
+/// Bind the positional or named operands of `pow` before selecting its numeric operation.
+fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["base", "exp", "mod"];
+    if args.len() + kwargs.len() <= names.len() {
+        // Argument Clinic diagnoses missing required operands before duplicate or unknown names.
+        for (index, &name) in names[..2].iter().enumerate().skip(args.len()) {
+            if !kwargs.iter().any(|(key, _)| key == name) {
+                return Err(type_error(format!(
+                    "pow() missing required argument '{name}' (pos {})",
+                    index + 1
+                )));
+            }
+        }
+        if let Some((key, _)) = kwargs
+            .iter()
+            .find(|(key, _)| !names.contains(&key.as_str()))
+            && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
+        {
+            return Err(type_error(format!(
+                "pow() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
+            )));
+        }
+    }
+    let [Some(base), Some(exp), modulus] = bind_method_arguments("pow", args, kwargs, names, 3)?
+    else {
+        unreachable!("required pow operands were checked above")
+    };
+    let Some(modulus) = modulus.filter(|&id| id != NONE) else {
+        return ctx.binary("**", base, exp);
+    };
+    let (Ok(x), Ok(y), Ok(m)) = (ctx.as_int(base), ctx.as_int(exp), ctx.as_int(modulus)) else {
+        if [base, exp, modulus]
+            .into_iter()
+            .any(|id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Float(_)))
+        {
+            return Err(type_error(
+                "pow() 3rd argument not allowed unless all arguments are integers",
+            ));
+        }
+        return Err(type_error(format!(
+            "unsupported operand type(s) for ** or pow(): '{}', '{}', '{}'",
+            ctx.type_name(base),
+            ctx.type_name(exp),
+            ctx.type_name(modulus)
+        )));
+    };
+    Ok(ctx.alloc(Value::Int(crate::integer_power::modular_power(&x, &y, &m)?)))
 }
 
 pub(super) fn boolean(value: bool) -> Id {
@@ -595,6 +672,12 @@ pub(super) fn call(
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
+            "bytes" | "bytearray" if method == "maketrans" => {
+                translation::maketrans(ctx, name, args, kwargs)
+            }
+            "bytes" | "bytearray" if method == "translate" => {
+                translation::translate(ctx, owner, args, kwargs)
+            }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;
@@ -614,7 +697,7 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
-            "map" => ctx.map_method(method, args, kwargs),
+            "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -698,6 +781,38 @@ pub(super) fn call(
             arity(name, args, 2, 3)?;
             ctx.exec_source(args[0], args[1], args.get(2).copied())
         }
+        "abs" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("abs() takes no keyword arguments"));
+            }
+            let &[value] = args else {
+                return Err(type_error(format!(
+                    "abs() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            if let Some(method) = ctx.bound_slot(value, "__abs__")? {
+                return ctx.call(method, vec![], vec![]);
+            }
+            let scalar = ctx.scalar_value(value);
+            match ctx.heap.get(scalar) {
+                Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
+                Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
+                Value::Int(number) => {
+                    let zero = crate::Int::from(0);
+                    if number.cmp(&zero).is_lt() {
+                        let magnitude = crate::integer_binary(&zero, number, 1)?;
+                        Ok(ctx.alloc(Value::Int(magnitude)))
+                    } else {
+                        Ok(scalar)
+                    }
+                }
+                _ => Err(type_error(format!(
+                    "bad operand type for abs(): '{}'",
+                    ctx.type_name(value)
+                ))),
+            }
+        }
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -735,6 +850,27 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
+        }
+        "divmod" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("divmod() takes no keyword arguments"));
+            }
+            let [a, b] = args else {
+                return Err(type_error(format!(
+                    "divmod expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            let (Ok(left), Ok(right)) = (ctx.as_int(*a), ctx.as_int(*b)) else {
+                return Err(type_error(format!(
+                    "unsupported operand type(s) for divmod(): '{}' and '{}'",
+                    ctx.type_name(*a),
+                    ctx.type_name(*b)
+                )));
+            };
+            let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
+            let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
+            Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
         }
         "chr" | "ord" => {
             if !kwargs.is_empty() {
@@ -789,6 +925,7 @@ pub(super) fn call(
                 ))),
             }
         }
+        "pow" => power(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
@@ -805,12 +942,13 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let object = args[0];
-            if let Value::List(items) = ctx.heap.get(object) {
+            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::Iterator {
                     sequence: Some(object),
                     offset: items.len(),
                     reverse: true,
                     kind: "list_reverseiterator",
+                    context: None,
                 }));
             }
             if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
@@ -846,19 +984,27 @@ pub(super) fn call(
         "len" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
+            let no_length = |ctx: &Context| {
+                type_error(format!(
+                    "object of type '{}' has no len()",
+                    ctx.type_name(args[0])
+                ))
+            };
             let size = match ctx.heap.get(args[0]) {
                 Value::List(v) | Value::Tuple(v) => v.len(),
                 Value::Set { entries, .. } => entries.len(),
                 Value::NamedTuple { values, .. } => values.len(),
-                Value::Context(bindings) => bindings.len(),
+                Value::Context(bindings)
+                | Value::Iterator {
+                    context: Some(bindings),
+                    ..
+                } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
                     collections::entries(ctx, *dict)?.len()
                 }
                 Value::Class { .. } => {
-                    let values = ctx
-                        .enum_values(args[0])
-                        .ok_or_else(|| type_error("object has no len()"))?;
+                    let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
                     collections::entries(ctx, values)?.len()
                 }
                 Value::Str(v) => v.chars().count(),
@@ -867,10 +1013,10 @@ pub(super) fn call(
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
                 }
-                Value::Instance { .. } => ctx
-                    .instance_len(args[0])?
-                    .ok_or_else(|| type_error("object has no len()"))?,
-                _ => return Err(type_error("object has no len()")),
+                Value::Instance { .. } => {
+                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
+                }
+                _ => return Err(no_length(ctx)),
             };
             let size = i64::try_from(size).map_err(|_| {
                 Error::new("OverflowError", "length does not fit in a Python index")
@@ -995,9 +1141,16 @@ pub(super) fn call(
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
         "all" | "any" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            let iter = ctx.iterator(args[0])?;
+            if !kwargs.is_empty() {
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
+            }
+            let [iterable] = args else {
+                return Err(type_error(format!(
+                    "{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let iter = ctx.iterator(*iterable)?;
             let stop_value = name == "any";
             while let Some(item) = ctx.next_item(iter)? {
                 if ctx.truth(item)? == stop_value {
@@ -1007,6 +1160,22 @@ pub(super) fn call(
             Ok(boolean(!stop_value))
         }
         "print" => print::call(ctx, args, kwargs),
+        "NoneType" | "NotImplementedType" | "ellipsis" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                let ty = if name == "ellipsis" {
+                    "EllipsisType"
+                } else {
+                    name
+                };
+                return Err(type_error(format!("{ty} takes no arguments")));
+            }
+            Ok(match name {
+                "NoneType" => NONE,
+                "NotImplementedType" => NOT_IMPLEMENTED,
+                _ => ELLIPSIS,
+            })
+        }
+        "function" => ctx.construct_function(args, kwargs),
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

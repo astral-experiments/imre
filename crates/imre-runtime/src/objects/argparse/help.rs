@@ -9,7 +9,7 @@ use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategory
 
 use super::super::python_whitespace;
 use super::exceptions::{Error, Kind as ExceptionKind};
-use super::{ArgumentGroup, OptionSpec, Parser, Subcommands};
+use super::{ArgumentGroup, Nargs, OptionSpec, Parser, Subcommands};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
@@ -298,6 +298,43 @@ impl Write for ProgramPrefix {
     }
 }
 
+impl ProgramPrefix {
+    fn choices<T: fmt::Display>(&mut self, choices: impl Iterator<Item = T>) -> fmt::Result {
+        self.write_char('{')?;
+        for (i, choice) in choices.enumerate() {
+            if i != 0 {
+                self.write_char(',')?;
+            }
+            write!(self, "{choice}")?;
+        }
+        self.write_char('}')
+    }
+}
+
+impl OptionSpec {
+    fn prefix_label(&self) -> Result<Cow<'_, str>, Error> {
+        let metavar = if self.has_choices {
+            let mut text = ProgramPrefix::default();
+            match &self.range {
+                Some(range) => range.write_choices(&mut text),
+                None => text.choices(self.choices.iter()),
+            }
+            .map_err(|_| Error::allocation())?;
+            Cow::Owned(text.0)
+        } else {
+            Cow::Borrowed(self.dest.as_str())
+        };
+        if matches!(self.nargs, Nargs::One) {
+            return Ok(metavar);
+        }
+        let mut text = ProgramPrefix::default();
+        self.nargs
+            .write_label(&mut text, &metavar)
+            .map_err(|_| Error::allocation())?;
+        Ok(Cow::Owned(text.0))
+    }
+}
+
 impl Subcommands {
     pub(super) fn metavar(&self) -> String {
         self.metavar
@@ -438,10 +475,10 @@ impl Parser {
                 .map_err(|_| Error::allocation())?;
             parts.push((len(&self.prog), Cow::Borrowed(self.prog.as_str())));
         }
-        parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
-            let label = o.label(true, false);
-            (len(&label), Cow::Owned(label))
-        }));
+        for option in self.options.iter().filter(|o| o.positional()) {
+            let label = option.prefix_label()?;
+            parts.push((len(&label), label));
+        }
         let prog = if parts.is_empty() {
             Cow::Borrowed(self.prog.as_str())
         } else {

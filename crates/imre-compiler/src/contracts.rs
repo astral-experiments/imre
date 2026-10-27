@@ -64,7 +64,7 @@ impl Builtin {
                 Contract::new(true, PreservesLists)
             }
             Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
-            Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
+            Self::ListExtendBuffer | Self::ListExtendSnapshot | Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::MarkCoroutine(_) => Contract::new(false, Unknown),
             Self::IsCoroutineFunction => Contract::new(false, PreservesOwners),
@@ -638,6 +638,7 @@ impl Builtin {
             | Self::LengthResult
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
+            | Self::ArgparseChoiceDigits(_)
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
             | Self::DequeGet { .. }
@@ -1025,6 +1026,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_union_truthy"
                 | "imre_seq_reverse"
                 | "imre_sort_detach"
+                | "imre_list_extend_buffer"
+                | "imre_list_extend_snapshot"
                 | "imre_list_extend_unhinted"
                 | "imre_chr"
                 | "imre_annotation_ref"

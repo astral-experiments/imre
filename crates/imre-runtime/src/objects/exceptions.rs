@@ -9,6 +9,7 @@ use crate::StrOwner;
 mod arguments;
 mod imports;
 pub(super) use imports::imre_exception_field_repr;
+pub(crate) use imports::keyword_suggestion;
 mod tree;
 pub(super) use tree::append_tree_entries;
 
@@ -81,6 +82,7 @@ pub(crate) enum Kind {
     GaiError = 68,
     BinasciiError = 69,
     BinasciiIncomplete = 70,
+    PackageNotFoundError = 71,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -156,6 +158,7 @@ impl Kind {
             68 => Self::GaiError,
             69 => Self::BinasciiError,
             70 => Self::BinasciiIncomplete,
+            71 => Self::PackageNotFoundError,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -259,6 +262,7 @@ impl Kind {
             Self::UnboundLocalError => "UnboundLocalError",
             Self::ImportError => "ImportError",
             Self::ModuleNotFoundError => "ModuleNotFoundError",
+            Self::PackageNotFoundError => "PackageNotFoundError",
             Self::RecursionError => "RecursionError",
             Self::BlockingIOError => "BlockingIOError",
             Self::ConnectionError => "ConnectionError",
@@ -309,7 +313,13 @@ impl Kind {
                 self,
                 Self::UnicodeError | Self::UnicodeDecodeError | Self::UnicodeEncodeError
             ),
-            Self::ImportError => matches!(self, Self::ImportError | Self::ModuleNotFoundError),
+            Self::ImportError => matches!(
+                self,
+                Self::ImportError | Self::ModuleNotFoundError | Self::PackageNotFoundError
+            ),
+            Self::ModuleNotFoundError => {
+                matches!(self, Self::ModuleNotFoundError | Self::PackageNotFoundError)
+            }
             Self::SubprocessError => {
                 matches!(
                     self,
@@ -638,6 +648,7 @@ impl Exception {
             Kind::JsonDecodeError => "json.decoder.JSONDecodeError",
             Kind::CancelledError => "asyncio.exceptions.CancelledError",
             Kind::BadZipFile => "zipfile.BadZipFile",
+            Kind::PackageNotFoundError => "importlib.metadata.PackageNotFoundError",
             Kind::UnsupportedOperation => "io.UnsupportedOperation",
             kind => kind.name(),
         }
@@ -873,7 +884,11 @@ impl Error {
 
     /// Installs a constant diagnostic, preserving a catchable error if either owner cannot grow.
     pub(crate) fn return_static_message<T>(kind: Kind, message: &'static str, sentinel: T) -> T {
-        let error = StrOwner::try_new(Str::const_new(message)).and_then(|message| {
+        Self::return_checked_message(kind, Str::const_new(message), sentinel)
+    }
+
+    pub(crate) fn return_checked_message<T>(kind: Kind, message: Str, sentinel: T) -> T {
+        let error = StrOwner::try_new(message).and_then(|message| {
             crate::ObjectOwner::try_new(exception_object(kind, Payload::Message(message), None))
         });
         match error {
@@ -1758,6 +1773,18 @@ impl Storage {
     fn exception_message(&self) -> Rendered {
         use std::fmt::Write as _;
         match &self.exception().payload {
+            Payload::Import(err) if self.exception().kind == Kind::PackageNotFoundError => {
+                let (kind, word) = err
+                    .package_name()
+                    .map_err(|e| e.returning(std::fmt::Error))?;
+                let name = super::boxed_values::word_text(kind, word, false)?;
+                let mut text = String::new();
+                write!(
+                    super::values::ReprWriter(&mut text),
+                    "No package metadata was found for {name}"
+                )?;
+                rendered(text.into())
+            }
             Payload::Import(err) => err.message(),
             Payload::Positional(args) => args.message(self.exception().quotes_single_key()),
             Payload::ExitArguments(args) => args.message(false),

@@ -826,7 +826,7 @@ impl<T: ReleaseEntries + 'static> TableOwner<T> {
         Self(Some(Box::new(table)))
     }
 
-    fn try_new(table: T) -> Result<Self, Error> {
+    pub(super) fn try_new(table: T) -> Result<Self, Error> {
         let table = allocator_api2::boxed::Box::try_new(table).map_err(|_| Error::allocation())?;
         let table = allocator_api2::boxed::Box::into_raw(table);
         // SAFETY: both box types use the global allocator and the same layout for T.
@@ -873,6 +873,17 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    pub(super) fn recursive_repr(&self) -> &'static str {
+        if self.order_version.is_some() {
+            return "...";
+        }
+        match self.missing {
+            Missing::List(_) => "defaultdict(<class 'list'>, {...})",
+            Missing::NoFactory => "defaultdict(None, {...})",
+            _ => "{...}",
+        }
+    }
+
     /// Render an unquoted attribute label and borrow its value from the rooted dictionary.
     pub(super) fn namespace_repr_entry(
         &self,
@@ -1999,14 +2010,14 @@ pub unsafe extern "C" fn imre_dict_copy(value: *const Object) -> *const Object {
             .0
             .with(|storage| storage.dictionary().copy_values(Ok))
     };
-    super::exceptions::finish(
-        result.map(|copy| {
-            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-                Storage::Dictionary(TableOwner::new(copy)),
-            ))))
-        }),
-        std::ptr::null(),
-    )
+    let result = result.and_then(|copy| {
+        let storage =
+            Storage::Dictionary(TableOwner::try_new(copy).map_err(|_| Error::memory_error())?);
+        crate::ObjectOwner::try_new(Object(StorageCell::new(storage)))
+            .map(crate::ObjectOwner::into_raw)
+            .map_err(|_| Error::memory_error())
+    });
+    super::exceptions::finish(result, std::ptr::null())
 }
 
 /// Constructs an integer-valued Counter with non-inserting zero subscriptions.

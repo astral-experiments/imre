@@ -2,6 +2,11 @@
 use crate::StrOwner;
 mod suggestions;
 
+/// Choose the nearest parameter name in declaration order for a binding error.
+pub(crate) fn keyword_suggestion<'a>(wrong: &str, names: &[&'a str]) -> Option<&'a str> {
+    suggestions::declaration_order(wrong, names)
+}
+
 use super::*;
 use crate::objects::boxed_values::{
     checked_text, concrete, length, sequence_item, tuple_item, word_text,
@@ -17,6 +22,21 @@ pub(super) struct Import {
 }
 
 impl Import {
+    /// CPython's PackageNotFoundError.name unpacks the current positional arguments.
+    pub(super) fn package_name(&self) -> Result<(WordKind, usize)> {
+        match self.args.len() {
+            1 => Ok(self.args.item(0)),
+            0 => Err(Error::new(
+                Kind::ValueError,
+                "not enough values to unpack (expected 1, got 0)",
+            )),
+            n => Err(Error::new(
+                Kind::ValueError,
+                format!("too many values to unpack (expected 1, got {n})"),
+            )),
+        }
+    }
+
     pub(super) fn message(&self) -> Rendered {
         if self.msg.kind.raw() == 3 {
             word_text(self.msg.kind, self.msg.word, false)
@@ -141,7 +161,7 @@ pub unsafe extern "C" fn imre_exception_keyword_message(
                 (&*(ptr as *const Str)).as_str()
             })
             .collect();
-        match suggestions::declaration_order((&*wrong).as_str(), &choices) {
+        match keyword_suggestion((&*wrong).as_str(), &choices) {
             Some(spelling) => crate::StrOwner::into_raw(crate::StrOwner::new(
                 format!("{}. Did you mean '{spelling}'?", *prefix).into(),
             )),
@@ -246,6 +266,10 @@ pub unsafe extern "C" fn imre_import_error_field(err: *const Object, field: u32)
             let (kind, word) = match field {
                 0 => (e.args.0.kind, e.args.0.word),
                 1 => (e.msg.kind, e.msg.word),
+                2 if s.exception().kind == Kind::PackageNotFoundError => match e.package_name() {
+                    Ok(name) => name,
+                    Err(err) => return err.returning(std::ptr::null()),
+                },
                 2..=4 => {
                     let x = &e.fields[field as usize - 2];
                     (x.kind, x.word)

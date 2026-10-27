@@ -5,6 +5,103 @@ use serde_json::json;
 
 use super::{Body, Cleanup, Function, LoopTarget};
 
+#[derive(Default)]
+struct ClosureNames {
+    locals: std::collections::BTreeSet<String>,
+    reads: std::collections::BTreeSet<String>,
+    globals: std::collections::BTreeSet<String>,
+    nonlocals: std::collections::BTreeSet<String>,
+    incomplete: bool,
+    locals_incomplete: bool,
+}
+
+impl<'a> Visitor<'a> for ClosureNames {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        match stmt {
+            ast::Stmt::FunctionDef(f) => {
+                self.locals.insert(f.name.to_string());
+                self.incomplete = true;
+                if !f.decorator_list.is_empty()
+                    || f.parameters
+                        .posonlyargs
+                        .iter()
+                        .chain(&f.parameters.args)
+                        .chain(&f.parameters.kwonlyargs)
+                        .any(|arg| arg.default.is_some())
+                {
+                    self.locals_incomplete = true;
+                }
+            }
+            ast::Stmt::ClassDef(c) => {
+                self.locals.insert(c.name.to_string());
+                self.incomplete = true;
+                self.locals_incomplete = true;
+            }
+            ast::Stmt::Global(g) => {
+                self.globals.extend(g.names.iter().map(ToString::to_string));
+            }
+            ast::Stmt::Nonlocal(n) => {
+                self.nonlocals
+                    .extend(n.names.iter().map(ToString::to_string));
+            }
+            ast::Stmt::Import(i) => {
+                for name in &i.names {
+                    self.locals.insert(name.asname.as_ref().map_or_else(
+                        || name.name.as_str().split('.').next().unwrap().to_string(),
+                        ToString::to_string,
+                    ));
+                }
+            }
+            ast::Stmt::ImportFrom(i) => {
+                for name in &i.names {
+                    if name.name.as_str() == "*" {
+                        self.incomplete = true;
+                        self.locals_incomplete = true;
+                    } else {
+                        self.locals
+                            .insert(name.asname.as_ref().unwrap_or(&name.name).to_string());
+                    }
+                }
+            }
+            ast::Stmt::Match(_) | ast::Stmt::TypeAlias(_) => {
+                self.incomplete = true;
+                self.locals_incomplete = true;
+                visitor::walk_stmt(self, stmt);
+            }
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
+    fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
+        let ast::ExceptHandler::ExceptHandler(handler_data) = handler;
+        if let Some(name) = &handler_data.name {
+            self.locals.insert(name.to_string());
+        }
+        visitor::walk_except_handler(self, handler);
+    }
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        match expr {
+            ast::Expr::Name(n) => match n.ctx {
+                ast::ExprContext::Load => {
+                    self.reads.insert(n.id.to_string());
+                }
+                ast::ExprContext::Store | ast::ExprContext::Del => {
+                    self.locals.insert(n.id.to_string());
+                }
+                _ => {}
+            },
+            ast::Expr::Lambda(_)
+            | ast::Expr::ListComp(_)
+            | ast::Expr::SetComp(_)
+            | ast::Expr::DictComp(_)
+            | ast::Expr::Generator(_) => {
+                self.incomplete = true;
+                self.locals_incomplete = true;
+            }
+            _ => visitor::walk_expr(self, expr),
+        }
+    }
+}
+
 enum Place {
     Name(String),
     Attr(String, String),
@@ -64,7 +161,7 @@ impl Function<'_, '_> {
                         self.expr(&v.value);
                     }
                 }
-                ast::Stmt::Pass(_) | ast::Stmt::Global(_) => {}
+                ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     for t in &v.targets {
@@ -325,7 +422,9 @@ impl Function<'_, '_> {
             format!("{qualname}.<locals>.")
         };
         let doc = match &body {
-            Body::Statements(stmts) if self.output.keep_docstrings => {
+            Body::Statements(stmts) | Body::GeneratorFunction(stmts)
+                if self.output.keep_docstrings =>
+            {
                 crate::frontend::docstring(stmts)
             }
             Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
@@ -374,6 +473,14 @@ impl Function<'_, '_> {
         } else {
             None
         };
+        let mut closure_names = ClosureNames::default();
+        match &body {
+            Body::Statements(stmts) | Body::GeneratorFunction(stmts) => {
+                closure_names.visit_body(stmts)
+            }
+            Body::Expression(expr) => closure_names.visit_expr(expr),
+            _ => closure_names.incomplete = true,
+        }
         let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
@@ -405,6 +512,34 @@ impl Function<'_, '_> {
             signature["varargs"] = json!(p.vararg.as_deref().map(|x| x.name.as_str()));
             signature["kwargs"] = json!(p.kwarg.as_deref().map(|x| x.name.as_str()));
         }
+        for group in ["posonly", "positional", "kwonly"] {
+            closure_names.locals.extend(
+                signature[group]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(str::to_owned)),
+            );
+        }
+        for group in ["varargs", "kwargs"] {
+            if let Some(name) = signature[group].as_str() {
+                closure_names.locals.insert(name.to_owned());
+            }
+        }
+        for name in closure_names.globals.iter().chain(&closure_names.nonlocals) {
+            closure_names.locals.remove(name);
+        }
+        closure_names.reads.retain(|name| {
+            !closure_names.locals.contains(name) && !closure_names.globals.contains(name)
+        });
+        closure_names
+            .reads
+            .extend(closure_names.nonlocals.iter().cloned());
+        signature["scope_locals"] = json!(closure_names.locals);
+        signature["scope_reads"] = json!(closure_names.reads);
+        signature["scope_nonlocals"] = json!(closure_names.nonlocals);
+        signature["scope_complete"] = json!(!closure_names.incomplete);
+        signature["scope_locals_complete"] = json!(!closure_names.locals_incomplete);
         let sig = self.text(&signature.to_string());
         let name = self.text(name);
         let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope));

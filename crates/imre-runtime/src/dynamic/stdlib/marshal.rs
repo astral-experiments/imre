@@ -42,7 +42,7 @@ pub(super) fn loads(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             ));
         }
         buffer(ctx, *input)?;
-        allow_code = ctx.truth(*value)?;
+        allow_code = ctx.truth_with_buffer_export(*input, *value)?;
     }
     let data = buffer(ctx, *input)?;
     let (&tag, data) = data

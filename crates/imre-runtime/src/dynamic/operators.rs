@@ -1,7 +1,5 @@
 use std::cmp::Ordering;
 
-use num_traits::{Signed, ToPrimitive, Zero};
-
 use super::*;
 
 fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
@@ -30,15 +28,6 @@ impl Context {
     }
 
     pub(super) fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
-        self.index_value_with_bool_result(value, true)
-    }
-
-    /// Some native operations reject a boolean returned by a user-defined index hook.
-    pub(super) fn index_value_with_bool_result(
-        &mut self,
-        value: Id,
-        allow_bool_result: bool,
-    ) -> Result<Option<crate::Int>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some(integer));
         }
@@ -46,12 +35,6 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        if !allow_bool_result && matches!(self.heap.get(result), Value::Bool(_)) {
-            return Err(Error::new(
-                "TypeError",
-                "__index__ returned non-int (type bool)",
-            ));
-        }
         self.as_int(result).map(Some).map_err(|_| {
             Error::new(
                 "TypeError",
@@ -125,7 +108,11 @@ impl Context {
                 .dict_entries(*dict)
                 .expect("dict view backing")
                 .is_empty(),
-            Value::Context(bindings) => !bindings.is_empty(),
+            Value::Context(bindings)
+            | Value::Iterator {
+                context: Some(bindings),
+                ..
+            } => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
                     start < stop
@@ -158,17 +145,118 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
-    /// Compare arbitrary boxed values and surface recursive context comparisons.
+    /// Walk arbitrary container pairs without tying their depth to the Rust stack.
     pub(super) fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
-        let mut exhausted = false;
-        let result = self.equal_inner(a, b, usize::MAX, &mut exhausted);
-        if exhausted {
-            return Err(Error::new(
-                "RecursionError",
-                "maximum comparison depth exceeded",
-            ));
+        use std::{borrow::Cow, collections::HashSet};
+
+        enum Children<'a> {
+            Sequence(Cow<'a, [Id]>, Cow<'a, [Id]>, usize),
+            Dict(std::slice::Iter<'a, (Id, Id)>, &'a [(Id, Id)]),
+            Context(
+                std::collections::hash_map::Iter<'a, Id, Id>,
+                &'a HashMap<Id, Id>,
+            ),
         }
-        Ok(result)
+        let sequence = |id| match self.heap.get(id) {
+            Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
+                Some(Cow::Borrowed(v.as_slice()))
+            }
+            Value::Instance { .. } => self.sequence(id).map(Cow::Owned),
+            _ => None,
+        };
+        let mut active = HashSet::new();
+        let mut frames = Vec::new();
+        let mut pair = Some((a, b));
+        loop {
+            if let Some((a, b)) = pair.take()
+                && a != b
+            {
+                let a = self.dict_storage(a).unwrap_or(a);
+                let b = self.dict_storage(b).unwrap_or(b);
+                let children = match (self.heap.get(a), self.heap.get(b)) {
+                    (Value::List(_), right) if !matches!(right, Value::List(_)) => {
+                        return Ok(false);
+                    }
+                    (left, Value::List(_)) if !matches!(left, Value::List(_)) => return Ok(false),
+                    (
+                        Value::Dict(x) | Value::DefaultDict { entries: x, .. },
+                        Value::Dict(y) | Value::DefaultDict { entries: y, .. },
+                    ) => {
+                        if x.len() != y.len() {
+                            return Ok(false);
+                        }
+                        Some(Children::Dict(x.iter(), y))
+                    }
+                    (Value::Context(x), Value::Context(y)) => {
+                        if x.len() != y.len() {
+                            return Ok(false);
+                        }
+                        (!std::rc::Rc::ptr_eq(x, y)).then(|| Children::Context(x.iter(), y))
+                    }
+                    _ => match (sequence(a), sequence(b)) {
+                        (Some(x), Some(y)) => {
+                            if x.len() != y.len() {
+                                return Ok(false);
+                            }
+                            Some(Children::Sequence(x, y, 0))
+                        }
+                        _ if self.equal(a, b) => None,
+                        _ => return Ok(false),
+                    },
+                };
+                if let Some(children) = children {
+                    let memory = |_| Error::new("MemoryError", "");
+                    active.try_reserve(1).map_err(memory)?;
+                    if !active.insert((a, b)) {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum comparison depth exceeded",
+                        ));
+                    }
+                    frames.try_reserve(1).map_err(memory)?;
+                    frames.push(((a, b), children));
+                }
+            }
+            while let Some((parents, children)) = frames.last_mut() {
+                pair = match children {
+                    Children::Sequence(x, y, index) => x.get(*index).map(|&left| {
+                        let right = y[*index];
+                        *index += 1;
+                        (left, right)
+                    }),
+                    Children::Dict(items, other) => {
+                        if let Some(&(key, value)) = items.next() {
+                            let Some(&(_, right)) =
+                                other.iter().find(|&&(k, _)| self.equal(key, k))
+                            else {
+                                return Ok(false);
+                            };
+                            Some((value, right))
+                        } else {
+                            None
+                        }
+                    }
+                    Children::Context(items, other) => {
+                        if let Some((key, &value)) = items.next() {
+                            let Some(&right) = other.get(key) else {
+                                return Ok(false);
+                            };
+                            Some((value, right))
+                        } else {
+                            None
+                        }
+                    }
+                };
+                if pair.is_some() {
+                    break;
+                }
+                active.remove(parents);
+                frames.pop();
+            }
+            if pair.is_none() {
+                return Ok(true);
+            }
+        }
     }
 
     /// Compare child values within the caller's remaining recursion budget.
@@ -296,11 +384,136 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        self.format_value(id, false, &mut Vec::new())
+        self.render_containers(id, false)
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        self.format_value(id, true, &mut Vec::new())
+        self.render_containers(id, true)
+    }
+
+    /// Render container ancestors iteratively so recursive values do not consume the native stack.
+    fn render_containers(&self, root: Id, quoted: bool) -> String {
+        enum Part<'a> {
+            Value(Id, bool),
+            Text(&'a str),
+            Sequence(&'a [Id], usize),
+            Entries(&'a [(Id, Id)], usize, bool),
+            Leave(Id, &'static str),
+            ContextEnd(Id),
+        }
+        let mut output = String::new();
+        let mut work = vec![Part::Value(root, quoted)];
+        let mut active = Vec::new();
+        let mut ancestors = std::collections::HashSet::new();
+        while let Some(part) = work.pop() {
+            match part {
+                Part::Text(text) => output.push_str(text),
+                Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::Leave(id, end) => {
+                    ancestors.remove(&id);
+                    let last = active.pop();
+                    debug_assert_eq!(last, Some(id));
+                    output.push_str(end);
+                }
+                Part::Sequence(items, index) => {
+                    if let Some(&item) = items.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::Sequence(items, index + 1));
+                        work.push(Part::Value(item, true));
+                    }
+                }
+                Part::Entries(items, index, include_values) => {
+                    if let Some(&(key, value)) = items.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::Entries(items, index + 1, include_values));
+                        if include_values {
+                            work.push(Part::Value(value, true));
+                            work.push(Part::Text(": "));
+                        }
+                        work.push(Part::Value(key, true));
+                    }
+                }
+                Part::Value(id, repr) => {
+                    match self.heap.get(id) {
+                        Value::Instance {
+                            scalar: None,
+                            dictionary: Some(backing),
+                            ..
+                        } if self.enum_member(id).is_none() => {
+                            work.push(Part::Value(*backing, repr));
+                            continue;
+                        }
+                        Value::ContextVar { name, default, .. } => {
+                            output.push_str("<ContextVar name=");
+                            work.push(Part::ContextEnd(id));
+                            if let Some(default) = default {
+                                work.push(Part::Value(*default, true));
+                                work.push(Part::Text(" default="));
+                            }
+                            work.push(Part::Value(*name, true));
+                            continue;
+                        }
+                        Value::ContextToken { variable, used, .. } => {
+                            output.push_str(if *used {
+                                "<Token used var="
+                            } else {
+                                "<Token var="
+                            });
+                            work.push(Part::ContextEnd(id));
+                            work.push(Part::Value(*variable, true));
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    let (start, end, placeholder, sequence, entries) = match self.heap.get(id) {
+                        Value::List(items) => ("[", "]", "[...]", Some(items.as_slice()), None),
+                        Value::Tuple(items) => (
+                            "(",
+                            if items.len() == 1 { ",)" } else { ")" },
+                            "(...)",
+                            Some(items.as_slice()),
+                            None,
+                        ),
+                        Value::Dict(items) => ("{", "}", "{...}", None, Some((&items[..], true))),
+                        Value::Set { entries, frozen } => {
+                            if entries.is_empty() {
+                                output.push_str(if *frozen { "frozenset()" } else { "set()" });
+                                continue;
+                            }
+                            (
+                                if *frozen { "frozenset({" } else { "{" },
+                                if *frozen { "})" } else { "}" },
+                                "set(...)",
+                                None,
+                                Some((&entries[..], false)),
+                            )
+                        }
+                        _ => {
+                            output.push_str(&self.format_value(id, repr, &mut active));
+                            continue;
+                        }
+                    };
+                    if !ancestors.insert(id) {
+                        output.push_str(placeholder);
+                        continue;
+                    }
+                    active.push(id);
+                    output.push_str(start);
+                    work.push(Part::Leave(id, end));
+                    if let Some(items) = sequence {
+                        work.push(Part::Sequence(items, 0));
+                    }
+                    if let Some((items, include_values)) = entries {
+                        work.push(Part::Entries(items, 0, include_values));
+                    }
+                }
+            }
+        }
+        output
     }
 
     /// Renders positional values inside tuples and exception representations.
@@ -327,6 +540,25 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::Instance { class, .. } = value
+            && self.classes.get("re.RegexFlag") == Some(class)
+            && let Some((_, name, bits)) = self.enum_member(id)
+        {
+            return match self.str_value(name) {
+                Ok(names) => names
+                    .split('|')
+                    .map(|name| {
+                        if name.starts_with("0x") {
+                            name.to_owned()
+                        } else {
+                            format!("re.{name}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|"),
+                Err(_) => format!("re.RegexFlag({})", self.repr(bits)),
+            };
+        }
         if let Value::Instance { scalar, .. } = value
             && (repr || scalar.is_none())
             && let Some((class, name, member_value)) = self.enum_member(id)
@@ -374,16 +606,18 @@ impl Context {
             }
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
+            Value::PartialPlaceholder => "Placeholder".to_owned(),
             Value::None => "None".into(),
             Value::Ellipsis => "Ellipsis".into(),
             Value::NotImplemented => "NotImplemented".into(),
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
+            Value::RegexPattern(pattern) => pattern.repr(self),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
             Value::Repeat(repeat) => {
-                let value = self.repr(repeat.value);
+                let value = self.format_value(repeat.value, true, active);
                 match repeat.remaining {
                     Some(n) => format!("repeat({value}, {n})"),
                     None => format!("repeat({value})"),
@@ -681,10 +915,29 @@ impl Context {
         ) {
             return Ok(self.find_dictionary_key(container, item, None)?.1.is_some());
         }
-        let iterator = self.iterator(container)?;
+        let iterator = self.iterator(container).map_err(|error| {
+            let ty = self.builtin("TypeError");
+            if self.raised_error_matches(&error, ty) {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "argument of type '{}' is not a container or iterable",
+                        self.type_name(container)
+                    ),
+                )
+            } else {
+                error
+            }
+        })?;
         self.heap.keep(iterator);
         while let Some(value) = self.next_item(iterator)? {
-            if self.checked_equal(value, item)? {
+            if value == item {
+                return Ok(true);
+            }
+            // Equality can resize the source and collect a removed candidate.
+            self.heap.keep(value);
+            let equal = self.binary("==", value, item)?;
+            if self.truth(equal)? {
                 return Ok(true);
             }
         }
@@ -1097,37 +1350,30 @@ impl Context {
                 }
             }
         }
+        if op == "**"
+            && [left, right]
+                .into_iter()
+                .any(|id| !matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for ** or pow(): '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            ));
+        }
         let (x, y) = (self.as_int(a)?, self.as_int(b)?);
         if op == "/" {
             return Ok(self.alloc(Value::Float(crate::floats::ratio(&x, &y)?)));
         }
         let result = if op == "**" {
-            let (x, y) = (x.big(), y.big());
-            if y.is_negative() {
-                if x.is_zero() {
-                    return Err(Error::new(
-                        "ZeroDivisionError",
-                        "0.0 cannot be raised to a negative power",
-                    ));
-                }
-                return Err(Error::new(
-                    "TypeError",
-                    "negative powers require floating-point results",
-                ));
+            if y.cmp(&crate::Int::from(0)).is_lt() {
+                let result = crate::integer_power::negative_power(&x, &y)?;
+                return Ok(self.alloc(Value::Float(result)));
             }
-            if let Some(exp) = y.to_u32() {
-                crate::Int::new(x.pow(exp))
-            } else if x.is_zero() || x.magnitude().bits() == 1 {
-                crate::Int::from(if x.is_zero() {
-                    0
-                } else if x.is_negative() && y.bit(0) {
-                    -1
-                } else {
-                    1
-                })
-            } else {
-                return Err(Error::new("OverflowError", "exponent is too large"));
-            }
+            crate::integer_power::power(&x, &y)?
         } else {
             let code = match op {
                 "+" => 0,
@@ -1149,7 +1395,12 @@ impl Context {
             };
             crate::integer_binary(&x, &y, code)?
         };
-        Ok(self.alloc(Value::Int(result)))
+        let class = if matches!(op, "&" | "|" | "^") {
+            self.flag_class(a).or_else(|| self.flag_class(b))
+        } else {
+            None
+        };
+        self.flag_or_integer(class, result)
     }
 }
 
@@ -1182,6 +1433,11 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         let Some(method) = self.bound_slot(obj, name)? else {
+            if name == "__ne__"
+                && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
+            {
+                return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));
+            }
             return Ok(None);
         };
         let result = self.call(method, vec![other], vec![])?;

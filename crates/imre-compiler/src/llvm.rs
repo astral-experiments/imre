@@ -5047,6 +5047,8 @@ impl Emitter<'_, '_> {
             Builtin::SortByKeys
             | Builtin::SortByComparator
             | Builtin::SortDetach
+            | Builtin::ListExtendBuffer
+            | Builtin::ListExtendSnapshot
             | Builtin::ListExtendUnhinted
             | Builtin::SortRestore
             | Builtin::StringJoin
@@ -5566,6 +5568,13 @@ impl Emitter<'_, '_> {
                     operand: returns.initial().to_owned(),
                     small_integer: false,
                 }
+            }
+            Builtin::ArgparseChoiceDigits(digits) => {
+                self.line(format!(
+                    "call void @imre_argparse_choice_digits(i64 {digits})"
+                ));
+                self.check_error();
+                none()
             }
             Builtin::ArgparseText { usage, output } => {
                 let file = args.get(2).map_or("null", |file| &file.value.operand);
@@ -9719,6 +9728,8 @@ declare ptr @imre_str_list_filter(ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_str_list_sorted_suffix(ptr, i32)
 declare i32 @imre_str_list_nonempty(ptr)
 declare ptr @imre_str_rstrip(ptr, ptr)
+declare ptr @imre_list_extend_buffer(i32)
+declare void @imre_list_extend_snapshot(ptr, i32, ptr)
 declare void @imre_list_extend_unhinted(ptr, i32)
 declare ptr @imre_sort_detach(ptr, i32)
 declare void @imre_sort_restore(ptr, i32, ptr, i32)
@@ -9757,6 +9768,7 @@ declare i32 @imre_text_flush(ptr)
 declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
+declare void @imre_argparse_choice_digits(i64)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_stdout()

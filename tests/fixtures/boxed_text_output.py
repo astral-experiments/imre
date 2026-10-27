@@ -2,6 +2,7 @@ def exercise(path):
     sample = "Málaga 東京🧪e\u0301\n"
     with open(path, "w") as ready:
         alias = ready
+        print(type(ready), type(ready) is type(ready), isinstance(ready, type(ready)))
         print(ready.closed, ready.__enter__() is ready)
         print(ready.write(""), ready.write(sample))
         with open(path, "rb") as observer:
@@ -43,6 +44,7 @@ def exercise(path):
 
     try:
         with open(path, "w") as output:
+            print(type(output) is type(alias))
             output.write("4321")
             raise ValueError("body")
     except ValueError as error:

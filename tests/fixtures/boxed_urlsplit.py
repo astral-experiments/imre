@@ -5,6 +5,13 @@ from urllib.parse import SplitResult, SplitResultBytes, unquote, urlsplit, urlun
 
 def current():
     print(urllib.parse is parse, parse.urlsplit is urlsplit)
+    from urllib.parse import uses_netloc
+    print(uses_netloc is parse.uses_netloc, uses_netloc)
+    parts = urlsplit("custom:/path")
+    uses_netloc.append("custom")
+    print(parts.geturl(), urlunsplit((b"custom", b"", b"/path", b"", b"")))
+    uses_netloc.pop()
+    print(parts.geturl())
     print(urllib.__package__, parse.__package__, parse.__name__, hasattr(urllib, "__path__"))
     for target in ("/health", "/hello%20there?suffix=%26&suffix=%C3%A9", "//first/second?x=1",
                    "https://user:pass@[FE80::1%25Scope]:443/a%2Fb?x=1#frag",

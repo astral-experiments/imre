@@ -217,6 +217,26 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
+/// Parse the sign and bounded precision of a fixed-point or percentage field.
+fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
+    let prefix = spec.strip_suffix(['f', '%'])?;
+    let (digits, sign) = match prefix.as_bytes().first() {
+        Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
+        Some(b'-') => (&prefix[1..], 0),
+        _ => (prefix, 0),
+    };
+    let precision = if digits.is_empty() {
+        6
+    } else {
+        let digits = digits.strip_prefix('.')?;
+        if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        digits.parse().ok()?
+    };
+    (precision <= 1000).then_some((precision, spec.ends_with('%'), sign))
+}
+
 /// Apply a scalar format specifier used by both f-strings and str.format.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
     if spec.is_empty() {
@@ -224,6 +244,17 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
     }
     if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
         return Ok(ctx.display(value));
+    }
+    if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
+        let number = match ctx.heap.get(ctx.scalar_value(value)) {
+            Value::Float(value) => *value,
+            Value::Int(value) => crate::floats::int_to_float(value)?,
+            Value::Bool(value) => f64::from(u8::from(*value)),
+            _ => return Err(type_error(format!("unsupported format string {spec:?}"))),
+        };
+        return Ok(
+            crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
+        );
     }
     if matches!(ctx.heap.get(value), Value::Bool(_) | Value::Int(_)) {
         let int = ctx.as_int(value)?;
@@ -429,7 +460,8 @@ fn render_percent_integer(
         ctx.index_integer(value)
     };
     let integer = convert().map_err(|error| {
-        if error.kind == "TypeError" {
+        let ty = ctx.builtin("TypeError");
+        if ctx.raised_error_matches(&error, ty) {
             let required = if decimal {
                 "a real number"
             } else {
@@ -687,14 +719,12 @@ pub(super) fn method(
         let width = match tabsize {
             None => 8,
             Some(id) => {
-                let index = ctx
-                    .index_value_with_bool_result(id, false)?
-                    .ok_or_else(|| {
-                        type_error(format!(
-                            "'{}' object cannot be interpreted as an integer",
-                            ctx.type_name(id)
-                        ))
-                    })?;
+                let index = ctx.index_value(id)?.ok_or_else(|| {
+                    type_error(format!(
+                        "'{}' object cannot be interpreted as an integer",
+                        ctx.type_name(id)
+                    ))
+                })?;
                 index
                     .to_i64()
                     .and_then(|n| i32::try_from(n).ok())
@@ -789,8 +819,15 @@ pub(super) fn method(
     if name == "rstrip"
         && let Value::Bytes(data) = ctx.heap.get(receiver)
     {
-        positional(name, kwargs)?;
-        arity(name, args, 0, 1)?;
+        if !kwargs.is_empty() {
+            return Err(type_error("bytes.rstrip() takes no keyword arguments"));
+        }
+        if args.len() > 1 {
+            return Err(type_error(format!(
+                "rstrip expected at most 1 argument, got {}",
+                args.len()
+            )));
+        }
         let chars = args
             .first()
             .copied()

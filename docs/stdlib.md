@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 81 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 41 modules with recorded suites, 112 complete test executions pass natively at both optimization levels; 15,141 of 15,288 upstream executions have a classification.
+**At a glance:** 84 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 41 modules with recorded suites, 112 complete test executions pass natively at both optimization levels; 15,141 of 15,288 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -18,6 +18,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `annotationlib` | Yes | `get_annotations`, `Format` and `type_repr` for supported declarations. [Evidence](../tests/fixtures/callables/annotations.py) | — | — | — |
 | `argparse` | Yes | `ArgumentParser`, typed options, subcommands and generated help. [Evidence](../benchmarks/cpython_stdlib/full/argparse/README.md) | [0 / 1,893](../benchmarks/cpython_stdlib/full/argparse/) | 5 | 925 |
 | `array` | Yes | `array.array` class identity, metadata, and virtual registration with `Sequence` and `MutableSequence`. [Evidence](../tests/fixtures/containers/array_registration.py) | — | — | — |
+| `ast` | Yes | No API example recorded. | — | — | — |
 | `asyncio` | Yes | Run subprocess tasks, wait for a task group and handle cancellation. [Evidence](../tests/fixtures/processes/async_groups.py) | — | — | — |
 | `base64` | Yes | `b64encode`, `b64decode`, alternate alphabets and strict validation for immutable inputs, plus URL-safe encoding. [Evidence](../benchmarks/cpython_stdlib/full/base64/README.md) | [1 / 41](../benchmarks/cpython_stdlib/full/base64/) | 0 | 1 |
 | `binascii` | Yes | Standard Base64 encoding, strict or permissive decoding of bytes and ASCII text, and the module exception hierarchy. [Evidence](../benchmarks/cpython_stdlib/full/binascii/README.md) | [0 / 93](../benchmarks/cpython_stdlib/full/binascii/) | 2 | 4 |
@@ -45,7 +46,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `hashlib` | Yes | SHA-1 and SHA-256 construction, incremental updates, copy, digest and hexdigest. [Evidence](../benchmarks/cpython_stdlib/full/hashlib/README.md) | [0 / 82](../benchmarks/cpython_stdlib/full/hashlib/) | 2 | 0 |
 | `hmac` | Yes | No API example recorded. | — | — | — |
 | `http` | Yes | Look up `HTTPStatus(404).phrase` or serve a request with `HTTPServer` and a `BaseHTTPRequestHandler` subclass. [Evidence](../benchmarks/cpython_stdlib/full/http/README.md) | [0 / 346](../benchmarks/cpython_stdlib/full/http/) | 1 | 27 |
-| `importlib` | Yes | Construct and mutate `machinery.ModuleSpec`; with a configured cache tag, convert paths using `util.cache_from_source` and `util.source_from_cache`. [Evidence](../benchmarks/cpython_stdlib/full/importlib/README.md) | [0 / 1,346](../benchmarks/cpython_stdlib/full/importlib/) | 10 | 72 |
+| `importlib` | Yes | Construct and mutate `machinery.ModuleSpec`, convert paths with `util.cache_from_source` and `util.source_from_cache` using a configured cache tag, and read `metadata.version` from unpacked `.dist-info` directories in the configured import roots. [Version lookup](../tests/fixtures/module_values/distribution_version/) [Evidence](../benchmarks/cpython_stdlib/full/importlib/README.md) | [0 / 1,346](../benchmarks/cpython_stdlib/full/importlib/) | 10 | 72 |
 | `inspect` | Yes | `cleandoc(doc=text)` for strings. `getattr_static` for selected owners and literal attribute names. [Evidence](../benchmarks/cpython_stdlib/full/inspect/README.md) | [0 / 362](../benchmarks/cpython_stdlib/full/inspect/) | 1 | 1 |
 | `io` | Yes | In-memory `StringIO` and `BytesIO` streams. [Evidence](../benchmarks/cpython_stdlib/full/doctest/stringio/README.md) | — | — | — |
 | `itertools` | Yes | Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/README.md) | [0 / 138](../benchmarks/cpython_stdlib/full/itertools/) | 11 | 0 |
@@ -80,6 +81,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `sysconfig` | Yes | `get_path("scripts")`. [Evidence](../tests/fixtures/paths/executables.py) | — | — | — |
 | `tempfile` | Yes | Scoped `TemporaryDirectory` workspaces. [Evidence](../tests/fixtures/workspaces/arguments.py) | — | — | — |
 | `textwrap` | Yes | Dedent, indent, wrapping and shortening, including selected `TextWrapper` options. [Evidence](../benchmarks/cpython_stdlib/full/textwrap/README.md) | [15 / 68](../benchmarks/cpython_stdlib/full/textwrap/) | 0 | 53 |
+| `threading` | Yes | No API example recorded. | — | — | — |
 | `time` | Yes | Read the clock, sleep, and convert a local `struct_time` to epoch seconds with `mktime`. [Evidence](../benchmarks/cpython_stdlib/full/time/README.md) | [0 / 63](../benchmarks/cpython_stdlib/full/time/) | 4 | 0 |
 | `tomllib` | Yes | Read selected TOML table keys with `load` on a binary stream. [Evidence](../tests/fixtures/paths/toml_discovery.py) | — | — | — |
 | `traceback` | Yes | No API example recorded. | — | — | — |
@@ -100,7 +102,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 
 | Module |
 | --- |
-| `ast` |
 | `atexit` |
 | `bdb` |
 | `bisect` |
@@ -191,7 +192,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `tabnanny` |
 | `tarfile` |
 | `termios` |
-| `threading` |
 | `timeit` |
 | `token` |
 | `tokenize` |
@@ -236,6 +236,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_collections` | Yes | No API example recorded. | — | — | — |
 | `_opcode` | Yes | `ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` are both zero for Imre’s native executables. [Evidence](../tests/fixtures/imports/opcode_flags.py) | — | — | — |
 | `_string` | Yes | `formatter_parser` and `formatter_field_name_split` iterate format fields and their components. [Evidence](../tests/fixtures/text/formatter_ownership.py) | — | — | — |
+| `_thread` | Yes | No API example recorded. | — | — | — |
 
 Both import modes reject the following names. They have no recorded API example or suite measurement.
 
@@ -325,7 +326,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_suggestions` |
 | `_symtable` |
 | `_sysconfig` |
-| `_thread` |
 | `_threading_local` |
 | `_tkinter` |
 | `_tokenize` |

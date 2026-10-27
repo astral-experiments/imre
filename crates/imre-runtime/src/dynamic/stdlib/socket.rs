@@ -17,7 +17,8 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         "SHUT_WR" => libc::SHUT_WR,
         "SHUT_RDWR" => libc::SHUT_RDWR,
         "SOMAXCONN" => libc::SOMAXCONN,
-        "socket" | "getaddrinfo" | "getfqdn" | "gaierror" => {
+        "socket" => return Ok(ctx.builtin("socket.socket")),
+        "getaddrinfo" | "getfqdn" | "gaierror" => {
             return Ok(ctx.alloc(Value::Native(format!("socket.{name}"))));
         }
         "error" => return Ok(ctx.alloc(Value::Native("OSError".into()))),

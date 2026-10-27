@@ -649,6 +649,7 @@ dependencies = [
  "imre-regex",
  "libc",
  "notify",
+ "num-bigint",
  "regex",
  "regex-syntax",
  "rpds",

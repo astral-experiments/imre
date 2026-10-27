@@ -375,6 +375,15 @@ impl Session {
         Ok(copy)
     }
 
+    /// A function-local module alias can be shadowed independently of the package binding.
+    pub(crate) fn is_metadata_module(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::Type as Ty;
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(expression.inferred_type(&model), Some(Ty::ModuleLiteral(m))
+            if m.module(&self.db).name(&self.db).as_str() == "importlib.metadata")
+    }
+
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
         use ty_python_semantic::types::Type as Ty;
         self.hint_reads.set(self.hint_reads.get() + 1);

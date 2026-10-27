@@ -70,6 +70,18 @@ print(str(error))
 print(repr(error._Root__value))
 print(repr(error._Leaf__value))
 """,
+    "context_key_message": """
+from contextvars import Context, ContextVar
+
+default = [1]
+key = ContextVar("mutable", default=default)
+try:
+    Context()[key]
+except KeyError as error:
+    print(str(error) == repr(key))
+    default.append(2)
+    print(str(error) == repr(key))
+""",
     "upstream_support_payloads": upstream_support_payloads(),
     "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
@@ -490,6 +502,26 @@ try:
 except:
     print("bare")
 """,
+    "context_default_decimal_limit": """
+from contextvars import ContextVar
+
+for number in [10**4299, 10**4300]:
+    key = ContextVar("digits", default=[number])
+    try:
+        repr(key)
+    except ValueError:
+        print("limited")
+    else:
+        print("unlimited")
+    token = key.set([0])
+    key.reset(token)
+    try:
+        key.reset(token)
+    except ValueError:
+        print("limited token")
+    except RuntimeError:
+        print("reused token")
+""",
     "runtime_failures": """
 for turn in range(3):
     try:
@@ -543,6 +575,20 @@ for turn in range(3):
         print(input())
     except EOFError:
         print("eof")
+""",
+    "context_recursive_default": """
+from contextvars import Context, ContextVar
+
+data: list[object] = []
+key = ContextVar("guard", default=data)
+ctx = Context()
+try:
+    ctx[key]
+except KeyError as error:
+    data.append(error.args[0])
+    print("default=[<ContextVar name=" in repr(error.args[0]))
+    data.clear()
+    print("default=[]" in repr(error.args[0]))
 """,
     "dictionary_errors": """
 values: dict[str, int] = {"present": 10}

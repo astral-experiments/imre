@@ -143,16 +143,21 @@ impl Rows {
 
     pub(super) fn boxed(&self) -> &Words {
         self.boxed.get_or_init(|| {
-            let mut out = Words::new(6);
-            out.values.reserve(self.len);
-            for at in 0..self.len {
-                out.values.push(self.get(at).unwrap_or_else(|_| {
-                    super::fail("MemoryError", "struct view allocation failed")
-                }));
-            }
-            out.update_header();
-            out
+            self.try_boxed_words()
+                .unwrap_or_else(|_| super::fail("MemoryError", "struct view allocation failed"))
         })
+    }
+
+    pub(super) fn try_boxed_words(&self) -> Result<Words> {
+        let mut out = Words::new(6);
+        out.values
+            .try_reserve_exact(self.len)
+            .map_err(|_| Error::allocation())?;
+        for at in 0..self.len {
+            out.values.push(self.get(at)?);
+        }
+        out.update_header();
+        Ok(out)
     }
 
     pub(super) fn take_boxed(&mut self) -> Words {
@@ -191,6 +196,38 @@ impl Rows {
             .try_reserve(target - words.len())
             .map_err(|_| Error::allocation())?;
         Ok(words)
+    }
+
+    /// Commit an exact list of rows after every required allocation succeeds.
+    pub(super) fn extend<'a>(
+        &mut self,
+        rows: impl ExactSizeIterator<Item = &'a [usize]>,
+    ) -> Result<()> {
+        let len = self
+            .len
+            .checked_add(rows.len())
+            .ok_or_else(Error::allocation)?;
+        if rows.len() == 0 {
+            return Ok(());
+        }
+        if let RowStorage::Repeated(base, edits) = &self.storage {
+            let mut result = self.with_default(base.clone(), self.len);
+            for (at, row) in edits.iter(self.layout.length) {
+                result.set(at, row)?;
+            }
+            for row in rows {
+                result.append(row)?;
+            }
+            *self = result;
+        } else {
+            let words = self.writable(len)?;
+            for row in rows {
+                words.extend_from_slice(row);
+            }
+            self.len = len;
+            self.boxed.take();
+        }
+        Ok(())
     }
 
     pub(super) fn append(&mut self, row: &[usize]) -> Result<()> {

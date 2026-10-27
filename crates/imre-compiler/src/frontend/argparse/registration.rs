@@ -18,6 +18,59 @@ pub(super) fn boolean_action(
         && graph.resolve(id, expr) == Some(Binding::Intrinsic(Intrinsic::BooleanOptionalAction))
 }
 
+/// CPython formats the choices to validate an action's metavar during add_argument.
+pub(super) fn choice_digits(range: Option<&[String; 3]>, choices: &[String]) -> Option<usize> {
+    const MIN_LIMIT: usize = 640;
+    // At most four bits per source digit, even for a hexadecimal literal.
+    // Inputs this short are below every permissible runtime limit.
+    let small = |value: &str| value.len() <= MIN_LIMIT / 2;
+    fn number(literal: &str) -> num_bigint::BigInt {
+        let literal = literal.replace('_', "");
+        let (digits, negative) = literal
+            .strip_prefix('-')
+            .map_or((literal.as_str(), false), |digits| (digits, true));
+        let (radix, digits) = match digits.as_bytes().get(..2) {
+            Some(b"0x" | b"0X") => (16, &digits[2..]),
+            Some(b"0o" | b"0O") => (8, &digits[2..]),
+            Some(b"0b" | b"0B") => (2, &digits[2..]),
+            _ => (10, digits),
+        };
+        let value = num_bigint::BigInt::parse_bytes(digits.as_bytes(), radix)
+            .expect("validated source integer");
+        if negative { -value } else { value }
+    }
+    let width = |n: &num_bigint::BigInt| n.magnitude().to_str_radix(10).len();
+    let count = if let Some([first, stop, step]) = range {
+        if small(first) && small(stop) {
+            return None;
+        }
+        // Only the first and last members can have the largest magnitude. The
+        // exclusive bound and the step can have more digits than either member.
+        let first = number(first);
+        let stop = number(stop);
+        let step = number(step);
+        let span = stop - &first;
+        if span.sign() != step.sign() {
+            return None;
+        }
+        let adjustment = if step.sign() == num_bigint::Sign::Minus {
+            -1i32
+        } else {
+            1
+        };
+        let last = &first + ((span - adjustment) / &step) * step;
+        width(&first).max(width(&last))
+    } else {
+        choices
+            .iter()
+            .filter(|text| !small(text))
+            .map(|text| width(&number(text)))
+            .max()
+            .unwrap_or(0)
+    };
+    (count > MIN_LIMIT).then_some(count)
+}
+
 fn raise(kind: &str, message: Expr) -> Expr {
     Expr {
         ty: Type::None,
@@ -196,4 +249,28 @@ pub(super) fn failures(
     };
     calls.visit_body(body);
     calls.failures
+}
+
+#[cfg(test)]
+mod choice_tests {
+    use super::choice_digits;
+
+    #[test]
+    fn count_only_actual_members_in_their_decimal_spelling() {
+        let hex = format!("0X_1{}", "0".repeat(550));
+        let stop = format!("0x1{}1", "0".repeat(549));
+        assert_eq!(choice_digits(None, &[format!("-{hex}")]), Some(663));
+        assert_eq!(
+            choice_digits(Some(&["0".into(), hex.clone(), hex.clone()]), &[]),
+            None
+        );
+        assert_eq!(
+            choice_digits(Some(&["0".into(), stop, hex.clone()]), &[]),
+            Some(663)
+        );
+        assert_eq!(
+            choice_digits(Some(&[hex, "-1".into(), "1".into()]), &[]),
+            None
+        );
+    }
 }

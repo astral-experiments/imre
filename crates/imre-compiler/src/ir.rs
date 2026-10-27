@@ -1090,6 +1090,8 @@ pub(crate) enum Builtin {
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
     SortByComparator,
+    ListExtendBuffer,
+    ListExtendSnapshot,
     ListExtendUnhinted,
     SortDetach,
     SortRestore,
@@ -1273,6 +1275,7 @@ pub(crate) enum Builtin {
         process_argv: bool,
     },
     /// Format parser text or print it to the requested stream.
+    ArgparseChoiceDigits(usize),
     ArgparseText {
         usage: bool,
         output: ArgparseOutput,

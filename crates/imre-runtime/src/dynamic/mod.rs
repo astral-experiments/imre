@@ -77,6 +77,8 @@ pub(crate) struct Context {
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
     pending: Option<Error>,
+    // Fallback for targets whose native stack bounds cannot be queried.
+    slot_depth: usize,
 }
 
 impl Context {
@@ -156,6 +158,17 @@ impl Context {
         }
     }
 
+    /// Keep a mutable input exported while Python coerces a buffer API's flag.
+    fn truth_with_buffer_export(&mut self, input: Id, flag: Id) -> Result<bool> {
+        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
+            return self.truth(flag);
+        }
+        self.bytearray_exports.push(input);
+        let result = self.truth(flag);
+        self.bytearray_exports.pop();
+        result
+    }
+
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
         if self.bytearray_exports.contains(&id) {
             Err(Error::new(
@@ -198,7 +211,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::DictIterator(_)
-                | Value::AstWalk(_)
+                | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
@@ -226,6 +239,7 @@ impl Context {
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
+            Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
             Value::Bytes(_) => (id, "bytes_iterator"),
@@ -267,6 +281,7 @@ impl Context {
             offset: 0,
             reverse: false,
             kind,
+            context: None,
         }))
     }
 
@@ -317,7 +332,7 @@ impl Context {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(*sequence) {
-            Value::List(values) if *reverse => {
+            Value::List(values) | Value::Tuple(values) if *reverse => {
                 IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
             }
             Value::List(values) | Value::Tuple(values) => {
@@ -356,8 +371,8 @@ impl Context {
             };
             return Ok(item.is_some());
         }
-        if let Value::AstWalk(queue) = self.heap.get(id) {
-            return Ok(!queue.is_empty());
+        if matches!(self.heap.get(id), Value::AstWalk { .. }) {
+            return stdlib::ast::has_item(self, id);
         }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
@@ -404,7 +419,7 @@ impl Context {
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
             Value::Iterator { .. } => {}
-            Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::DictIterator(iter) => {
                 let mut iter = *iter;
                 let item = iter.next(self);
@@ -418,7 +433,13 @@ impl Context {
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
-            Value::Map { .. } | Value::Zip { .. } => return self.next_zip_or_map(id),
+            Value::Map { .. } => return self.next_zip_or_map(id),
+            Value::Zip { .. } => {
+                // A zip input can itself be a zip, so advancing a row can descend many native frames.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.next_zip_or_map(id)
+                });
+            }
             Value::Generator { code, .. } => {
                 let code = *code;
                 // Delegated generators resume their children on the native stack.
@@ -477,7 +498,7 @@ impl Context {
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
-            Value::AstWalk(_)
+            Value::AstWalk { .. }
                 | Value::DictIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }
@@ -569,6 +590,7 @@ impl Context {
             class_lineage: None,
             first_argument: None,
             names: Default::default(),
+            closure: Default::default(),
             namespace: None,
             globals: Default::default(),
             exec_globals: None,
@@ -584,6 +606,21 @@ impl Context {
         s
     }
     fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+        if self.scope_data(scope).closure.nonlocals.contains(name) {
+            let mut cursor = self.scope_data(scope).parent;
+            while let Some(parent) = cursor {
+                let frame = self.scope_data(parent);
+                if let Some(&cell) = frame.closure.cells.get(name)
+                    && let Value::Cell { scope, .. } = self.heap.get(cell)
+                {
+                    return *scope;
+                }
+                if frame.closure.declared.contains(name) {
+                    return parent;
+                }
+                cursor = frame.parent;
+            }
+        }
         if self.scope_data(scope).globals.contains(name) {
             while let Some(parent) = self.scope_data(scope).parent {
                 scope = parent;
@@ -677,6 +714,19 @@ impl Context {
                 }
             }
             let s = self.scope_data(scope);
+            if let Some(&cell) = s.closure.cells.get(name)
+                && let Value::Cell {
+                    scope: owner,
+                    name: cell_name,
+                } = self.heap.get(cell)
+            {
+                return self.scope_name(*owner, cell_name).ok_or_else(|| {
+                    Error::new(
+                        "NameError",
+                        format!("free variable '{name}' is not associated with a value"),
+                    )
+                });
+            }
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
@@ -1015,6 +1065,7 @@ impl Context {
                 self.modules.insert("os.path".to_owned(), path);
             }
             "io" => stdlib::io::install(self, scope),
+            "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => {
                 self.module("io")?;
                 for name in ["BytesIO", "StringIO"] {
@@ -1049,7 +1100,11 @@ impl Context {
                 body: value::Body::Native(entry),
                 parameters: NONE,
                 nested: Vec::new(),
+                freevars: Vec::new(),
+                closure_supported: false,
                 name: name_id,
+                qualname: name_id,
+                doc: NONE,
                 filename,
                 first_line: 1,
                 module_definition: true,

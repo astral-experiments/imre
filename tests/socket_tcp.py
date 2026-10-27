@@ -46,6 +46,22 @@ def reference_operations(python, source, timeout=TIMEOUT):
     return [python, "-E", "-c", bootstrap, str(timeout), source]
 
 
+def buffered_resets(command):
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(TIMEOUT)
+        with child([*command, str(listener.getsockname()[1])]) as proc:
+            for _ in range(4):
+                peer, _ = listener.accept()
+                with peer:
+                    peer.settimeout(TIMEOUT)
+                    peer.sendall(b"\n")
+                    assert peer.recv(1) == b"G"
+                    peer.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            return collect(proc)
+
+
 def drain(peer):
     data = bytearray()
     while chunk := peer.recv(65536):
@@ -104,6 +120,8 @@ def main():
     print("CPython: loopback, fd lifetime, short send, EAGAIN, sendall and reset passed", flush=True)
     boxed = (FIXTURES / "boxed/main.py").resolve()
     boxed_output = subprocess.check_output([args.python, "-E", boxed], timeout=TIMEOUT)
+    reset = (FIXTURES / "boxed/reset.py").resolve()
+    reset_output = buffered_resets([args.python, "-E", reset])
     with tempfile.TemporaryDirectory(prefix="imre-socket-") as directory:
         for opt in args.opt_levels:
             programs = {}
@@ -121,6 +139,11 @@ def main():
                             "--opt-level", opt, "-o", binary], check=True, timeout=180)
             with child([binary]) as proc:
                 assert collect(proc) == boxed_output
+            subprocess.run([args.compiler.resolve(), "build", reset, "--runtime-imports", "--no-cache",
+                            "--runtime", args.runtime.resolve(), "--clang", args.clang,
+                            "--opt-level", opt, "-o", binary], check=True, timeout=180)
+            actual = buffered_resets([binary])
+            assert actual == reset_output, (actual, reset_output)
             print(f"O{opt}: socket observations matched CPython", flush=True)
 
 

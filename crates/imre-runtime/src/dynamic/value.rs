@@ -15,11 +15,15 @@ pub(super) struct CodeObject {
     pub body: Body,
     pub parameters: Id,
     pub name: Id,
+    pub qualname: Id,
+    pub doc: Id,
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
     pub coroutine: bool,
     pub nested: Vec<(usize, Id)>,
+    pub freevars: Vec<String>,
+    pub closure_supported: bool,
 }
 
 #[derive(Clone)]
@@ -58,6 +62,7 @@ pub(super) struct Trace {
     pub instance: Option<Id>,
     pub context: Option<Id>,
     pub cause: Option<Id>,
+    pub fields: HashMap<String, Id>,
     cached: Option<(usize, Id)>,
 }
 
@@ -127,6 +132,7 @@ impl Error {
                     .chain(trace.instance)
                     .chain(trace.context)
                     .chain(trace.cause)
+                    .chain(trace.fields.values().copied())
                     .chain(trace.cached.map(|(_, head)| head))
             }))
     }
@@ -214,6 +220,7 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
+            Value::BufferedRandom(_) => "_io.BufferedRandom",
             Value::List(_) => "list",
             Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
@@ -236,6 +243,7 @@ impl Context {
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
+            Value::Cell { .. } => "cell",
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -249,6 +257,7 @@ impl Context {
                 FormatKind::Field => "fieldnameiterator",
             },
             Value::Partial { .. } => "partial",
+            Value::PartialPlaceholder => "_PlaceholderType",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
@@ -327,12 +336,21 @@ pub(super) struct Scope {
     pub class_lineage: Option<(Id, Id)>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
+    pub closure: Box<ClosureScope>,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
     pub exec_globals: Option<ExecGlobals>,
     pub exec_locals: Option<Id>,
     pub parent: Option<Id>,
     pub module: String,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct ClosureScope {
+    pub declared: HashSet<String>,
+    pub declared_complete: bool,
+    pub nonlocals: HashSet<String>,
+    pub cells: HashMap<String, Id>,
 }
 
 #[derive(Clone, Copy)]
@@ -402,6 +420,10 @@ pub(super) enum Value {
         entries: super::dictionary::Entries,
     },
     Scope(Scope),
+    Cell {
+        scope: Id,
+        name: String,
+    },
     ClassCell(Option<Id>),
     Super {
         start: Id,
@@ -416,10 +438,12 @@ pub(super) enum Value {
     },
     Function {
         fields: super::function_fields::FunctionFields,
+        closure: Id,
         code: Id,
         scope: Id,
         class_cell: Option<Id>,
         defaults: Id,
+        kwdefaults: Id,
     },
     Code(CodeObject),
     Generator {
@@ -481,12 +505,16 @@ pub(super) enum Value {
         keywords: Id,
         coroutine_marker: Option<Id>,
     },
+    PartialPlaceholder,
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
     },
     Yielded(Id),
-    AstWalk(std::collections::VecDeque<Id>),
+    AstWalk {
+        queue: std::collections::VecDeque<Id>,
+        running: bool,
+    },
     Enumerate {
         input: Id,
         next_index: crate::Int,
@@ -516,6 +544,7 @@ pub(super) enum Value {
         sequence: Option<Id>,
         offset: usize,
         reverse: bool,
+        context: Option<std::rc::Rc<HashMap<Id, Id>>>,
     },
     FormatIterator {
         input: Id,
@@ -529,6 +558,7 @@ pub(super) enum Value {
     File(std::rc::Rc<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
+    BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
     RegexMatch {
         groups: Vec<Option<Id>>,
         names: HashMap<String, usize>,
@@ -562,11 +592,24 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut Vec<Id>) {
+        for (key, value) in bindings {
+            visit.extend([*key, *value]);
+        }
+    }
+
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
             Self::List(v) | Self::Tuple(v) => visit.extend(v),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
-            Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::Iterator {
+                sequence, context, ..
+            } => {
+                visit.extend(*sequence);
+                if let Some(bindings) = context {
+                    Self::visit_bindings(bindings, visit);
+                }
+            }
             Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
@@ -598,11 +641,7 @@ impl Value {
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
             }
-            Self::Context(bindings) => {
-                for (key, value) in bindings.iter() {
-                    visit.extend([*key, *value]);
-                }
-            }
+            Self::Context(bindings) => Self::visit_bindings(bindings, visit),
             Self::ContextVar { name, default, .. } => {
                 visit.push(*name);
                 visit.extend(default);
@@ -619,7 +658,7 @@ impl Value {
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
-            Self::AstWalk(queue) => visit.extend(queue),
+            Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
@@ -630,6 +669,7 @@ impl Value {
             }
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
+                visit.extend(scope.closure.cells.values().copied());
                 visit.extend(scope.class_cell);
                 if let Some((bases, mro)) = scope.class_lineage {
                     visit.extend([bases, mro]);
@@ -652,20 +692,29 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(origin);
             }
+            Self::Cell { scope, .. } => visit.push(*scope),
             Self::Function {
+                closure,
                 scope,
                 class_cell,
                 code,
                 defaults,
+                kwdefaults,
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *code, *defaults]);
+                visit.extend([*scope, *code, *defaults, *kwdefaults, *closure]);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
             Self::Code(code) => {
-                visit.extend([code.name, code.filename, code.parameters]);
+                visit.extend([
+                    code.name,
+                    code.qualname,
+                    code.doc,
+                    code.filename,
+                    code.parameters,
+                ]);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
             }
             Self::Generator {
@@ -752,9 +801,11 @@ impl Value {
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
+            | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
-            | Self::TextFile(_) => {}
+            | Self::TextFile(_)
+            | Self::BufferedRandom(_) => {}
         }
     }
 }
@@ -997,5 +1048,43 @@ impl Heap {
         self.next_collection = (self.slots.len() - self.free.len())
             .saturating_mul(2)
             .max(4096);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exhausted_context_iterator_traces_bindings_until_dropped() {
+        let mut heap = Heap::new();
+        let name = heap.alloc(Value::Str("key".into()));
+        let key = heap.alloc(Value::ContextVar {
+            name,
+            default: None,
+            repr_active: std::cell::Cell::new(false),
+        });
+        let value = heap.alloc(Value::List(Vec::new()));
+        let view = heap.alloc(Value::Iterator {
+            sequence: None,
+            offset: 1,
+            reverse: false,
+            kind: "values",
+            context: Some(std::rc::Rc::new(HashMap::from([(key, value)]))),
+        });
+        let location = Location {
+            file: "test".into(),
+            line: 1,
+            span: None,
+        };
+        heap.next_collection = 0;
+        heap.statement(std::iter::empty(), &[view], location.clone(), NONE);
+        assert!(matches!(heap.get(key), Value::ContextVar { .. }));
+        assert!(matches!(heap.get(value), Value::List(_)));
+
+        heap.next_collection = 0;
+        heap.statement(std::iter::empty(), &[], location, NONE);
+        assert!(heap.slots[key as usize].is_none());
+        assert!(heap.slots[value as usize].is_none());
     }
 }

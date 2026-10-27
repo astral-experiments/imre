@@ -59,7 +59,11 @@ class _SocketWriter:
             raise ValueError("I/O operation on closed file.")
 
     def close(self) -> None:
-        self.closed = True
+        if not self.closed:
+            try:
+                self.flush()
+            finally:
+                self.closed = True
 
 
 class StreamRequestHandler(BaseRequestHandler):
@@ -67,12 +71,15 @@ class StreamRequestHandler(BaseRequestHandler):
     rbufsize = -1
     wbufsize = 0
     disable_nagle_algorithm = False
-    _connection: socket.socket | None
-    _reader: _SocketReader | None
-    _writer: _SocketWriter | None
+    _has_connection: bool
+    _connection: socket.socket
+    # A populated slot can hold None in runtime-loaded Python.
+    _reader: tuple[_SocketReader] | None
+    _writer: tuple[_SocketWriter] | None
 
     def __init__(self, request: socket.socket, client_address: tuple[str, int], server: TCPServer) -> None:
-        self._connection = None
+        self._has_connection = False
+        self._connection = request
         self._reader = None
         self._writer = None
         super().__init__(request, client_address, server)
@@ -85,35 +92,48 @@ class StreamRequestHandler(BaseRequestHandler):
             raise NotImplementedError("custom socketserver stream buffer sizes are unsupported")
         if self.disable_nagle_algorithm:
             self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self._reader = _SocketReader(self.connection)
-        self._writer = _SocketWriter(self.connection)
+        self.rfile = _SocketReader(self.connection)
+        self.wfile = _SocketWriter(self.connection)
 
     @property
     def connection(self) -> socket.socket:
-        connection = self._connection
-        if connection is None:
+        if not self._has_connection:
             raise AttributeError("connection")
-        return connection
+        return self._connection
 
     @connection.setter
     def connection(self, value: socket.socket) -> None:
         self._connection = value
+        self._has_connection = True
 
     @property
     def rfile(self) -> _SocketReader:
         reader = self._reader
         if reader is None:
             raise AttributeError("rfile")
-        return reader
+        return reader[0]
+
+    @rfile.setter
+    def rfile(self, value: _SocketReader) -> None:
+        self._reader = (value,)
 
     @property
     def wfile(self) -> _SocketWriter:
         writer = self._writer
         if writer is None:
             raise AttributeError("wfile")
-        return writer
+        return writer[0]
+
+    @wfile.setter
+    def wfile(self, value: _SocketWriter) -> None:
+        self._writer = (value,)
 
     def finish(self) -> None:
+        if not self.wfile.closed:
+            try:
+                self.wfile.flush()
+            except OSError:
+                pass
         self.wfile.close()
         self.rfile.close()
 

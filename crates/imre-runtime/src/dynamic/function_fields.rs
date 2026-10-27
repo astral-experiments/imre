@@ -78,6 +78,21 @@ impl Context {
             "__annotate__" => fields.annotate,
             "__type_params__" => fields.type_params,
             "__dict__" => fields.dict,
+            "__defaults__" | "__kwdefaults__" => {
+                let Value::Function {
+                    defaults,
+                    kwdefaults,
+                    ..
+                } = *self.heap.get(fun)
+                else {
+                    unreachable!()
+                };
+                if name == "__defaults__" {
+                    defaults
+                } else {
+                    kwdefaults
+                }
+            }
             "__annotations__" => {
                 if let Some(value) = fields.annotations {
                     return Ok(Some(value));
@@ -131,7 +146,9 @@ impl Context {
                 "__code__ must be set to a code object",
             )),
             "__module__" | "__doc__" | "__annotations__" | "__name__" | "__qualname__"
-            | "__type_params__" => self.set_function_attr(fun, name, NONE),
+            | "__type_params__" | "__defaults__" | "__kwdefaults__" => {
+                self.set_function_attr(fun, name, NONE)
+            }
             _ => {
                 let storage = self.dict_storage(fields.dict).expect("function namespace");
                 self.delete_dict_attribute(fun, storage, name)
@@ -140,7 +157,7 @@ impl Context {
     }
 
     pub(super) fn set_function_attr(&mut self, fun: Id, name: &str, value: Id) -> Result<()> {
-        if name == "__globals__" {
+        if matches!(name, "__globals__" | "__closure__") {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         let object = self.heap.get(value);
@@ -168,6 +185,12 @@ impl Context {
             return Ok(());
         }
         let invalid = match name {
+            "__defaults__" if value != NONE && !matches!(object, Value::Tuple(_)) => {
+                Some("__defaults__ must be set to a tuple object".into())
+            }
+            "__kwdefaults__" if value != NONE && self.dict_storage(value).is_none() => {
+                Some("__kwdefaults__ must be set to a dict object".into())
+            }
             "__name__" | "__qualname__" if !matches!(object, Value::Str(_)) => {
                 Some(format!("{name} must be set to a string object"))
             }
@@ -188,6 +211,22 @@ impl Context {
         };
         if let Some(reason) = invalid {
             return Err(Error::new("TypeError", reason));
+        }
+        if name == "__defaults__" || name == "__kwdefaults__" {
+            let Value::Function {
+                defaults,
+                kwdefaults,
+                ..
+            } = self.heap.get_mut(fun)
+            else {
+                unreachable!()
+            };
+            if name == "__defaults__" {
+                *defaults = value;
+            } else {
+                *kwdefaults = value;
+            }
+            return Ok(());
         }
         let Value::Function { fields, .. } = self.heap.get_mut(fun) else {
             unreachable!()

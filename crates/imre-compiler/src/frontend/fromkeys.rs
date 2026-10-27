@@ -179,17 +179,25 @@ impl Checker<'_> {
         let mut input = self.prepare_iteration(input, source, false)?;
         self.hint_empty_iteration(&input, Some(hint.unwrap_or(Type::Int)));
         let key_type = self.locals[input.value];
-        if !self.types.hashable_key(key_type) {
-            return Err(error(
-                self.source,
-                source,
-                "dict.fromkeys requires supported immutable keys",
-            ));
-        }
-        if let Some(key) = hint {
-            self.expect(key, key_type, source)?;
-        }
-        let result = self.fromkeys_target(receiver, key_type, value.ty);
+        // A list key raises only if iteration produces an item. An empty
+        // iterable still needs the ordinary mapping of the requested shape.
+        let list_key = ordered && matches!(key_type, Type::ListInt | Type::List(_));
+        let result_key = if list_key {
+            hint.unwrap_or(Type::Int)
+        } else {
+            if !self.types.hashable_key(key_type) {
+                return Err(error(
+                    self.source,
+                    source,
+                    "dict.fromkeys requires supported immutable keys",
+                ));
+            }
+            if let Some(key) = hint {
+                self.expect(key, key_type, source)?;
+            }
+            key_type
+        };
+        let result = self.fromkeys_target(receiver, result_key, value.ty);
         let ty = result.ty;
         let kept = self.hidden(value.ty);
         let target = self.hidden(ty);
@@ -201,11 +209,12 @@ impl Checker<'_> {
         }
         input.evaluate.push(Statement::Assign(target, result));
         let body = self.expand_items(Iteration::Prepared(input), source, |checker, key| {
-            Ok(vec![Statement::SetItem(
-                checker.local(target),
-                key,
-                checker.local(kept),
-            )])
+            let insert = if list_key {
+                Statement::Expr(fromkeys_error("unhashable type: 'list'".into(), Type::None))
+            } else {
+                Statement::SetItem(checker.local(target), key, checker.local(kept))
+            };
+            Ok(vec![insert])
         })?;
         Ok(outer.finish(Expr {
             ty,

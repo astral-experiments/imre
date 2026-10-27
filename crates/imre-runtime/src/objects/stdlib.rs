@@ -301,6 +301,97 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
     }
 }
 
+/// Allocate an unpublished destination-typed list for converting an exact list.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_list_extend_buffer(kind: u32) -> *const () {
+    let owner = if kind == 2 {
+        crate::ListOwner::try_new(List::new(Vec::new()))
+            .map(|owner| crate::ListOwner::into_raw(owner).cast())
+    } else {
+        crate::ObjectOwner::try_new(Object(StorageCell::new(Words::new(kind).into_storage())))
+            .map(|owner| crate::ObjectOwner::into_raw(owner).cast())
+    };
+    super::exceptions::finish(owner.map_err(|_| Error::memory_error()), std::ptr::null())
+}
+
+/// Publish a private source snapshot only after the destination can hold every item.
+fn extend_snapshot(target: &mut Words, mut source: Words) -> super::exceptions::Result<()> {
+    if let Some(rows) = source.rows() {
+        if rows.len() == 0 {
+            return Ok(());
+        }
+        if target.rows().is_none() && target.plan().is_none() && target.values.is_empty() {
+            *target = source;
+            return Ok(());
+        }
+    } else {
+        source.resolve_mut()?;
+        if source.values.is_empty() {
+            return Ok(());
+        }
+    }
+    if let Some(rows) = target.rows_mut() {
+        if let Some(other) = source.rows() {
+            rows.extend((0..other.len()).map(|at| other.row(at)))?;
+        } else {
+            let width = rows.layout().length;
+            rows.extend(source.values.iter().map(|&word| {
+                // SAFETY: the snapshot contains rooted records of this exact layout.
+                unsafe { std::slice::from_raw_parts(word as *const usize, width) }
+            }))?;
+        }
+    } else {
+        if let Some(rows) = source.rows() {
+            source = rows.try_boxed_words()?;
+        }
+        target.resolve_mut()?;
+        target
+            .values
+            .try_reserve(source.values.len())
+            .map_err(|_| Error::memory_error())?;
+        target.values.append(&mut source.values);
+    }
+    target.forget_order();
+    target.update_header();
+    Ok(())
+}
+
+/// Extend from an evaluated exact-list snapshot. Its elements can be transferred
+/// because the compiler created the slice or conversion buffer without exposing it.
+///
+/// # Safety
+/// Both pointers are rooted lists of the same exact element layout. The snapshot
+/// is private and distinct from the receiver, including for self-extension.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_extend_snapshot(
+    list: *const (),
+    kind: u32,
+    snapshot: *const (),
+) {
+    debug_assert_ne!(list, snapshot);
+    // SAFETY: the compiler selects the representation and roots the separate lists.
+    let result = unsafe {
+        if kind == 2 {
+            let added = (&*snapshot.cast::<List>()).0.with_mut(std::mem::take);
+            (&*list.cast::<List>()).0.with_mut(|values| {
+                values
+                    .try_reserve(added.len())
+                    .map_err(|_| Error::memory_error())?;
+                values.extend(added);
+                Ok(())
+            })
+        } else {
+            let source = object(snapshot.cast()).0.with_mut(|storage| {
+                std::mem::replace(storage.sequence_storage_mut(), Words::new(kind))
+            });
+            object(list.cast())
+                .0
+                .with_mut(|storage| extend_snapshot(storage.sequence_storage_mut(), source))
+        }
+    };
+    super::exceptions::finish(result, ());
+}
+
 /// Extending from an iterator without a length hint modifies the temporary
 /// list even when it yields nothing. An ordinary destination needs no mutation.
 ///
@@ -740,8 +831,17 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
         fail("SystemError", "unchecked float format precision");
     }
     // The low bit selects percentages. A zero high byte keeps the default sign.
-    let percent = flags & 1 != 0;
-    let positive_sign = (flags >> 8) as u8;
+    let result = format_fixed_float(value, precision, flags & 1 != 0, (flags >> 8) as u8);
+    StrOwner::into_raw(StrOwner::new(result))
+}
+
+/// Render a fixed-point or percentage field after its precision and sign have been checked.
+pub(crate) fn format_fixed_float(
+    value: f64,
+    precision: u32,
+    percent: bool,
+    positive_sign: u8,
+) -> Str {
     let value = if percent { value * 100.0 } else { value };
     let mut result = if value.is_nan() {
         Str::from("nan")
@@ -761,7 +861,7 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
     if percent {
         result.push('%');
     }
-    StrOwner::into_raw(StrOwner::new(result))
+    result
 }
 
 /// Suspend the current native thread, rounding a positive timeout up to nanoseconds.

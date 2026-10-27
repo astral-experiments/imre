@@ -34,6 +34,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
         "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
+        "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "collections" => Some((
             "collections/__init__.py",
             include_str!("../stdlib/collections/__init__.py"),
@@ -61,6 +62,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
         "inspect" => Some(("inspect.py", include_str!("../stdlib/inspect.py"))),
+        "typing" => Some(("typing.py", include_str!("../stdlib/typing.py"))),
         "logging" => Some((
             "logging/__init__.py",
             concat!(
@@ -136,8 +138,10 @@ pub(crate) enum IntrinsicModule {
     ContextVars,
     Importlib,
     ImportlibMachinery,
+    ImportlibMetadata,
     ImportlibUtil,
     Array,
+    Ast,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -403,6 +407,7 @@ pub(crate) enum Intrinsic {
     BinasciiEncode,
     BinasciiError,
     BinasciiIncomplete,
+    PackageNotFoundError,
     Socket,
     GaiError,
     SocketGetFqdn,
@@ -565,6 +570,7 @@ impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
             "array" => Some(Self::Array),
+            "ast" => Some(Self::Ast),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
@@ -614,6 +620,7 @@ impl IntrinsicModule {
             "urllib.parse" => Some(Self::UrllibParse),
             "importlib" => Some(Self::Importlib),
             "importlib.machinery" => Some(Self::ImportlibMachinery),
+            "importlib.metadata" => Some(Self::ImportlibMetadata),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
             "_collections" => Some(Self::CollectionsNative),
@@ -710,6 +717,8 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
+            (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
+            (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }
@@ -726,6 +735,10 @@ impl IntrinsicModule {
             (Self::AnnotationFormat, "VALUE_WITH_FAKE_GLOBALS") => Intrinsic::AnnotationFormat(2),
             (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
             (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
+            (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
+            (Self::ImportlibMetadata, "entry_points") => {
+                Intrinsic::Declaration("importlib.metadata.entry_points")
+            }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::ImportlibUtil, "cache_from_source") => Intrinsic::CachePath { reverse: false },
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
@@ -1186,6 +1199,7 @@ pub(crate) struct SourceModule {
     type_bindings: HashMap<String, Binding>,
     /// Only an executed explicit submodule import populates the bare importlib namespace.
     importlib_children: HashMap<&'static str, TextSize>,
+    local_metadata_imports: Vec<LocalMetadataImport>,
     pub(crate) aliases: Vec<TypeAlias>,
     /// Decorated declarations register their original function at module initialization.
     pub(crate) overloads: HashSet<usize>,
@@ -1881,11 +1895,65 @@ impl SourceGraph {
 
     /// Resolves namespace paths while leaving local-value attributes to the expression checker.
     pub(crate) fn resolve(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
+        if let Some(import) = self.local_metadata_binding(module, expression) {
+            return self.metadata_attribute(module, expression, import);
+        }
         resolve_binding(&self.modules, module, expression)
+    }
+
+    /// An import binds its name throughout the function, even before the import executes.
+    fn local_metadata_binding(
+        &self,
+        module: ModuleId,
+        expression: &ast::Expr,
+    ) -> Option<&LocalMetadataImport> {
+        let imports = &self.modules[module].local_metadata_imports;
+        if imports.is_empty() {
+            return None;
+        }
+        let mut root = expression;
+        while let ast::Expr::Attribute(attr) = root {
+            root = &attr.value;
+        }
+        let name = root.as_name_expr()?.id.as_str();
+        imports
+            .iter()
+            .find(|i| i.name == name && i.body.contains_range(expression.range()))
+    }
+
+    fn metadata_attribute(
+        &self,
+        module: ModuleId,
+        expression: &ast::Expr,
+        import: &LocalMetadataImport,
+    ) -> Option<Binding> {
+        let attr = expression.as_attribute_expr()?;
+        if expression.start() < import.initialized
+            || !self.session.is_metadata_module(module, &attr.value)
+        {
+            return None;
+        }
+        stdlib_symbol(
+            &self.modules,
+            IntrinsicModule::ImportlibMetadata,
+            attr.attr.as_str(),
+        )
+    }
+
+    /// The loader has already resolved this import and recorded the scope of its binding.
+    pub(crate) fn local_metadata_import(&self, module: ModuleId, stmt: &ast::Stmt) -> bool {
+        stmt.is_import_stmt()
+            && self.modules[module]
+                .local_metadata_imports
+                .iter()
+                .any(|i| i.initialized == stmt.end())
     }
 
     /// A postponed annotation may reference a type imported under TYPE_CHECKING.
     pub(crate) fn resolve_type(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
+        if let Some(import) = self.local_metadata_binding(module, expression) {
+            return self.metadata_attribute(module, expression, import);
+        }
         match expression {
             ast::Expr::Name(name) => self.modules[module]
                 .type_bindings
@@ -1904,9 +1972,38 @@ impl SourceGraph {
     }
 }
 
+struct LocalMetadataImport {
+    name: String,
+    body: TextRange,
+    initialized: TextSize,
+}
+
+/// An unconditional function-local import dominates the remaining statements in that body.
+/// The semantic model checks the receiver at each use, including local rebindings.
+fn metadata_import_scopes(f: &ast::StmtFunctionDef, imports: &mut Vec<LocalMetadataImport>) {
+    for stmt in &f.body {
+        if let ast::Stmt::Import(import) = stmt
+            && !import.is_lazy
+            && let [alias] = import.names.as_slice()
+            && alias.name.as_str() == "importlib.metadata"
+        {
+            imports.push(LocalMetadataImport {
+                name: alias
+                    .asname
+                    .as_ref()
+                    .map_or("importlib", |n| n.as_str())
+                    .into(),
+                body: TextRange::new(f.body[0].start(), f.end()),
+                initialized: stmt.end(),
+            });
+        }
+    }
+}
+
 fn importlib_child(name: &str) -> Option<IntrinsicModule> {
     match name {
         "machinery" => Some(IntrinsicModule::ImportlibMachinery),
+        "metadata" => Some(IntrinsicModule::ImportlibMetadata),
         "util" => Some(IntrinsicModule::ImportlibUtil),
         _ => None,
     }
@@ -1915,6 +2012,7 @@ fn importlib_child(name: &str) -> Option<IntrinsicModule> {
 fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
     match module {
         IntrinsicModule::ImportlibMachinery => Some("machinery"),
+        IntrinsicModule::ImportlibMetadata => Some("metadata"),
         IntrinsicModule::ImportlibUtil => Some("util"),
         _ => None,
     }
@@ -1966,6 +2064,7 @@ pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
 const CONTEXTLIB_EXIT_STACK: &str = "__imre_contextlib_exit_stack__";
+const METADATA_VERSION: &str = "__imre_metadata_version__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
@@ -1994,6 +2093,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         let implementation = match module {
             IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
             IntrinsicModule::Contextlib if name == "ExitStack" => CONTEXTLIB_EXIT_STACK,
+            IntrinsicModule::ImportlibMetadata if name == "version" => METADATA_VERSION,
             IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
@@ -2009,7 +2109,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
                     (IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
-                    | (IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
+                    | (IntrinsicModule::ImportlibMetadata | IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
@@ -2135,6 +2235,7 @@ impl<'a> Loader<'a> {
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
             importlib_children: HashMap::new(),
+            local_metadata_imports: Vec::new(),
             aliases: Vec::new(),
             overloads: HashSet::new(),
             type_guards: Vec::new(),
@@ -2271,6 +2372,22 @@ impl<'a> Loader<'a> {
 
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
         let parsed = self.modules[id].parsed.clone();
+        let mut imports = Vec::new();
+        for stmt in &parsed.syntax().body {
+            match stmt {
+                ast::Stmt::FunctionDef(f) => metadata_import_scopes(f, &mut imports),
+                ast::Stmt::ClassDef(c) => {
+                    for f in c.body.iter().filter_map(ast::Stmt::as_function_def_stmt) {
+                        metadata_import_scopes(f, &mut imports);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !imports.is_empty() {
+            self.intrinsic_module("importlib.metadata", None)?;
+            self.modules[id].local_metadata_imports = imports;
+        }
         let last_definition = parsed.syntax().body.iter().rposition(|statement| {
             matches!(
                 statement,
@@ -2540,6 +2657,10 @@ impl<'a> Loader<'a> {
         binding: Binding,
         node: &impl Ranged,
     ) -> Result<(), String> {
+        if self.modules[module].bindings.get(name) == Some(&Binding::ConditionalFunction) {
+            self.modules[module].bindings.insert(name.into(), binding);
+            return Ok(());
+        }
         if let Some(previous) = self.modules[module].bindings.get(name) {
             if *previous != binding {
                 return Err(self.modules[module]
@@ -2641,6 +2762,7 @@ impl<'a> Loader<'a> {
                         let binding = if module == IntrinsicModule::Importlib
                             && let Some(child) = importlib_child(alias.name.as_str())
                         {
+                            self.intrinsic_module(&format!("importlib.{}", alias.name), None)?;
                             self.modules[id].importlib_children.entry(importlib_child_name(child).unwrap()).or_insert(statement.end());
                             Some(Binding::IntrinsicModule(child))
                         } else if module == IntrinsicModule::Sys && alias.name.as_str() == "pycache_prefix" {
@@ -2784,8 +2906,9 @@ impl<'a> Loader<'a> {
         let module = IntrinsicModule::named(name).filter(|module| {
             self.reachable_only || !matches!(module, IntrinsicModule::Declaration(_))
         });
-        if module.is_some() {
+        if let Some(module) = module {
             self.reject_stdlib_shadow(name)?;
+            self.needs_object_imports |= module == IntrinsicModule::Ast;
         }
         if module == Some(IntrinsicModule::Selectors)
             && cfg!(any(target_os = "linux", target_os = "macos"))
@@ -2800,8 +2923,19 @@ impl<'a> Loader<'a> {
                     })
                 })
         };
+        let metadata = if module == Some(IntrinsicModule::ImportlibMetadata)
+            && !self.by_name.contains_key(METADATA_VERSION)
+            && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "version"))
+        {
+            let source = include_str!("../stdlib/importlib/metadata_version.py");
+            let paths = self.filesystem_search_path()?;
+            Some(format!("{source}\n_search_path: list[str] = {paths}\n"))
+        } else {
+            None
+        };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
+            metadata.as_deref().map(|source| (METADATA_VERSION, source)),
             (module == Some(IntrinsicModule::Contextlib)
                 && imports.is_none_or(|names| {
                     names
@@ -2923,7 +3057,21 @@ impl<'a> Loader<'a> {
         })
     }
 
+    /// Embed the same ordered roots that resolve imports, including Python's safe-path exclusion.
+    fn filesystem_search_path(&self) -> Result<String, String> {
+        let roots = std::iter::once(&self.root)
+            .skip(usize::from(self.skip_current_root))
+            .chain(&self.extension_roots)
+            .collect::<Vec<_>>();
+        serde_json::to_string(&roots).map_err(|e| e.to_string())
+    }
+
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == METADATA_VERSION {
+            return Err(
+                "the private importlib.metadata implementation is not an importable module".into(),
+            );
+        }
         if name == TEMPFILE_SPOOL {
             return Err("the private tempfile implementation is not an importable module".into());
         }
@@ -2976,11 +3124,7 @@ impl<'a> Loader<'a> {
             self.reject_stdlib_shadow(name)?;
             let pkgutil_source;
             let source = if name == "pkgutil" {
-                let roots = std::iter::once(&self.root)
-                    .skip(usize::from(self.skip_current_root))
-                    .chain(&self.extension_roots)
-                    .collect::<Vec<_>>();
-                let paths = serde_json::to_string(&roots).map_err(|e| e.to_string())?;
+                let paths = self.filesystem_search_path()?;
                 let version = crate::PYTHON_VERSION;
                 let abi = if cfg!(target_os = "macos") {
                     "darwin".to_owned()
