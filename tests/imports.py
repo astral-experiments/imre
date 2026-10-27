@@ -154,6 +154,22 @@ ACCEPTED = {
         ),
         "witness.py": "seen = []\n",
     },
+    "registered_typevar_frame": {
+        "main.py": "from importlib import import_module\nimport_module('maker')\n",
+        "maker.py": (
+            "from typing import TypeVar\n"
+            "print(TypeVar('Imported').__module__)\n"
+            "first, second = [], []\n"
+            "scope = {'__name__': first, 'second': second, 'T': TypeVar}\n"
+            "exec(\"__name__ = second\\nstable = T('Stable')\\n"
+            "def make():\\n    before = T('Before')\\n    make.__module__ = None\\n"
+            "    return before, T('After')\", scope)\n"
+            "make = scope['make']\nscope['__name__'] = 'rebound'\n"
+            "before, after = make()\n"
+            "print(scope['stable'].__module__ is first, before.__module__ is second, "
+            "after.__module__ is None)\n"
+        ),
+    },
     "registered_source_spec": {
         "main.py": (
             "from importlib.util import find_spec\nfrom importlib import import_module\n"

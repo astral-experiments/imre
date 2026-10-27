@@ -477,6 +477,7 @@ pub(super) enum Value {
     },
     Code(CodeObject),
     Generator {
+        owner: FrameOwner,
         code: Id,
         scope: Id,
         iterators: Vec<Id>,
@@ -758,12 +759,13 @@ impl Value {
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
             }
             Self::Generator {
+                owner,
                 code,
                 scope,
                 iterators,
                 ..
             } => {
-                visit.extend([*code, *scope]);
+                visit.extend([*code, *scope, owner.root()]);
                 visit.extend(iterators);
             }
             Self::Class {
@@ -943,7 +945,23 @@ pub(super) struct Heap {
     weak_edge_removed: bool,
 }
 
+/// A Python call observes its mutable function, while bare code keeps its entry module.
+#[derive(Clone, Copy)]
+pub(super) enum FrameOwner {
+    Function(Id),
+    Module(Id),
+}
+
+impl FrameOwner {
+    fn root(self) -> Id {
+        match self {
+            Self::Function(id) | Self::Module(id) => id,
+        }
+    }
+}
+
 struct Frame {
+    owner: FrameOwner,
     scope: Id,
     code: Id,
     live: Vec<Id>,
@@ -954,8 +972,9 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(scope: Id, code: Id, inherited: Id) -> Self {
+    fn new(scope: Id, code: Id, owner: FrameOwner, inherited: Id) -> Self {
         Self {
+            owner,
             scope,
             code,
             live: Vec::new(),
@@ -979,7 +998,7 @@ impl Heap {
             ],
             free: Vec::new(),
             immutable_hashes: HashMap::new(),
-            frames: vec![Frame::new(NONE, NONE, NONE)],
+            frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             next_collection: 4096,
             weak: HashMap::new(),
             has_weak_values: false,
@@ -1079,9 +1098,9 @@ impl Heap {
             .as_mut()
             .expect("live native handle")
     }
-    pub fn enter(&mut self, scope: Id, code: Id) {
+    pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
         self.frames
-            .push(Frame::new(scope, code, self.active_exception()));
+            .push(Frame::new(scope, code, owner, self.active_exception()));
     }
     pub fn leave(&mut self, value: Id) {
         let frame = self.frames.pop().expect("returning native activation");
@@ -1143,6 +1162,18 @@ impl Heap {
         Some((location, object))
     }
 
+    pub fn caller_module(&self) -> Id {
+        match self.frames.last().unwrap().owner {
+            FrameOwner::Module(module) => module,
+            FrameOwner::Function(function) => {
+                let Value::Function { fields, .. } = self.get(function) else {
+                    unreachable!("executing Python function")
+                };
+                fields.module
+            }
+        }
+    }
+
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
     }
@@ -1180,7 +1211,13 @@ impl Heap {
         let mut pending: Vec<_> = globals.collect();
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         for frame in &self.frames {
-            pending.extend([frame.scope, frame.code, frame.active, frame.inherited]);
+            pending.extend([
+                frame.scope,
+                frame.code,
+                frame.owner.root(),
+                frame.active,
+                frame.inherited,
+            ]);
             pending.extend(frame.object);
             pending.extend(&frame.live);
         }
