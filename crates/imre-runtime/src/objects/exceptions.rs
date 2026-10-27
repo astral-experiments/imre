@@ -121,6 +121,8 @@ pub(crate) enum Kind {
     ConnectionRefusedError = 48,
     ConnectionResetError = 49,
     InterruptedError = 50,
+    ChildProcessError = 57,
+    ProcessLookupError = 58,
     TimeoutError = 51,
     // Warning exception identities use a separate block from module errors and filter categories.
     UnidiffParseError = 52,
@@ -199,6 +201,8 @@ impl Kind {
             48 => Self::ConnectionRefusedError,
             49 => Self::ConnectionResetError,
             50 => Self::InterruptedError,
+            57 => Self::ChildProcessError,
+            58 => Self::ProcessLookupError,
             51 => Self::TimeoutError,
             52 => Self::UnidiffParseError,
             53 => Self::ReferenceError,
@@ -277,6 +281,8 @@ impl Kind {
             Self::ConnectionRefusedError => "ConnectionRefusedError",
             Self::ConnectionResetError => "ConnectionResetError",
             Self::InterruptedError => "InterruptedError",
+            Self::ChildProcessError => "ChildProcessError",
+            Self::ProcessLookupError => "ProcessLookupError",
             Self::TimeoutError => "TimeoutError",
             Self::Warning => "Warning",
             Self::RuntimeWarning => "RuntimeWarning",
@@ -362,6 +368,8 @@ impl Kind {
                     | Self::ConnectionRefusedError
                     | Self::ConnectionResetError
                     | Self::InterruptedError
+                    | Self::ChildProcessError
+                    | Self::ProcessLookupError
                     | Self::TimeoutError
                     | Self::GaiError
                     | Self::BadGzipFile

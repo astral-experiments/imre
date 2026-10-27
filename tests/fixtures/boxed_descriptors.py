@@ -155,3 +155,19 @@ def current():
         item.extra = 11
     except AttributeError as error:
         print(str(error))
+
+    class Node:
+        def __eq__(self, other):
+            return isinstance(other, Node)
+
+        __hash__ = object.__hash__
+
+    first, second = Node(), Node()
+    slot = Node.__hash__
+    assert slot is object.__hash__ and type(slot).__name__ == "wrapper_descriptor"
+    assert slot.__get__(None, Node) is slot
+    bound = slot.__get__(first, Node)
+    assert bound.__self__ is first and bound.__objclass__ is object
+    assert first == second and hash(first) == slot(first) == bound()
+    keys = {first: 1, second: 2}
+    assert keys[first] == 1 and keys[second] == 2

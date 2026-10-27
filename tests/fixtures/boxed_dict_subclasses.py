@@ -1,6 +1,35 @@
 """Compare dict subclass storage, inherited methods, and explicit base dispatch."""
 
 
+def ordered_dictionary():
+    from collections import OrderedDict
+
+    source = OrderedDict(b=[2], a=[1])
+    assert source != OrderedDict(a=[1], b=[2])
+    assert source == {"a": [1], "b": [2]}
+    class NoKeys(OrderedDict):
+        def keys(self):
+            raise AssertionError("comparison called keys")
+
+    assert NoKeys(b=2) == {"b": 2}
+    shallow = source.copy()
+    assert type(shallow) is OrderedDict and shallow["b"] is source["b"]
+    cursor = iter(source.items())
+    assert next(cursor) == ("b", [2])
+    del source["a"]
+    source["a"] = [3]
+    try:
+        next(cursor)
+    except RuntimeError as error:
+        assert str(error) == "OrderedDict mutated during iteration"
+    else:
+        raise AssertionError("cursor missed a deletion and reinsertion")
+    assert next(cursor, None) is None
+    source.clear()
+    source["self"] = source
+    assert repr(source) == "OrderedDict({'self': ...})"
+
+
 def inherited_deletion():
     from operator import delitem
 
@@ -62,6 +91,8 @@ def current():
     from collections import _count_elements
     from _collections import _count_elements as native_count
 
+    fromkeys_construction()
+    ordered_dictionary()
     counted = {"a": 4}
     print(native_count is _count_elements, native_count(counted, "aba"), counted)
     try:
@@ -95,6 +126,13 @@ def current():
     saved.append(7)
     print(groups.clear(), groups["key"], saved)
     print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
+
+    groups["visits"].append(1)
+    plain_copy = dict.copy(groups)
+    other = groups.copy()
+    other["visits"].append(2)
+    print(plain_copy["visits"], groups["visits"], other["fresh"], list(groups))
+    print(type(plain_copy) is dict, type(other) is defaultdict, isinstance(other, dict), "fresh" in plain_copy)
 
     class ClearOnCompare:
         def __hash__(self):
@@ -209,7 +247,17 @@ def current():
             return dict.__getitem__(self, key) + 10
 
     filtered = Filtered(data)
-    print(dict(filtered), {**filtered})
+    print(dict(filtered), {**filtered}, filtered.copy())
+
+    class MissingKeys(Filtered):
+        @property
+        def keys(self):
+            raise AttributeError("unavailable keys")
+
+    try:
+        dict.copy(MissingKeys(data))
+    except AttributeError as error:
+        print(error.args)
 
     pending = []
 
@@ -403,6 +451,28 @@ def current():
     source = {once: "value"}
     print(list(dict(source).values()), once.calls)
 
+    from collections import defaultdict
+
+    groups = defaultdict(list)
+    existing = groups["key"]
+    assert repr(groups) == "defaultdict(<class 'list'>, {'key': []})"
+    groups["cycle"] = groups
+    assert repr(groups).endswith("'cycle': defaultdict(<class 'list'>, {...})})")
+    del groups["cycle"]
+    print(groups.default_factory is list, groups.__missing__("key") is existing)
+    groups.default_factory = None
+    try:
+        defaultdict.__missing__(groups, "key")
+    except KeyError as error:
+        print(error.args, groups["key"] is existing)
+
+    def fill():
+        groups["new"] = [7]
+        return []
+
+    groups.default_factory = fill
+    print(groups["new"], list(groups))
+
     class Late:
         pass
 
@@ -427,6 +497,35 @@ def current():
     key = Colliding()
     print({key: 13}[key])
     declined_key_equality()
+
+
+def fromkeys_construction():
+    from collections import Counter, defaultdict
+
+    class Custom(dict):
+        def __setitem__(self, key, value):
+            dict.__setitem__(self, key + 10, value)
+
+    source = Custom()
+    shared = []
+    made = source.fromkeys([2, 1, 2], shared)
+    made[11].append(7)
+    assert type(made) is Custom and list(made) == [12, 11]
+    assert not source and made[12] is shared and shared == [7]
+    fresh = defaultdict(list).fromkeys([1])
+    assert fresh[1] is None
+    try:
+        fresh[2]
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("inherited the original factory")
+    try:
+        Counter.fromkeys([1])
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("Counter.fromkeys accepted keys")
 
 
 def declined_key_equality():

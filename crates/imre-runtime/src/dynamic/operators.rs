@@ -16,6 +16,8 @@ enum FormatPart {
     Closing(usize),
     Sequence(Id, usize),
     Entries(Id, usize, bool),
+    DefaultDictFactory(Id, usize),
+    DefaultDictEnd(String),
     SetMembers(Vec<Id>, usize),
     Fields(Id, usize),
     Leave(Id, &'static str),
@@ -31,6 +33,7 @@ impl FormatPart {
             Self::Value(id, _)
             | Self::Sequence(id, _)
             | Self::Entries(id, _, _)
+            | Self::DefaultDictFactory(id, _)
             | Self::Fields(id, _)
             | Self::Leave(id, _)
             | Self::ContextEnd(id) => heap.keep(*id),
@@ -39,7 +42,11 @@ impl FormatPart {
                 let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
                 *self = Self::Sequence(tuple, *index);
             }
-            Self::Text(_) | Self::Closing(_) | Self::SliceEnd | Self::NamedTupleEnd => {}
+            Self::Text(_)
+            | Self::Closing(_)
+            | Self::SliceEnd
+            | Self::NamedTupleEnd
+            | Self::DefaultDictEnd(_) => {}
         }
     }
 }
@@ -806,11 +813,26 @@ impl Context {
                 output.push_str(text);
                 output.extend(std::iter::repeat_n(')', closing));
                 break;
-            } else if error.os_args.is_some()
-                || error
-                    .trace
-                    .as_ref()
-                    .is_some_and(|trace| trace.source_syntax.is_some())
+            } else if let Some(super::os_error::Args::Python(fields)) = error.os_args.as_deref()
+                && let Some(fragments) = fields.fragments()
+            {
+                work.try_reserve(9)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                work.push(Part::Closing(closing));
+                for part in fragments.into_iter().rev().flatten() {
+                    work.push(match part {
+                        super::os_error::Fragment::Text(text) => Part::Text(text),
+                        super::os_error::Fragment::Value(id, repr) => Part::Value(id, repr),
+                    });
+                }
+                break;
+            } else if matches!(
+                error.os_args.as_deref(),
+                Some(super::os_error::Args::Native { .. })
+            ) || error
+                .trace
+                .as_ref()
+                .is_some_and(|trace| trace.source_syntax.is_some())
             {
                 output.push_str(&error.message);
                 output.extend(std::iter::repeat_n(')', closing));
@@ -846,7 +868,9 @@ impl Context {
             } else {
                 if repr {
                     output.push('(');
-                    if let Some(os) = &error.os_args {
+                    if let Some(super::os_error::Args::Native { source: os, .. }) =
+                        error.os_args.as_deref()
+                    {
                         output.push_str(&format!(
                             "{}, {}",
                             os.errno,
@@ -977,6 +1001,27 @@ impl Context {
                         work.push(Part::Value(member, true));
                     }
                 }
+                Part::DefaultDictFactory(id, start) => {
+                    // A key or value repr may have replaced the factory while rendering the table.
+                    let Value::DefaultDict { factory, .. } = *ctx.heap.get(id) else {
+                        unreachable!()
+                    };
+                    let contents = output.split_off(start);
+                    output.push_str("defaultdict(");
+                    work.push(Part::DefaultDictEnd(contents));
+                    if ancestors.insert(factory) {
+                        active.push(factory);
+                        work.push(Part::Leave(factory, ""));
+                        work.push(Part::Value(factory, true));
+                    } else {
+                        output.push_str("...");
+                    }
+                }
+                Part::DefaultDictEnd(contents) => {
+                    output.push_str(", ");
+                    output.push_str(&contents);
+                    output.push(')');
+                }
                 Part::Entries(id, index, include_values) => {
                     let entry = match ctx.heap.get(id) {
                         Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
@@ -1009,6 +1054,18 @@ impl Context {
                     }
                     match ctx.heap.get(id) {
                         Value::Raised(error) => {
+                            if !repr
+                                && let Some(super::os_error::Args::Python(fields)) =
+                                    error.os_args.as_deref()
+                                && fields.fragments().is_some()
+                            {
+                                if !ancestors.insert(id) {
+                                    output.push_str("...");
+                                    continue;
+                                }
+                                active.push(id);
+                                work.push(Part::Leave(id, ""));
+                            }
                             ctx.render_exception(error, repr, &mut output, &mut work)?;
                             continue;
                         }
@@ -1133,6 +1190,10 @@ impl Context {
                             )
                         }
                         Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
+                        Value::DefaultDict { .. } => {
+                            work.push(Part::DefaultDictFactory(id, output.len()));
+                            ("{", "}", "{...}", Part::Entries(id, 0, true))
+                        }
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });
@@ -1508,12 +1569,8 @@ impl Context {
             if let Some(index) = index {
                 return Ok(self.dict_entries(obj).expect("dictionary")[index].1);
             }
-            if let Value::DefaultDict { factory, .. } = self.heap.get(obj)
-                && *factory != NONE
-            {
-                let v = self.call(*factory, Vec::new(), Vec::new())?;
-                self.put_item(obj, key, v)?;
-                return Ok(v);
+            if matches!(self.heap.get(obj), Value::DefaultDict { .. }) {
+                return self.defaultdict_missing(obj, key);
             }
             return Err(self.lookup_error("KeyError", key));
         }
@@ -1603,6 +1660,24 @@ impl Context {
             _ => unreachable!(),
         })
     }
+    /// Call the current factory, preserving any value it inserts for this key.
+    pub(super) fn defaultdict_missing(&mut self, obj: Id, key: Id) -> Result<Id> {
+        let Value::DefaultDict { factory, .. } = *self.heap.get(obj) else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a '{}' object",
+                    self.type_name(obj)
+                ),
+            ));
+        };
+        if factory == NONE {
+            return Err(self.lookup_error("KeyError", key));
+        }
+        let value = self.call(factory, Vec::new(), Vec::new())?;
+        self.set_dictionary_key(obj, key, value, None, false)
+    }
+
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
         if matches!(
@@ -1880,6 +1955,9 @@ impl Context {
         } else {
             (self.weak_proxy_target(a)?, self.weak_proxy_target(b)?)
         };
+        if op == "|" && matches!(self.heap.get(a), Value::Union(_) | Value::TypeVar(_)) {
+            return super::union::make(self, &[a, b]);
+        }
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
         }

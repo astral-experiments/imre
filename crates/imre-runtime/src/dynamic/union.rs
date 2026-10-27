@@ -90,7 +90,7 @@ fn accepts(ctx: &Context, id: Id) -> bool {
 }
 
 /// Flatten nested unions left to right and discard repeated types.
-fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
+pub(super) fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
     let mut flattened = Vec::new();
     for &input in inputs {
         if matches!(ctx.heap.get(input), Value::Instance { .. })

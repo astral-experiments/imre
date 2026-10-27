@@ -31,6 +31,7 @@ mod logging;
 mod marshal;
 mod math;
 mod operator;
+mod ordered_dict;
 mod pickle;
 mod pkgutil;
 mod posixpath;
@@ -316,7 +317,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
-        ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
+        (
+            "_collections",
+            "_count_elements" | "_ordered_dict_equal" | "_ordered_dict_repr" | "_ordered_dict_view",
+        ) => ctx.builtin(&format!("_collections.{name}")),
+        ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
@@ -495,7 +500,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
-        | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
@@ -754,6 +758,9 @@ pub(super) fn call(
     }
     if name == "_collections._count_elements" {
         return count_elements(ctx, args, kwargs);
+    }
+    if let Some(operation) = name.strip_prefix("_collections._ordered_dict_") {
+        return ordered_dict::call(ctx, operation, args, kwargs);
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
@@ -1022,6 +1029,7 @@ pub(super) fn call(
             (2, &[])
         }
         "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "traceback.print_exc" => return traceback::print_active(ctx, args, kwargs),
@@ -1038,6 +1046,7 @@ pub(super) fn call(
         | "_string.formatter_parser"
         | "_string.formatter_field_name_split"
         | "collections.defaultdict"
+        | "collections.defaultdict.copy"
         | "functools.lru_cache"
         | "functools._cached"
         | "contextlib.contextmanager"
@@ -1295,6 +1304,19 @@ pub(super) fn call(
             factory: args.first().copied().unwrap_or(NONE),
             entries: Default::default(),
         }),
+        "collections.defaultdict.copy" => {
+            let receiver = argument(args, 0)?;
+            let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) else {
+                return Err(Error::new(
+                    "TypeError",
+                    "defaultdict.copy requires a defaultdict",
+                ));
+            };
+            ctx.alloc(source.clone())
+        }
+        "collections.defaultdict.__missing__" => {
+            ctx.defaultdict_missing(argument(args, 0)?, argument(args, 1)?)?
+        }
         "contextlib.contextmanager" => {
             let callable = ctx.alloc(Value::Native("contextlib._manager".into()));
             ctx.alloc(Value::Method {

@@ -1,6 +1,6 @@
 from operator import getitem
 from types import UnionType
-from typing import Union, get_args, get_origin
+from typing import TypeVar, Union, get_args, get_origin
 
 
 class Left:
@@ -32,6 +32,15 @@ class RaisesEquality(EqualSeventeen):
 
 
 def current():
+    class Member:
+        def __ror__(self, left):
+            return "reflected"
+
+    member = Member()
+    for left_operand in (int | str, TypeVar("T")):
+        assert (left_operand | member).__args__[-1] is member
+    assert list[int] | member == "reflected"
+
     left = list[EqualSeventeen()] | str
     right = str | list[17]
     assert left == right and {left: 42}[right] == 42

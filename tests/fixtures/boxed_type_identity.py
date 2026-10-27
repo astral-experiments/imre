@@ -40,6 +40,15 @@ def current():
               isinstance(sample, alias))
         by_type[alias] = name
     print(len(by_type), [by_type[type(sample)] for name, sample in samples])
+    class Number(int):
+        pass
+
+    class Child(Number):
+        pass
+
+    for value in (Number(), Number(7), Child("-17")):
+        print(type(value).__name__, int(value), value + 1)
+
     for cls, instance in ((int, 43), (str, "report")):
         new = cls.__new__
         print(type(new) is type(len), isinstance(new, types.BuiltinFunctionType),

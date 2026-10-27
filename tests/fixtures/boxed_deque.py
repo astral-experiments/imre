@@ -32,6 +32,25 @@ def current():
         raise AssertionError("changed deque")
     assert list(queue) == [3, "last"]
 
+    queue = deque([1, 2, 3, 4], maxlen=4)
+    forward, backward = iter(queue), reversed(queue)
+    assert (next(forward), next(backward)) == (1, 4)
+    reverse = queue.reverse
+    assert reverse.__self__ is queue and reverse() is None
+    assert list(forward) == [3, 2, 1] and list(backward) == [2, 3, 4]
+    assert queue.maxlen == 4 and list(queue) == [4, 3, 2, 1]
+    backward = deque.__reversed__(queue)
+    assert type(backward).__name__ == "_deque_reverse_iterator"
+    assert iter(backward) is backward
+    queue.append(0)
+    try:
+        next(backward)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("changed deque")
+    assert next(backward, None) is None
+
     queue = deque([marker])
     push = queue.append
     remove = queue.remove

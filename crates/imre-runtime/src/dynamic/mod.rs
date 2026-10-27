@@ -15,6 +15,7 @@ mod iterators;
 mod mapping_abc;
 mod module_type;
 mod operators;
+mod os_error;
 mod property;
 mod range;
 mod slice;
@@ -49,6 +50,8 @@ enum IteratorSlice<'a> {
     Values(&'a [Id]),
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
+    ReversedBytes(&'a [u8]),
+    ReversedText(&'a str),
 }
 
 impl IteratorSlice<'_> {
@@ -56,7 +59,16 @@ impl IteratorSlice<'_> {
     fn len(&self) -> usize {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
-            Self::Bytes(bytes) => bytes.len(),
+            Self::Bytes(bytes) | Self::ReversedBytes(bytes) => bytes.len(),
+            Self::ReversedText(text) => text.chars().count(),
+        }
+    }
+
+    /// Test the byte boundary directly so each character step stays constant time.
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::ReversedText(text) => text.is_empty(),
+            _ => self.len() == 0,
         }
     }
 }
@@ -238,6 +250,7 @@ impl Context {
                 | Value::RangeIterator(_)
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
+                | Value::MappingViewIterator { .. }
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Zip { .. }
@@ -268,11 +281,7 @@ impl Context {
         let (sequence, kind) = match *self.heap.get(id) {
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::Deque(ref ring) => {
-                let cursor = Value::DequeIterator {
-                    deque: id,
-                    state: ring.state,
-                    remaining: ring.items.len(),
-                };
+                let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
             }
             Value::List(_) => (id, "list_iterator"),
@@ -283,9 +292,21 @@ impl Context {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
             }
             Value::Dict(_) | Value::DefaultDict { .. } => {
-                return Ok(self.dict_iterator(id, DictViewKind::Keys));
+                return Ok(self.dict_iterator(id, DictViewKind::Keys, false));
             }
-            Value::DictView { dict, kind } => return Ok(self.dict_iterator(dict, kind)),
+            Value::DictView {
+                dict,
+                kind,
+                ordered,
+            } => return Ok(self.dict_iterator(dict, kind, ordered)),
+            Value::MappingView { mapping, kind } => {
+                return Ok(self.alloc(Value::MappingViewIterator {
+                    mapping: Some(mapping),
+                    source: None,
+                    kind,
+                    running: false,
+                }));
+            }
             Value::Instance { class, .. }
                 if let Some(slot) = self.class_attr(class, "__iter__") =>
             {
@@ -323,12 +344,16 @@ impl Context {
     }
 
     /// Start a cursor at the first entry without copying keys or values.
-    fn dict_iterator(&mut self, dict: Id, kind: DictViewKind) -> Id {
-        let size = self
-            .dict_entries(dict)
-            .expect("dictionary iterator source")
-            .len();
-        self.alloc(Value::DictIterator(DictIterator::new(dict, kind, size)))
+    fn dict_iterator(&mut self, dict: Id, kind: DictViewKind, ordered: bool) -> Id {
+        let storage = self.dict_storage(dict).expect("dictionary iterator source");
+        let entries = self.stored_entries(storage);
+        let iter = DictIterator::new(
+            dict,
+            kind,
+            entries.len(),
+            ordered.then(|| entries.order_state()),
+        );
+        self.alloc(Value::DictIterator(iter))
     }
 
     /// Compiled loops test for an item before consuming it. User code must advance only once.
@@ -339,6 +364,7 @@ impl Context {
             Value::Instance { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
+                | Value::MappingViewIterator { .. }
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
                 | Value::Zip { .. }
@@ -376,6 +402,8 @@ impl Context {
             Value::List(values) | Value::Tuple(values) => {
                 IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
             }
+            Value::Str(text) if *reverse => IteratorSlice::ReversedText(&text[..*offset]),
+            Value::Bytes(bytes) if *reverse => IteratorSlice::ReversedBytes(&bytes[..*offset]),
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
             }
@@ -411,7 +439,7 @@ impl Context {
         if matches!(self.heap.get(id), Value::AstWalk { .. }) {
             return stdlib::ast::has_item(self, id);
         }
-        let more = self.iterator_remaining(id)?.len() != 0;
+        let more = !self.iterator_remaining(id)?.is_empty();
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
             *sequence = None;
         }
@@ -459,22 +487,27 @@ impl Context {
                 deque,
                 state,
                 remaining,
+                reverse,
             } => {
-                let (deque, state, remaining) = (*deque, *state, *remaining);
+                let (deque, state, mut remaining, reverse) = (*deque, *state, *remaining, *reverse);
                 let Value::Deque(ring) = self.heap.get(deque) else {
                     unreachable!()
                 };
-                let item = ring.cursor_item(state, remaining, false)?.copied();
-                if item.is_some() {
-                    let Value::DequeIterator { remaining, .. } = self.heap.get_mut(id) else {
-                        unreachable!()
-                    };
-                    *remaining -= 1;
-                }
-                return Ok(item);
+                let item = ring
+                    .cursor_item(state, &mut remaining, reverse)
+                    .map(|item| item.copied());
+                let Value::DequeIterator {
+                    remaining: saved, ..
+                } = self.heap.get_mut(id)
+                else {
+                    unreachable!()
+                };
+                *saved = remaining;
+                return Ok(item?);
             }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
+            Value::MappingViewIterator { .. } => return self.next_mapping_view_item(id),
             Value::DictIterator(iter) => {
                 let mut iter = *iter;
                 let item = iter.next(self);
@@ -535,22 +568,89 @@ impl Context {
         if !self.iterator_has_item(id)? {
             return Ok(None);
         }
-        let item = match self.iterator_remaining(id)? {
-            IteratorSlice::Values(values) => values[0],
-            IteratorSlice::Reversed(values) => values[values.len() - 1],
-            IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+        let (item, width) = match self.iterator_remaining(id)? {
+            IteratorSlice::Values(values) => (values[0], 1),
+            IteratorSlice::Reversed(values) => (values[values.len() - 1], 1),
+            IteratorSlice::Bytes(bytes) => (self.int(i64::from(bytes[0])), 1),
+            IteratorSlice::ReversedBytes(bytes) => (self.int(i64::from(bytes[bytes.len() - 1])), 1),
+            IteratorSlice::ReversedText(text) => {
+                let ch = text.chars().next_back().expect("nonempty iterator");
+                (self.text(ch.to_string()), ch.len_utf8())
+            }
         };
         if let Value::Iterator {
             offset, reverse, ..
         } = self.heap.get_mut(id)
         {
             if *reverse {
-                *offset -= 1;
+                *offset -= width;
             } else {
                 *offset += 1;
             }
         }
         Ok(Some(item))
+    }
+
+    /// Advance a Mapping ABC view as a generator, without snapshotting its keys or values.
+    fn next_mapping_view_item(&mut self, id: Id) -> Result<Option<Id>> {
+        let (mapping, source, kind) = match *self.heap.get(id) {
+            Value::MappingViewIterator { mapping: None, .. } => return Ok(None),
+            Value::MappingViewIterator { running: true, .. } => {
+                return Err(Error::new("ValueError", "generator already executing"));
+            }
+            Value::MappingViewIterator {
+                mapping: Some(mapping),
+                source,
+                kind,
+                ..
+            } => (mapping, source, kind),
+            _ => unreachable!(),
+        };
+        self.heap.keep(id);
+        if let Value::MappingViewIterator { running, .. } = self.heap.get_mut(id) {
+            *running = true;
+        }
+        let item = (|| {
+            let source = match source {
+                Some(source) => source,
+                None => {
+                    let source = self.iterator(mapping)?;
+                    if let Value::MappingViewIterator { source: slot, .. } = self.heap.get_mut(id) {
+                        *slot = Some(source);
+                    }
+                    source
+                }
+            };
+            let Some(key) = self.next_item(source)? else {
+                return Ok(None);
+            };
+            if matches!(kind, DictViewKind::Keys) {
+                return Ok(Some(key));
+            }
+            let value = self.get_item(mapping, key)?;
+            Ok(Some(match kind {
+                DictViewKind::Values => value,
+                DictViewKind::Items => self.alloc(Value::Tuple(vec![key, value])),
+                DictViewKind::Keys => unreachable!(),
+            }))
+        })();
+        if let Value::MappingViewIterator {
+            mapping,
+            source,
+            running,
+            ..
+        } = self.heap.get_mut(id)
+        {
+            *running = false;
+            if !matches!(&item, Ok(Some(_))) {
+                *mapping = None;
+                *source = None;
+            }
+        }
+        if !matches!(&item, Ok(Some(_))) {
+            self.heap.weak_edge_removed(mapping);
+        }
+        item
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
@@ -559,7 +659,9 @@ impl Context {
             Value::AstWalk { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
+                | Value::MappingViewIterator { .. }
                 | Value::DictView { .. }
+                | Value::MappingView { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
@@ -637,7 +739,9 @@ impl Context {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
                     IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    remaining @ IteratorSlice::Bytes(_) => {
+                    remaining @ (IteratorSlice::Bytes(_)
+                    | IteratorSlice::ReversedBytes(_)
+                    | IteratorSlice::ReversedText(_)) => {
                         let mut values = Vec::new();
                         values.try_reserve_exact(remaining.len()).map_err(|_| {
                             Error::new("MemoryError", "iterator is too large to materialize")
@@ -804,6 +908,10 @@ impl Context {
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
+        self.bind_local(scope, name, value);
+    }
+
+    fn bind_local(&mut self, scope: Id, name: &str, value: Id) {
         if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
             self.heap.replace_cell(cell, Some(value));
             return;
@@ -912,6 +1020,7 @@ impl Context {
             self.builtin(builtins::exception_initializer(name));
         }
         let methods = match name {
+            "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
             "property" => property::METHODS,
             "int" => &["to_bytes"],

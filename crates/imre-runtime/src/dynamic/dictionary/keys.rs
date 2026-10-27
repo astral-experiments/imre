@@ -169,6 +169,14 @@ impl Index {
 }
 
 impl Entries {
+    /// Identify changes to insertion positions even when the live size is restored.
+    pub(in super::super) fn order_state(&self) -> (usize, usize) {
+        (
+            self.next,
+            self.index.as_ref().map_or(0, |index| index.generation),
+        )
+    }
+
     /// Remove all pairs and invalidate lookups suspended in a key comparison.
     pub(in super::super) fn clear(&mut self) -> Vec<(Id, Id)> {
         let old = std::mem::take(self);
@@ -257,7 +265,7 @@ fn data_hash(bytes: &[u8]) -> i64 {
 }
 
 impl Context {
-    fn stored_entries(&self, dict: Id) -> &Entries {
+    pub(in super::super) fn stored_entries(&self, dict: Id) -> &Entries {
         match self.heap.get(dict) {
             Value::Set { entries, .. }
             | Value::Dict(entries)
@@ -301,6 +309,18 @@ impl Context {
     }
 
     fn dictionary_hash_error(&self, container: Id, key: Id, error: Error) -> Error {
+        self.key_hash_error(
+            key,
+            if matches!(self.heap.get(container), Value::Set { .. }) {
+                "set element"
+            } else {
+                "dict key"
+            },
+            error,
+        )
+    }
+
+    pub(in super::super) fn key_hash_error(&self, key: Id, role: &str, error: Error) -> Error {
         if error.kind != "TypeError" {
             return error;
         }
@@ -322,15 +342,7 @@ impl Context {
         };
         Error::new(
             "TypeError",
-            format!(
-                "cannot use '{name}' as a {} ({})",
-                if matches!(self.heap.get(container), Value::Set { .. }) {
-                    "set element"
-                } else {
-                    "dict key"
-                },
-                error.message
-            ),
+            format!("cannot use '{name}' as a {} ({})", role, error.message),
         )
     }
 
@@ -342,6 +354,11 @@ impl Context {
                 .map(|names| names.iter().map(|name| fields[name]).collect()),
             _ => None,
         }
+    }
+
+    /// Hash the stable arena handle without calling any Python special methods.
+    pub(in super::super) fn identity_hash(key: Id) -> i64 {
+        normalized(data_hash(&key.to_ne_bytes()))
     }
 
     pub(in super::super) fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
@@ -359,6 +376,9 @@ impl Context {
         {
             if slot == NONE {
                 return Err(self.unhashable(key));
+            }
+            if matches!(self.heap.get(slot), Value::Native(name) if name == "object.__hash__") {
+                return Ok(Self::identity_hash(key));
             }
             let method = self.bind_attribute(slot, key, class)?;
             let returned = self.call(method, vec![], vec![])?;
@@ -455,6 +475,9 @@ impl Context {
                 Value::Float(f) => float_hash(*f, key),
                 Value::Complex(z) => normalized(float_hash(z.real, key))
                     .wrapping_add(1_000_003_i64.wrapping_mul(normalized(float_hash(z.imag, key)))),
+                Value::Native(_) if self.builtin_type_name(key) == Some("type") => {
+                    Self::identity_hash(key)
+                }
                 Value::Str(text) | Value::Native(text) => data_hash(text.as_bytes()),
                 Value::Bytes(bytes) => data_hash(bytes),
                 Value::None => 0xfca8_6420,
@@ -510,7 +533,7 @@ impl Context {
                 _ if !super::super::builtins::hashable(self, key) => {
                     return Err(self.unhashable(key));
                 }
-                _ => data_hash(&key.to_ne_bytes()),
+                _ => Self::identity_hash(key),
             }
         };
         Ok(normalized(hash))

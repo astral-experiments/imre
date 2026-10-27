@@ -54,6 +54,15 @@ class FailedCursor:
 
 
 def current():
+    from operator import length_hint
+
+    for source, last, rest in (("é中x", "x", ["中", "é"]), (b"\x00\xffA", 65, [255, 0])):
+        cursor = reversed(source)
+        assert type(cursor) is reversed and iter(cursor) is cursor
+        assert length_hint(cursor) == 3 and next(cursor) == last
+        assert length_hint(cursor) == 2 and list(cursor) == rest
+        assert length_hint(cursor) == 0 and next(cursor, None) is None
+
     values = iter([1, 0, 7])
     print(all([]), all(values), next(values))
     for call in (lambda: all(), lambda: any([], []), lambda: all(iterable=[])):

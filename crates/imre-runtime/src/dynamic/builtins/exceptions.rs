@@ -35,16 +35,24 @@ pub(super) fn allocate(ctx: &mut Context, owner: &str, args: &[Id]) -> Result<Id
             }
         }
     }
-    let import = ctx.builtin("ImportError");
-    let mut error = ctx.exception(&name, args);
+    let python_class = matches!(ctx.heap.get(class), Value::Class { .. }).then_some(class);
+    let mut error = if owner == "OSError" {
+        let args = if python_class.is_some() && ctx.deferred_os_init(class) {
+            &[]
+        } else {
+            args
+        };
+        ctx.os_exception(&name, python_class, args, None)?
+    } else {
+        ctx.exception(&name, args)
+    };
     // StopIteration.__new__ retains the arguments; only its initializer sets value.
     error.set_stop_value(NONE);
+    let import = ctx.builtin("ImportError");
     if ctx.subclass(class, import) {
         error.tracing().import_message = Some(NONE);
     }
-    if matches!(ctx.heap.get(class), Value::Class { .. }) {
-        error.class = Some(class);
-    }
+    error.class = python_class;
     Ok(ctx.alloc(Value::Raised(error)))
 }
 
@@ -71,18 +79,28 @@ pub(super) fn initialize(
         unreachable!()
     };
     let kind = error.kind.clone();
+    let class = error.class;
+    let prior = error.os_args.clone();
+    if owner == "OSError" && !class.is_some_and(|id| ctx.deferred_os_init(id)) {
+        return Ok(NONE);
+    }
     if owner != "ImportError" && !kwargs.is_empty() {
         return Err(type_error(format!("{kind}() takes no keyword arguments")));
     }
-    // Import failures created by the loader can still have a lazy message.
-    // BaseException.__init__ replaces only the args, even if msg was never read.
     let _ = ctx.import_error_message(object, None);
-    let initialized = ctx.exception(&kind, args);
+    let initialized = if owner == "OSError" {
+        ctx.os_exception(&kind, class, args, prior.as_deref())?
+    } else {
+        ctx.exception(&kind, args)
+    };
     let Value::Raised(error) = ctx.heap.get_mut(object) else {
         unreachable!()
     };
     if owner == "StopIteration" {
         error.set_stop_value(args.first().copied().unwrap_or(NONE));
+    }
+    if owner == "OSError" {
+        error.os_args = initialized.os_args;
     }
     error.args = initialized.args;
     error.message = initialized.message;

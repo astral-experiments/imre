@@ -2,12 +2,25 @@ use super::wrapper_descriptor::Wrapper;
 use super::*;
 
 pub(super) enum MappingOperation {
+    Copy,
     Update,
     Unpack,
 }
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if name == "__hash__" {
+            if matches!(self.heap.get(class), Value::Native(_)) {
+                return self.own_class_attr(class, name);
+            }
+            return self
+                .find_in_mro(class, |base| {
+                    let slot = self.own_class_attr(base, name);
+                    (slot.is_some() || matches!(self.heap.get(base), Value::Native(_)))
+                        .then_some(slot)
+                })
+                .flatten();
+        }
         self.find_in_mro(class, |base| self.own_class_attr(base, name))
     }
 
@@ -28,6 +41,15 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if name == "__hash__" && kind == "object" => {
+                self.builtins.get("object.__hash__").copied()
+            }
+            Value::Native(kind)
+                if name == "__hash__"
+                    && matches!(kind.as_str(), "list" | "dict" | "set" | "bytearray") =>
+            {
+                Some(NONE)
+            }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
                 "__new__" => self
                     .builtins
@@ -187,6 +209,15 @@ impl Context {
         self.class_attr(self.heap.get(object).instance_class()?, name)
     }
 
+    /// Return dictionary storage when the receiver still uses the builtin iterator.
+    pub(super) fn raw_dict_source(&self, value: Id) -> Option<Id> {
+        self.dict_storage(value).filter(|_| {
+            self.slot(value, "__iter__").is_none_or(
+                |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
+            )
+        })
+    }
+
     /// Dict copying uses raw entries for a dict with its original iterator.
     /// An overridden iterator opts into the mapping protocol, including key lookup.
     pub(super) fn for_each_mapping_item(
@@ -208,10 +239,7 @@ impl Context {
                 Err(error)
             };
         }
-        if self.slot(input, "__iter__").is_none_or(
-            |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
-        ) && let Some(storage) = self.dict_storage(input)
-        {
+        if let Some(storage) = self.raw_dict_source(input) {
             if storage == target {
                 return Ok(true);
             }
@@ -246,6 +274,7 @@ impl Context {
                 | Value::Range(_)
                 | Value::Iterator { .. }
                 | Value::DictIterator(_)
+                | Value::MappingViewIterator { .. }
         ) {
             return Ok(false);
         }
@@ -325,7 +354,20 @@ impl Context {
             || self.slot(descriptor, "__delete__").is_some()
     }
 
+    /// Bind the inherited dictionary constructor to the class used for the result.
+    fn bind_dict_fromkeys(&mut self, owner: Id) -> Id {
+        let callable = self.builtin("dict.fromkeys");
+        self.alloc(Value::Method {
+            callable,
+            receiver: owner,
+            explicit: false,
+        })
+    }
+
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
+        if matches!(self.heap.get(value), Value::Native(name) if name == "dict.fromkeys") {
+            return Ok(self.bind_dict_fromkeys(owner));
+        }
         if let Value::ClassMethod(callable) = *self.heap.get(value) {
             return Ok(self.alloc(Value::Method {
                 callable,
@@ -367,6 +409,7 @@ impl Context {
                             | "object.__init__"
                             | "BaseException.__init__"
                             | "ImportError.__init__"
+                            | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "module.__init__"
                             | "int.to_bytes"
@@ -511,6 +554,7 @@ impl Context {
             return matches!(
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
+                    | ("collections.defaultdict", "dict")
                     | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
@@ -559,6 +603,7 @@ impl Context {
             | Value::Iterator { .. }
             | Value::Tuple(_)
             | Value::DictIterator(_)
+            | Value::MappingViewIterator { .. }
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
@@ -570,6 +615,7 @@ impl Context {
             | Value::ThreadLocal(_)
             | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::TextFile(_) => "_io.TextIOWrapper",
+            Value::DefaultDict { .. } => "collections.defaultdict",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
             Value::Weak(wr) => wr.kind.class(),
@@ -578,6 +624,7 @@ impl Context {
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
             Value::Deque(_) => super::deque::CLASS,
+            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
             Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
             Value::ItemGetter(_) => "operator.itemgetter",
@@ -629,9 +676,11 @@ impl Context {
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
                             | "operator.itemgetter"
+                            | "collections.defaultdict"
                             | "itertools.count"
                             | super::deque::CLASS
                             | super::deque::ITERATOR
+                            | super::deque::REVERSE_ITERATOR
                             | "itertools.repeat"
                             | "weakref.ReferenceType"
                             | "weakref.ProxyType"
@@ -765,6 +814,7 @@ impl Context {
             | ("_io.TextIOWrapper", Value::TextFile(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
+            | ("collections.defaultdict", Value::DefaultDict { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | ("slice", Value::Slice(_))
@@ -779,7 +829,8 @@ impl Context {
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
-            | (super::deque::ITERATOR, Value::DequeIterator { .. })
+            | (super::deque::ITERATOR, Value::DequeIterator { reverse: false, .. })
+            | (super::deque::REVERSE_ITERATOR, Value::DequeIterator { reverse: true, .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
@@ -888,9 +939,7 @@ impl Context {
         if let Some(args) = error.args {
             return args;
         }
-        let fields = if let Some(os) = error.os_args {
-            vec![self.int(os.errno), self.text(os.description)]
-        } else if error.message.is_empty() {
+        let fields = if error.message.is_empty() {
             Vec::new()
         } else {
             vec![
@@ -965,8 +1014,13 @@ impl Context {
             return self
                 .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
         }
-        let Value::Instance { class, .. } = *self.heap.get(obj) else {
-            return self.default_get_attr(obj, name);
+        let class = match *self.heap.get(obj) {
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => class,
+            _ => return self.default_get_attr(obj, name),
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
             self.attribute_hook(hook, obj, class, name, original)
@@ -1069,6 +1123,9 @@ impl Context {
         }
         if let Some(value) = super::typing::attribute(self, obj, name) {
             return value;
+        }
+        if let Some(value) = self.os_attribute(obj, name)? {
+            return Ok(value);
         }
         match self.heap.get(obj).clone() {
             Value::Complex(z) if matches!(name, "real" | "imag") => {
@@ -1311,7 +1368,10 @@ impl Context {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
             Value::Native(class)
-                if matches!(class.as_str(), super::deque::CLASS | super::deque::ITERATOR) =>
+                if matches!(
+                    class.as_str(),
+                    super::deque::CLASS | super::deque::ITERATOR | super::deque::REVERSE_ITERATOR
+                ) =>
             {
                 match name {
                     "__name__" | "__qualname__" => {
@@ -1417,20 +1477,6 @@ impl Context {
             Value::TextFile(file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
             }
-            Value::Raised(Error {
-                os_args: Some(args),
-                ..
-            }) if name != "args" => match name {
-                "errno" => return Ok(self.int(args.errno)),
-                "strerror" => return Ok(self.text(args.description)),
-                "filename" | "filename2" => {
-                    if let Some([first, second]) = args.text_paths {
-                        let path = if name == "filename" { first } else { second };
-                        return Ok(path.map_or(NONE, |path| self.text(path)));
-                    }
-                }
-                _ => {}
-            },
             Value::Raised(error)
                 if let Some(index) = builtins::IMPORT_KEYWORDS
                     .iter()
@@ -1453,6 +1499,10 @@ impl Context {
             }
             Value::Raised(error) if name == "args" => {
                 return Ok(self.exception_argument_tuple(obj, error));
+            }
+            Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
+            Value::Native(class) if class == "collections.defaultdict" && name == "__missing__" => {
+                return Ok(self.builtin("collections.defaultdict.__missing__"));
             }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),
@@ -1561,8 +1611,24 @@ impl Context {
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
             }
+            Value::Native(class) if class == "collections.defaultdict" && name == "copy" => {
+                return Ok(self.builtin("collections.defaultdict.copy"));
+            }
+            Value::Native(class)
+                if name == "fromkeys"
+                    && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
+            {
+                return Ok(self.bind_dict_fromkeys(obj));
+            }
+            Value::Dict(_) | Value::DefaultDict { .. } if name == "fromkeys" => {
+                let owner = self.exact_type(obj)?;
+                return Ok(self.bind_dict_fromkeys(owner));
+            }
             Value::Native(class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
+            }
+            Value::Native(class) if class == "set" && name == "discard" => {
+                return Ok(self.builtin("set.discard"));
             }
             Value::Native(class)
                 if class == "list"
@@ -1586,7 +1652,11 @@ impl Context {
                 if class == "object"
                     && matches!(
                         name,
-                        "__getattribute__" | "__setattr__" | "__delattr__" | "__init__"
+                        "__hash__"
+                            | "__getattribute__"
+                            | "__setattr__"
+                            | "__delattr__"
+                            | "__init__"
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
@@ -1829,6 +1899,9 @@ impl Context {
         }
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, None);
+        }
+        if self.update_os_field(obj, name, None)? {
+            return Ok(());
         }
         if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
             return Err(Error::new("TypeError", "cannot delete __dict__"));
@@ -2150,6 +2223,9 @@ impl Context {
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, Some(value));
         }
+        if self.update_os_field(obj, name, Some(value))? {
+            return Ok(());
+        }
         if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
             if self.dict_storage(value).is_none() {
                 return Err(Error::new(
@@ -2218,6 +2294,10 @@ impl Context {
         self.check_instance_field(obj, name)?;
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
+            Value::DefaultDict { factory, .. } if name == "default_factory" => {
+                let old = std::mem::replace(factory, value);
+                self.heap.weak_edge_removed(old);
+            }
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
@@ -2418,6 +2498,7 @@ impl Context {
                         name.as_str(),
                         "BaseException.__init__"
                             | "ImportError.__init__"
+                            | "OSError.__init__"
                             | "StopIteration.__init__"
                     )
                     || !name.contains('.')
@@ -2646,7 +2727,10 @@ impl Context {
                         memory_stream: None,
                     }));
                 }
-                let new = self.class_attr(callable, "__new__");
+                let new = self.class_attr(callable, "__new__").or_else(|| {
+                    self.has_base(callable, "int")
+                        .then(|| self.builtin("int.__new__"))
+                });
                 let string_base = ["str", "bytes"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
@@ -2936,6 +3020,14 @@ impl Context {
         else {
             return Err(Error::new("TypeError", "invalid class body"));
         };
+        #[derive(serde::Deserialize)]
+        struct ClassBindings {
+            #[serde(default)]
+            scope_nonlocals: std::collections::HashSet<String>,
+        }
+        let parameters = self.code_object(code).parameters;
+        let bindings: ClassBindings = serde_json::from_str(self.str_value(parameters)?)
+            .map_err(|e| Error::new("SystemError", e.to_string()))?;
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
         let enum_namespace = self.enum_namespace(&bases);
@@ -2945,6 +3037,7 @@ impl Context {
             unreachable!()
         };
         body_scope.class_body = Some(Vec::new());
+        body_scope.closure.nonlocals = bindings.scope_nonlocals;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
         let mut globals = parent;
@@ -2962,12 +3055,19 @@ impl Context {
             self.bind(scope, "__qualname__", qualname);
         }
         let annotations = self.dict(Vec::new());
-        self.bind(scope, "__annotations__", annotations);
+        self.bind_local(scope, "__annotations__", annotations);
         self.execute(code, scope, FrameOwner::Function(body))?;
+        if let Value::Scope(frame) = self.heap.get_mut(scope) {
+            frame.closure.nonlocals.clear();
+        }
+        if self.scope_name(scope, "__qualname__").is_none() {
+            let qualname = self.text(&name);
+            self.bind_local(scope, "__qualname__", qualname);
+        }
         if self.scope_name(scope, "__module__").is_none() {
             let namespace = self.module_globals(parent);
             if let Some(name) = self.dict_named_item(namespace, "__name__") {
-                self.bind(scope, "__module__", name);
+                self.bind_local(scope, "__module__", name);
             }
         }
         // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.

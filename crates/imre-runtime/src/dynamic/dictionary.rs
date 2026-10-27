@@ -73,6 +73,11 @@ impl<'a> IntoIterator for &'a Entries {
 }
 
 impl Entries {
+    /// Copy a dense table with its cached key hashes and insertion positions.
+    pub(super) fn clone_dense(&self) -> Option<Self> {
+        (self.len() >= self.next.saturating_mul(2) / 3).then(|| self.clone())
+    }
+
     pub(super) fn push(&mut self, value: (Id, Id), hash: i64) {
         // CPython compacts its entries when the index table runs out of usable slots.
         // Existing iterators keep their numerical cursor in the compacted table.

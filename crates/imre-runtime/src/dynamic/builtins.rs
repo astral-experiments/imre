@@ -58,6 +58,9 @@ exception_kinds!(
     ImportError,
     ModuleNotFoundError,
     OSError,
+    InterruptedError,
+    ChildProcessError,
+    ProcessLookupError,
     ConnectionError,
     ConnectionRefusedError,
     ConnectionResetError,
@@ -156,6 +159,7 @@ pub(super) fn exception_initializer(kind: &str) -> &'static str {
     match kind {
         "StopIteration" => "StopIteration.__init__",
         "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
+        kind if exception_subclass(kind, "OSError") == Some(true) => "OSError.__init__",
         _ => "BaseException.__init__",
     }
 }
@@ -215,6 +219,8 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "__setitem__",
     "__delitem__",
     "clear",
+    "copy",
+    "fromkeys",
     "get",
     "items",
     "keys",
@@ -339,7 +345,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Set { frozen: false, .. }
             if matches!(
                 attr,
-                "add" | "copy" | "update" | "issuperset" | "__contains__"
+                "add" | "copy" | "discard" | "update" | "issuperset" | "__contains__"
             ) =>
         {
             "set"
@@ -348,6 +354,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if matches!(attr, "copy" | "issuperset" | "__contains__") =>
         {
             "frozenset"
+        }
+        Value::DefaultDict { .. } if matches!(attr, "copy" | "__missing__") => {
+            "collections.defaultdict"
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Selector(_)
@@ -704,10 +713,27 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(owner @ ("BaseException" | "StopIteration" | "ImportError")) =
+    if let Some(owner @ ("BaseException" | "StopIteration" | "OSError" | "ImportError")) =
         name.strip_suffix(".__init__")
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
+    }
+    if name == "object.__hash__" {
+        let Some((&receiver, rest)) = args.split_first() else {
+            return Err(type_error(
+                "descriptor '__hash__' of 'object' object needs an argument",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __hash__() takes no keyword arguments"));
+        }
+        if !rest.is_empty() {
+            return Err(type_error(format!(
+                "expected 0 arguments, got {}",
+                rest.len()
+            )));
+        }
+        return Ok(ctx.int(Context::identity_hash(receiver)));
     }
     if name == "object.__init__" {
         if args.len() != 1 || !kwargs.is_empty() {
@@ -1019,12 +1045,23 @@ pub(super) fn call(
             if let Value::Range(range) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
             }
-            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(object) {
+            if let Value::Deque(ring) = ctx.heap.get(object) {
+                let iter = super::deque::iterator(object, ring, true);
+                return Ok(ctx.alloc(iter));
+            }
+            let start = match ctx.heap.get(object) {
+                Value::List(items) => Some((items.len(), "list_reverseiterator")),
+                Value::Tuple(items) => Some((items.len(), "reversed")),
+                Value::Str(text) => Some((text.len(), "reversed")),
+                Value::Bytes(bytes) => Some((bytes.len(), "reversed")),
+                _ => None,
+            };
+            if let Some((offset, kind)) = start {
                 return Ok(ctx.alloc(Value::Iterator {
                     sequence: Some(object),
-                    offset: items.len(),
+                    offset,
                     reverse: true,
-                    kind: "list_reverseiterator",
+                    kind,
                     context: None,
                 }));
             }
@@ -1268,7 +1305,11 @@ pub(super) fn call(
         }
         name if is_exception(name) => {
             positional(name, kwargs)?;
-            let error = ctx.exception(name, args);
+            let error = if exception_subclass(name, "OSError") == Some(true) {
+                ctx.os_exception(name, None, args, None)?
+            } else {
+                ctx.exception(name, args)
+            };
             Ok(ctx.alloc(Value::Raised(error)))
         }
         name => Err(type_error(format!("unsupported builtin {name}"))),
