@@ -81,6 +81,15 @@ def current():
     except ReferenceError as error:
         print(str(error))
 
+    target = Item()
+    print(target.__weakref__ is None)
+    observation = ref(target)
+    print(target.__weakref__ is observation)
+    try:
+        target.__weakref__ = None
+    except AttributeError:
+        print('read only')
+
     other = Item()
     observer = proxy(other)
     methods = {"GET"}
