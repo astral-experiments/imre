@@ -636,6 +636,7 @@ impl Context {
         &'a self,
         mut error: &'a Error,
         mut repr: bool,
+        checked: bool,
         output: &mut String,
         work: &mut Vec<FormatPart>,
     ) -> Result<()> {
@@ -664,7 +665,9 @@ impl Context {
                     closing += 1;
                 }
                 repr |= self.is_builtin_error(error, "KeyError");
-                if let Value::Raised(next) = self.heap.get(*arg) {
+                if let Value::Raised(next) = self.heap.get(*arg)
+                    && !(checked && repr && self.repr_slot(*arg).is_some())
+                {
                     if !seen.insert(*arg) {
                         let op = if repr { "repr" } else { "str" };
                         return Err(Error::new(
@@ -721,7 +724,7 @@ impl Context {
         match root {
             RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
             RenderRoot::Exception(error) => {
-                ctx.render_exception(error, quoted, &mut output, &mut work)?;
+                ctx.render_exception(error, quoted, checked, &mut output, &mut work)?;
             }
         }
         let mut active = Vec::new();
@@ -839,7 +842,7 @@ impl Context {
                     }
                     match ctx.heap.get(id) {
                         Value::Raised(error) => {
-                            ctx.render_exception(error, repr, &mut output, &mut work)?;
+                            ctx.render_exception(error, repr, checked, &mut output, &mut work)?;
                             continue;
                         }
                         Value::Slice(_) => {

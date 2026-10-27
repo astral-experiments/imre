@@ -98,6 +98,7 @@ def current():
     error = Saved("x")
     assert repr(error) == "<saved>" and repr([error]) == "[<saved>]"
     assert str(error) == "x"
+    assert repr(ValueError(error)) == "ValueError(<saved>)"
 
     class Poison(ValueError):
         def __repr__(self):
