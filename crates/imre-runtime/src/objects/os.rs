@@ -14,13 +14,20 @@ use std::io;
 pub(super) mod links;
 pub(super) mod stat_result;
 
+/// The target's primary or alternate separator, shared by typed and boxed imports.
+pub(crate) fn os_separator(alternate: bool) -> Option<&'static str> {
+    match (cfg!(windows), alternate) {
+        (false, true) => None,
+        (true, false) => Some(r"\"),
+        _ => Some("/"),
+    }
+}
+
 /// Return the target OS separator as an interned one-character string, or None.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_separator(alternate: u32) -> *const Str {
-    let sep = match (cfg!(windows), alternate != 0) {
-        (false, true) => return std::ptr::null(),
-        (true, false) => r"\",
-        _ => "/",
+    let Some(sep) = os_separator(alternate != 0) else {
+        return std::ptr::null();
     };
     finish(
         super::text::try_owned_string(sep).map(StrOwner::into_raw),

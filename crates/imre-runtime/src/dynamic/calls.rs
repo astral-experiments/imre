@@ -178,6 +178,7 @@ impl Context {
                 | Value::GenericAlias(_)
                 | Value::Function { .. }
                 | Value::AttrGetter(_)
+                | Value::ItemGetter(_)
                 | Value::StaticMethod { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
@@ -244,6 +245,7 @@ impl Context {
                             | "BaseException.__init__"
                             | "StopIteration.__init__"
                             | "int.to_bytes"
+                            | "list.index"
                             | "list.pop"
                             | "list.clear"
                             | "list.reverse"
@@ -412,6 +414,7 @@ impl Context {
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
             Value::Repeat(_) => "itertools.repeat",
+            Value::ItemGetter(_) => "operator.itemgetter",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::GenericAlias(alias) => alias.kind.class(),
@@ -462,6 +465,7 @@ impl Context {
                             | "getset_descriptor"
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
+                            | "operator.itemgetter"
                             | "itertools.count"
                             | "itertools.repeat"
                             | "weakref.ReferenceType"
@@ -589,6 +593,7 @@ impl Context {
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
+            | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
@@ -1215,7 +1220,8 @@ impl Context {
                 return Ok(self.builtin("dict.clear"));
             }
             Value::Native(class)
-                if class == "list" && matches!(name, "clear" | "pop" | "reverse" | "sort") =>
+                if class == "list"
+                    && matches!(name, "clear" | "index" | "pop" | "reverse" | "sort") =>
             {
                 return Ok(self.builtin(&format!("list.{name}")));
             }
@@ -1244,6 +1250,9 @@ impl Context {
                 if class == "slice" && matches!(name, "indices" | "__reduce__") =>
             {
                 return Ok(self.builtin(&format!("slice.{name}")));
+            }
+            Value::Native(class) if class == "operator.itemgetter" && name == "__reduce__" => {
+                return Ok(self.builtin("operator.itemgetter.__reduce__"));
             }
             Value::Native(class)
                 if class == "enumerate" && matches!(name, "__iter__" | "__next__") =>
@@ -1985,6 +1994,7 @@ impl Context {
                 self.call(callable, all, kwargs)
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
+            Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
             Value::Cached { function, entries } => {
                 if !args
                     .iter()

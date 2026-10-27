@@ -314,6 +314,27 @@ impl Context {
             };
             return Ok(normalized(hash));
         }
+        if matches!(self.heap.get(key), Value::Method { .. }) {
+            let mut receivers = smallvec::SmallVec::<[Id; 4]>::new();
+            let mut callable = key;
+            while let Value::Method {
+                callable: inner,
+                receiver,
+                ..
+            } = *self.heap.get(callable)
+            {
+                receivers
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                receivers.push(receiver);
+                callable = inner;
+            }
+            let mut hash = self.dictionary_hash(callable)?;
+            for receiver in receivers.into_iter().rev() {
+                hash = normalized(hash ^ data_hash(&receiver.to_ne_bytes()));
+            }
+            return Ok(hash);
+        }
         // Immutable scalar subclasses inherit the hash of their backing value.
         let key = self.scalar_value(key);
         if let Some(&hash) = self.heap.immutable_hashes.get(&key) {
