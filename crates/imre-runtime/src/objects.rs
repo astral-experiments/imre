@@ -65,6 +65,7 @@ mod mappings;
 mod module_specs;
 mod namespaces;
 mod os;
+pub(crate) use os::os_separator;
 mod patchset;
 mod paths;
 pub(crate) use paths::is_file;

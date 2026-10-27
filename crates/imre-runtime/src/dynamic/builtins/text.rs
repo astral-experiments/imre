@@ -704,8 +704,8 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     || spec.min_field_width.is_some()
                     || !spec.flags.is_empty();
                 let float_field = matches!(spec.format_type, CFormatType::Float(_));
-                let number_field = float_field
-                    || decorated && matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X');
+                let number_field =
+                    float_field || matches!(spec.format_type, CFormatType::Number(_));
                 let star_width =
                     matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple));
                 let star_precision = matches!(

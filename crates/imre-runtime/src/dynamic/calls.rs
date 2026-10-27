@@ -29,7 +29,7 @@ impl Context {
                 "__init__" => self.builtins.get("BaseException.__init__").copied(),
                 _ => None,
             },
-            Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str") => {
+            Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str" | "property") => {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             _ => None,
@@ -253,7 +253,8 @@ impl Context {
                             | "map.__iter__"
                             | "map.__next__"
                             | weakref::REFERENCE_HASH
-                    ) || name.starts_with("dict.")
+                    ) || name.starts_with("property.")
+                        || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -279,6 +280,13 @@ impl Context {
         name: &str,
     ) -> Result<Id> {
         let member = self.class_attr(class, name);
+        if member.is_none()
+            && matches!(name, "fget" | "fset" | "fdel" | "__name__")
+            && let Some(property) = self.heap.get(object).property().copied()
+            && let Some(value) = property.attribute(self, name)?
+        {
+            return Ok(value);
+        }
         match (member, field) {
             (Some(member), _)
                 if self.data_descriptor(member)
@@ -869,8 +877,10 @@ impl Context {
             Value::Native(class) if class == "staticmethod" && name == "__get__" => {
                 return Ok(self.builtin("staticmethod.__get__"));
             }
-            Value::Native(class) if class == "property" && name == "setter" => {
-                return Ok(self.builtin("property.setter"));
+            Value::Native(class)
+                if class == "property" && super::property::METHODS.contains(&name) =>
+            {
+                return Ok(self.builtin(&format!("property.{name}")));
             }
             Value::Code(code) => match name {
                 "co_name" => return Ok(code.name),
@@ -954,12 +964,28 @@ impl Context {
                 receiver,
                 explicit,
             } => match name {
-                "__func__" => return Ok(callable),
                 "__self__" => return Ok(receiver),
+                "__func__"
+                    if explicit || matches!(self.heap.get(callable), Value::Function { .. }) =>
+                {
+                    return Ok(callable);
+                }
                 _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
                     return self.lookup_attr(callable, name);
                 }
-                _ => {}
+                _ => {
+                    if let Value::Native(method) = self.heap.get(callable) {
+                        let value = match name {
+                            "__name__" => method.rsplit('.').next(),
+                            "__qualname__" => Some(method.as_str()),
+                            "__module__" => return Ok(NONE),
+                            _ => None,
+                        };
+                        if let Some(value) = value {
+                            return Ok(self.text(value.to_owned()));
+                        }
+                    }
+                }
             },
             Value::RegexPattern(pattern) if name == "flags" => return Ok(self.int(pattern.flags)),
             Value::RegexPattern(pattern) if name == "groups" => {
@@ -1470,23 +1496,23 @@ impl Context {
         if name == "__class__" && member.is_none() {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
         }
+        if member.is_none()
+            && matches!(name, "__name__" | "fget" | "fset" | "fdel")
+            && let Some(property) = self.heap.get_mut(obj).property_mut()
+        {
+            if name == "__name__" {
+                property.name = None;
+                return Ok(());
+            }
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         match *self.heap.get(obj) {
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
-            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
-                Err(Error::new("AttributeError", "readonly attribute"))
-            }
-            Value::Property(_) if matches!(name, "__doc__" | "__name__") => {
-                let Value::Property(property) = self.heap.get_mut(obj) else {
-                    unreachable!()
-                };
-                if name == "__doc__" {
-                    property.doc = NONE;
-                } else {
-                    property.name = None;
-                }
+            Value::Property(_) if name == "__doc__" => {
+                self.heap.get_mut(obj).property_mut().unwrap().doc = NONE;
                 Ok(())
             }
             Value::StaticMethod { dictionary, .. } => {
@@ -1669,7 +1695,8 @@ impl Context {
             return self.set_function_attr(obj, name, value);
         }
         let exception_member = self.exception_member(obj, name);
-        if let Some(descriptor) = self.slot(obj, name).or(exception_member)
+        let member = self.slot(obj, name);
+        if let Some(descriptor) = member.or(exception_member)
             && self.data_descriptor(descriptor)
         {
             if let Value::Property(property) = *self.heap.get(descriptor) {
@@ -1709,6 +1736,21 @@ impl Context {
             error.set_stop_value(value);
             return Ok(());
         }
+        if member.is_none()
+            && matches!(name, "__name__" | "fget" | "fset" | "fdel")
+            && let Some(property) = self.heap.get_mut(obj).property_mut()
+        {
+            match name {
+                "__name__" => {
+                    property.name = Some(value);
+                    return Ok(());
+                }
+                "fget" | "fset" | "fdel" => {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
+                _ => {}
+            }
+        }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
@@ -1719,11 +1761,7 @@ impl Context {
             } if name == "_is_coroutine_marker" => {
                 *coroutine_marker = Some(value);
             }
-            Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
-            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
-                return Err(Error::new("AttributeError", "readonly attribute"));
-            }
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
@@ -1774,9 +1812,11 @@ impl Context {
     }
 
     pub(super) fn instance(&mut self, class: Id, dictionary: Option<Id>) -> Id {
+        let property = self.has_base(class, "property").then(Box::default);
         self.alloc(Value::Instance {
             class,
             dictionary,
+            property,
             memory_stream: None,
             fields: HashMap::new(),
             scalar: None,
@@ -1813,6 +1853,7 @@ impl Context {
             fields: HashMap::new(),
             scalar: Some(value),
             dictionary: None,
+            property: None,
             memory_stream: None,
         }))
     }
@@ -1851,6 +1892,7 @@ impl Context {
             fields: HashMap::new(),
             dictionary: None,
             scalar: Some(text),
+            property: None,
             memory_stream: None,
         }))
     }
@@ -2081,6 +2123,7 @@ impl Context {
                         fields,
                         dictionary: None,
                         scalar: None,
+                        property: None,
                         memory_stream: None,
                     }));
                 }

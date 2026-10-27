@@ -230,7 +230,7 @@ impl Context {
                 .own_class_attr(class, "__qualname__")
                 .and_then(|id| self.str_value(id).ok())
                 .unwrap_or_else(|| self.key_type_name(key));
-            if module == "builtins" {
+            if matches!(module.as_str(), "builtins" | "__main__") {
                 name.to_owned()
             } else {
                 format!("{module}.{name}")
@@ -303,6 +303,27 @@ impl Context {
                 }
             };
             return Ok(normalized(hash));
+        }
+        if matches!(self.heap.get(key), Value::Method { .. }) {
+            let mut receivers = smallvec::SmallVec::<[Id; 4]>::new();
+            let mut callable = key;
+            while let Value::Method {
+                callable: inner,
+                receiver,
+                ..
+            } = *self.heap.get(callable)
+            {
+                receivers
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                receivers.push(receiver);
+                callable = inner;
+            }
+            let mut hash = self.dictionary_hash(callable)?;
+            for receiver in receivers.into_iter().rev() {
+                hash = normalized(hash ^ data_hash(&receiver.to_ne_bytes()));
+            }
+            return Ok(hash);
         }
         // Immutable scalar subclasses inherit the hash of their backing value.
         let key = self.scalar_value(key);

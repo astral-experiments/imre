@@ -791,6 +791,7 @@ impl Context {
         }
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
+            "property" => property::METHODS,
             "int" => &["to_bytes"],
             "str" => {
                 self.builtin("str.maketrans");
@@ -959,7 +960,7 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
-            if matches!(name, "email" | "urllib") {
+            if matches!(name, "email" | "importlib" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
@@ -1087,6 +1088,15 @@ impl Context {
         match name {
             "os" => {
                 let path = self.module("posixpath")?;
+                let posix_sep = self.lookup_attr(path, "sep")?;
+                for (name, alternate) in [("sep", false), ("altsep", true)] {
+                    let value = match crate::objects::os_separator(alternate) {
+                        Some(sep) if self.str_value(posix_sep)? == sep => posix_sep,
+                        Some(sep) => self.text(sep),
+                        None => NONE,
+                    };
+                    self.bind(scope, name, value);
+                }
                 self.bind(scope, "path", path);
                 self.modules.insert("os.path".to_owned(), path);
             }

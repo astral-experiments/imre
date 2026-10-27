@@ -216,17 +216,21 @@ fn object_fallback<T>(
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
     let mut runtime_imports = options.runtime_imports;
+    let mut literal_modules = Vec::new();
     let typed = options
         .load_graph(path, module_root, filesystem)
         .and_then(|mut graph| {
             let result = lower(&mut graph);
             runtime_imports |= graph.needs_object_runtime.get();
+            if result.is_err() && runtime_imports {
+                literal_modules = dynamic::literal_targets(&graph);
+            }
             result
         });
     match typed {
         Ok(value) => Ok(value),
         Err(error) if options.entry_profile.is_none() => {
-            match dynamic::compile(path, module_root, options, runtime_imports)? {
+            match dynamic::compile(path, module_root, options, runtime_imports, literal_modules)? {
                 Some(compilation) => Ok(boxed(compilation)),
                 None => Err(error),
             }

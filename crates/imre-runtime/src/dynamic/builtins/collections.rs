@@ -373,7 +373,11 @@ pub(super) fn method(
     }
     let slot = matches!(
         name,
-        "dict.__init__" | "dict.__len__" | "dict.__iter__" | "dict.__setitem__"
+        "dict.__init__"
+            | "dict.__len__"
+            | "dict.__iter__"
+            | "dict.__setitem__"
+            | "dict.__delitem__"
     );
     let (&object, args) = args
         .split_first()
@@ -400,9 +404,31 @@ pub(super) fn method(
     } else {
         object
     };
+    if name == "dict.__delitem__" {
+        if !kwargs.is_empty() {
+            return Err(type_error(
+                "wrapper __delitem__() takes no keyword arguments",
+            ));
+        }
+        let [key] = args else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
+        };
+        // Calling the base descriptor operates on the actual mapping and
+        // does not redispatch to an override on the original receiver.
+        ctx.delete_item(receiver, *key)?;
+        return Ok(NONE);
+    }
     if matches!(
         name,
-        "dict.pop" | "set.issuperset" | "frozenset.issuperset" | "frozenset.copy"
+        "dict.pop"
+            | "set.issuperset"
+            | "frozenset.issuperset"
+            | "frozenset.copy"
+            | "frozenset.__contains__"
+            | "set.__contains__"
     ) && !kwargs.is_empty()
     {
         return Err(type_error(format!("{name}() takes no keyword arguments")));
@@ -532,8 +558,13 @@ pub(super) fn method(
             Ok(NONE)
         }
         "frozenset.__contains__" | "set.__contains__" => {
-            arity(name, args, 1, 1)?;
-            Ok(boolean(set_member(ctx, receiver, args[0], true)?))
+            let [value] = args else {
+                return Err(type_error(format!(
+                    "{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            Ok(boolean(set_member(ctx, receiver, *value, true)?))
         }
         "frozenset.copy" => {
             arity(name, args, 0, 0)?;
