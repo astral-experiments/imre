@@ -1591,7 +1591,10 @@ impl Context {
         let Value::DefaultDict { factory, .. } = *self.heap.get(obj) else {
             return Err(Error::new(
                 "TypeError",
-                "__missing__ requires a defaultdict",
+                format!(
+                    "descriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a '{}' object",
+                    self.type_name(obj)
+                ),
             ));
         };
         if factory == NONE {
