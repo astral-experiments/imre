@@ -465,7 +465,13 @@ impl Context {
         }
         let name = self.text("__name__");
         let module = self.text("builtins");
-        let dict = self.dict(vec![(name, module)]);
+        let ellipsis = self.text("Ellipsis");
+        let not_implemented = self.text("NotImplemented");
+        let dict = self.dict(vec![
+            (name, module),
+            (ellipsis, value::ELLIPSIS),
+            (not_implemented, value::NOT_IMPLEMENTED),
+        ]);
         for name in builtins::names() {
             let k = self.text(name);
             let v = self.builtin(name);
