@@ -34,8 +34,11 @@ class InitVar:
     def __init__(self, type):
         self.type = type
 
+    @classmethod
     def __class_getitem__(cls, type):
         return InitVar(type)
+
+
 class _FIELD_BASE:
     def __init__(self, name):
         self.name = name

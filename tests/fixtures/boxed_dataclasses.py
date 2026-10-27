@@ -1,4 +1,4 @@
-from dataclasses import KW_ONLY, FrozenInstanceError, asdict, dataclass, field, fields
+from dataclasses import KW_ONLY, FrozenInstanceError, InitVar, asdict, dataclass, field, fields
 
 
 @dataclass
@@ -19,6 +19,7 @@ class Key:
 
 
 def current():
+    assert InitVar[int].type is int
     a = Entry("root")
     b = Entry(name="root")
     assert a == b and not (a != b) and a.label() == "ROOT"
