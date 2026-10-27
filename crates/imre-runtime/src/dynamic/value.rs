@@ -261,6 +261,7 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::BufferedRandom(_) => "_io.BufferedRandom",
+            Value::ReverseSequence { .. } => "reversed",
             Value::Deque(_) => super::deque::CLASS,
             Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
             Value::DequeIterator { .. } => super::deque::ITERATOR,
@@ -546,6 +547,10 @@ pub(super) enum Value {
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
+    ReverseSequence {
+        source: Option<Id>,
+        remaining: usize,
+    },
     DequeIterator {
         deque: Id,
         state: usize,
@@ -789,6 +794,7 @@ impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
+            Self::ReverseSequence { source, .. } => visit.extend(*source),
             Self::DequeIterator { deque, .. } => visit.push(*deque),
             Self::List(v) | Self::Tuple(v) => visit.extend(v),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),

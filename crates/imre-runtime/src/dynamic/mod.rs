@@ -287,6 +287,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::RangeIterator(_)
+                | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::MappingViewIterator { .. }
@@ -405,6 +406,7 @@ impl Context {
         if matches!(
             self.heap.get(source),
             Value::Instance { .. }
+                | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::MappingViewIterator { .. }
@@ -503,6 +505,55 @@ impl Context {
         self.raised_error_matches(error, stop)
     }
 
+    fn reverse_sequence_len(&mut self, source: Id) -> Result<usize> {
+        let size = builtins::call(self, "len", &[source], &[])?;
+        self.as_int(size)?
+            .to_i64()
+            .and_then(|n| usize::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "cannot fit 'int' into an index-sized integer",
+                )
+            })
+    }
+
+    fn next_reverse_sequence(
+        &mut self,
+        id: Id,
+        source: Option<Id>,
+        remaining: usize,
+    ) -> Result<Option<Id>> {
+        let result = match (source, remaining.checked_sub(1)) {
+            (Some(source), Some(index)) => {
+                let index = self.int(index as i64);
+                self.get_item(source, index).map(Some)
+            }
+            _ => Ok(None),
+        };
+        if let Ok(Some(_)) = result {
+            let Value::ReverseSequence {
+                remaining: saved, ..
+            } = self.heap.get_mut(id)
+            else {
+                unreachable!()
+            };
+            *saved = remaining - 1;
+            return result;
+        }
+        *self.heap.get_mut(id) = Value::ReverseSequence {
+            source: None,
+            remaining: 0,
+        };
+        if let Err(error) = &result {
+            let index_error = self.builtin("IndexError");
+            if self.raised_error_matches(error, index_error) || self.is_stop_iteration(error) {
+                return Ok(None);
+            }
+        }
+        result
+    }
+
     fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
         match self.call(callable, Vec::new(), Vec::new()) {
             Ok(item) => {
@@ -526,6 +577,9 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        if let Value::ReverseSequence { source, remaining } = *self.heap.get(id) {
+            return self.next_reverse_sequence(id, source, remaining);
+        }
         match self.heap.get_mut(id) {
             Value::DequeIterator {
                 deque,
@@ -707,6 +761,7 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
+                | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::MappingViewIterator { .. }
