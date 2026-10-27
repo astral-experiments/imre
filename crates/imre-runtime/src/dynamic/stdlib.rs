@@ -76,6 +76,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "email.utils"
             | "tempfile"
             | "time"
+            | "random"
             | "hashlib"
             | "hmac"
             | "re"
@@ -441,6 +442,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
+        | ("random", "random")
         | ("codecs", "lookup")
         | ("marshal", "loads")
         | ("pickle", "dumps")
@@ -574,6 +576,21 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "random.random" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "Random.random() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("Random.random() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
+    }
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);
     }
