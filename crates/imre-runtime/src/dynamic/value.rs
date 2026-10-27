@@ -1275,17 +1275,22 @@ impl Heap {
         id
     }
 
+    /// Mark the shared spelling as a live code constant and return its local Python handle.
+    pub fn code_name(&mut self, text: &str) -> Id {
+        if let Some(entry) = self.interned.get_mut(text) {
+            entry.literal = true;
+            let id = entry.id;
+            self.keep(id);
+            return id;
+        }
+        self.intern_literal(crate::sys::intern_owner(&crate::objects::literal_string(
+            text,
+        )))
+    }
+
     pub fn string_literal(&mut self, text: &str) -> Id {
         if text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            if let Some(entry) = self.interned.get_mut(text) {
-                entry.literal = true;
-                let id = entry.id;
-                self.keep(id);
-                return id;
-            }
-            return self.intern_literal(crate::sys::intern_owner(&crate::objects::literal_string(
-                text,
-            )));
+            return self.code_name(text);
         }
         self.alloc(Value::Str(text.to_owned()))
     }
