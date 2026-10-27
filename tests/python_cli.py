@@ -592,6 +592,7 @@ def report(text):
             "boxed_sys_intern.py",
             "boxed_bytes_add.py",
             "boxed_bytes_io.py",
+            "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
             "boxed_complex.py",

@@ -79,6 +79,7 @@ pub(crate) struct Context {
     executable: PathBuf,
     argv: Id,
     sys_path: Id,
+    default_encoding: Id,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
@@ -1342,7 +1343,7 @@ impl Context {
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => {
                 self.module("io")?;
-                for name in ["BytesIO", "StringIO"] {
+                for name in ["BytesIO", "StringIO", "TextIOWrapper"] {
                     let class = self.builtins[&format!("_io.{name}")];
                     self.bind(scope, name, class);
                 }

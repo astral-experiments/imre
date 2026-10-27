@@ -377,7 +377,13 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::File(_)
             if matches!(
                 attr,
-                "read"
+                "readable"
+                    | "writable"
+                    | "seekable"
+                    | "isatty"
+                    | "seek"
+                    | "tell"
+                    | "read"
                     | "fileno"
                     | "readline"
                     | "readinto"
@@ -387,12 +393,6 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "__enter__"
                     | "__exit__"
             ) =>
-        {
-            "file"
-        }
-        Value::File(file)
-            if matches!(attr, "seek" | "tell")
-                && matches!(file.as_ref(), super::stdlib::BinaryFile::Reader { .. }) =>
         {
             "file"
         }
