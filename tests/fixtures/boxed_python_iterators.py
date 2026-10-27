@@ -41,6 +41,9 @@ class Broken(Cursor):
 
 
 def current():
+    values = iter([1, 0, 7])
+    print(all([]), all(values), next(values))
+
     cursor = Cursor()
     cursor.__iter__ = lambda: []
     print(iter(cursor) is cursor)

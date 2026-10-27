@@ -76,6 +76,7 @@ const FUNCTIONS: &[&str] = &[
     "reversed",
     "ord",
     "callable",
+    "all",
     "any",
     "isinstance",
     "issubclass",
@@ -943,16 +944,17 @@ pub(super) fn call(
         }
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
-        "any" => {
+        "all" | "any" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let iter = ctx.iterator(args[0])?;
+            let stop_value = name == "any";
             while let Some(item) = ctx.next_item(iter)? {
-                if ctx.truth(item)? {
-                    return Ok(TRUE);
+                if ctx.truth(item)? == stop_value {
+                    return Ok(boolean(stop_value));
                 }
             }
-            Ok(FALSE)
+            Ok(boolean(!stop_value))
         }
         "print" => print::call(ctx, args, kwargs),
         name if is_exception(name) => {
