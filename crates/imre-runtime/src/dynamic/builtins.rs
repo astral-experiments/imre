@@ -8,6 +8,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
 mod float;
+pub(super) use float::from_numeric;
 mod integer;
 mod text;
 pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, view_items};
