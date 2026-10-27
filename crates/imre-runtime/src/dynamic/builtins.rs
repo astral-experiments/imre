@@ -1,6 +1,5 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::io::{self, Write};
 use std::rc::Rc;
 
 use super::Context;
@@ -9,6 +8,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 mod collections;
 mod float;
 mod integer;
+mod print;
 mod text;
 pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
@@ -958,33 +958,7 @@ pub(super) fn call(
             }
             Ok(FALSE)
         }
-        "print" => {
-            let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;
-            let flush = ctx.optional_truth(flush, false)?;
-            if file.is_some_and(|id| id != NONE) {
-                return Err(type_error("print supports standard output"));
-            }
-            let sep = sep
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or(" ");
-            let end = end
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or("\n");
-            let values = args
-                .iter()
-                .map(|&id| ctx.display(id))
-                .collect::<Vec<_>>()
-                .join(sep);
-            let mut out = io::stdout().lock();
-            write!(out, "{values}{end}")
-                .and_then(|()| if flush { out.flush() } else { Ok(()) })
-                .map_err(|err| Error::new("OSError", err.to_string()))?;
-            Ok(NONE)
-        }
+        "print" => print::call(ctx, args, kwargs),
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);
