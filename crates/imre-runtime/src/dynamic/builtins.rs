@@ -103,6 +103,7 @@ const TYPES: &[&str] = &[
     "bytes",
     "complex",
     "dict",
+    "enumerate",
     "float",
     "frozenset",
     "int",
@@ -764,6 +765,17 @@ pub(super) fn call(
                     args.len()
                 ))),
             }
+        }
+        "enumerate" => {
+            let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
+            let iterable = iterable
+                .ok_or_else(|| type_error("enumerate() missing required argument 'iterable'"))?;
+            let next_index = match start {
+                Some(value) => ctx.index_integer(value)?,
+                None => crate::Int::from(0),
+            };
+            let input = ctx.iterator(iterable)?;
+            Ok(ctx.alloc(Value::Enumerate { input, next_index }))
         }
         "reversed" => {
             positional(name, kwargs)?;
