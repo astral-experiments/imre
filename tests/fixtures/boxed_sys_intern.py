@@ -1,5 +1,6 @@
 def current():
     compiled_source_pool()
+    module_binding_keys()
     import sys
     from sys import intern
 
@@ -75,3 +76,30 @@ def compiled_source_pool():
     keyword = ''.join(('runtime_λ_', '1171'))
     code = compile('target(' + keyword + '=1)', '<keyword>', 'exec')
     print(sys.intern(keyword) is keyword)
+
+
+def module_binding_keys():
+    import sys
+
+    def key_from(mapping, text):
+        for key in mapping:
+            if key == text:
+                return key
+        raise KeyError(text)
+
+    global λbinding_after_materialization
+    namespace = globals()
+    spelling = "".join(("module_binding_", "keys"))
+    key = key_from(namespace, spelling)
+    print(sys._is_interned(key), sys.intern(spelling) is key)
+
+    λbinding_after_materialization = 17
+    spelling = "".join(("λbinding_", "after_materialization"))
+    key = key_from(namespace, spelling)
+    print(sys._is_interned(key), sys.intern(spelling) is key, namespace[key])
+
+    original = "".join(("external_binding_", "identity"))
+    supplied = {original: 1}
+    exec("external_binding_identity = 19", supplied)
+    key = key_from(supplied, "".join(("external_binding_", "identity")))
+    print(key is original, sys._is_interned(key), supplied[key])
