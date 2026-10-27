@@ -238,6 +238,16 @@ pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) ->
     if matches!(ctx.heap.get(source), Value::Set { .. }) {
         return merge_set(ctx, target, source);
     }
+    if matches!(ctx.heap.get(source), Value::Dict(_)) {
+        ctx.heap.keep(source);
+        ctx.heap.keep(target);
+        let mut position = 0;
+        while let Some((at, key, _, hash)) = ctx.dictionary_pair(source, position) {
+            ctx.set_dictionary_key(target, key, NONE, hash, false)?;
+            position = at + 1;
+        }
+        return Ok(());
+    }
     let iterator = ctx.iterator(source)?;
     while let Some(item) = ctx.next_item(iterator)? {
         set_add(ctx, target, item)?;
@@ -577,10 +587,22 @@ pub(super) fn method(
                     args.len()
                 )));
             };
-            let iterator = ctx.iterator(*source)?;
-            while let Some(item) = ctx.next_item(iterator)? {
-                if !set_member(ctx, receiver, item, false)? {
-                    return Ok(FALSE);
+            if matches!(ctx.heap.get(*source), Value::Set { .. }) {
+                ctx.heap.keep(*source);
+                ctx.heap.keep(receiver);
+                let mut position = 0;
+                while let Some((at, key, _, hash)) = ctx.dictionary_pair(*source, position) {
+                    if ctx.find_dictionary_key(receiver, key, hash)?.1.is_none() {
+                        return Ok(FALSE);
+                    }
+                    position = at + 1;
+                }
+            } else {
+                let iterator = ctx.iterator(*source)?;
+                while let Some(item) = ctx.next_item(iterator)? {
+                    if !set_member(ctx, receiver, item, false)? {
+                        return Ok(FALSE);
+                    }
                 }
             }
             Ok(TRUE)
