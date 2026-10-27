@@ -25,6 +25,7 @@ enum Instruction {
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
     Return(Option<ast::Expr>),
+    Raise(ast::StmtRaise),
     Unless(ast::Expr, usize),
     Iter(ast::Expr),
     Next(Option<ast::Expr>, usize),
@@ -98,6 +99,7 @@ impl Program {
                     }
                     Instruction::Return(s.value.as_deref().cloned())
                 }
+                Stmt::Raise(s) => Instruction::Raise(s.clone()),
                 Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
                     let module = s
                         .module
@@ -594,6 +596,17 @@ impl Context {
         match op {
             Instruction::Eval(e) => {
                 eval(self, e)?;
+            }
+            Instruction::Raise(s) => {
+                let (op, exception) = match &s.exc {
+                    Some(exc) => ("raise", eval(self, exc)?),
+                    None => ("reraise", NONE),
+                };
+                let (cause, explicit) = match &s.cause {
+                    Some(cause) => (eval(self, cause)?, TRUE),
+                    None => (NONE, FALSE),
+                };
+                self.op(op, exception, cause, explicit)?;
             }
             Instruction::Assign(n, e) => {
                 let value = eval(self, e)?;
