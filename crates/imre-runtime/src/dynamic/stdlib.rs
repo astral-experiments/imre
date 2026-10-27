@@ -405,7 +405,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         ("os", "name") => ctx.text("posix"),
-        ("os" | "posixpath", "sep") => ctx.text("/"),
+        ("posixpath", "sep") => ctx.text("/"),
+        ("posixpath", "altsep") => NONE,
         ("importlib.machinery", "EXTENSION_SUFFIXES") => {
             let suffix = ctx.text(
                 ctx.config["archive_suffix"]
