@@ -342,6 +342,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                 attr,
                 "append"
                     | "clear"
+                    | "copy"
                     | "extend"
                     | "index"
                     | "insert"
