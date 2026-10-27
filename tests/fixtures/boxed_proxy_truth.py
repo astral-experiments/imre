@@ -65,3 +65,13 @@ def current():
     for i in range(2500):
         _ = [i, {}]
     print(get_tag())
+
+    class Equal:
+        def __eq__(self, other):
+            return True
+
+    class Declines(Equal):
+        def __ne__(self, other):
+            return NotImplemented
+
+    print(Equal() != Equal(), Declines() != Declines())
