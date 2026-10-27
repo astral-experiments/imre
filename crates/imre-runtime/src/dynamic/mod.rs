@@ -5,6 +5,7 @@ mod abstract_class;
 mod builtins;
 mod calls;
 mod complex;
+mod dictionary;
 mod enums;
 mod ffi;
 mod function_fields;
@@ -112,7 +113,7 @@ impl Context {
     }
 
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
-        self.alloc(Value::Dict(entries))
+        self.alloc(Value::Dict(entries.into()))
     }
 
     fn keyword_args(&self, dict: Id) -> Result<Vec<(String, Id)>> {

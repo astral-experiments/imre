@@ -180,6 +180,44 @@ def current():
         []
     print(list(view), list(values), session.writes)
 
+    class ViewPair(dict):
+        def __iter__(self):
+            source["b"] = ("new", 2)
+            if grow:
+                source["c"] = ("later", 3)
+            return dict.__iter__({"first": None, 1: None})
+
+    for grow in (False, True):
+        source = {"a": ViewPair(), "b": ("old", 0)}
+        copied = {}
+        try:
+            copied.update(source.values())
+        except RuntimeError as error:
+            print(error.args)
+        print(copied)
+
+    from operator import delitem
+
+    source = {"first": 1}
+    cursor = iter(source)
+    key = next(cursor)
+    delitem(source, key)
+    source[key] = 2
+    try:
+        next(cursor)
+    except RuntimeError as error:
+        print(error, length_hint(cursor))
+
+    source = {"a": 1, "b": 2, "c": 3}
+    cursor = dict.__iter__(source)
+    for first in cursor:
+        break
+    for key in ("a", "b", "c"):
+        delitem(source, key)
+    for key in ("d", "e", "f"):
+        source[key] = key
+    print(first, list(cursor))
+
     try:
         empty[()]
     except KeyError as error:
