@@ -963,17 +963,33 @@ impl Context {
         first.is_ok_and(|first| first == root)
     }
 
+    fn missing_module(name: &str) -> Error {
+        Error::new(
+            "ModuleNotFoundError",
+            format!("No module named {}", string_repr(name)),
+        )
+        .with_import(Some(name), None, None)
+    }
+
     fn module(&mut self, name: &str) -> Result<Id> {
+        self.find_module(name, false)?
+            .ok_or_else(|| Self::missing_module(name))
+    }
+
+    /// Package resource lookups can initialize filesystem sources added after compilation.
+    fn find_module(&mut self, name: &str, filesystem: bool) -> Result<Option<Id>> {
         if let Some(value) = self.modules.get(name) {
-            return Ok(*value);
+            return Ok(Some(*value));
         }
         // Execute the package initializer before its child. A regular package
         // constrains child modules to its __path__; namespace packages combine
         // their locations in search order.
         let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-            let id = self.module(parent)?;
+            let id = self
+                .find_module(parent, filesystem)?
+                .ok_or_else(|| Self::missing_module(parent))?;
             if let Some(id) = self.modules.get(name) {
-                return Ok(*id);
+                return Ok(Some(*id));
             }
             Some((id, child))
         } else {
@@ -1024,14 +1040,17 @@ impl Context {
             } else {
                 (self.sys_path, name)
             };
-            self.registered_source(name, child, search, parent.is_none(), &mut locations)?
+            self.source_on_path(
+                name,
+                child,
+                search,
+                parent.is_none(),
+                filesystem,
+                &mut locations,
+            )?
         };
         if source.is_none() && !stdlib::is_module(name) {
-            return Err(Error::new(
-                "ModuleNotFoundError",
-                format!("No module named {}", string_repr(name)),
-            )
-            .with_import(Some(name), None, None));
+            return Ok(None);
         }
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
@@ -1138,7 +1157,7 @@ impl Context {
                     origin.expect("ZIP source has a filename"),
                     loader,
                 ),
-                importlib::SourceBody::Compiled(_)
+                importlib::SourceBody::Compiled(_) | importlib::SourceBody::Filesystem
                     if let Some(origin) = origin
                         && name != "__main__"
                         && !stdlib::is_module(name)
@@ -1151,6 +1170,7 @@ impl Context {
                     let code = self.module_code(entry, &path);
                     self.execute(code, scope)
                 }
+                importlib::SourceBody::Filesystem => Ok(NONE),
             };
             let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
                 unreachable!()
@@ -1164,6 +1184,6 @@ impl Context {
         if let Some((parent, child)) = parent {
             self.set_attr(parent, child, module)?;
         }
-        Ok(module)
+        Ok(Some(module))
     }
 }

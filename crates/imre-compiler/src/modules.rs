@@ -51,6 +51,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
         "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
+        "pkgutil" => Some((
+            "pkgutil.py",
+            concat!(
+                include_str!("../stdlib/pkgutil/boxed.py"),
+                "\n",
+                include_str!("../stdlib/pkgutil/iter_modules.py"),
+            ),
+        )),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
@@ -124,6 +132,24 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => None,
     }
+}
+
+/// Spell filesystem import suffixes in longest-first order for both pkgutil frontends.
+pub(crate) fn pkgutil_suffixes() -> String {
+    let version = crate::PYTHON_VERSION;
+    let abi = if cfg!(target_os = "macos") {
+        "darwin".to_owned()
+    } else {
+        let libc = if cfg!(target_env = "musl") {
+            "musl"
+        } else {
+            "gnu"
+        };
+        format!("{}-linux-{libc}", std::env::consts::ARCH)
+    };
+    let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
+    let archive = format!(".{}", crate::NATIVE_ARCHIVE_EXTENSION);
+    serde_json::to_string(&[&tagged, ".abi3.so", &archive, ".so", ".py", ".pyc"]).unwrap()
 }
 
 // CPython's built-in/frozen lookup precedes first-party files. These internal and
@@ -3201,30 +3227,10 @@ impl<'a> Loader<'a> {
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;
-                let version = crate::PYTHON_VERSION;
-                let abi = if cfg!(target_os = "macos") {
-                    "darwin".to_owned()
-                } else {
-                    let libc = if cfg!(target_env = "musl") {
-                        "musl"
-                    } else {
-                        "gnu"
-                    };
-                    format!("{}-linux-{libc}", std::env::consts::ARCH)
-                };
-                let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
-                let archive = format!(".{}", crate::NATIVE_ARCHIVE_EXTENSION);
-                let suffixes = serde_json::to_string(&[
-                    tagged.as_str(),
-                    ".abi3.so",
-                    &archive,
-                    ".so",
-                    ".py",
-                    ".pyc",
-                ])
-                .unwrap();
+                let suffixes = pkgutil_suffixes();
+                let discovery = include_str!("../stdlib/pkgutil/iter_modules.py");
                 pkgutil_source = format!(
-                    "{source}\n_search_path: list[str] = {paths}\n_module_suffixes: list[str] = {suffixes}\n"
+                    "{source}\n{discovery}\n_search_path: list[str] = {paths}\n_module_suffixes: list[str] = {suffixes}\n"
                 );
                 &pkgutil_source
             } else {

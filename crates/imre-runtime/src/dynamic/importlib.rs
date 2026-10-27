@@ -8,30 +8,32 @@ use super::{
     value::{self, Code, Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 
-/// A registered disk body or the live loader for an indexed ZIP source.
+/// A compiled body, a newly discovered filesystem source, or its ZIP loader.
 #[derive(Clone, Copy)]
 pub(super) enum SourceBody {
     Compiled(Code),
+    Filesystem,
     Zip(Id),
 }
 
 impl SourceBody {
     fn loader(self) -> Id {
         match self {
-            Self::Compiled(_) => NONE,
+            Self::Compiled(_) | Self::Filesystem => NONE,
             Self::Zip(loader) => loader,
         }
     }
 }
 
 impl Context {
-    /// Select the same registered module for a lookup and for an executing import.
-    pub(super) fn registered_source(
+    /// Select a package or module in search order, including late files for resource lookups.
+    pub(super) fn source_on_path(
         &mut self,
         name: &str,
         child: &str,
         search: Id,
         top_level: bool,
+        filesystem: bool,
         locations: &mut Vec<PathBuf>,
     ) -> Result<Option<(PathBuf, SourceBody)>> {
         let mut namespace = None;
@@ -56,25 +58,31 @@ impl Context {
             };
             let Ok(root) = root else { continue };
             let stem = root.join(child);
-            if let Some(choices) = self.sources.get(name) {
-                if let Some(module) = choices.iter().find(|m| {
-                    m.path == stem.join("__init__.py") || m.path == stem.with_extension("py")
-                }) {
+            let choices = self.sources.get(name).map_or(&[][..], Vec::as_slice);
+            let disk = filesystem
+                && !bundle.as_ref().is_some_and(|dir| root.starts_with(dir))
+                && Path::new(child).file_name() == Some(std::ffi::OsStr::new(child));
+            for path in [stem.join("__init__.py"), stem.with_extension("py")] {
+                let entry = choices.iter().find(|m| m.path == path).map(|m| m.code);
+                if entry.is_some() || (disk && path.is_file()) {
                     locations.clear();
-                    if module.path.ends_with("__init__.py") {
+                    if path.ends_with("__init__.py") {
                         locations.push(stem);
                     }
                     return Ok(Some((
-                        module.path.clone(),
-                        SourceBody::Compiled(module.code),
+                        path,
+                        entry.map_or(SourceBody::Filesystem, SourceBody::Compiled),
                     )));
                 }
-                if let Some(module) = choices.iter().find(|m| m.path == stem) {
-                    locations.push(stem);
-                    namespace
-                        .get_or_insert((module.path.clone(), SourceBody::Compiled(module.code)));
-                    continue;
-                }
+            }
+            let entry = choices.iter().find(|m| m.path == stem).map(|m| m.code);
+            if entry.is_some() || (disk && stem.is_dir()) {
+                locations.push(stem.clone());
+                namespace.get_or_insert((
+                    stem,
+                    entry.map_or(SourceBody::Filesystem, SourceBody::Compiled),
+                ));
+                continue;
             }
             // A path below an archive is virtual. Preserve its spelling because the
             // loader exposes it in __file__, __path__, and resource names.
@@ -145,19 +153,27 @@ impl Context {
     /// Return the compiled body belonging to this filesystem loader.
     pub(super) fn registered_code(&mut self, name: Id, path: Id) -> Result<Id> {
         let name = self.str_value(name)?;
-        let path = Path::new(self.str_value(path)?);
-        let source = self
+        let filename = self.str_value(path)?;
+        if let Some(source) = self
             .sources
             .get(name)
-            .and_then(|sources| sources.iter().find(|s| s.path == path))
-            .ok_or_else(|| {
-                Error::new(
-                    "NotImplementedError",
-                    format!("no registered source for {name:?} at {path:?}"),
-                )
-            })?;
-        let (entry, path) = (source.code, source.path.clone());
-        Ok(self.module_code(entry, &path))
+            .and_then(|sources| sources.iter().find(|s| s.path == Path::new(filename)))
+        {
+            let (entry, path) = (source.code, source.path.clone());
+            return Ok(self.module_code(entry, &path));
+        }
+        if self.modules.get(name).is_some_and(|&module| {
+            matches!(self.heap.get(module), Value::Module { origin: Some(origin), .. }
+                if self.str_value(*origin).ok() == Some(filename))
+        }) {
+            let source = self.text(crate::objects::read_path_text(filename)?);
+            let mode = self.text("exec");
+            return self.compile_source(source, path, mode);
+        }
+        Err(Error::new(
+            "NotImplementedError",
+            format!("no registered source for {name:?} at {filename:?}"),
+        ))
     }
 
     fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {
@@ -186,7 +202,12 @@ impl Context {
         result
     }
 
-    pub(super) fn find_spec(&mut self, fullname: &str, original: &str) -> Result<Id> {
+    pub(super) fn find_spec(
+        &mut self,
+        fullname: &str,
+        original: &str,
+        filesystem: bool,
+    ) -> Result<Id> {
         if let Some(&module) = self.modules.get(fullname) {
             return match self.lookup_attr(module, "__spec__") {
                 Ok(NONE) => Err(Error::new(
@@ -201,6 +222,9 @@ impl Context {
                                 Value::Module { origin: None, .. }
                             )) =>
                 {
+                    if filesystem {
+                        return Ok(NONE);
+                    }
                     Err(Error::new(
                         "NotImplementedError",
                         "find_spec requires a registered source file",
@@ -218,7 +242,9 @@ impl Context {
         }
         let (child, search, top_level) =
             if let Some((parent_name, child)) = fullname.rsplit_once('.') {
-                let parent = self.module(parent_name)?;
+                let parent = self
+                    .find_module(parent_name, filesystem)?
+                    .ok_or_else(|| Self::missing_module(parent_name))?;
                 let path = match self.lookup_attr(parent, "__path__") {
                     Err(cause) if self.is_attribute_error(&cause) => {
                         let mut error = Error::new(
@@ -242,18 +268,30 @@ impl Context {
                 (fullname, self.sys_path, true)
             };
         if stdlib::is_module(fullname) {
+            if filesystem {
+                return Ok(NONE);
+            }
             return Err(Error::new(
                 "NotImplementedError",
                 "find_spec requires a registered source file",
             ));
         }
         let mut locations = Vec::new();
-        let Some((path, body)) =
-            self.registered_source(fullname, child, search, top_level, &mut locations)?
+        let Some((path, body)) = self.source_on_path(
+            fullname,
+            child,
+            search,
+            top_level,
+            filesystem,
+            &mut locations,
+        )?
         else {
             return Ok(NONE);
         };
         if locations.contains(&path) {
+            if filesystem {
+                return Ok(NONE);
+            }
             return Err(Error::new(
                 "NotImplementedError",
                 "find_spec for namespace packages",
