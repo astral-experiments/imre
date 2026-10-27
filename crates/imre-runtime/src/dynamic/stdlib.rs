@@ -39,8 +39,12 @@ mod socket;
 mod structure;
 mod traceback;
 pub(super) mod urllib;
+mod zipimport;
 
 pub(super) fn is_module(name: &str) -> bool {
+    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
+        return true;
+    }
     matches!(
         name,
         "sys"
@@ -443,6 +447,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
         | ("_imre_posixpath", "extension_start" | "isfile")
+        | ("_imre_zipimport", "exists" | "index" | "read")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -663,6 +668,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
+    }
+    if let Some(op) = name.strip_prefix("_imre_zipimport.") {
+        return zipimport::call(ctx, op, args, kwargs);
     }
     if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
         return posixpath::call(ctx, name, args, kwargs);
