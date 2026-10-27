@@ -347,7 +347,8 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         ));
     }
     if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
-        let bases = ctx.items(bases)?;
+        let base_tuple = bases;
+        let bases = ctx.items(base_tuple)?;
         let i = bases
             .iter()
             .position(|base| *base == id)
@@ -358,11 +359,37 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         if !bases.contains(&callable) {
             result.push(callable);
         }
-        let later_generic = bases[i + 1..].iter().any(|&base| {
-            matches!(ctx.heap.get(base), Value::Native(name) if name == "typing.Callable")
+        let mut later_generic = false;
+        for &base in &bases[i + 1..] {
+            if matches!(ctx.heap.get(base), Value::Native(name) if name == "typing.Callable")
                 || matches!(ctx.heap.get(base), Value::GenericAlias(a) if a.kind.is_typing_alias())
-                || ctx.subclass(base, generic)
-        });
+            {
+                later_generic = true;
+                break;
+            }
+            if matches!(ctx.heap.get(base), Value::Class { .. } | Value::Native(_)) {
+                if ctx.subclass(base, generic) {
+                    later_generic = true;
+                    break;
+                }
+                continue;
+            }
+            let method = match ctx.lookup_attr(base, "__mro_entries__") {
+                Ok(method) => method,
+                Err(error) if ctx.is_attribute_error(&error) => continue,
+                Err(error) => return Err(error),
+            };
+            let entries = ctx.call(method, vec![base_tuple], vec![])?;
+            if let Value::Tuple(entries) = ctx.heap.get(entries)
+                && entries.iter().any(|&entry| {
+                    matches!(ctx.heap.get(entry), Value::Class { .. } | Value::Native(_))
+                        && ctx.subclass(entry, generic)
+                })
+            {
+                later_generic = true;
+                break;
+            }
+        }
         if !later_generic {
             result.push(generic);
         }
