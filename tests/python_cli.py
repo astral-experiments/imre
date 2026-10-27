@@ -459,6 +459,7 @@ def report(text):
             "boxed_exception_repr.py",
             "boxed_type_identity.py",
             "boxed_singleton_types.py",
+            "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
             "boxed_functiontype.py",

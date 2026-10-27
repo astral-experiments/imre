@@ -877,7 +877,10 @@ impl Context {
                 ));
             }
             if let Value::Native(name) = self.heap.get(base)
-                && matches!(name.as_str(), "typing.TypeVar" | "slice")
+                && matches!(
+                    name.as_str(),
+                    "typing.TypeVar" | "slice" | "NoneType" | "NotImplementedType" | "ellipsis"
+                )
             {
                 return Err(Error::new(
                     "TypeError",
