@@ -621,6 +621,7 @@ def report(text):
             "boxed_function_defaults.py",
             "boxed_set_union.py",
             "boxed_weakref.py",
+            "boxed_public_weakref.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",

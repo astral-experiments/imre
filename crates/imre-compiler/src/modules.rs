@@ -92,6 +92,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_collections_abc.py",
             include_str!("../stdlib/_collections_abc.py"),
         )),
+        // CPython 3.14.5 Lib/weakref.py and Lib/_weakrefset.py.
+        "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
+        "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
