@@ -1089,6 +1089,7 @@ pub(super) fn call(
         | "_string.formatter_field_name_split"
         | "collections.defaultdict"
         | "collections.defaultdict.copy"
+        | "collections.defaultdict.__copy__"
         | "functools.lru_cache"
         | "functools._cached"
         | "contextlib.contextmanager"
@@ -1340,7 +1341,7 @@ pub(super) fn call(
             factory: args.first().copied().unwrap_or(NONE),
             entries: Default::default(),
         }),
-        "collections.defaultdict.copy" => {
+        "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;
             let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) else {
                 return Err(Error::new(
