@@ -282,7 +282,9 @@ impl Context {
         if let Some(dict) = self.source_builtins {
             return Ok(dict);
         }
-        let dict = self.dict(Vec::new());
+        let name = self.text("__name__");
+        let module = self.text("builtins");
+        let dict = self.dict(vec![(name, module)]);
         for name in builtins::names() {
             let k = self.text(name);
             let v = self.builtin(name);
