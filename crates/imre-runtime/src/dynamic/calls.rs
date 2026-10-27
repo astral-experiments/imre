@@ -24,6 +24,24 @@ impl Context {
             _ => None,
         }
     }
+    /// Find the exception storage only when the object inherits StopIteration.
+    fn stop_iteration_error(&mut self, object: Id) -> Option<&mut Error> {
+        let Value::Raised(error) = self.heap.get(object) else {
+            return None;
+        };
+        let stop = error.class.map_or_else(
+            || error.kind == "StopIteration",
+            |class| self.has_base(class, "StopIteration"),
+        );
+        if !stop {
+            return None;
+        }
+        let Value::Raised(error) = self.heap.get_mut(object) else {
+            unreachable!()
+        };
+        Some(error)
+    }
+
     /// Find a Python-declared member on an exception that retains its original class.
     fn exception_member(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Raised(error) = self.heap.get(object) else {
@@ -692,6 +710,11 @@ impl Context {
                 return self.instance_attribute(obj, class, field, name);
             }
         }
+        if name == "value"
+            && let Some(error) = self.stop_iteration_error(obj)
+        {
+            return Ok(error.stop_value());
+        }
         if name == "__class__" {
             return self.exact_type(obj);
         }
@@ -1285,6 +1308,12 @@ impl Context {
                 return Err(self.missing_attribute(obj, name));
             }
         }
+        if name == "value"
+            && let Some(error) = self.stop_iteration_error(obj)
+        {
+            error.set_stop_value(NONE);
+            return Ok(());
+        }
         if name == "__class__" && member.is_none() {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
         }
@@ -1500,6 +1529,12 @@ impl Context {
             && let Value::Raised(error) = self.heap.get_mut(obj)
         {
             error.tracing().fields.insert(name.to_owned(), value);
+            return Ok(());
+        }
+        if name == "value"
+            && let Some(error) = self.stop_iteration_error(obj)
+        {
+            error.set_stop_value(value);
             return Ok(());
         }
         let object_class = self.builtins.get("object").copied();
@@ -1826,6 +1861,9 @@ impl Context {
                 }) {
                     let mut error = self.exception(&name, &args);
                     error.class = Some(callable);
+                    if self.has_base(callable, "StopIteration") {
+                        error.set_stop_value(args.first().copied().unwrap_or(NONE));
+                    }
                     return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
