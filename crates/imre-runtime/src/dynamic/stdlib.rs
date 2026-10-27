@@ -46,6 +46,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "abc"
             | "codecs"
             | "types"
+            | "_io"
             | "io"
             | "traceback"
             | "sysconfig"
@@ -131,7 +132,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         class,
         dictionary: None,
         scalar: None,
-        text_memory: None,
+        memory_stream: None,
         fields: fields
             .iter()
             .map(|&(key, value)| (key.to_owned(), value))

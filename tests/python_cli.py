@@ -373,6 +373,7 @@ def report(text):
             "boxed_code_objects.py",
             "boxed_source_exec.py",
             "boxed_bytes_add.py",
+            "boxed_bytes_io.py",
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",

@@ -1270,7 +1270,7 @@ impl Context {
         self.alloc(Value::Instance {
             class,
             dictionary,
-            text_memory: None,
+            memory_stream: None,
             fields: HashMap::new(),
             scalar: None,
         })
@@ -1309,7 +1309,7 @@ impl Context {
             fields: HashMap::new(),
             dictionary: None,
             scalar: Some(text),
-            text_memory: None,
+            memory_stream: None,
         }))
     }
 
@@ -1484,7 +1484,7 @@ impl Context {
                         fields,
                         dictionary: None,
                         scalar: None,
-                        text_memory: None,
+                        memory_stream: None,
                     }));
                 }
                 let new = self.class_attr(callable, "__new__");

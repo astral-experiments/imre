@@ -870,6 +870,13 @@ impl Context {
         self.modules.insert(name.to_owned(), module);
         match name {
             "io" => stdlib::io::install(self, scope),
+            "_io" => {
+                self.module("io")?;
+                for name in ["BytesIO", "StringIO"] {
+                    let class = self.builtins[&format!("_io.{name}")];
+                    self.bind(scope, name, class);
+                }
+            }
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
             "sys" => {
