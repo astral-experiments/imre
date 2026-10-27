@@ -1354,6 +1354,11 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         let Some(method) = self.bound_slot(obj, name)? else {
+            if name == "__ne__"
+                && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
+            {
+                return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));
+            }
             return Ok(None);
         };
         let result = self.call(method, vec![other], vec![])?;
