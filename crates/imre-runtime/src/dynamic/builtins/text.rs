@@ -17,28 +17,8 @@ use crate::objects::{python_whitespace, split_parts, translate, visit_line_field
 mod bytes_fields;
 mod maketrans;
 
-fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
-    if let Some(id) = id
-        && ctx.str_value(id)? != "strict"
-    {
-        return Err(Error::new(
-            "NotImplementedError",
-            "only strict codec error handling is supported",
-        ));
-    }
-    Ok(())
-}
-
-fn decode(
-    ctx: &mut Context,
-    id: Id,
-    encoding_id: Option<Id>,
-    errors: Option<Id>,
-) -> Result<String> {
-    let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(id)) else {
-        return Err(type_error("decoding requires bytes"));
-    };
-    let encoding = encoding_id
+fn decode(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<String> {
+    let encoding = encoding
         .map(|id| ctx.str_value(id))
         .transpose()?
         .unwrap_or("utf-8");
@@ -49,7 +29,7 @@ fn decode(
                 .is_ok_and(|value| value == "surrogateescape")
         })
     {
-        return crate::objects::interpreter_stdlib::fsdecode(bytes)
+        return crate::objects::interpreter_stdlib::fsdecode(ctx.bytes_like(ctx.scalar_value(id))?)
             .map(char::from_u32)
             .collect::<Option<String>>()
             .ok_or_else(|| {
@@ -59,10 +39,7 @@ fn decode(
                 )
             });
     }
-    strict(ctx, errors)?;
-    codec
-        .decode(bytes, None)
-        .map_err(|err| ctx.decode_error(err))
+    super::super::stdlib::codecs::decode_bytes(ctx, codec, ctx.scalar_value(id), errors)
 }
 
 fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {

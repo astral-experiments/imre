@@ -264,7 +264,7 @@ impl Function<'_, '_> {
                     };
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
-                        v.name.as_str(),
+                        self.source.private_names.definition(&v.name),
                         Some(&v.parameters),
                         v.returns.as_deref(),
                         body,
@@ -292,12 +292,12 @@ impl Function<'_, '_> {
                     };
                     let init = self.define(
                         v.start(),
-                        v.name.as_str(),
+                        self.source.private_names.definition(&v.name),
                         None,
                         None,
                         Body::Namespace(&v.body),
                     );
-                    let name = self.code_name(v.name.as_str());
+                    let name = self.code_name(self.source.private_names.definition(&v.name));
                     let class = self.op("class", &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
                 }
@@ -371,11 +371,15 @@ impl Function<'_, '_> {
                     for alias in &v.names {
                         let full = alias.name.as_str();
                         let module = self.import(full);
-                        if let Some(name) = &alias.asname {
+                        if let Some(name) = &alias.asname
+                            && !self.source.private_names.imports_root(&alias.name)
+                        {
                             self.bind(name.as_str(), &module);
                         } else if let Some((root, _)) = full.split_once('.') {
                             let outer = self.import(root);
-                            self.bind(root, &outer);
+                            let binding =
+                                alias.asname.as_ref().map_or(root, ast::Identifier::as_str);
+                            self.bind(binding, &outer);
                         } else {
                             self.bind(full, &module);
                         }
@@ -502,6 +506,9 @@ impl Function<'_, '_> {
         }
         let generator = if let Body::GeneratorFunction(stmts) = &body {
             let first = stmts[0].start();
+            if let Some(owner) = self.source.private_names.suite_owner(first) {
+                signature["private_scope"] = json!([owner, self.source.string_annotations]);
+            }
             let start = first.to_usize();
             let end = stmts.last().unwrap().end().to_usize();
             let prefix = self.source.text[..start].rsplit('\n').next().unwrap();

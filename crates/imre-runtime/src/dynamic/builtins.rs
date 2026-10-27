@@ -89,11 +89,14 @@ const FUNCTIONS: &[&str] = &[
     "reversed",
     "dir",
     "sorted",
+    "min",
+    "max",
     "ord",
     "chr",
     "divmod",
     "round",
     "callable",
+    "id",
     "abs",
     "all",
     "any",
@@ -125,6 +128,7 @@ const TYPES: &[&str] = &[
     "complex",
     "dict",
     "enumerate",
+    "filter",
     "float",
     "frozenset",
     "int",
@@ -283,7 +287,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "bytes"
         }
-        Value::ByteArray(_) if matches!(attr, "extend" | "translate") => "bytearray",
+        Value::ByteArray(_) if matches!(attr, "decode" | "extend" | "translate") => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
@@ -339,6 +343,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                 attr,
                 "append"
                     | "clear"
+                    | "copy"
                     | "extend"
                     | "index"
                     | "insert"
@@ -365,7 +370,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "frozenset"
         }
-        Value::DefaultDict { .. } if matches!(attr, "copy" | "__missing__") => {
+        Value::DefaultDict { .. } if matches!(attr, "copy" | "__copy__" | "__missing__") => {
             "collections.defaultdict"
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
@@ -413,6 +418,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
+        Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Deque(_) if super::deque::METHODS.contains(&attr) => super::deque::CLASS,
@@ -763,6 +769,7 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
+            "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;
@@ -787,7 +794,7 @@ pub(super) fn call(
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
+            "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -918,6 +925,11 @@ pub(super) fn call(
             }
         }
         "round" => round::call(ctx, args, kwargs),
+        "id" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            Ok(ctx.alloc(Value::Int(crate::Int::from_usize(args[0] as usize))))
+        }
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -1039,6 +1051,7 @@ pub(super) fn call(
         "pow" => power(ctx, args, kwargs),
         "dir" => dir::call(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
+        "min" | "max" => collections::extremum(ctx, name, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
             let iterable = iterable
@@ -1092,20 +1105,7 @@ pub(super) fn call(
                 return Err(type_error("sum requires a positional iterable"));
             };
             let [start] = bind(name, rest, kwargs, ["start"])?;
-            let iterator = ctx.iterator(source)?;
-            let mut total = start
-                .map(|id| ctx.as_int(id))
-                .transpose()?
-                .unwrap_or_else(|| crate::Int::from(0));
-            let mut item = ctx.next_item(iterator)?;
-            if item.is_none() {
-                return Ok(start.unwrap_or_else(|| ctx.int(0)));
-            }
-            while let Some(value) = item {
-                total = crate::integer_binary(&total, &ctx.as_int(value)?, 0)?;
-                item = ctx.next_item(iterator)?;
-            }
-            Ok(ctx.alloc(Value::Int(total)))
+            float::sum(ctx, source, start)
         }
         "len" => {
             positional(name, kwargs)?;
@@ -1170,6 +1170,22 @@ pub(super) fn call(
             Ok(ctx.int(size))
         }
         "map" | "zip" => ctx.zip_or_map(name, args, kwargs),
+        "filter" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("filter() takes no keyword arguments"));
+            }
+            let [predicate, source] = args else {
+                return Err(type_error(format!(
+                    "filter expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            let input = ctx.iterator(*source)?;
+            Ok(ctx.alloc(Value::Filter {
+                predicate: *predicate,
+                input,
+            }))
+        }
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;

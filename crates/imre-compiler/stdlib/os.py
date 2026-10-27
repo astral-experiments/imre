@@ -2,7 +2,8 @@
 import abc
 import posixpath as path
 from _collections_abc import _check_methods
-from posix import fspath
+from _collections_abc import MutableMapping as _MutableMapping
+from posix import environ as _environ, fspath, putenv, unsetenv
 from types import GenericAlias
 
 
@@ -32,3 +33,49 @@ class PathLike(abc.ABC):
         return NotImplemented
 
     __class_getitem__ = classmethod(GenericAlias)
+
+
+def _encode_env(value):
+    if not isinstance(value, str):
+        raise TypeError("str expected, not %s" % type(value).__name__)
+    return value.encode("utf-8", "surrogateescape")
+
+
+class _Environ(_MutableMapping):
+    def __init__(self, data):
+        self._data = data
+
+    def __getitem__(self, key):
+        try:
+            value = self._data[_encode_env(key)]
+        except KeyError:
+            raise KeyError(key) from None
+        return value.decode("utf-8", "surrogateescape")
+
+    def __setitem__(self, key, value):
+        key = _encode_env(key)
+        value = _encode_env(value)
+        putenv(key, value)
+        self._data[key] = value
+
+    def __delitem__(self, key):
+        encoded = _encode_env(key)
+        unsetenv(encoded)
+        try:
+            del self._data[encoded]
+        except KeyError:
+            raise KeyError(key) from None
+
+    def __iter__(self):
+        for key in list(self._data):
+            yield key.decode("utf-8", "surrogateescape")
+
+    def __len__(self):
+        return len(self._data)
+
+
+environ = _Environ(_environ)
+
+
+def getenv(key, default=None):
+    return environ.get(key, default)

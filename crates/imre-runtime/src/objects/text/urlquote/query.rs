@@ -25,7 +25,9 @@ fn component(input: &[u8], bytes: bool, encoding: &str, errors: &str) -> Result<
         let text = if input.contains(&b'%') {
             check_option(encoding)?;
             check_option(errors)?;
-            crate::checked_owned_str(decode_text(&input, Codec::lookup(encoding)?, errors)?.into())?
+            let codec = Codec::lookup(encoding)?;
+            let decoded = decode_text(&input, |span| codec.decode(span, Some(errors)))?;
+            crate::checked_owned_str(decoded.into())?
         } else {
             // SAFETY: A text component has only been split on whole scalars and ASCII delimiters.
             let raw = unsafe { std::str::from_utf8_unchecked(&input) };

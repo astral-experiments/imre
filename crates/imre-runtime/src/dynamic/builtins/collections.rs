@@ -3,6 +3,99 @@ use super::super::value::DictViewKind;
 use super::*;
 use num_traits::Signed;
 
+/// Select the first minimum or maximum, evaluating each key as its candidate arrives.
+pub(super) fn extremum(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some(&first) = args.first() else {
+        return Err(type_error(format!(
+            "{name} expected at least 1 argument, got 0"
+        )));
+    };
+    let [key, default] = bind_method_arguments(name, &[], kwargs, ["key", "default"], 0)?;
+    let key = key.filter(|&key| key != NONE);
+    if args.len() > 1 {
+        if default.is_some() {
+            return Err(type_error(format!(
+                "Cannot specify a default for {name}() with multiple positional arguments"
+            )));
+        }
+        let mut values = args.iter().copied();
+        return select_item(ctx, name, key, None, |_| Ok(values.next()));
+    }
+    if matches!(ctx.heap.get(first), Value::Instance { .. })
+        && ctx.slot(first, "__iter__").is_none()
+        && ctx.slot(first, "__getitem__").is_some()
+    {
+        let mut index = 0_i64;
+        return select_item(ctx, name, key, default, |ctx| {
+            let position = ctx.int(index);
+            match ctx.get_item(first, position) {
+                Ok(value) => {
+                    index += 1;
+                    Ok(Some(value))
+                }
+                Err(error) => {
+                    let index_error = ctx.builtin("IndexError");
+                    if ctx.raised_error_matches(&error, index_error)
+                        || ctx.is_stop_iteration(&error)
+                    {
+                        Ok(None)
+                    } else {
+                        Err(error)
+                    }
+                }
+            }
+        });
+    }
+    let iterator = ctx.iterator(first)?;
+    select_item(ctx, name, key, default, |ctx| ctx.next_item(iterator))
+}
+
+/// Keep the winning item and key alive across iterator and comparison callbacks.
+fn select_item(
+    ctx: &mut Context,
+    name: &str,
+    key: Option<Id>,
+    default: Option<Id>,
+    mut next: impl FnMut(&mut Context) -> Result<Option<Id>>,
+) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    let Some(mut winner) = next(ctx)? else {
+        return default.ok_or_else(|| {
+            Error::new("ValueError", format!("{name}() iterable argument is empty"))
+        });
+    };
+    let comparison = if name == "min" { "<" } else { ">" };
+    let rank = |ctx: &mut Context, item| match key {
+        Some(key) => ctx.call(key, vec![item], Vec::new()),
+        None => Ok(item),
+    };
+    ctx.heap.keep(winner);
+    let mut winning_key = rank(ctx, winner)?;
+    loop {
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(winner);
+        ctx.heap.keep(winning_key);
+        let Some(item) = next(ctx)? else {
+            break;
+        };
+        ctx.heap.keep(item);
+        let item_key = rank(ctx, item)?;
+        let better = ctx.binary(comparison, item_key, winning_key)?;
+        if ctx.truth(better)? {
+            winner = item;
+            winning_key = item_key;
+        }
+    }
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.keep(winner);
+    Ok(winner)
+}
+
 /// Materialize the iterable before parsing the forwarded list.sort keywords.
 pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [iterable] = args else {
@@ -385,7 +478,7 @@ pub(super) fn method(
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
-    if let Some(method @ ("clear" | "index" | "pop" | "reverse" | "sort")) =
+    if let Some(method @ ("clear" | "copy" | "index" | "pop" | "reverse" | "sort")) =
         name.strip_prefix("list.")
     {
         let Some((&receiver, args)) = args.split_first() else {
@@ -417,6 +510,10 @@ pub(super) fn method(
                 let Value::List(items) = ctx.heap.get_mut(receiver) else {
                     unreachable!()
                 };
+                if method == "copy" {
+                    let copy = items.clone();
+                    return Ok(ctx.alloc(Value::List(copy)));
+                }
                 if method == "reverse" {
                     items.reverse();
                 } else {

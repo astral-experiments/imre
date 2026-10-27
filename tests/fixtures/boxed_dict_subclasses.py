@@ -90,9 +90,27 @@ def current():
     from collections import Counter, defaultdict
     from collections import _count_elements
     from _collections import _count_elements as native_count
+    from copy import copy
 
     fromkeys_construction()
     ordered_dictionary()
+    counts = Counter(a=3)
+    clone = copy(counts)
+    clone["a"] += 1
+    assert type(clone) is Counter and clone["missing"] == 0 and counts["a"] == 3
+    groups = defaultdict(list)
+    child = groups["present"]
+    clone = copy(groups)
+    assert type(clone) is defaultdict and clone.default_factory is list
+    assert clone["present"] is child and clone["missing"] == [] and "missing" not in groups
+    left, right = Counter(b=2, a=-3), Counter(a=5, c=4)
+    assert list((left + right).items()) == [("b", 2), ("a", 2), ("c", 4)]
+    assert -left == Counter(a=3) and +left == Counter(b=2)
+    alias = left
+    left |= right
+    assert alias is left and list(alias.items()) == [("b", 2), ("a", 5), ("c", 4)]
+    left -= left
+    assert not alias
     counted = {"a": 4}
     print(native_count is _count_elements, native_count(counted, "aba"), counted)
     try:

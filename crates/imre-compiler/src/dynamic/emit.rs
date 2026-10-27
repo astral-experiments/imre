@@ -49,25 +49,20 @@ pub(crate) fn emit(
         };
         let name = output.data(name.as_bytes());
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
+        let mut body = parsed.into_syntax().body;
+        let private_names = imre_ast::lower(&mut body);
         let location = SourceMap {
+            string_annotations: private_names.string_annotations,
+            private_names,
             package,
             text: source,
-            string_annotations: parsed.syntax().body.iter().any(|s| {
-                matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
-                && i.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
-                && i.names.iter().any(|n| n.name.as_str() == "annotations"))
-            }),
             file: &file,
             newlines: source
                 .match_indices('\n')
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        let code = output.code(
-            &location,
-            String::new(),
-            Body::Namespace(&parsed.syntax().body),
-        );
+        let code = output.code(&location, String::new(), Body::Namespace(&body));
         writeln!(
             main,
             "  call void @imre_dyn_register(ptr %ctx, ptr {name}, ptr {file}, ptr {code})"
@@ -92,6 +87,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    private_names: imre_ast::Names,
     text: &'a str,
     package: &'a str,
     string_annotations: bool,

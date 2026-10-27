@@ -1,7 +1,7 @@
 //! In-process execution of source received by the boxed Python runtime.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use ruff_python_ast as ast;
@@ -13,7 +13,9 @@ use super::*;
 pub(super) struct Program {
     pub filename: Rc<str>,
     pub name: String,
-    doc: Option<String>,
+    doc: Option<ruff_text_size::TextRange>,
+    strings: HashMap<ruff_text_size::TextRange, Id>,
+    pub(super) string_roots: Id,
     first_line: u32,
     generator: bool,
     locals: HashSet<String>,
@@ -45,12 +47,174 @@ fn unsupported(what: impl std::fmt::Display) -> Error {
     Error::new("NotImplementedError", format!("runtime source: {what}"))
 }
 
+/// Collect names and string constants without recursing through an expression's left spine.
+struct CompiledStrings<'a, 'ctx> {
+    heap: &'ctx mut value::Heap,
+    shared: &'ctx mut HashMap<&'a str, Id>,
+    constants: &'ctx mut HashMap<ruff_text_size::TextRange, Id>,
+    roots: Vec<Id>,
+    pending: Vec<&'a ast::Expr>,
+    exhausted: bool,
+}
+
+impl<'a> ast::visitor::Visitor<'a> for CompiledStrings<'a, '_> {
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if self.pending.try_reserve(1).is_err() {
+            self.exhausted = true;
+        } else {
+            self.pending.push(expr);
+        }
+    }
+
+    fn visit_keyword(&mut self, keyword: &'a ast::Keyword) {
+        if let Some(name) = &keyword.arg {
+            self.heap.code_name(name.as_str());
+        }
+        self.visit_expr(&keyword.value);
+    }
+
+    fn visit_parameter(&mut self, parameter: &'a ast::Parameter) {
+        self.heap.code_name(parameter.name.as_str());
+        if let Some(annotation) = &parameter.annotation {
+            self.visit_expr(annotation);
+        }
+    }
+}
+
+impl<'a> CompiledStrings<'a, '_> {
+    fn keep(&mut self, id: Id) -> Result<()> {
+        self.roots
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.roots.push(id);
+        Ok(())
+    }
+
+    fn constant(&mut self, literal: &'a ast::ExprStringLiteral) -> Result<()> {
+        let text = literal.value.to_str();
+        let id = if let Some(&id) = self.shared.get(text) {
+            id
+        } else {
+            self.shared
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            let id = self
+                .heap
+                .source_string_constant(text)
+                .ok_or_else(|| Error::new("MemoryError", ""))?;
+            self.shared.insert(text, id);
+            id
+        };
+        self.constants
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.constants.insert(literal.range(), id);
+        self.keep(id)
+    }
+
+    fn finish(mut self) -> Result<Id> {
+        while let Some(expr) = self.pending.pop() {
+            match expr {
+                ast::Expr::Name(name) => {
+                    self.heap.code_name(name.id.as_str());
+                }
+                ast::Expr::Attribute(attr) => {
+                    self.heap.code_name(attr.attr.as_str());
+                }
+                ast::Expr::StringLiteral(literal) => self.constant(literal)?,
+                _ => {}
+            }
+            ast::visitor::walk_expr(&mut self, expr);
+        }
+        if self.exhausted {
+            return Err(Error::new("MemoryError", ""));
+        }
+        Ok(if self.roots.is_empty() {
+            NONE
+        } else {
+            self.heap.alloc(Value::Tuple(self.roots))
+        })
+    }
+}
+
 impl Program {
+    /// Keep each code object's constants alive, including constants owned by unexecuted children.
+    fn prepare_strings<'a>(
+        &'a mut self,
+        heap: &mut value::Heap,
+        shared: &mut HashMap<&'a str, Id>,
+    ) -> Result<Id> {
+        use ast::visitor::Visitor;
+        let mut strings = CompiledStrings {
+            heap,
+            shared,
+            constants: &mut self.strings,
+            roots: Vec::new(),
+            pending: Vec::new(),
+            exhausted: false,
+        };
+        for (_, op) in &mut self.instructions {
+            match op {
+                Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
+                    strings.visit_expr(e)
+                }
+                Instruction::Assign(name, e) => {
+                    strings.heap.code_name(name);
+                    strings.visit_expr(e);
+                }
+                Instruction::AssignItem(target, e) => {
+                    strings.visit_expr(&target.value);
+                    strings.visit_expr(&target.slice);
+                    strings.visit_expr(e);
+                }
+                Instruction::AssignAttr(target, e) => {
+                    strings.heap.code_name(target.attr.as_str());
+                    strings.visit_expr(&target.value);
+                    strings.visit_expr(e);
+                }
+                Instruction::From(module, bindings) => {
+                    strings.heap.code_name(module);
+                    for (name, alias) in bindings {
+                        strings.heap.code_name(name);
+                        strings.heap.code_name(alias);
+                    }
+                }
+                Instruction::Define(child, parameters) => {
+                    let child = Rc::get_mut(child).expect("newly lowered child code");
+                    strings.heap.code_name(&child.name);
+                    let roots = child.prepare_strings(strings.heap, strings.shared)?;
+                    if roots != NONE {
+                        strings.keep(roots)?;
+                    }
+                    strings.visit_parameters(parameters);
+                }
+                Instruction::Yield(e) | Instruction::Return(e) | Instruction::Next(e, _) => {
+                    if let Some(e) = e {
+                        strings.visit_expr(e);
+                    }
+                }
+                Instruction::Raise(statement) => {
+                    if let Some(e) = &statement.exc {
+                        strings.visit_expr(e);
+                    }
+                    if let Some(e) = &statement.cause {
+                        strings.visit_expr(e);
+                    }
+                }
+                Instruction::Jump(_) => {}
+            }
+        }
+        self.string_roots = strings.finish()?;
+        Ok(self.string_roots)
+    }
+
     fn new(filename: Rc<str>, name: &str) -> Self {
         Self {
             filename,
             name: name.to_owned(),
             doc: None,
+            strings: HashMap::new(),
+            string_roots: NONE,
             first_line: 1,
             generator: false,
             locals: HashSet::new(),
@@ -64,7 +228,7 @@ impl Program {
             && let Some(Stmt::Expr(statement)) = body.first()
             && let ast::Expr::StringLiteral(value) = &*statement.value
         {
-            self.doc = Some(value.value.to_string());
+            self.doc = Some(value.range());
         }
         for stmt in body {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
@@ -259,6 +423,7 @@ impl Context {
             .collect::<Vec<_>>();
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.lower(&parsed.syntax().body, &lines, false)?;
+        code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         Ok(self.box_source_code(Rc::new(code), None))
     }
 
@@ -322,12 +487,11 @@ impl Context {
     }
 
     fn box_source_code(&mut self, program: Rc<Program>, parameters: Option<Id>) -> Id {
-        let name = self.text(&program.name);
+        let name = self.heap.code_name(&program.name);
         let filename = self.text(program.filename.as_ref());
         let doc = program
             .doc
-            .as_ref()
-            .map(|value| self.text(value))
+            .and_then(|range| program.strings.get(&range).copied())
             .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
             name,
@@ -695,9 +859,20 @@ impl Context {
         };
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
-        let [ast::Stmt::FunctionDef(def)] = parsed.syntax().body.as_slice() else {
+        let mut syntax = parsed.into_syntax();
+        let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
         };
+        #[derive(serde::Deserialize)]
+        struct Signature<'a> {
+            #[serde(borrow)]
+            private_scope: Option<(&'a str, bool)>,
+        }
+        let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
+            .map_err(|_| Error::new("SystemError", "invalid generator signature"))?;
+        if let Some((owner, postponed)) = signature.private_scope {
+            imre_ast::lower_in(&mut def.body, owner, postponed);
+        }
         let lines = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
             .collect::<Vec<_>>();
@@ -711,6 +886,7 @@ impl Context {
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
+        program.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         let Value::Code(code) = self.heap.get_mut(id) else {
             unreachable!()
         };
@@ -1088,6 +1264,33 @@ impl Context {
         self.source_bool_operand(code, scope, last)
     }
 
+    /// Return the comparison result and whether an earlier comparison already tested false.
+    fn source_comparison(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        comparison: &ast::ExprCompare,
+    ) -> Result<(Id, bool)> {
+        let mut left = self.source_expr(code, scope, &comparison.operands[0])?;
+        for (index, (op, right)) in comparison
+            .ops
+            .iter()
+            .zip(&comparison.operands[1..])
+            .enumerate()
+        {
+            let right = self.source_expr(code, scope, right)?;
+            let result = self.op(op.as_str(), left, right, NONE)?;
+            if index + 1 == comparison.ops.len() {
+                return Ok((result, false));
+            }
+            if !self.truth(result)? {
+                return Ok((result, true));
+            }
+            left = right;
+        }
+        unreachable!("comparison has at least one operator")
+    }
+
     /// Evaluate a branch condition without testing a short-circuited operand twice.
     fn source_condition(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<bool> {
         if let ast::Expr::UnaryOp(op) = expr
@@ -1095,8 +1298,25 @@ impl Context {
         {
             return Ok(!self.source_condition(code, scope, &op.operand)?);
         }
-        let (value, known) = self.source_bool_operand(code, scope, expr)?;
-        known.map_or_else(|| self.truth(value), Ok)
+        if let ast::Expr::BoolOp(op) = expr {
+            let stop = op.op == ast::BoolOp::Or;
+            for operand in &op.values {
+                if self.source_condition(code, scope, operand)? == stop {
+                    return Ok(stop);
+                }
+            }
+            return Ok(!stop);
+        }
+        if let ast::Expr::Compare(comparison) = expr {
+            let (value, stopped) = self.source_comparison(code, scope, comparison)?;
+            return if stopped {
+                Ok(false)
+            } else {
+                self.truth(value)
+            };
+        }
+        let value = self.source_expr(code, scope, expr)?;
+        self.truth(value)
     }
 
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
@@ -1118,10 +1338,13 @@ impl Context {
                 }
                 self.lookup(scope, name)
             }
-            Expr::StringLiteral(v) => Ok(self.text(v.value.to_string())),
+            Expr::StringLiteral(v) => Ok(code.strings[&v.range()]),
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {
+                if let ast::Number::Float(value) = &v.value {
+                    return Ok(self.alloc(Value::Float(*value)));
+                }
                 let ast::Number::Int(n) = &v.value else {
                     return Err(unsupported("noninteger literal"));
                 };
@@ -1190,18 +1413,7 @@ impl Context {
                 };
                 self.op(op, value, NONE, NONE)
             }
-            Expr::Compare(v) => {
-                let mut left = eval(self, &v.operands[0])?;
-                for (index, (op, right)) in v.ops.iter().zip(&v.operands[1..]).enumerate() {
-                    let right = eval(self, right)?;
-                    let result = self.op(op.as_str(), left, right, NONE)?;
-                    if index + 1 == v.ops.len() || !self.truth(result)? {
-                        return Ok(result);
-                    }
-                    left = right;
-                }
-                unreachable!("comparison has at least one operator")
-            }
+            Expr::Compare(v) => Ok(self.source_comparison(code, scope, v)?.0),
             Expr::If(v) => {
                 let branch = if self.source_condition(code, scope, &v.test)? {
                     &v.body

@@ -648,8 +648,51 @@ pub(super) fn ascii_decode_error(bytes: crate::BytesOwner, index: usize) -> Erro
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
 pub(super) fn decode_owned_error(value: crate::BytesOwner, error: std::str::Utf8Error) -> Error {
-    let (range, reason, message) = utf8_error_details(&value, error);
-    Error::unicode_decode("utf-8", value, range, reason, message)
+    Utf8Issue::new(&value, 0, error).owned_error(value)
+}
+
+/// A failing UTF-8 sequence uses offsets in the whole input, including after resuming.
+pub(crate) struct Utf8Issue {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) reason: &'static str,
+}
+
+impl Utf8Issue {
+    pub(super) fn new(data: &[u8], offset: usize, error: std::str::Utf8Error) -> Self {
+        let start = offset + error.valid_up_to();
+        let end = error
+            .error_len()
+            .map_or(data.len(), |length| start + length);
+        let reason = match error.error_len() {
+            None => "unexpected end of data",
+            Some(_) if !(0xc2..=0xf4).contains(&data[start]) => "invalid start byte",
+            _ => "invalid continuation byte",
+        };
+        Self { start, end, reason }
+    }
+
+    fn message(&self, data: &[u8]) -> String {
+        let Self { start, end, reason } = *self;
+        let location = if end == start + 1 {
+            format!("byte 0x{:02x} in position {start}", data[start])
+        } else {
+            format!("bytes in position {start}-{}", end - 1)
+        };
+        format!("'utf-8' codec can't decode {location}: {reason}")
+    }
+
+    fn owned_error(&self, value: crate::BytesOwner) -> Error {
+        let message = self.message(&value);
+        Error::unicode_decode("utf-8", value, self.start..self.end, self.reason, message)
+    }
+
+    pub(crate) fn error(&self, data: &[u8]) -> Error {
+        match owned_input(data) {
+            Ok(bytes) => self.owned_error(bytes),
+            Err(error) => error,
+        }
+    }
 }
 
 /// Describe invalid UTF-8 without copying the input into a Python bytes object.
@@ -657,27 +700,8 @@ pub(super) fn utf8_error_details(
     value: &[u8],
     error: std::str::Utf8Error,
 ) -> (std::ops::Range<usize>, &'static str, String) {
-    let start = error.valid_up_to();
-    let end = error
-        .error_len()
-        .map_or(value.len(), |length| start + length);
-    let reason = if error.error_len().is_none() {
-        "unexpected end of data"
-    } else if !(0xc2..=0xf4).contains(&value[start]) {
-        "invalid start byte"
-    } else {
-        "invalid continuation byte"
-    };
-    let location = if end == start + 1 {
-        format!("byte 0x{:02x} in position {start}", value[start])
-    } else {
-        format!("bytes in position {start}-{}", end - 1)
-    };
-    (
-        start..end,
-        reason,
-        format!("'utf-8' codec can't decode {location}: {reason}"),
-    )
+    let issue = Utf8Issue::new(value, 0, error);
+    (issue.start..issue.end, issue.reason, issue.message(value))
 }
 
 /// # Safety

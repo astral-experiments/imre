@@ -16,6 +16,16 @@ class ReportsString:
 
 
 def current():
+    from copy import deepcopy
+
+    shared = []
+    graph = [shared, shared]
+    assert id(graph[0]) == id(shared) and id(graph) != id(shared)
+    memo = {}
+    clone = deepcopy(graph, memo)
+    assert clone is memo[id(graph)] and clone[0] is clone[1] is memo[id(shared)]
+    assert clone is not graph and clone[0] is not shared
+
     class Reporter:
         def render(self):
             return self

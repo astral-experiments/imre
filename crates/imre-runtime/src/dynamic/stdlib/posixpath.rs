@@ -64,7 +64,7 @@ fn normpath(ctx: &mut Context, path: Id) -> Result<Id> {
     Ok(ctx.alloc(result))
 }
 
-fn isfile(ctx: &mut Context, path: Id) -> Result<bool> {
+fn stat_predicate(ctx: &mut Context, path: Id, file_only: bool) -> Result<bool> {
     if !spelling(ctx, path)
         && let Some(index) = ctx.index_value(path)?
     {
@@ -85,7 +85,7 @@ fn isfile(ctx: &mut Context, path: Id) -> Result<bool> {
         // SAFETY: fstat initializes the full buffer on success and never takes ownership of fd.
         return Ok(unsafe {
             libc::fstat(fd, stat.as_mut_ptr()) == 0
-                && stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFREG
+                && (!file_only || stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFREG)
         });
     }
     let value = path_arg(
@@ -98,7 +98,11 @@ fn isfile(ctx: &mut Context, path: Id) -> Result<bool> {
         Value::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
         _ => unreachable!(),
     };
-    Ok(crate::objects::is_file(path))
+    Ok(if file_only {
+        crate::objects::is_file(path)
+    } else {
+        crate::objects::exists(path)
+    })
 }
 
 pub(super) fn call(
@@ -144,7 +148,9 @@ pub(super) fn call(
             };
             Ok(ctx.int(cut as i64))
         }
-        "_imre_posixpath.isfile" => Ok(super::super::builtins::boolean(isfile(ctx, path)?)),
+        "_imre_posixpath.exists" | "_imre_posixpath.isfile" => Ok(super::super::builtins::boolean(
+            stat_predicate(ctx, path, name == "_imre_posixpath.isfile")?,
+        )),
         _ => unreachable!(),
     }
 }

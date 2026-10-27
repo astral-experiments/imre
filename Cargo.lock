@@ -642,10 +642,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "imre-ast"
+version = "0.1.3"
+dependencies = [
+ "ruff_python_ast",
+ "ruff_python_stdlib",
+ "ruff_text_size",
+]
+
+[[package]]
 name = "imre-compiler"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "blake3",
+ "imre-ast",
  "imre-regex",
  "libc",
  "notify",
@@ -673,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "imre-regex"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "regex",
  "regex-syntax",
@@ -681,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "imre-runtime"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "allocator-api2",
  "base64",
@@ -694,6 +704,7 @@ dependencies = [
  "glidesort",
  "hashbrown 0.17.1",
  "icu_properties",
+ "imre-ast",
  "imre-regex",
  "indexmap",
  "itoa",
@@ -729,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "imre-runtime-jemalloc"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "imre-runtime",
  "tikv-jemallocator",

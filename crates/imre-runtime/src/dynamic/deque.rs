@@ -9,7 +9,10 @@ pub(super) const METHODS: &[&str] = &[
     "append",
     "appendleft",
     "clear",
+    "copy",
+    "__copy__",
     "extend",
+    "extendleft",
     "remove",
     "pop",
     "popleft",
@@ -117,7 +120,7 @@ fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]
     ring.maxlen = maxlen;
     clear(ctx, queue);
     if let Some(source) = iterable {
-        extend(ctx, queue, source)?;
+        extend(ctx, queue, source, false)?;
     }
     Ok(())
 }
@@ -133,7 +136,7 @@ fn clear(ctx: &mut Context, queue: Id) {
 }
 
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
-fn extend(ctx: &mut Context, queue: Id, source: Id) -> Result<()> {
+fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Result<()> {
     let source = if queue == source {
         let items = ctx.items(source)?;
         ctx.alloc(Value::Tuple(items))
@@ -145,7 +148,7 @@ fn extend(ctx: &mut Context, queue: Id, source: Id) -> Result<()> {
         let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
             unreachable!()
         };
-        if let Some(removed) = ring.push(false, true, || item)? {
+        if let Some(removed) = ring.push(left, true, || item)? {
             ctx.heap.weak_edge_removed(removed);
         }
     }
@@ -160,11 +163,14 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
         return Ok(op == "==");
     }
 
+    enum Cursor {
+        Deque(Id, Id),
+        Sequence(usize),
+    }
     struct Frame {
         left: Id,
         right: Id,
-        left_iter: Id,
-        right_iter: Id,
+        cursor: Cursor,
         equal_op: bool,
         roots: usize,
         element_roots: usize,
@@ -177,6 +183,7 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
     let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
         let mut active: HashMap<(Id, Id), usize> = HashMap::new();
         let mut frames: Vec<Frame> = Vec::new();
+        let mut deque_depth = 0;
         let mut request = Some((left, right, op == "=="));
         let mut answer: Option<bool> = None;
         loop {
@@ -185,10 +192,18 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     answer = Some(equal_op);
                     continue;
                 }
-                let (Value::Deque(x), Value::Deque(y)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
-                    unreachable!()
+                let is_deque = matches!(
+                    (ctx.heap.get(a), ctx.heap.get(b)),
+                    (Value::Deque(_), Value::Deque(_))
+                );
+                let unequal = match (ctx.heap.get(a), ctx.heap.get(b)) {
+                    (Value::Deque(x), Value::Deque(y)) => x.items.len() != y.items.len(),
+                    (Value::List(x), Value::List(y)) | (Value::Tuple(x), Value::Tuple(y)) => {
+                        x.len() != y.len()
+                    }
+                    _ => unreachable!(),
                 };
-                if x.items.len() != y.items.len() {
+                if unequal {
                     answer = Some(!equal_op);
                     continue;
                 }
@@ -196,28 +211,45 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 let repeats = active.get(&(a, b)).copied().unwrap_or(0);
-                if repeats > 0 && frames.len() + ctx.call_depth >= 1000 {
-                    return Err(Error::new(
-                        "RecursionError",
-                        "maximum comparison depth exceeded",
-                    ));
+                if repeats > 0 {
+                    let previous = frames
+                        .iter()
+                        .rposition(|frame| frame.left == a && frame.right == b)
+                        .unwrap();
+                    let crosses_deque = is_deque
+                        || frames[previous + 1..]
+                            .iter()
+                            .any(|frame| matches!(frame.cursor, Cursor::Deque(..)));
+                    if !crosses_deque || deque_depth + ctx.call_depth >= 1000 {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum comparison depth exceeded",
+                        ));
+                    }
                 }
                 active.insert((a, b), repeats + 1);
+                if is_deque {
+                    deque_depth += 1;
+                }
                 frames
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 let mark = ctx.heap.temporary_mark();
                 ctx.heap.keep(a);
                 ctx.heap.keep(b);
-                let left_iter = ctx.iterator(a)?;
-                ctx.heap.keep(left_iter);
-                let right_iter = ctx.iterator(b)?;
-                ctx.heap.keep(right_iter);
+                let cursor = if is_deque {
+                    let left_iter = ctx.iterator(a)?;
+                    ctx.heap.keep(left_iter);
+                    let right_iter = ctx.iterator(b)?;
+                    ctx.heap.keep(right_iter);
+                    Cursor::Deque(left_iter, right_iter)
+                } else {
+                    Cursor::Sequence(0)
+                };
                 frames.push(Frame {
                     left: a,
                     right: b,
-                    left_iter,
-                    right_iter,
+                    cursor,
                     equal_op,
                     roots: mark,
                     element_roots: ctx.heap.temporary_mark(),
@@ -231,12 +263,30 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                 };
                 let (x, y, final_pass) = parent.pending.take().expect("waiting parent");
                 if !final_pass && !value {
-                    parent.pending = Some((x, y, true));
-                    request = Some((x, y, parent.equal_op));
+                    if matches!(parent.cursor, Cursor::Sequence(_)) {
+                        let value = !parent.equal_op;
+                        let parent = frames.pop().unwrap();
+                        if matches!(parent.cursor, Cursor::Deque(..)) {
+                            deque_depth -= 1;
+                        }
+                        let count = active.get_mut(&(parent.left, parent.right)).unwrap();
+                        *count -= 1;
+                        if *count == 0 {
+                            active.remove(&(parent.left, parent.right));
+                        }
+                        ctx.heap.release_temporaries_since(parent.roots);
+                        answer = Some(value);
+                    } else {
+                        parent.pending = Some((x, y, true));
+                        request = Some((x, y, parent.equal_op));
+                    }
                 } else if !final_pass {
                     ctx.heap.release_temporaries_since(parent.element_roots);
                 } else {
                     let parent = frames.pop().unwrap();
+                    if matches!(parent.cursor, Cursor::Deque(..)) {
+                        deque_depth -= 1;
+                    }
                     let count = active.get_mut(&(parent.left, parent.right)).unwrap();
                     *count -= 1;
                     if *count == 0 {
@@ -249,11 +299,43 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
             }
             let frame = frames.last_mut().expect("active comparison");
             ctx.heap.release_temporaries_since(frame.element_roots);
-            let x = ctx.next_item(frame.left_iter)?;
-            let y = ctx.next_item(frame.right_iter)?;
+            let (x, y) = match &mut frame.cursor {
+                Cursor::Deque(left_iter, right_iter) => {
+                    (ctx.next_item(*left_iter)?, ctx.next_item(*right_iter)?)
+                }
+                Cursor::Sequence(index) => {
+                    let (a, b) = match (ctx.heap.get(frame.left), ctx.heap.get(frame.right)) {
+                        (Value::List(a), Value::List(b)) | (Value::Tuple(a), Value::Tuple(b)) => {
+                            (a, b)
+                        }
+                        _ => unreachable!(),
+                    };
+                    if a.len() != b.len() {
+                        let value = !frame.equal_op;
+                        let frame = frames.pop().unwrap();
+                        if matches!(frame.cursor, Cursor::Deque(..)) {
+                            deque_depth -= 1;
+                        }
+                        let count = active.get_mut(&(frame.left, frame.right)).unwrap();
+                        *count -= 1;
+                        if *count == 0 {
+                            active.remove(&(frame.left, frame.right));
+                        }
+                        ctx.heap.release_temporaries_since(frame.roots);
+                        answer = Some(value);
+                        continue;
+                    }
+                    let result = (a.get(*index).copied(), b.get(*index).copied());
+                    *index += 1;
+                    result
+                }
+            };
             let (Some(x), Some(y)) = (x, y) else {
                 let value = if frame.equal_op { x == y } else { x != y };
                 let frame = frames.pop().unwrap();
+                if matches!(frame.cursor, Cursor::Deque(..)) {
+                    deque_depth -= 1;
+                }
                 let count = active.get_mut(&(frame.left, frame.right)).unwrap();
                 *count -= 1;
                 if *count == 0 {
@@ -265,18 +347,28 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
             };
             ctx.heap.keep(x);
             ctx.heap.keep(y);
-            if matches!(ctx.heap.get(x), Value::Deque(_))
-                && matches!(ctx.heap.get(y), Value::Deque(_))
-            {
+            if matches!(
+                (ctx.heap.get(x), ctx.heap.get(y)),
+                (Value::Deque(_), Value::Deque(_))
+                    | (Value::List(_), Value::List(_))
+                    | (Value::Tuple(_), Value::Tuple(_))
+            ) {
                 frame.pending = Some((x, y, false));
                 request = Some((x, y, true));
                 continue;
             }
             if !ctx.checked_equal(x, y)? {
-                let operation = if frame.equal_op { "==" } else { "!=" };
-                let value = ctx.binary(operation, x, y)?;
-                let value = ctx.truth(value)?;
+                let value = if matches!(frame.cursor, Cursor::Sequence(_)) {
+                    !frame.equal_op
+                } else {
+                    let operation = if frame.equal_op { "==" } else { "!=" };
+                    let value = ctx.binary(operation, x, y)?;
+                    ctx.truth(value)?
+                };
                 let frame = frames.pop().unwrap();
+                if matches!(frame.cursor, Cursor::Deque(..)) {
+                    deque_depth -= 1;
+                }
                 let count = active.get_mut(&(frame.left, frame.right)).unwrap();
                 *count -= 1;
                 if *count == 0 {
@@ -388,7 +480,10 @@ pub(super) fn method(
         }
         _ => {}
     }
-    if matches!(name, "append" | "appendleft" | "extend" | "remove") {
+    if matches!(
+        name,
+        "append" | "appendleft" | "extend" | "extendleft" | "remove"
+    ) {
         let [item] = rest else {
             return Err(Error::new(
                 "TypeError",
@@ -399,7 +494,7 @@ pub(super) fn method(
             ));
         };
         match name {
-            "extend" => extend(ctx, receiver, *item)?,
+            "extend" | "extendleft" => extend(ctx, receiver, *item, name == "extendleft")?,
             "remove" => remove(ctx, receiver, *item)?,
             _ => {
                 if let Some(removed) = ring.push(name == "appendleft", false, || *item)? {
@@ -419,6 +514,10 @@ pub(super) fn method(
         "clear" => {
             clear(ctx, receiver);
             Ok(NONE)
+        }
+        "copy" | "__copy__" => {
+            let copy = ring.shallow_copy()?;
+            Ok(ctx.alloc(Value::Deque(Box::new(copy))))
         }
         "reverse" => {
             ring.reverse();

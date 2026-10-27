@@ -216,6 +216,24 @@ impl Context {
         self.class_attr(self.heap.get(object).instance_class()?, name)
     }
 
+    /// Construct a cache with an independently traced dictionary and keyword marker.
+    pub(super) fn cached_function(&mut self, function: Id) -> Id {
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(function);
+        let table = self.dict(Vec::new());
+        self.heap.keep(table);
+        let marker = self.alloc(Value::Native("functools._cache_marker".into()));
+        self.heap.keep(marker);
+        let result = self.alloc(Value::Cached {
+            function,
+            entries: Vec::new(),
+            table,
+            marker,
+        });
+        self.heap.release_temporaries_since(mark);
+        result
+    }
+
     /// Return dictionary storage when the receiver still uses the builtin iterator.
     pub(super) fn raw_dict_source(&self, value: Id) -> Option<Id> {
         self.dict_storage(value).filter(|_| {
@@ -423,6 +441,7 @@ impl Context {
                             | "list.index"
                             | "list.pop"
                             | "list.clear"
+                            | "list.copy"
                             | "list.reverse"
                             | "list.sort"
                             | "map.__iter__"
@@ -630,6 +649,7 @@ impl Context {
             Value::DefaultDict { .. } => "collections.defaultdict",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
+            Value::Filter { .. } => "filter",
             Value::Weak(wr) => wr.kind.class(),
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
@@ -648,6 +668,7 @@ impl Context {
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
+            Value::MappingProxy(_) => "mappingproxy",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
@@ -685,6 +706,7 @@ impl Context {
                             | "bytearray_iterator"
                             | "range_iterator"
                             | "getset_descriptor"
+                            | "mappingproxy"
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
                             | "operator.itemgetter"
@@ -833,6 +855,7 @@ impl Context {
             | ("slice", Value::Slice(_))
             | ("range", Value::Range(_))
             | ("map", Value::Map { .. })
+            | ("filter", Value::Filter { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
@@ -1400,9 +1423,9 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(class) if class == "map" => match name {
-                "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
-                "__name__" | "__qualname__" => return Ok(self.text("map")),
+            Value::Native(class) if matches!(class.as_str(), "map" | "filter") => match name {
+                "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text(&class)),
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
@@ -1652,8 +1675,10 @@ impl Context {
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
             }
-            Value::Native(class) if class == "collections.defaultdict" && name == "copy" => {
-                return Ok(self.builtin("collections.defaultdict.copy"));
+            Value::Native(class)
+                if class == "collections.defaultdict" && matches!(name, "copy" | "__copy__") =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(class)
                 if name == "fromkeys"
@@ -1673,7 +1698,10 @@ impl Context {
             }
             Value::Native(class)
                 if class == "list"
-                    && matches!(name, "clear" | "index" | "pop" | "reverse" | "sort") =>
+                    && matches!(
+                        name,
+                        "clear" | "copy" | "index" | "pop" | "reverse" | "sort"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("list.{name}")));
             }
@@ -1754,6 +1782,9 @@ impl Context {
                 scope,
                 ..
             } => {
+                if name == "__dict__" {
+                    return Ok(self.class_dictionary(scope));
+                }
                 if name == "__annotations__"
                     && let Some(thunks) = self
                         .scope_data(scope)
@@ -2422,6 +2453,12 @@ impl Context {
                 }
             }
             Value::Class { scope, .. } => {
+                if name == "__dict__" {
+                    return Err(Error::new(
+                        "AttributeError",
+                        "attribute '__dict__' of 'type' objects is not writable",
+                    ));
+                }
                 let scope = *scope;
                 if name == "__annotations__"
                     && let Value::Scope(data) = self.heap.get_mut(scope)
@@ -2596,6 +2633,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "map"
+                                | "filter"
                                 | "set"
                                 | "int"
                                 | "frozenset"
@@ -2671,46 +2709,124 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
-            Value::Cached { function, .. } => {
-                for &value in args.iter().chain(kwargs.iter().map(|(_, value)| value)) {
-                    self.dictionary_hash(value)?;
-                }
-                // A hash hook can call this wrapper and evict earlier entries.
-                let Value::Cached { entries, .. } = self.heap.get(callable) else {
-                    unreachable!()
-                };
-                let hit = entries.iter().position(|call| {
-                    call.args.len() == args.len()
-                        && call.args.iter().zip(&args).all(|(&x, &y)| self.equal(x, y))
-                        && call.kwargs.len() == kwargs.len()
-                        && call
-                            .kwargs
-                            .iter()
-                            .zip(&kwargs)
-                            .all(|((kx, x), (ky, y))| kx == ky && self.equal(*x, *y))
-                });
-                if let Some(i) = hit {
+            Value::Cached {
+                function,
+                table,
+                marker,
+                ..
+            } => {
+                let mark = self.heap.temporary_mark();
+                let result = (|| -> Result<Id> {
+                    self.heap.keep(callable);
+                    self.heap.keep(table);
+                    let fast = args.len() == 1
+                        && kwargs.is_empty()
+                        && matches!(self.heap.get(args[0]), Value::Int(_) | Value::Str(_));
+                    let mut parts = args.clone();
+                    if !kwargs.is_empty() {
+                        parts.push(marker);
+                        for (name, value) in &kwargs {
+                            let name = self.text(name.clone());
+                            self.heap.keep(name);
+                            parts.push(name);
+                            parts.push(*value);
+                        }
+                    }
+                    for &part in &parts {
+                        self.heap.keep(part);
+                    }
+                    let key = if fast {
+                        args[0]
+                    } else {
+                        self.alloc(Value::Tuple(parts))
+                    };
+                    self.heap.keep(key);
+                    let hash = self.dictionary_hash(key)?;
+                    if let Some(index) = self.find_dictionary_key(table, key, Some(hash))?.1 {
+                        let (resident, value) = self.dict_entries(table).unwrap()[index];
+                        let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
+                            unreachable!()
+                        };
+                        if let Some(i) = entries.iter().position(|call| call.key == resident) {
+                            let hit = entries.remove(i);
+                            entries.push(hit);
+                        }
+                        return Ok(value);
+                    }
+                    let result = self.call(function, args.clone(), kwargs.clone())?;
+                    self.heap.keep(result);
+                    if self
+                        .find_dictionary_key(table, key, Some(hash))?
+                        .1
+                        .is_some()
+                    {
+                        return Ok(result);
+                    }
+                    let evicted = {
+                        let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
+                            unreachable!()
+                        };
+                        if entries.len() >= 128 {
+                            Some(entries.remove(0))
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(old) = evicted {
+                        self.heap.keep(old.key);
+                        if let Some(i) = self.find_dictionary_key(table, old.key, Some(old.hash))?.1
+                        {
+                            let Value::Dict(entries) = self.heap.get_mut(table) else {
+                                unreachable!()
+                            };
+                            let (key, value) = entries.remove(i);
+                            self.heap.weak_edge_removed(key);
+                            self.heap.weak_edge_removed(value);
+                        }
+                    }
+                    let resident = self.set_cache_key(table, key, result, hash)?;
+                    {
+                        let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
+                            unreachable!()
+                        };
+                        if let Some(i) = entries.iter().position(|entry| entry.key == resident) {
+                            entries.remove(i);
+                        }
+                    }
+                    loop {
+                        let old = {
+                            let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
+                                unreachable!()
+                            };
+                            if entries.len() >= 128 {
+                                Some(entries.remove(0))
+                            } else {
+                                None
+                            }
+                        };
+                        let Some(old) = old else { break };
+                        self.heap.keep(old.key);
+                        if let Some(i) = self.find_dictionary_key(table, old.key, Some(old.hash))?.1
+                        {
+                            let Value::Dict(entries) = self.heap.get_mut(table) else {
+                                unreachable!()
+                            };
+                            let (key, value) = entries.remove(i);
+                            self.heap.weak_edge_removed(key);
+                            self.heap.weak_edge_removed(value);
+                        }
+                    }
                     let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
                         unreachable!()
                     };
-                    let hit = entries.remove(i);
-                    let result = hit.result;
-                    entries.push(hit);
-                    return Ok(result);
-                }
-                let result = self.call(function, args.clone(), kwargs.clone())?;
-                let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
-                    unreachable!()
-                };
-                if entries.len() == 128 {
-                    entries.remove(0);
-                }
-                entries.push(value::CachedCall {
-                    args,
-                    kwargs,
-                    result,
-                });
-                Ok(result)
+                    entries.push(value::CachedCall {
+                        key: resident,
+                        hash,
+                    });
+                    Ok(result)
+                })();
+                self.heap.release_temporaries_since(mark);
+                result
             }
             Value::Class {
                 name,

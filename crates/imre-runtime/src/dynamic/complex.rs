@@ -45,7 +45,7 @@ impl Context {
     }
 
     /// Convert a real numeric operand without truncating floats or overflowing large integers.
-    fn real_component(&self, value: Id) -> Result<Option<f64>> {
+    pub(super) fn real_component(&self, value: Id) -> Result<Option<f64>> {
         match self.heap.get(value) {
             Value::Float(f) => Ok(Some(*f)),
             Value::Int(_) | Value::Bool(_) => {
