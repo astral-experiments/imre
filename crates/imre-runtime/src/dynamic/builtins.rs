@@ -10,7 +10,7 @@ mod float;
 mod integer;
 mod print;
 mod text;
-pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, view_items};
+pub(super) use collections::{hashable, remove_dict_item, set_add, set_member};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 macro_rules! exception_kinds {
