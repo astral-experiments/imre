@@ -1439,6 +1439,26 @@ impl Context {
         }
     }
 
+    /// Bytearray repr includes the receiver's class name even for an explicit base slot call.
+    pub(super) fn bytearray_repr(&self, object: Id, bytes: &[u8]) -> String {
+        let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
+            '"'
+        } else {
+            '\''
+        };
+        let mut output = format!("{}(b{quote}", self.type_name(object));
+        for &byte in bytes {
+            if byte == b'"' {
+                output.push('"');
+            } else {
+                output.extend(std::ascii::escape_default(byte).map(char::from));
+            }
+        }
+        output.push(quote);
+        output.push(')');
+        output
+    }
+
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
@@ -1570,24 +1590,7 @@ impl Context {
                 crate::objects::write_bytes_repr(&mut output, bytes);
                 output
             }
-            Value::ByteArray(bytes) => {
-                let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
-                    '"'
-                } else {
-                    '\''
-                };
-                let mut output = format!("bytearray(b{quote}");
-                for &byte in bytes {
-                    if byte == b'"' {
-                        output.push('"');
-                    } else {
-                        output.extend(std::ascii::escape_default(byte).map(char::from));
-                    }
-                }
-                output.push(quote);
-                output.push(')');
-                output
-            }
+            Value::ByteArray(bytes) => self.bytearray_repr(id, bytes),
             Value::Instance {
                 dictionary: Some(backing),
                 ..

@@ -235,6 +235,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "__repr__",
     "capitalize",
     "encode",
     "endswith",
@@ -282,12 +283,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Bytes(_)
             if matches!(
                 attr,
-                "__mod__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
+                "__mod__" | "__repr__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
             ) =>
         {
             "bytes"
         }
-        Value::ByteArray(_) if matches!(attr, "decode" | "extend" | "translate") => "bytearray",
+        Value::ByteArray(_) if matches!(attr, "__repr__" | "decode" | "extend" | "translate") => {
+            "bytearray"
+        }
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
@@ -768,6 +771,9 @@ pub(super) fn call(
             }
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
+            }
+            "str" | "bytes" | "bytearray" if method == "__repr__" => {
+                collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
