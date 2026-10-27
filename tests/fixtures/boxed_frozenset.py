@@ -39,6 +39,9 @@ def current():
     equal_alias = GenericAlias(list, (0,))
     assert alias == equal_alias and equal_alias in {alias}
     assert {alias: "value"}[equal_alias] == "value"
+    values = {1, 2}
+    assert values.discard(1) is None and values == {2}
+    assert values.discard(3) is None and values == {2}
     print("ok")
 
 
