@@ -242,10 +242,7 @@ impl Context {
             if name.starts_with('_') {
                 continue;
             }
-            if matches!(
-                self.heap.get(raw),
-                Value::Property(_) | Value::Function { .. } | Value::StaticMethod { .. }
-            ) {
+            if self.is_enum_descriptor(raw)? {
                 continue;
             }
             let (member, value) = if let Some(base) = base {
@@ -267,6 +264,27 @@ impl Context {
             self.bind(scope, &name, canonical);
         }
         Ok(())
+    }
+
+    /// Enum checks for descriptor attributes on the value itself, in Python lookup order.
+    fn is_enum_descriptor(&mut self, value: Id) -> Result<bool> {
+        if matches!(
+            self.heap.get(value),
+            Value::Property(_)
+                | Value::Function { .. }
+                | Value::StaticMethod { .. }
+                | Value::ClassMethod(_)
+        ) {
+            return Ok(true);
+        }
+        for name in ["__get__", "__set__", "__delete__"] {
+            match self.lookup_attr(value, name) {
+                Ok(_) => return Ok(true),
+                Err(error) if self.is_attribute_error(&error) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(false)
     }
 
     fn scalar_member(&mut self, class: Id, base: Id, new: Option<Id>, raw: Id) -> Result<(Id, Id)> {
