@@ -273,3 +273,53 @@ def current():
             method(*args)
         except TypeError as error:
             print(error.args)
+
+    class RefusingHash:
+        def __hash__(self):
+            raise RuntimeError("hash interrupted")
+
+    class Colliding:
+        def __hash__(self):
+            return 17
+
+        def __eq__(self, other):
+            raise ValueError("comparison interrupted")
+
+    class EqualOnly:
+        def __eq__(self, other):
+            return True
+
+    for key in (RefusingHash(), Colliding(), EqualOnly()):
+        target = {Colliding(): "old"}
+        try:
+            target.update([("first", 1), (key, "new"), ("late", 2)])
+        except Exception as error:
+            print(type(error).__name__, list(target.values()))
+
+    class Reentrant:
+        def __hash__(self):
+            return 9
+
+        def __eq__(self, other):
+            delitem(target, self)
+            for _ in range(6000):
+                []
+            return True
+
+    target = {Reentrant(): "old"}
+    target[Reentrant()] = "new"
+    print(list(target.values()))
+
+    class Once:
+        def __init__(self):
+            self.calls = 0
+
+        def __hash__(self):
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("rehashed a stored key")
+            return 5
+
+    once = Once()
+    source = {once: "value"}
+    print(list(dict(source).values()), once.calls)

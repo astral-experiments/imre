@@ -842,6 +842,7 @@ impl DictIterator {
 pub(super) struct Heap {
     slots: Vec<Option<Value>>,
     free: Vec<usize>,
+    pub(super) immutable_hashes: HashMap<Id, i64>,
     frames: Vec<Frame>,
     next_collection: usize,
 }
@@ -881,6 +882,7 @@ impl Heap {
                 Some(Value::NotImplemented),
             ],
             free: Vec::new(),
+            immutable_hashes: HashMap::new(),
             frames: vec![Frame::new(NONE, NONE, NONE)],
             next_collection: 4096,
         }
@@ -992,6 +994,7 @@ impl Heap {
         }
         for (id, alive) in marked.into_iter().enumerate() {
             if !alive && self.slots[id].take().is_some() {
+                self.immutable_hashes.remove(&(id as Id));
                 self.free.push(id);
             }
         }

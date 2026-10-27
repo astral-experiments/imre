@@ -37,8 +37,9 @@ impl Context {
     pub(super) fn for_each_mapping_item(
         &mut self,
         input: Id,
+        target: Id,
         operation: MappingOperation,
-        mut visit: impl FnMut(&mut Self, Id, Id) -> Result<()>,
+        mut visit: impl FnMut(&mut Self, Id, Id, Option<i64>) -> Result<()>,
     ) -> Result<bool> {
         // dict.update probes for keys before choosing a merge or a sequence of pairs.
         // A later mapping lookup may return a different method or raise.
@@ -54,10 +55,29 @@ impl Context {
         }
         if self.slot(input, "__iter__").is_none_or(
             |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
-        ) && let Some(entries) = self.dict_entries(input).map(<[_]>::to_vec)
+        ) && let Some(storage) = self.dict_storage(input)
         {
-            for (key, value) in entries {
-                visit(self, key, value)?;
+            if storage == target {
+                return Ok(true);
+            }
+            let used = self
+                .dict_entries(storage)
+                .expect("dictionary storage")
+                .len();
+            let mut position = 0;
+            while let Some((current, key, value, hash)) = self.dictionary_pair(storage, position) {
+                self.heap.keep(key);
+                self.heap.keep(value);
+                visit(self, key, value, hash)?;
+                if self
+                    .dict_entries(storage)
+                    .expect("dictionary storage")
+                    .len()
+                    != used
+                {
+                    return Err(Error::new("RuntimeError", "dict mutated during update"));
+                }
+                position = current + 1;
             }
             return Ok(true);
         }
@@ -96,7 +116,7 @@ impl Context {
         while let Some(key) = self.next_item(iterator)? {
             self.heap.keep(key);
             let value = self.get_item(input, key)?;
-            visit(self, key, value)?;
+            visit(self, key, value, None)?;
         }
         Ok(true)
     }
