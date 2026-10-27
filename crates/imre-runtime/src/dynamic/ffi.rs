@@ -137,7 +137,7 @@ impl Context {
                 }
                 self.lookup(a, &name)
             }
-            "assign" | "assign_expr" => {
+            "assign" | "assign_expr" | "assign_target" => {
                 let mut scope = a;
                 if op == "assign_expr" {
                     while self.scope_data(scope).is_comprehension {
@@ -149,8 +149,13 @@ impl Context {
                 }
                 let name = self.str_value(b)?.to_owned();
                 let value = self.enum_assignment(scope, &name, c)?;
+                let result = if op == "assign_target" {
+                    flag(self.replacing_writer(scope, &name, value))
+                } else {
+                    c
+                };
                 self.bind_source_name(scope, &name, value)?;
-                Ok(c)
+                Ok(result)
             }
             "declare_global" => {
                 let name = self.str_value(b)?.to_owned();
@@ -1109,10 +1114,11 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
     ctx: *mut Context,
     live: *const Id,
     len: usize,
+    replaced: Id,
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live) {
+    if ctx.heap.assignment_target(live, replaced == TRUE) {
         ctx.collect_unreachable();
     }
 }
@@ -1154,6 +1160,20 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 }
 
 impl Context {
+    /// Check the old binding without calling a Python mapping's lookup hook.
+    fn replacing_writer(&self, scope: Id, name: &str, value: Id) -> bool {
+        if !self.heap.has_file_writers() {
+            return false;
+        }
+        let scope = self.binding_scope(scope, name);
+        let data = self.scope_data(scope);
+        data.exec_locals.is_some()
+            || data.exec_globals.is_some()
+            || self
+                .scope_name(scope, name)
+                .is_some_and(|old| old != value && self.heap.could_own_writer(old, false))
+    }
+
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
         (
             &mut self.heap,

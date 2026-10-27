@@ -717,10 +717,20 @@ impl Function<'_, '_> {
             ast::Expr::List(l) => &l.elts,
             _ => {
                 if let Some(p) = self.place(target) {
-                    self.write(&p, value);
                     if owned {
+                        let replaced = match &p {
+                            Place::Name(name) => {
+                                self.op("assign_target", &[&self.scope.clone(), name, value])
+                            }
+                            _ => {
+                                self.write(&p, value);
+                                "2".to_owned() // An attribute or item setter may replace a writer.
+                            }
+                        };
                         let (ptr, count) = self.live_handles();
-                        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count})"));
+                        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+                    } else {
+                        self.write(&p, value);
                     }
                 }
                 return;

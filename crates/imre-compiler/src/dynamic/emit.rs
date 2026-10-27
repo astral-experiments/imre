@@ -22,7 +22,7 @@ declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr)
 declare void @imre_dyn_discard_truth(ptr, i64)
-declare void @imre_dyn_assignment_target(ptr, ptr, i64)
+declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";

@@ -1616,12 +1616,8 @@ impl Heap {
             .position(|&id| id == arguments)
     }
 
-    /// Discard the evaluated operand while preserving earlier arguments in the same statement.
-    pub(super) fn discard_truth(&mut self, mark: usize) -> bool {
-        if self.file_writers.is_empty() {
-            return false;
-        }
-        // Scalar intermediates and the argument wrappers around them cannot own a writer.
+    /// A scalar and a container of scalars cannot hold an output file.
+    pub(super) fn could_own_writer(&self, id: Id, skip_bound: bool) -> bool {
         let scalar = |id| {
             matches!(
                 self.get(id),
@@ -1636,6 +1632,21 @@ impl Heap {
                     | Value::Native(_)
             )
         };
+        if scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
+            return false;
+        }
+        match self.get(id) {
+            Value::List(values) | Value::Tuple(values) => values.iter().any(|&item| !scalar(item)),
+            Value::Dict(entries) => !entries.is_empty(),
+            _ => true,
+        }
+    }
+
+    /// Discard the evaluated operand while preserving earlier arguments in the same statement.
+    pub(super) fn discard_truth(&mut self, mark: usize) -> bool {
+        if self.file_writers.is_empty() {
+            return false;
+        }
         let could_own_writer = self
             .frames
             .last()
@@ -1643,13 +1654,7 @@ impl Heap {
             .live
             .iter()
             .skip(mark)
-            .any(|&id| match self.get(id) {
-                Value::List(values) | Value::Tuple(values) if values.len() <= 1 => {
-                    values.first().is_some_and(|&item| !scalar(item))
-                }
-                Value::Dict(entries) if entries.is_empty() => false,
-                _ => !scalar(id) && !self.bound_in_active_frame(id),
-            });
+            .any(|&id| self.could_own_writer(id, true));
         if !could_own_writer || !self.has_unbound_writer(NONE) {
             return false;
         }
@@ -1762,14 +1767,27 @@ impl Heap {
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
     }
 
+    /// Return whether a buffered file could need collecting at a target boundary.
+    pub(super) fn has_file_writers(&self) -> bool {
+        !self.file_writers.is_empty()
+    }
+
     /// Recheck unbound writers after control flow discards temporary roots.
     pub fn release_unbound_writers(&mut self) {
         self.collect_next_statement |= self.has_unbound_writer(NONE);
     }
 
     /// Keep the operands needed by later targets after a source assignment releases its old value.
-    pub(super) fn assignment_target(&mut self, live: &[Id]) -> bool {
-        if !self.has_unbound_writer(NONE) {
+    pub(super) fn assignment_target(&mut self, live: &[Id], replaced: bool) -> bool {
+        if self.file_writers.is_empty() {
+            return false;
+        }
+        let old = &self.frames.last().unwrap().live;
+        let discarded = replaced
+            || old
+                .iter()
+                .any(|&id| !live.contains(&id) && self.could_own_writer(id, true));
+        if !discarded || !self.has_unbound_writer(NONE) {
             return false;
         }
         let temporaries = &mut self.frames.last_mut().unwrap().live;
