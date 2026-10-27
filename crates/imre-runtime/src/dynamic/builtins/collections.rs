@@ -91,7 +91,10 @@ pub(super) fn entries(ctx: &Context, dict: Id) -> Result<&[(Id, Id)]> {
 
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some(input) = input
-        && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
+        && !ctx.for_each_mapping_item(input, dict, |ctx, key, value, hash| {
+            ctx.set_dictionary_key(dict, key, value, hash, true)
+                .map(|_| ())
+        })?
     {
         let iterator = ctx.iterator(input)?;
         for index in 0.. {
@@ -172,17 +175,7 @@ pub(in super::super) fn remove_dict_item(
     dict: Id,
     key: Id,
 ) -> Result<Option<Id>> {
-    if let Some(part) = unhashable_part(ctx, key) {
-        return Err(type_error(format!(
-            "cannot use '{}' as a dict key (unhashable type: '{}')",
-            ctx.type_name(key),
-            ctx.type_name(part),
-        )));
-    }
-    let Some(index) = entries(ctx, dict)?
-        .iter()
-        .position(|&(stored, _)| ctx.equal(stored, key))
-    else {
+    let Some(index) = ctx.find_dictionary_key(dict, key, None)?.1 else {
         return Ok(None);
     };
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
@@ -378,20 +371,14 @@ pub(super) fn method(
         }
         "dict.get" | "dict.setdefault" => {
             arity(name, args, 1, 2)?;
-            if !hashable(ctx, args[0]) {
-                return Err(type_error("unhashable dictionary key"));
-            }
-            if let Some(&(_, value)) = entries(ctx, receiver)?
-                .iter()
-                .find(|(key, _)| ctx.equal(*key, args[0]))
-            {
-                return Ok(value);
-            }
             let default = args.get(1).copied().unwrap_or(NONE);
             if name == "dict.setdefault" {
-                ctx.put_item(receiver, args[0], default)?;
+                return ctx.set_dictionary_key(receiver, args[0], default, None, false);
             }
-            Ok(default)
+            let (_, index) = ctx.find_dictionary_key(receiver, args[0], None)?;
+            Ok(index.map_or(default, |i| {
+                ctx.dict_entries(receiver).expect("dictionary")[i].1
+            }))
         }
         "dict.__len__" => {
             arity(name, args, 0, 0)?;
