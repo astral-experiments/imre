@@ -137,7 +137,7 @@ impl Context {
                 }
                 self.lookup(a, &name)
             }
-            "assign" | "assign_expr" => {
+            "assign" | "assign_expr" | "assign_target" => {
                 let mut scope = a;
                 if op == "assign_expr" {
                     while self.scope_data(scope).is_comprehension {
@@ -149,8 +149,13 @@ impl Context {
                 }
                 let name = self.str_value(b)?.to_owned();
                 let value = self.enum_assignment(scope, &name, c)?;
+                let result = if op == "assign_target" {
+                    flag(self.replacing_writer(scope, &name, value))
+                } else {
+                    c
+                };
                 self.bind_source_name(scope, &name, value)?;
-                Ok(c)
+                Ok(result)
             }
             "declare_global" => {
                 let name = self.str_value(b)?.to_owned();
@@ -269,6 +274,13 @@ impl Context {
                     out.extend(&values[tail..]);
                     Ok(self.alloc(Value::List(out)))
                 }
+            }
+            "unpack_take" => {
+                let index = usize::try_from(self.as_integer(b)?).expect("compiled unpack index");
+                let Value::List(items) = self.heap.get_mut(a) else {
+                    unreachable!("private unpack result")
+                };
+                Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "call" => {
@@ -1086,6 +1098,31 @@ pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: 
     unsafe { (&mut *ctx).discard_truth(mark) }
 }
 
+/// Borrow the explicitly live handles in the generated caller's temporary array.
+unsafe fn live_handles<'a>(live: *const Id, len: usize) -> &'a [Id] {
+    if len == 0 {
+        &[]
+    } else {
+        // SAFETY: the native caller provides an array of len handles for this call.
+        unsafe { slice::from_raw_parts(live, len) }
+    }
+}
+
+/// Finish one target before the next target can observe a replaced writer.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
+    ctx: *mut Context,
+    live: *const Id,
+    len: usize,
+    replaced: Id,
+) {
+    // SAFETY: the caller owns the context and its live handle array.
+    let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
+    if ctx.heap.assignment_target(live, replaced == TRUE) {
+        ctx.collect_unreachable();
+    }
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_statement(
     ctx: *mut Context,
@@ -1108,13 +1145,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
     caught: Id,
 ) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
-    let ctx = unsafe { &mut *ctx };
-    let live = if len == 0 {
-        &[]
-    } else {
-        // SAFETY: the native frame owns this array of len live handles.
-        unsafe { slice::from_raw_parts(live, len) }
-    };
+    let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
     // SAFETY: file names are static constants in the generated native program.
     let file = unsafe { cstr(file) };
     ctx.checkpoint(
@@ -1129,6 +1160,20 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 }
 
 impl Context {
+    /// Check the old binding without calling a Python mapping's lookup hook.
+    fn replacing_writer(&self, scope: Id, name: &str, value: Id) -> bool {
+        if !self.heap.has_file_writers() {
+            return false;
+        }
+        let scope = self.binding_scope(scope, name);
+        let data = self.scope_data(scope);
+        data.exec_locals.is_some()
+            || data.exec_globals.is_some()
+            || self
+                .scope_name(scope, name)
+                .is_some_and(|old| old != value && self.heap.could_own_writer(old, false))
+    }
+
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
         (
             &mut self.heap,

@@ -45,6 +45,16 @@ def exercise(path):
         assert reader.read() == b""
     selected.close()
 
+    def checked_index():
+        with open(path, "rb") as reader:
+            assert reader.read() == b"loop"
+        return 0
+
+    slots = [None]
+    held = buffered()
+    held = slots[checked_index()] = None
+    held, held, slots[checked_index()] = buffered(), None, None
+
     sample = "Málaga 東京🧪e\u0301\n"
     with open(path, "w") as ready:
         alias = ready

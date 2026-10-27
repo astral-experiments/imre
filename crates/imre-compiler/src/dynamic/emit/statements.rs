@@ -208,8 +208,17 @@ impl Function<'_, '_> {
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
-                    for t in &v.targets {
-                        self.assign(t, &value);
+                    let chained = v.targets.len() > 1;
+                    if chained {
+                        self.live.push(value.clone());
+                    }
+                    for (index, target) in v.targets.iter().enumerate() {
+                        if chained && index + 1 == v.targets.len() {
+                            self.live.pop();
+                        }
+                        let owned =
+                            chained || matches!(target, ast::Expr::List(_) | ast::Expr::Tuple(_));
+                        self.assign_target(target, &value, owned);
                     }
                 }
                 ast::Stmt::Delete(v) => {
@@ -698,12 +707,31 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn assign(&mut self, target: &ast::Expr, value: &str) {
+        self.assign_target(target, value, false);
+    }
+
+    /// Transfer unpacked items to their targets while retaining the outstanding operands.
+    fn assign_target(&mut self, target: &ast::Expr, value: &str, owned: bool) {
         let elements = match target {
             ast::Expr::Tuple(t) => &t.elts,
             ast::Expr::List(l) => &l.elts,
             _ => {
                 if let Some(p) = self.place(target) {
-                    self.write(&p, value);
+                    if owned {
+                        let replaced = match &p {
+                            Place::Name(name) => {
+                                self.op("assign_target", &[&self.scope.clone(), name, value])
+                            }
+                            _ => {
+                                self.write(&p, value);
+                                "2".to_owned() // An attribute or item setter may replace a writer.
+                            }
+                        };
+                        let (ptr, count) = self.live_handles();
+                        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+                    } else {
+                        self.write(&p, value);
+                    }
                 }
                 return;
             }
@@ -714,15 +742,21 @@ impl Function<'_, '_> {
             .position(|v| matches!(v, ast::Expr::Starred(_)))
             .map_or_else(|| "0".into(), |i| self.integer(i));
         let sequence = self.op("unpack", &[value, &count, &star]);
+        if owned {
+            self.live.push(sequence.clone());
+        }
         for (index, target) in elements.iter().enumerate() {
             let i = self.integer(index);
-            let item = self.op("get", &[&sequence, &i]);
+            let item = self.op(if owned { "unpack_take" } else { "get" }, &[&sequence, &i]);
             let target = if let ast::Expr::Starred(s) = target {
                 &s.value
             } else {
                 target
             };
-            self.assign(target, &item);
+            self.assign_target(target, &item, owned);
+        }
+        if owned {
+            self.live.pop();
         }
     }
 
