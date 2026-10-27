@@ -486,6 +486,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
             "boxed_namedtuple_repr.py",
@@ -498,6 +499,7 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",
+            "boxed_math_rounding.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_bytes_octal.py",

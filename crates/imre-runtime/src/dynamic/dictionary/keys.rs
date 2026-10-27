@@ -252,21 +252,6 @@ impl Context {
         )
     }
 
-    fn hash_slot(&self, class: Id) -> Option<Id> {
-        let Value::Class { ancestors, .. } = self.heap.get(class) else {
-            return None;
-        };
-        for &base in std::iter::once(&class).chain(ancestors) {
-            if let Some(slot) = self.own_class_attr(base, "__hash__") {
-                return Some(slot);
-            }
-            if self.own_class_attr(base, "__eq__").is_some() {
-                return Some(NONE);
-            }
-        }
-        None
-    }
-
     fn tuple_keys(&self, key: Id) -> Option<Vec<Id>> {
         match self.heap.get(key) {
             Value::Tuple(values) | Value::NamedTuple { values, .. } => Some(values.clone()),
@@ -285,7 +270,7 @@ impl Context {
             return self.weak_reference_hash(key, wr);
         }
         if let Value::Instance { class, .. } = *self.heap.get(key)
-            && let Some(slot) = self.hash_slot(class)
+            && let Some(slot) = self.class_attr(class, "__hash__")
         {
             if slot == NONE {
                 return Err(self.unhashable(key));
@@ -438,6 +423,27 @@ impl Context {
             }
         };
         Ok(normalized(hash))
+    }
+
+    /// Look up a Python name in immutable builtin type dictionaries. Type lookup clears errors.
+    pub(in super::super) fn lookup_builtin_type_name(
+        &mut self,
+        key: Id,
+        names: &[&'static str],
+    ) -> Option<&'static str> {
+        if let Value::Str(text) = self.heap.get(key) {
+            return names.iter().copied().find(|&name| name == text);
+        }
+        let hash = self.dictionary_hash(key).ok()?;
+        for &name in names {
+            if normalized(data_hash(name.as_bytes())) == hash {
+                let stored = self.text(name);
+                if self.dictionary_equal(stored, key).ok()? {
+                    return Some(name);
+                }
+            }
+        }
+        None
     }
 
     fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {

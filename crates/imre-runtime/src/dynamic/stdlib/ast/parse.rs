@@ -3,10 +3,12 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins, parsed_instance};
-use crate::dynamic::value::{FALSE, TRUE};
+use crate::dynamic::complex::Complex;
+use crate::dynamic::value::{ELLIPSIS, FALSE, TRUE};
 
 struct Parser<'a> {
     ctx: &'a mut Context,
+    literal: bool,
     lines: Vec<usize>,
     function_starts: Vec<TextSize>,
     load: Id,
@@ -14,6 +16,8 @@ struct Parser<'a> {
 }
 
 enum Trailer {
+    Unary(ast::UnaryOp),
+    Binary(ast::Operator, Box<ast::Expr>),
     Attribute(ast::Identifier, ast::ExprContext),
     Subscript(Box<ast::Expr>, ast::ExprContext),
     Call(ast::Arguments, Vec<Id>),
@@ -217,6 +221,8 @@ impl Parser<'_> {
         loop {
             let range = e.range();
             let (next, trailer) = match e {
+                Expr::UnaryOp(v) => (v.operand, Trailer::Unary(v.op)),
+                Expr::BinOp(v) => (v.left, Trailer::Binary(v.op, v.right)),
                 Expr::Attribute(v) => (v.value, Trailer::Attribute(v.attr, v.ctx)),
                 Expr::Subscript(v) => (v.value, Trailer::Subscript(v.slice, v.ctx)),
                 Expr::Call(mut v) => {
@@ -245,21 +251,45 @@ impl Parser<'_> {
                 vec![self.ctx.text(v.id.as_str()), self.context(v.ctx)?],
             ),
             Expr::StringLiteral(v) => ("Constant", vec![self.ctx.text(v.value.to_string()), NONE]),
+            Expr::BytesLiteral(v) => (
+                "Constant",
+                vec![
+                    self.ctx.alloc(Value::Bytes(v.value.bytes().collect())),
+                    NONE,
+                ],
+            ),
+            Expr::EllipsisLiteral(_) => ("Constant", vec![ELLIPSIS, NONE]),
             Expr::NoneLiteral(_) => ("Constant", vec![NONE, NONE]),
             Expr::BooleanLiteral(v) => ("Constant", vec![if v.value { TRUE } else { FALSE }, NONE]),
             Expr::NumberLiteral(v) => {
-                let ast::Number::Int(n) = &v.value else {
-                    return Err(Error::new("NotImplementedError", "noninteger AST literal"));
+                let number = match v.value {
+                    ast::Number::Int(n) => {
+                        let n = crate::parse_integer_literal(&n.to_string())
+                            .ok_or_else(|| Error::new("ValueError", "invalid integer literal"))?;
+                        Value::Int(crate::Int::new(n))
+                    }
+                    ast::Number::Float(n) => Value::Float(n),
+                    ast::Number::Complex { real, imag } => Value::Complex(Complex { real, imag }),
                 };
-                let integer = crate::parse_integer_literal(&n.to_string())
-                    .ok_or_else(|| Error::new("ValueError", "invalid integer literal"))?;
-                (
-                    "Constant",
-                    vec![self.ctx.alloc(Value::Int(crate::Int::new(integer))), NONE],
-                )
+                ("Constant", vec![self.ctx.alloc(number), NONE])
             }
             Expr::Tuple(v) => ("Tuple", vec![self.exprs(v.elts)?, self.context(v.ctx)?]),
             Expr::List(v) => ("List", vec![self.exprs(v.elts)?, self.context(v.ctx)?]),
+            Expr::Set(v) => ("Set", vec![self.exprs(v.elts)?]),
+            Expr::Dict(v) => {
+                let mut keys = Vec::with_capacity(v.items.len());
+                let mut values = Vec::with_capacity(v.items.len());
+                for item in v.items {
+                    keys.push(
+                        item.key
+                            .map(|key| self.expr(key))
+                            .transpose()?
+                            .unwrap_or(NONE),
+                    );
+                    values.push(self.expr(item.value)?);
+                }
+                ("Dict", vec![self.list(keys), self.list(values)])
+            }
             Expr::If(v) => (
                 "IfExp",
                 vec![
@@ -269,6 +299,17 @@ impl Parser<'_> {
                 ],
             ),
             other => {
+                if self.literal {
+                    let kind = format!("{:?}", ast::AnyNodeRef::from(&other).kind());
+                    let line = self.location(range)[0];
+                    return Err(Error::new(
+                        "ValueError",
+                        format!(
+                            "malformed node or string on line {line}: {}(...)",
+                            kind.trim_start_matches("Expr")
+                        ),
+                    ));
+                }
                 return Err(Error::new(
                     "NotImplementedError",
                     format!(
@@ -281,6 +322,15 @@ impl Parser<'_> {
         let mut value = self.node(kind, &fields, range);
         for (range, trailer) in trailers.into_iter().rev() {
             value = match trailer {
+                Trailer::Unary(op) => {
+                    let op = self.ctx.builtins[&format!("ast._{op:?}")];
+                    self.node("UnaryOp", &[op, value], range)
+                }
+                Trailer::Binary(op, right) => {
+                    let op = self.ctx.builtins[&format!("ast._{op:?}")];
+                    let right = self.expr(*right)?;
+                    self.node("BinOp", &[value, op, right], range)
+                }
                 Trailer::Attribute(name, ctx) => {
                     let name = self.ctx.text(name.as_str());
                     self.node("Attribute", &[value, name, self.context(ctx)?], range)
@@ -321,6 +371,16 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
         .transpose()?
         .unwrap_or("exec")
         .to_owned();
+    parse_source(ctx, &source, &filename, &mode, false)
+}
+
+pub(super) fn parse_source(
+    ctx: &mut Context,
+    source: &str,
+    filename: &str,
+    mode: &str,
+    literal: bool,
+) -> Result<Id> {
     let mut lines = vec![0];
     let bytes = source.as_bytes();
     for (i, &byte) in bytes.iter().enumerate() {
@@ -332,15 +392,21 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let store = ctx.builtins["ast._Store"];
     let mut parser = Parser {
         ctx,
+        literal,
         lines,
         function_starts: Vec::new(),
         load,
         store,
     };
+    if literal {
+        super::literal::check_source(source, |offset| {
+            parser.lines.partition_point(|&n| n <= offset) as i64
+        })?;
+    }
     let syntax = |err| Error::new("SyntaxError", format!("{filename}: {err}"));
-    match mode.as_str() {
+    match mode {
         "exec" => {
-            let body = ruff_python_parser::parse_module(&source).map_err(syntax)?;
+            let body = ruff_python_parser::parse_module(source).map_err(syntax)?;
             parser.function_starts = body
                 .tokens()
                 .iter()
@@ -357,7 +423,14 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             ))
         }
         "eval" => {
-            let expr = ruff_python_parser::parse_expression(&source).map_err(syntax)?;
+            let expr = ruff_python_parser::parse_expression(source).map_err(|err| {
+                if literal {
+                    let line = parser.location(err.location)[0];
+                    super::literal::syntax_error(&err, source, line)
+                } else {
+                    syntax(err)
+                }
+            })?;
             let body = parser.expr(*expr.into_syntax().body)?;
             Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
         }

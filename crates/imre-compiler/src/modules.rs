@@ -33,6 +33,14 @@ const KEYWORD_SOURCE: &str = include_str!("../stdlib/keyword.py");
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "zipimport" if cfg!(unix) => Some((
+            "zipimport.py",
+            concat!(
+                include_str!("../stdlib/zipimport_boxed.py"),
+                "\n",
+                include_str!("../stdlib/zipimport.py"),
+            ),
+        )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "importlib" => Some((
@@ -744,6 +752,7 @@ impl IntrinsicModule {
             (Self::Numbers, "Number") => Intrinsic::Number,
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
+            (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }
@@ -3143,9 +3152,14 @@ impl<'a> Loader<'a> {
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
-            "zipimport" if cfg!(unix) => {
-                Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))
-            }
+            "zipimport" if cfg!(unix) => Some((
+                "zipimport.py",
+                concat!(
+                    include_str!("../stdlib/zipimport_typed.py"),
+                    "\n",
+                    include_str!("../stdlib/zipimport.py")
+                ),
+            )),
             "platform" => Some((
                 "platform.py",
                 concat!(

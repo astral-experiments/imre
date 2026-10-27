@@ -29,6 +29,7 @@ pub(super) mod io;
 mod json;
 mod logging;
 mod marshal;
+mod math;
 mod operator;
 mod pickle;
 mod posixpath;
@@ -39,8 +40,12 @@ mod socket;
 mod structure;
 mod traceback;
 pub(super) mod urllib;
+mod zipimport;
 
 pub(super) fn is_module(name: &str) -> bool {
+    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
+        return true;
+    }
     matches!(
         name,
         "sys"
@@ -69,6 +74,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "binascii"
+            | "math"
             | "unicodedata"
             | "json"
             | "_imre_logging"
@@ -274,10 +280,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
-        ("secrets", "choice") => ctx.builtin("secrets.choice"),
+        ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
+        ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
@@ -443,6 +450,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
         | ("_imre_posixpath", "extension_start" | "isfile")
+        | ("_imre_zipimport", "exists" | "index" | "read")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -583,9 +591,6 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "secrets.choice" {
-        return secrets::choice(ctx, args, kwargs);
-    }
     if name == "random.random" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -600,6 +605,9 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
+    }
+    if name == "secrets.choice" {
+        return secrets::choice(ctx, args, kwargs);
     }
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);
@@ -658,11 +666,17 @@ pub(super) fn call(
             },
         );
     }
+    if let Some(operation) = name.strip_prefix("math.") {
+        return math::round(ctx, operation, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
+    }
+    if let Some(op) = name.strip_prefix("_imre_zipimport.") {
+        return zipimport::call(ctx, op, args, kwargs);
     }
     if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
         return posixpath::call(ctx, name, args, kwargs);

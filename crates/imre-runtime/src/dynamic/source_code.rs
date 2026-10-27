@@ -22,6 +22,7 @@ pub(super) struct Program {
 enum Instruction {
     Eval(ast::Expr),
     Assign(String, ast::Expr),
+    AssignItem(ast::ExprSubscript, ast::Expr),
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
@@ -83,14 +84,19 @@ impl Program {
                     }
                     e => Instruction::Eval(e.clone()),
                 },
-                Stmt::Assign(s) => {
-                    let [ast::Expr::Name(n)] = s.targets.as_slice() else {
-                        return Err(unsupported("assignment target"));
-                    };
-                    let n = n.id.to_string();
-                    self.locals.insert(n.clone());
-                    Instruction::Assign(n, (*s.value).clone())
-                }
+                Stmt::Assign(s) => match s.targets.as_slice() {
+                    [ast::Expr::Name(n)] => {
+                        let name = n.id.to_string();
+                        self.locals.insert(name.clone());
+                        Instruction::Assign(name, (*s.value).clone())
+                    }
+                    [ast::Expr::Subscript(target)]
+                        if !matches!(*target.slice, ast::Expr::Slice(_)) =>
+                    {
+                        Instruction::AssignItem(target.clone(), (*s.value).clone())
+                    }
+                    _ => return Err(unsupported("assignment target")),
+                },
                 Stmt::AnnAssign(s) if function => {
                     let ast::Expr::Name(name) = &*s.target else {
                         return Err(unsupported("annotated assignment target"));
@@ -799,6 +805,12 @@ impl Context {
             Instruction::Assign(n, e) => {
                 let value = eval(self, e)?;
                 self.bind_source_name(scope, n, value)?;
+            }
+            Instruction::AssignItem(target, e) => {
+                let value = eval(self, e)?;
+                let object = eval(self, &target.value)?;
+                let key = eval(self, &target.slice)?;
+                self.put_item(object, key, value)?;
             }
             Instruction::Unless(e, destination) => {
                 let value = eval(self, e)?;
