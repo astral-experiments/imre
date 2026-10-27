@@ -95,6 +95,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
 | `weakref` | Yes | Callback-free proxy for source-defined records, including cached identity, attribute and call forwarding, and ReferenceError after the referent is released. [Evidence](../tests/fixtures/classes/weak_proxy.py) | — | — | — |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
+| `zipimport` | Yes | Read stored and deflated resources with `zipimporter.get_data()`. Importing Python modules from ZIP paths is unsupported. [Evidence](../tests/fixtures/files/zipimport_resources.py) | — | — | — |
 | `zlib` | Yes | `adler32` computes an unsigned checksum of bytes with an optional integer seed. Compressed-input failures preserve the `error` exception. [Evidence](../tests/fixtures/bytes/zlib_adler32.py) | — | — | — |
 
 ## Modules without an accepted import or a suite measurement
@@ -206,7 +207,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `xml` |
 | `xmlrpc` |
 | `zipapp` |
-| `zipimport` |
 | `zoneinfo` |
 
 ## Proposed scope exclusions

@@ -78,8 +78,10 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let method = attr.attr.as_str();
+        let import_data = method == "_read_import_data"
+            && self.graph.modules[self.module].is_bundled("zipimport");
         let mut args = vec![receiver];
-        let (op, ty) = if matches!(method, "open" | "read" | "getinfo") {
+        let (op, ty) = if matches!(method, "open" | "read" | "getinfo") || import_data {
             let positional = call.arguments.args.as_ref();
             if positional.len() > (if method == "open" { 2 } else { 1 }) {
                 return Err(error(self.source, call, "unsupported ZIP member arguments"));
@@ -111,6 +113,7 @@ impl Checker<'_> {
             let name = name.ok_or_else(|| error(self.source, call, "missing ZIP member name"))?;
             let value = self.expr(name)?;
             let (op, ty) = match (method, value.ty) {
+                ("_read_import_data", Type::Str) => (Builtin::ZipImportData, Type::Bytes),
                 ("getinfo", Type::Str) => (Builtin::ZipGetInfo, Type::ZipInfo),
                 ("read", Type::Str | Type::ZipInfo) => (Builtin::ZipRead, Type::Bytes),
                 ("open", Type::Str | Type::ZipInfo) => (Builtin::ZipMember, Type::BinaryIO),

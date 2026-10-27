@@ -3131,6 +3131,9 @@ impl<'a> Loader<'a> {
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
+            "zipimport" if cfg!(unix) => {
+                Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))
+            }
             "platform" => Some((
                 "platform.py",
                 concat!(
