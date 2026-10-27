@@ -16,7 +16,18 @@ class Text(str):
     pass
 
 
+class FailingFlag:
+    def __bool__(self):
+        raise ValueError("keepends")
+
+
 def current():
+    for flag in (None, [], [0], 1 << 100):
+        print("a\r\nb".splitlines(keepends=flag))
+    try:
+        "".splitlines(FailingFlag())
+    except ValueError as error:
+        print(error)
     text = "é🦊:東:🦊"
     print(["\\x%02x" % code for code in (0, 15, 31, 127, 159)])
     print("☃ %% %02d/%04d %#06X %.4o" % (7, 42, 15, 7))
