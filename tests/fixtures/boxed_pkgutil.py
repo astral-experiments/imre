@@ -1,5 +1,6 @@
 import os
 import pkgutil
+from importlib.util import find_spec
 from pkgutil import get_data, iter_modules
 
 
@@ -15,6 +16,19 @@ def current():
     assert isinstance(found[0], tuple) and isinstance(found[0], pkgutil.ModuleInfo)
     assert (finder.path, name, is_package) == (root, 'found.' + __name__, False)
     assert get_data(__name__, os.path.basename(__file__))[:10] == b'import os\n'
+    spec = find_spec(__name__)
+    loader = spec.loader
+    class ResourceLoader:
+        def get_data(self, path):
+            assert path == os.path.join(root, 'resource')
+            return b'from the loader'
+    try:
+        spec.loader = ResourceLoader()
+        assert get_data(__name__, 'resource') == b'from the loader'
+        spec.loader = None
+        assert get_data(__name__, 'resource') is None
+    finally:
+        spec.loader = loader
     package = 'pkgutil_resource'
     assert get_data(package=package, resource='payload.bin') == b'\x00\xff\r\n'
     assert get_data('missing_pkgutil_fixture_module', 'data') is None

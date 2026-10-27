@@ -1,15 +1,15 @@
 """Discover filesystem modules and read package resources in runtime imports."""
 
 import sys
+from importlib.util import _spec_name
 from os import fsdecode
 from os.path import abspath as _absolute, dirname, join as _join
 from typing import NamedTuple
 from _imre_pkgutil import (
     filenames as _filenames,
     find_module as _find_module,
+    find_spec as _find_spec,
     isdir as _isdir,
-    missing_error as _missing_error,
-    read_bytes as _read_bytes,
 )
 
 
@@ -21,24 +21,13 @@ class ModuleInfo(NamedTuple):
 
 def get_data(package, resource):
     """Load a filesystem package and read a resource beside its module file."""
-    if package.startswith('.'):
-        raise ImportError(f'no package specified for {package!r} (required for relative module names)')
-    parent, _, _ = package.rpartition('.')
-    if parent:
-        module = _find_module(parent)
-        if module is None:
-            raise _missing_error(parent, f'No module named {parent!r}')
-        try:
-            module.__path__
-        except AttributeError as error:
-            raise _missing_error(
-                package,
-                f'__path__ attribute not found on {parent!r} while trying to find {package!r}',
-            ) from error
+    spec = _find_spec(_spec_name(package, None))
+    if spec is None or not hasattr(spec.loader, 'get_data'):
+        return None
     filename = getattr(_find_module(package), '__file__', None)
     if filename is None:
         return None
-    return _read_bytes(_join(dirname(filename), *resource.split('/')))
+    return spec.loader.get_data(_join(dirname(filename), *resource.split('/')))
 
 
 def iter_modules(path=None, prefix=''):

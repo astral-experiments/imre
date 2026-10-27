@@ -385,7 +385,13 @@ impl Session {
     }
 
     /// Only the stdlib function can add a literal dependency, even if a local shares its spelling.
-    pub(crate) fn is_import_module(&self, module: usize, expression: &Expr) -> bool {
+    pub(crate) fn is_stdlib_function(
+        &self,
+        module: usize,
+        expression: &Expr,
+        owner: &str,
+        name: &str,
+    ) -> bool {
         use ty_python_semantic::types::{ProgramEnvironment, Type, TypeDefinition};
         self.hint_reads.set(self.hint_reads.get() + 1);
         let program = self.db.program_file(self.files[module]);
@@ -398,14 +404,14 @@ impl Session {
         else {
             return false;
         };
-        def.name(&self.db).as_deref() == Some("import_module")
+        def.name(&self.db).as_deref() == Some(name)
             && def
                 .file(&self.db)
                 .path(&self.db)
                 .as_vendored_path()
                 .is_some()
             && model
-                .resolve_module(Some("importlib"), 0)
+                .resolve_module(Some(owner), 0)
                 .and_then(|m| m.file(&self.db))
                 == Some(def.file(&self.db))
     }
