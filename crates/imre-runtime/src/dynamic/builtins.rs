@@ -4,13 +4,14 @@ use super::Context;
 use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
+mod exceptions;
 mod float;
 pub(super) use float::from_numeric;
 mod integer;
 mod print;
 mod text;
 mod translation;
-pub(super) use collections::{hashable, remove_dict_item, set_add, set_member};
+pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, update_set};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 macro_rules! exception_kinds {
@@ -93,6 +94,7 @@ const FUNCTIONS: &[&str] = &[
     "delattr",
     "hasattr",
     "open",
+    "input",
     "print",
     "pow",
     "sum",
@@ -139,6 +141,24 @@ pub(super) fn is_exception(name: &str) -> bool {
     exception_kind(name).is_some()
 }
 
+/// Return the exception that declares the inherited CPython allocation slot.
+pub(super) fn exception_new_owner(name: &str) -> &str {
+    match name {
+        "KeyError" => "LookupError",
+        "SystemExit" => "BaseException",
+        "NameError"
+        | "UnboundLocalError"
+        | "AttributeError"
+        | "ImportError"
+        | "ModuleNotFoundError"
+        | "StopIteration"
+        | "binascii.Incomplete" => "Exception",
+        "binascii.Error" => "ValueError",
+        name if exception_subclass(name, "OSError") == Some(true) => "OSError",
+        _ => name,
+    }
+}
+
 /// Consult the native hierarchy when both names denote known exception types.
 pub(super) fn exception_subclass(child: &str, parent: &str) -> Option<bool> {
     Some(crate::objects::exceptions::imre_builtin_exception_subclass(
@@ -152,13 +172,9 @@ pub(super) fn is_builtin(name: &str) -> bool {
 }
 
 /// Static constructors retain their declaring type as `__self__` even on instances.
-pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
-    match name {
-        "float.__new__" => Some("float"),
-        "int.__new__" => Some("int"),
-        "str.__new__" => Some("str"),
-        _ => None,
-    }
+pub(super) fn constructor_owner(name: &str) -> Option<&str> {
+    let owner = name.strip_suffix(".__new__")?;
+    (matches!(owner, "float" | "int" | "str") || is_exception(owner)).then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -223,7 +239,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_)
-            if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip" | "translate") =>
+            if matches!(
+                attr,
+                "__mod__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
+            ) =>
         {
             "bytes"
         }
@@ -665,6 +684,14 @@ pub(super) fn call(
     if matches!(name, "delattr" | "object.__delattr__") {
         return delete_attribute(ctx, name, args, kwargs);
     }
+    if let Some(owner) = name.strip_suffix(".__new__")
+        && is_exception(owner)
+    {
+        return exceptions::allocate(ctx, owner, args);
+    }
+    if let Some(owner @ ("BaseException" | "StopIteration")) = name.strip_suffix(".__init__") {
+        return exceptions::initialize(ctx, owner, args, kwargs);
+    }
     if name == "object.__init__" {
         if args.len() != 1 || !kwargs.is_empty() {
             return Err(type_error(
@@ -995,7 +1022,8 @@ pub(super) fn call(
                 ))
             };
             let size = match ctx.heap.get(args[0]) {
-                Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => v.len(),
+                Value::List(v) | Value::Tuple(v) => v.len(),
+                Value::Set { entries, .. } => entries.len(),
                 Value::NamedTuple { values, .. } => values.len(),
                 Value::Context(bindings)
                 | Value::Iterator {
@@ -1161,6 +1189,11 @@ pub(super) fn call(
                 }
             }
             Ok(boolean(!stop_value))
+        }
+        "input" => {
+            positional(name, kwargs)?;
+            arity(name, args, 0, 0)?;
+            Ok(ctx.text(crate::sys::read_input_line()?))
         }
         "print" => print::call(ctx, args, kwargs),
         "NoneType" | "NotImplementedType" | "ellipsis" => {

@@ -69,6 +69,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "binascii"
             | "json"
             | "_imre_logging"
+            | "_imre_dataclasses"
             | "marshal"
             | "pickle"
             | "datetime"
@@ -268,10 +269,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
+        ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
+            ctx.builtin(&format!("{module}.{name}"))
+        }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
+        ("traceback", "print_exc") => ctx.builtin("traceback.print_exc"),
         ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
@@ -495,11 +501,13 @@ fn count_elements(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     let get = ctx.lookup_attr(receiver, "get")?;
     let zero = ctx.int(0);
     let one = ctx.int(1);
+    let roots = ctx.heap.temporary_mark();
     while let Some(key) = ctx.next_item(iterator)? {
         ctx.heap.keep(key);
         let previous = ctx.call(get, vec![key, zero], vec![])?;
         let count = ctx.binary("+", previous, one)?;
         ctx.put_item(receiver, key, count)?;
+        ctx.heap.release_temporaries_since(roots);
     }
     Ok(NONE)
 }
@@ -631,6 +639,35 @@ pub(super) fn call(
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
     }
+    if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
+        match (method, args, kwargs) {
+            ("loaded_module", [name], []) => {
+                return Ok(ctx
+                    .modules
+                    .get(ctx.str_value(*name)?)
+                    .copied()
+                    .unwrap_or(NONE));
+            }
+            ("members", [class], []) => {
+                if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
+                    let names = ctx.scope_data(scope).names.clone();
+                    let entries = names
+                        .into_iter()
+                        .map(|(name, value)| (ctx.text(name), value))
+                        .collect();
+                    return Ok(ctx.dict(entries));
+                }
+            }
+            ("metadata", [dict], []) if ctx.dict_storage(*dict).is_some() => {
+                return Ok(ctx.alloc(Value::MappingProxy(*dict)));
+            }
+            _ => {}
+        }
+        return Err(Error::new(
+            "TypeError",
+            format!("invalid arguments to {name}"),
+        ));
+    }
     if let Some(function) = name.strip_prefix("_imre_logging.") {
         return logging::call(ctx, function, args, kwargs);
     }
@@ -668,6 +705,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);
+    }
+    if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
+        return ctx.auto_method(name, args, kwargs);
     }
     if name == "enum._simple_enum" {
         return ctx.enum_decorator(args, kwargs);
@@ -811,6 +851,7 @@ pub(super) fn call(
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
+        "traceback.print_exc" => return traceback::print_active(ctx, args, kwargs),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
         | "sysconfig.get_config_var"
@@ -1127,4 +1168,30 @@ pub(super) fn call(
         }
     };
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_elements_keeps_a_bounded_number_of_temporary_roots() {
+        let roots = [1, 256].map(|length| {
+            // SAFETY: the empty argv is valid for zero arguments, and the config is NUL-terminated.
+            let mut ctx = unsafe {
+                Box::from_raw(super::super::ffi::imre_dyn_new(
+                    0,
+                    [].as_ptr(),
+                    c"{\"paths\":[]}".as_ptr(),
+                ))
+            };
+            let mapping = ctx.alloc(Value::Dict(Default::default()));
+            let key = ctx.text("key");
+            let values = ctx.alloc(Value::List(vec![key; length]));
+            let before = ctx.heap.temporary_mark();
+            count_elements(&mut ctx, &[mapping, values], &[]).unwrap();
+            ctx.heap.temporary_mark() - before
+        });
+        assert_eq!(roots[0], roots[1]);
+    }
 }

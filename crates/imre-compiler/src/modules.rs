@@ -161,6 +161,7 @@ pub(crate) enum IntrinsicModule {
     Builtins,
     Sys,
     SysJit,
+    Traceback,
     Typing,
     Dataclasses,
     Difflib,
@@ -279,6 +280,7 @@ pub(crate) enum Intrinsic {
     HandlerLookup,
     FileEncodingUsesUtf8,
     PrintActiveException,
+    TracebackPrintExc,
     HandlerLevelType,
     TextOutputType,
     HandlerFallback,
@@ -609,6 +611,7 @@ impl IntrinsicModule {
             "argparse" => Some(Self::Argparse),
             "builtins" => Some(Self::Builtins),
             "sys" => Some(Self::Sys),
+            "traceback" => Some(Self::Traceback),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
@@ -886,6 +889,7 @@ impl IntrinsicModule {
             (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::Traceback, "print_exc") => Intrinsic::TracebackPrintExc,
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
@@ -1254,6 +1258,7 @@ impl SourceModule {
 pub(crate) struct SourceGraph {
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
+    pub(crate) handled_tracebacks: bool,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
@@ -2340,6 +2345,15 @@ impl<'a> Loader<'a> {
         let mut graph = SourceGraph {
             command_startup: None,
             virtual_command: false,
+            handled_tracebacks: self.modules.iter().any(|module| {
+                module.bindings.values().any(|binding| {
+                    matches!(
+                        binding,
+                        Binding::IntrinsicModule(IntrinsicModule::Traceback)
+                            | Binding::Intrinsic(Intrinsic::TracebackPrintExc)
+                    )
+                })
+            }),
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),

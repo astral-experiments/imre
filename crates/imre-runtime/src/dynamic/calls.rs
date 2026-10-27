@@ -18,6 +18,17 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if builtins::is_exception(kind) => match name {
+                "__new__" => self
+                    .builtins
+                    .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
+                    .copied(),
+                "__init__" if kind == "StopIteration" => {
+                    self.builtins.get("StopIteration.__init__").copied()
+                }
+                "__init__" => self.builtins.get("BaseException.__init__").copied(),
+                _ => None,
+            },
             Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str") => {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -148,8 +159,12 @@ impl Context {
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
-        let Value::Instance { class, .. } = *self.heap.get(object) else {
-            return Ok(None);
+        let class = match self.heap.get(object) {
+            Value::Instance { class, .. } => *class,
+            Value::Raised(Error {
+                class: Some(class), ..
+            }) if name == "__str__" => *class,
+            _ => return Ok(None),
         };
         self.class_attr(class, name)
             .map(|slot| self.bind_attribute(slot, object, class))
@@ -220,9 +235,13 @@ impl Context {
                         name.as_str(),
                         "ast.AST.__init__"
                             | "object.__getattribute__"
+                            | "enum.auto.__init__"
+                            | "enum.auto.__repr__"
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
+                            | "BaseException.__init__"
+                            | "StopIteration.__init__"
                             | "int.to_bytes"
                             | "list.pop"
                             | "list.clear"
@@ -980,9 +999,9 @@ impl Context {
             {
                 return self.lookup_attr(dict, name);
             }
-            Value::Native(symbol)
+            Value::Native(ref symbol)
                 if name == "__self__"
-                    && let Some(owner) = builtins::constructor_owner(&symbol) =>
+                    && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(self.builtin(owner));
             }
@@ -1142,6 +1161,9 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
+            Value::Native(class) if class == "bytes" && name == "__mod__" => {
+                return Ok(self.builtin("bytes.__mod__"));
+            }
             Value::Bytes(_) if name == "maketrans" => return Ok(self.builtin("bytes.maketrans")),
             Value::ByteArray(_) if name == "maketrans" => {
                 return Ok(self.builtin("bytearray.maketrans"));
@@ -1156,8 +1178,11 @@ impl Context {
             }
             Value::Native(class)
                 if class == "dict"
+                    || (builtins::is_exception(&class)
+                        && matches!(name, "__new__" | "__init__"))
                     || (class == "int" && name == "to_bytes")
-                    || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+                    || (class == "str"
+                        && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
@@ -1203,8 +1228,35 @@ impl Context {
                 }
             }
             Value::Class {
-                name: class_name, ..
+                name: class_name,
+                scope,
+                ..
             } => {
+                if name == "__annotations__"
+                    && let Some(thunks) = self
+                        .scope_data(scope)
+                        .class_namespace
+                        .as_ref()
+                        .and_then(|c| c.annotation_thunks)
+                {
+                    let entries = self.dict_entries(thunks).unwrap().to_vec();
+                    let mapping = self
+                        .own_class_attr(obj, name)
+                        .ok_or_else(|| self.missing_attribute(obj, name))?;
+                    let mut evaluated = Vec::with_capacity(entries.len());
+                    for (key, thunk) in entries {
+                        let value = self.call(thunk, Vec::new(), Vec::new())?;
+                        evaluated.push((key, value));
+                    }
+                    for (key, value) in evaluated {
+                        self.put_item(mapping, key, value)?;
+                    }
+                    let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                        unreachable!()
+                    };
+                    frame.class_namespace.as_mut().unwrap().annotation_thunks = None;
+                    return Ok(mapping);
+                }
                 if name == "__name__" {
                     return Ok(self.text(class_name));
                 }
@@ -1246,6 +1298,9 @@ impl Context {
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
         let base = self.scalar_value(obj);
+        if name == "maketrans" && matches!(self.heap.get(base), Value::Str(_)) {
+            return Ok(self.builtin("str.maketrans"));
+        }
         if name == "__new__" {
             match self.heap.get(base) {
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
@@ -1416,6 +1471,16 @@ impl Context {
                     "__base__" => Error::new("AttributeError", "readonly attribute"),
                     "__annotate__" => {
                         Error::new("TypeError", "cannot delete __annotate__ attribute")
+                    }
+                    "__annotations__"
+                        if self
+                            .scope_data(scope)
+                            .class_namespace
+                            .as_ref()
+                            .and_then(|c| c.annotation_thunks)
+                            .is_some() =>
+                    {
+                        Error::new("AttributeError", "__annotations__")
                     }
                     _ => {
                         let key = self.text(name);
@@ -1626,6 +1691,12 @@ impl Context {
             }
             Value::Class { scope, .. } => {
                 let scope = *scope;
+                if name == "__annotations__"
+                    && let Value::Scope(data) = self.heap.get_mut(scope)
+                    && let Some(namespace) = &mut data.class_namespace
+                {
+                    namespace.annotation_thunks = None;
+                }
                 self.bind(scope, name, value);
             }
             _ => {
@@ -1758,6 +1829,11 @@ impl Context {
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
+                    || builtins::constructor_owner(&name).is_some()
+                    || matches!(
+                        name.as_str(),
+                        "BaseException.__init__" | "StopIteration.__init__"
+                    )
                     || !name.contains('.')
                     || matches!(
                         name.split('.').next(),
@@ -1879,12 +1955,7 @@ impl Context {
                 });
                 Ok(result)
             }
-            Value::Class {
-                name,
-                scope,
-                ancestors,
-                ..
-            } => {
+            Value::Class { name, scope, .. } => {
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
                 }
@@ -1907,16 +1978,6 @@ impl Context {
                         "TypeError",
                         "Can't instantiate typing.Generic directly",
                     ));
-                }
-                if ancestors.iter().any(|&base| {
-                    matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
-                }) {
-                    let mut error = self.exception(&name, &args);
-                    error.class = Some(callable);
-                    if self.has_base(callable, "StopIteration") {
-                        error.set_stop_value(args.first().copied().unwrap_or(NONE));
-                    }
-                    return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
                     if args.len() > names.len() {
@@ -1973,9 +2034,18 @@ impl Context {
                         .then(|| self.dict(Vec::new()));
                     self.instance(callable, dictionary)
                 };
-                if let Some(init) = self.bound_slot(instance, "__init__")? {
-                    if self.call(init, args, kwargs)? != NONE {
-                        return Err(Error::new("TypeError", "__init__ must return None"));
+                let actual = self.exact_type(instance)?;
+                if let Some(init) = self.class_attr(actual, "__init__") {
+                    let init = self.bind_attribute(init, instance, actual)?;
+                    let result = self.call(init, args, kwargs)?;
+                    if result != NONE {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "__init__() should return None, not '{}'",
+                                self.type_name(result)
+                            ),
+                        ));
                     }
                 } else if new.is_none()
                     && string_base.is_none()
@@ -2222,11 +2292,14 @@ impl Context {
         };
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
+        let enum_namespace = self.enum_namespace(&bases);
+        let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
         let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         body_scope.class_body = Some(Vec::new());
+        body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
         let mut globals = parent;
         while let Some(outer) = self.scope_data(globals).parent {
@@ -2302,10 +2375,8 @@ impl Context {
         }
         self.init_abstract_class(class, &name, scope)?;
         self.classes.insert(name, class);
-        if self.has_base(class, "enum.Enum") {
-            let scalar = self
-                .has_base(class, "enum.IntFlag")
-                .then(|| self.builtin("enum.IntFlag"));
+        if let Some(kind) = enum_kind {
+            let scalar = kind.scalar_base().map(|base| self.builtin(base));
             self.populate_enum(class, scalar)?;
         }
         Ok(class)

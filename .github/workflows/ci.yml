@@ -233,7 +233,8 @@ jobs:
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
-      - name: Verify the standard library support table
+      - &verify-stdlib-table
+        name: Verify the standard library support table
         run: python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre --check
       - name: Compare interrupted socket calls and fd reuse with CPython
         run: python3 tests/socket_eintr.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
@@ -688,6 +689,7 @@ jobs:
       - *build-asan
       - *asan-smoke
       - *asan-suites
+      - *verify-stdlib-table
 
   thinlto:
     needs: scope

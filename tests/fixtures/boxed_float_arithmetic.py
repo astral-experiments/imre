@@ -36,3 +36,15 @@ def current():
             call()
         except TypeError as error:
             print(error.args)
+
+    for operation, value in ((lambda x: -x, "x"), (lambda x: +x, []), (lambda x: ~x, 2.5)):
+        try:
+            operation(value)
+        except TypeError as error:
+            print(str(error))
+
+    class Declines:
+        def __neg__(self):
+            return NotImplemented
+
+    print(-Declines() is NotImplemented)

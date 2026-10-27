@@ -26,6 +26,15 @@ class BufferedInput(RawIOBase):
         return self.stream.readinto(buffer)
 
 
+class ClosingOffset:
+    def __init__(self, reader):
+        self.reader = reader
+
+    def __index__(self):
+        self.reader.close()
+        return 0
+
+
 class ReadCount(RawIOBase):
     def __init__(self, count):
         self.count = count
@@ -207,6 +216,12 @@ def exercise(path):
         return item
 
     print([truncate(item) for item in target], bytes(target))
+
+    with open(path, "rb") as reader:
+        try:
+            reader.seek(ClosingOffset(reader))
+        except ValueError as error:
+            print(error.args, reader.closed)
 
     lines = path + ".lines"
     with open(lines, "w") as output:

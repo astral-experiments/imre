@@ -113,11 +113,10 @@ impl Context {
             }
             Value::Str(s) => !s.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
-            Value::List(v)
-            | Value::Tuple(v)
-            | Value::Set { items: v, .. }
-            | Value::NamedTuple { values: v, .. } => !v.is_empty(),
-            Value::Dict(v) | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
+            Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
+            Value::Set { entries: v, .. }
+            | Value::Dict(v)
+            | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
             Value::DictView { dict, .. } => !self
                 .dict_entries(*dict)
                 .expect("dict view backing")
@@ -364,8 +363,8 @@ impl Context {
                             })
                         }))
             }
-            (Value::Set { items: x, .. }, Value::Set { items: y, .. }) => {
-                x.len() == y.len() && x.iter().all(|&k| y.iter().any(|&j| equal(k, j)))
+            (Value::Set { entries: x, .. }, Value::Set { entries: y, .. }) => {
+                x.len() == y.len() && x.iter().all(|&(k, _)| y.iter().any(|&(j, _)| equal(k, j)))
             }
             _ => match (self.sequence(a), self.sequence(b)) {
                 (Some(x), Some(y)) => {
@@ -448,7 +447,7 @@ impl Context {
             Value(Id, bool),
             Text(&'a str),
             Sequence(&'a [Id], usize),
-            Mapping(&'a [(Id, Id)], usize),
+            Entries(&'a [(Id, Id)], usize, bool),
             Fields(
                 &'a [String],
                 &'a std::collections::HashMap<String, Id>,
@@ -516,14 +515,16 @@ impl Context {
                         work.push(Part::Value(fields[name], true));
                     }
                 }
-                Part::Mapping(items, index) => {
+                Part::Entries(items, index, include_values) => {
                     if let Some(&(key, value)) = items.get(index) {
                         if index != 0 {
                             output.push_str(", ");
                         }
-                        work.push(Part::Mapping(items, index + 1));
-                        work.push(Part::Value(value, true));
-                        work.push(Part::Text(": "));
+                        work.push(Part::Entries(items, index + 1, include_values));
+                        if include_values {
+                            work.push(Part::Value(value, true));
+                            work.push(Part::Text(": "));
+                        }
                         work.push(Part::Value(key, true));
                     }
                 }
@@ -590,7 +591,7 @@ impl Context {
                         }
                         _ => {}
                     }
-                    let (start, end, placeholder, sequence, mapping) = match self.heap.get(id) {
+                    let (start, end, placeholder, sequence, entries) = match self.heap.get(id) {
                         Value::List(items) => ("[", "]", "[...]", Some(items.as_slice()), None),
                         Value::Tuple(items) => (
                             "(",
@@ -599,9 +600,9 @@ impl Context {
                             Some(items.as_slice()),
                             None,
                         ),
-                        Value::Dict(items) => ("{", "}", "{...}", None, Some(&items[..])),
-                        Value::Set { items, frozen } => {
-                            if items.is_empty() {
+                        Value::Dict(items) => ("{", "}", "{...}", None, Some((&items[..], true))),
+                        Value::Set { entries, frozen } => {
+                            if entries.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });
                                 continue;
                             }
@@ -609,8 +610,8 @@ impl Context {
                                 if *frozen { "frozenset({" } else { "{" },
                                 if *frozen { "})" } else { "}" },
                                 "set(...)",
-                                Some(items.as_slice()),
                                 None,
+                                Some((&entries[..], false)),
                             )
                         }
                         _ => {
@@ -628,8 +629,8 @@ impl Context {
                     if let Some(items) = sequence {
                         work.push(Part::Sequence(items, 0));
                     }
-                    if let Some(items) = mapping {
-                        work.push(Part::Mapping(items, 0));
+                    if let Some((items, include_values)) = entries {
+                        work.push(Part::Entries(items, 0, include_values));
                     }
                 }
             }
@@ -816,14 +817,25 @@ impl Context {
                     .join(", ")
             ),
             Value::Slice(parts) => format!("slice({})", self.format_elements(parts, active)),
-            Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => {
+            Value::Set { entries, frozen } => {
+                if entries.is_empty() {
+                    return if *frozen { "frozenset()" } else { "set()" }.to_owned();
+                }
+                let body = entries
+                    .iter()
+                    .map(|&(key, _)| self.format_value(key, true, active))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if *frozen {
+                    format!("frozenset({{{body}}})")
+                } else {
+                    format!("{{{body}}}")
+                }
+            }
+            Value::List(v) | Value::Tuple(v) => {
                 let body = self.format_elements(v, active);
                 match self.heap.get(id) {
                     Value::List(_) => format!("[{body}]"),
-                    Value::Set { frozen: true, .. } if v.is_empty() => "frozenset()".into(),
-                    Value::Set { frozen: true, .. } => format!("frozenset({{{body}}})"),
-                    Value::Set { .. } if v.is_empty() => "set()".into(),
-                    Value::Set { .. } => format!("{{{body}}}"),
                     _ if v.len() == 1 => format!("({body},)"),
                     _ => format!("({body})"),
                 }
@@ -1194,7 +1206,30 @@ impl Context {
         })
     }
 
+    /// Union of set operands preserves mutable left-hand storage for augmented assignment.
+    fn set_union(&mut self, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        let Value::Set { entries, frozen } = self.heap.get(a) else {
+            unreachable!()
+        };
+        let result = if inplace && !frozen {
+            a
+        } else {
+            self.alloc(Value::Set {
+                entries: entries.clone(),
+                frozen: *frozen,
+            })
+        };
+        if a != b {
+            builtins::update_set(self, result, b)?;
+        }
+        Ok(result)
+    }
+
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        self.binary_operation(op, a, b, false)
+    }
+
+    fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
         }
@@ -1205,6 +1240,44 @@ impl Context {
         }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
+            "|" if [a, b].into_iter().any(|id| {
+                matches!(
+                    self.heap.get(id),
+                    Value::DictView {
+                        kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                        ..
+                    }
+                )
+            }) =>
+            {
+                // Dictionary keys and items implement reflected union, returning a fresh set.
+                let result = self.alloc(Value::Set {
+                    entries: Default::default(),
+                    frozen: false,
+                });
+                builtins::update_set(self, result, a)?;
+                builtins::update_set(self, result, b)?;
+                return Ok(result);
+            }
+            "|" if matches!(self.heap.get(a), Value::Set { .. })
+                || matches!(self.heap.get(b), Value::Set { .. }) =>
+            {
+                if matches!(
+                    (self.heap.get(a), self.heap.get(b)),
+                    (Value::Set { .. }, Value::Set { .. })
+                ) {
+                    return self.set_union(a, b, inplace);
+                }
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "unsupported operand type(s) for {}: '{}' and '{}'",
+                        if inplace { "|=" } else { "|" },
+                        self.type_name(a),
+                        self.type_name(b)
+                    ),
+                ));
+            }
             "%" if let Value::Str(text) = self.heap.get(a) => {
                 return builtins::percent(self, &text.clone(), b);
             }
@@ -1578,7 +1651,7 @@ impl Context {
             }
             return Ok(a);
         }
-        self.binary(op, a, b)
+        self.binary_operation(op, a, b, true)
     }
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {

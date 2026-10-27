@@ -13,10 +13,45 @@ impl Context {
     /// Instantiate exception classes used by raise and its explicit cause.
     fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
         let base = self.builtin("BaseException");
-        if self.subclass(value, base) {
-            self.call(value, Vec::new(), Vec::new())
+        if !self.subclass(value, base) {
+            return Ok(value);
+        }
+        let result = self.call(value, Vec::new(), Vec::new())?;
+        if !matches!(self.heap.get(result), Value::Raised(_)) {
+            let actual = self.exact_type(result)?;
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "calling {} should have returned an instance of BaseException, not {}",
+                    self.exception_class_repr(value),
+                    self.exception_class_repr(actual)
+                ),
+            ));
+        }
+        Ok(result)
+    }
+
+    /// Format exception-construction diagnostics with the class's Python module.
+    fn exception_class_repr(&self, class: Id) -> String {
+        let Value::Class { name, scope, .. } = self.heap.get(class) else {
+            return self.repr(class);
+        };
+        let scope = self.scope_data(*scope);
+        let attr = |key: &str| {
+            scope
+                .names
+                .get(key)
+                .and_then(|&id| match self.heap.get(id) {
+                    Value::Str(s) => Some(s.as_str()),
+                    _ => None,
+                })
+        };
+        let module = attr("__module__").unwrap_or(&scope.module);
+        let name = attr("__qualname__").unwrap_or(name);
+        if module == "builtins" {
+            format!("<class '{name}'>")
         } else {
-            Ok(value)
+            format!("<class '{module}.{name}'>")
         }
     }
 
@@ -28,7 +63,8 @@ impl Context {
             }
             "assign" => {
                 let name = self.str_value(b)?.to_owned();
-                self.bind_source_name(a, &name, c)?;
+                let value = self.enum_assignment(a, &name, c)?;
+                self.bind_source_name(a, &name, value)?;
                 Ok(c)
             }
             "declare_global" => {
@@ -90,7 +126,7 @@ impl Context {
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
             "set" => Ok(self.alloc(Value::Set {
-                items: Vec::new(),
+                entries: Default::default(),
                 frozen: false,
             })),
             "dict" => Ok(self.dict(Vec::new())),
@@ -172,9 +208,32 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
-            "annotate" => {
+            "annotate" | "annotate_deferred" => {
                 if let Some(mapping) = self.scope_name(a, "__annotations__") {
-                    self.put_item(mapping, b, c)?;
+                    if op == "annotate_deferred" {
+                        let thunks = if let Some(dict) = self
+                            .scope_data(a)
+                            .class_namespace
+                            .as_ref()
+                            .and_then(|c| c.annotation_thunks)
+                        {
+                            dict
+                        } else {
+                            let dict = self.dict(Vec::new());
+                            let Value::Scope(scope) = self.heap.get_mut(a) else {
+                                unreachable!()
+                            };
+                            scope
+                                .class_namespace
+                                .get_or_insert_with(Default::default)
+                                .annotation_thunks = Some(dict);
+                            dict
+                        };
+                        self.put_item(thunks, b, c)?;
+                        self.put_item(mapping, b, NONE)?;
+                    } else {
+                        self.put_item(mapping, b, c)?;
+                    }
                 }
                 Ok(NONE)
             }
@@ -201,15 +260,22 @@ impl Context {
                 }
             }
             "neg" | "pos" | "~" => {
-                let slot = match op {
-                    "neg" => "__neg__",
-                    "pos" => "__pos__",
-                    _ => "__invert__",
+                let (slot, symbol) = match op {
+                    "neg" => ("__neg__", "-"),
+                    "pos" => ("__pos__", "+"),
+                    _ => ("__invert__", "~"),
                 };
                 if let Some(method) = self.bound_slot(a, slot)? {
                     return self.call(method, vec![], vec![]);
                 }
-                let v = self.as_int(a)?;
+                let v = self.as_int(a).map_err(|_| {
+                    let name = self.type_name(a);
+                    let name = &name[..name.floor_char_boundary(200)];
+                    Error::new(
+                        "TypeError",
+                        format!("bad operand type for unary {symbol}: '{name}'"),
+                    )
+                })?;
                 let result = match op {
                     "neg" => crate::integer_binary(&crate::Int::from(0), &v, 1)?,
                     "~" => crate::integer_binary(&crate::Int::from(-1), &v, 7)?,
@@ -302,10 +368,6 @@ impl Context {
                 let trace = error.tracing();
                 trace.instance = Some(exception);
                 if op == "raise" {
-                    let active = self.heap.active_exception();
-                    if active != NONE && active != exception {
-                        trace.context = Some(active);
-                    }
                     if c == TRUE {
                         let cause = self.instantiate_exception_class(b)?;
                         if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
@@ -315,6 +377,31 @@ impl Context {
                             ));
                         }
                         trace.cause = Some(cause);
+                    }
+                    if exception != a && !self.instance_of(exception, a) {
+                        // A class may allocate a different exception. CPython normalizes
+                        // the target by calling the requested class with that instance.
+                        let Value::Raised(original) = self.heap.get_mut(exception) else {
+                            unreachable!()
+                        };
+                        *original = error;
+                        let normalized = self.call(a, vec![exception], Vec::new())?;
+                        let Value::Raised(result) = self.heap.get(normalized) else {
+                            return Err(Error::new(
+                                "TypeError",
+                                format!(
+                                    "calling {} should have returned an instance of BaseException, not {}",
+                                    self.exception_class_repr(a),
+                                    self.type_name(normalized)
+                                ),
+                            ));
+                        };
+                        error = result.clone();
+                        error.tracing().instance = Some(normalized);
+                    }
+                    let active = self.heap.active_exception();
+                    if active != NONE && error.tracing().instance != Some(active) {
+                        error.tracing().context = Some(active);
                     }
                 }
                 Err(error)

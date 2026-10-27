@@ -531,7 +531,32 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
         "pattern.findall" => {
             let text = subject_bytes(ctx, subject, pattern.bytes)?.to_vec();
             let mut found = Vec::new();
-            for captures in regex.captures_iter(&text) {
+            let mut captures = regex.create_captures();
+            let mut start = 0;
+            let mut retry = false;
+            loop {
+                if retry && !split::nonempty(&pattern, &text, start, &mut captures)? {
+                    if start == text.len() {
+                        break;
+                    }
+                    start += 1;
+                    while !pattern.bytes && start < text.len() && text[start] & 0xc0 == 0x80 {
+                        start += 1;
+                    }
+                    retry = false;
+                }
+                if !retry {
+                    regex.captures(Input::new(&text).range(start..text.len()), &mut captures);
+                }
+                let Some(span) = captures.get_group(0) else {
+                    break;
+                };
+                let eol = captures.group_info().to_index(PatternID::ZERO, "imre.eol");
+                let end = eol
+                    .and_then(|i| captures.get_group(i))
+                    .map_or(span.end, |nl| nl.start);
+                start = end;
+                retry = end == span.start;
                 let fields = groups(&captures, &text);
                 let value = match fields.as_slice() {
                     [complete] => group_value(complete.unwrap_or_default(), pattern.bytes),

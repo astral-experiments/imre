@@ -536,11 +536,12 @@ impl Context {
             return self.items(dict);
         }
         match self.heap.get(id).clone() {
-            Value::List(items)
-            | Value::Tuple(items)
-            | Value::Set { items, .. }
-            | Value::NamedTuple { values: items, .. } => Ok(items),
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+            Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                Ok(items)
+            }
+            Value::Set { entries, .. }
+            | Value::Dict(entries)
+            | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
             }
             Value::Context(bindings) => Ok(bindings.keys().copied().collect()),
@@ -590,9 +591,10 @@ impl Context {
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
         self.alloc(Value::Scope(Scope {
             class_body: None,
+            enum_namespace: None,
             is_abstract: false,
             class_cell: None,
-            class_lineage: None,
+            class_namespace: None,
             first_argument: None,
             names: Default::default(),
             closure: Default::default(),
@@ -771,10 +773,20 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if builtins::is_exception(name) {
+            self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
+            self.builtin("BaseException.__init__");
+            if name == "StopIteration" {
+                self.builtin("StopIteration.__init__");
+            }
+        }
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
             "int" => &["to_bytes"],
-            "str" => builtins::STR_METHODS,
+            "str" => {
+                self.builtin("str.maketrans");
+                builtins::STR_METHODS
+            }
             _ => &[],
         };
         for method in methods {

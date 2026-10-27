@@ -62,6 +62,33 @@ with TCPServer(("127.0.0.1", 0), BaseRequestHandler) as server:
 """
 
 
+CHECKED_ERROR = """import socket
+from socketserver import BaseRequestHandler, TCPServer
+
+class Fails(BaseRequestHandler):
+    def handle(self) -> None:
+        raise ValueError("checked request")
+
+with TCPServer(("127.0.0.1", 0), Fails) as server:
+    with socket.socket() as peer:
+        peer.connect(server.server_address)
+        server.handle_request()
+        assert peer.recv(1) == b""
+        print("closed")
+    server.handle_error(server.socket, server.server_address)
+"""
+CHECKED_ERROR_LINE = 6
+
+
+def check_handler_error(command, source):
+    result = subprocess.run(command, capture_output=True, timeout=25, check=True)
+    assert result.stdout == b"closed\n", result
+    location = f'File "{source}", line {CHECKED_ERROR_LINE}'.encode()
+    for expected in (b"Traceback (most recent call last):", location,
+                     b"ValueError: checked request\n", b"NoneType: None\n"):
+        assert expected in result.stderr, (expected, result.stderr)
+
+
 def observe(command):
     p = subprocess.run(command, capture_output=True, timeout=25)
     if p.returncode or p.stderr:
@@ -89,16 +116,22 @@ def main():
         timed = root / "timed_listener.py"
         timed.write_text(TIMED_LISTENER)
         assert observe([args.python, "-E", timed]) == b"timed out\n"
+        failure = root / "checked_error.py"
+        failure.write_text(CHECKED_ERROR)
+        check_handler_error([args.python, "-E", failure], failure)
+
+        def build(source, level):
+            binary = root / source.stem
+            subprocess.run([compiler, "build", source, "--no-cache", "--runtime", args.runtime.resolve(),
+                            "--clang", args.clang, "--opt-level", level, "-o", binary], check=True, timeout=180)
+            return binary
+
         for level in args.opt_levels:
-            timed_binary = root / "timed_listener"
-            subprocess.run([compiler, "build", timed, "--no-cache", "--runtime", args.runtime.resolve(),
-                            "--clang", args.clang, "--opt-level", level, "-o", timed_binary], check=True, timeout=180)
+            check_handler_error([build(failure, level)], failure)
+            timed_binary = build(timed, level)
             assert observe([timed_binary]) == b"socketserver listener timeout only supports None\n"
             for source, expected in oracles.items():
-                binary = root / source.stem
-                subprocess.run([compiler, "build", source, "--no-cache", "--runtime", args.runtime.resolve(),
-                                "--clang", args.clang, "--opt-level", level, "-o", binary], check=True, timeout=180)
-                assert observe([binary]) == expected, source
+                assert observe([build(source, level)]) == expected, source
             print(f"O{level}: TCP handler identity, dispatch, stream data, EOF and descriptor cleanup match CPython")
 
 

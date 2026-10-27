@@ -4,7 +4,7 @@ use num_traits::{Signed, ToPrimitive};
 
 use ruff_python_literal::cformat::{
     CConversionFlags, CFormatContext, CFormatError, CFormatErrorType, CFormatPart,
-    CFormatPrecision, CFormatQuantity, CFormatSpec, CFormatString,
+    CFormatPrecision, CFormatQuantity, CFormatSpec, CFormatString, CFormatType,
 };
 use ruff_python_literal::format::{
     FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
@@ -13,6 +13,9 @@ use ruff_python_literal::format::{
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
+
+mod bytes_fields;
+mod maketrans;
 
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
@@ -83,11 +86,15 @@ pub(super) fn construct(
         "repr" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            if let Value::Instance { class, .. } = *ctx.heap.get(args[0])
-                && ctx.enum_values(class).is_some()
-                && let Some(repr) = ctx.bound_slot(args[0], "__repr__")?
-            {
-                return ctx.call(repr, Vec::new(), Vec::new());
+            if let Some(repr) = ctx.bound_slot(args[0], "__repr__")? {
+                let result = ctx.call(repr, Vec::new(), Vec::new())?;
+                if ctx.str_value(result).is_err() {
+                    return Err(type_error(format!(
+                        "__repr__ returned non-string (type {})",
+                        ctx.type_name(result)
+                    )));
+                }
+                return Ok(result);
             }
             Ok(ctx.text(ctx.checked_format(args[0], true)?))
         }
@@ -239,6 +246,16 @@ fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
     (precision <= 1000).then_some((precision, spec.ends_with('%'), sign))
 }
 
+/// Convert a numeric formatting operand to binary64, checking large integers first.
+fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
+    Ok(match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Float(n) => Some(*n),
+        Value::Int(n) => Some(crate::floats::int_to_float(n)?),
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        _ => None,
+    })
+}
+
 /// Apply a scalar format specifier used by both f-strings and str.format.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
     if spec.is_empty() {
@@ -251,12 +268,8 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
         return Ok(ctx.display(value));
     }
     if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
-        let number = match ctx.heap.get(ctx.scalar_value(value)) {
-            Value::Float(value) => *value,
-            Value::Int(value) => crate::floats::int_to_float(value)?,
-            Value::Bool(value) => f64::from(u8::from(*value)),
-            _ => return Err(type_error(format!("unsupported format string {spec:?}"))),
-        };
+        let number = float_operand(ctx, value)?
+            .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
         return Ok(
             crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
         );
@@ -418,8 +431,8 @@ fn negative_format_char(prefix: &[u8], ch: char) -> bool {
     !after_quantity && i32::from(ch as u8 as std::ffi::c_char).is_negative()
 }
 
-/// Decimal conversions accept real numbers. Octal and hex require the integer-index protocol.
-fn render_percent_integer(
+/// Convert the numeric operand after its starred width and precision have been consumed.
+fn render_percent_number(
     ctx: &mut Context,
     value: Id,
     spec: &CFormatSpec,
@@ -427,6 +440,16 @@ fn render_percent_integer(
     star_width: Option<isize>,
     star_precision: Option<usize>,
 ) -> Result<String> {
+    let stars = star_width
+        .map(|w| crate::Int::from(w as i64))
+        .into_iter()
+        .chain(star_precision.map(crate::Int::from_usize));
+    if matches!(spec.format_type, CFormatType::Float(_)) {
+        let number = float_operand(ctx, value)?.ok_or_else(|| {
+            type_error(format!("must be real number, not {}", ctx.type_name(value)))
+        })?;
+        return Ok(crate::objects::percent_float_field(field, stars, number)?);
+    }
     let conversion = spec.format_char;
     let decimal = matches!(conversion, 'd' | 'i' | 'u');
     let mut convert = || {
@@ -468,11 +491,7 @@ fn render_percent_integer(
     if precision.is_some_and(|n| n > (i32::MAX - 3) as usize) {
         return Err(Error::new("OverflowError", "precision too large"));
     }
-    let operands = star_width
-        .map(|w| crate::Int::from(w as i64))
-        .into_iter()
-        .chain(star_precision.map(crate::Int::from_usize))
-        .chain(std::iter::once(integer));
+    let operands = stars.chain(std::iter::once(integer));
     crate::objects::percent_integer_field(field, operands).map_err(|e| {
         let error = Error::from(e);
         if error.kind == "MemoryError" {
@@ -483,9 +502,10 @@ fn render_percent_integer(
     })
 }
 
-/// Format positional octal fields while preserving all literal bytes.
+/// Interpolate binary fields without decoding the template or the arguments.
 pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id) -> Result<Id> {
     let mut args = percent_args(ctx, rhs)?;
+    let mapping = bytes_fields::is_mapping(ctx, rhs);
     let mut input = format.iter().copied().enumerate().peekable();
     let mut output = Vec::new();
     let memory = |_| Error::new("MemoryError", "");
@@ -495,10 +515,41 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
             output.push(byte);
             continue;
         }
-        let mut parsed = CFormatSpec::parse(&mut input, CFormatContext::Bytes);
+        // A mapping key is an arbitrary byte string. Look it up before parsing its field.
+        if input.next_if(|&(_, byte)| byte == b'(').is_some() {
+            if !mapping {
+                return Err(type_error("format requires a mapping"));
+            }
+            let mut depth = 1;
+            let (end, _) = input
+                .find(|&(_, byte)| {
+                    match byte {
+                        b'(' => depth += 1,
+                        b')' => depth -= 1,
+                        _ => {}
+                    }
+                    depth == 0
+                })
+                .ok_or_else(|| Error::new("ValueError", "incomplete format key"))?;
+            let key = ctx.alloc(Value::Bytes(format[start + 2..end].to_vec()));
+            if matches!(ctx.heap.get(rhs), Value::List(_) | Value::Range { .. }) {
+                return Err(type_error(format!(
+                    "{} indices must be integers or slices, not bytes",
+                    ctx.type_name(rhs)
+                )));
+            }
+            args = vec![ctx.get_item(rhs, key)?].into_iter();
+        }
+        let field_start = input.peek().map_or(format.len(), |&(i, _)| i);
+        let mut parsed = if let Some(&(index, b'(')) = input.peek() {
+            // A second opening parenthesis occupies the conversion-character position.
+            Err((CFormatErrorType::UnsupportedFormatChar('('), index))
+        } else {
+            CFormatSpec::parse(&mut input, CFormatContext::Bytes)
+        };
         // Ruff limits both quantities to i32. CPython's bytes width fits Py_ssize_t.
         if let Err((CFormatErrorType::IntTooBig, index)) = parsed
-            && !format[start..index].contains(&b'.')
+            && !format[field_start..index].contains(&b'.')
         {
             let digits = format[..index]
                 .iter()
@@ -508,7 +559,7 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
             while input.next_if(|(_, b)| b.is_ascii_digit()).is_some() {}
             let tail = input.peek().map_or(format.len(), |&(i, _)| i);
             let width = std::str::from_utf8(&format[digits..tail]).unwrap();
-            if width.parse::<isize>().is_ok() {
+            if let Ok(width) = width.parse::<isize>() {
                 // Validate the suffix with the same parser. The renderer uses the original width.
                 let mut suffix = std::iter::once(b'1')
                     .chain(format[tail..].iter().copied())
@@ -516,31 +567,49 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
                     .peekable();
                 parsed = CFormatSpec::parse(&mut suffix, CFormatContext::Bytes)
                     .map_err(|(kind, i)| (kind, tail - 1 + i));
+                if let Ok(spec) = &mut parsed {
+                    spec.min_field_width = Some(CFormatQuantity::Amount(width as usize));
+                }
                 let end = suffix.peek().map_or(format.len(), |&(i, _)| tail - 1 + i);
                 while input.next_if(|&(i, _)| i < end).is_some() {}
             }
         }
-        let spec = parsed.map_err(|(typ, index)| match typ {
-            CFormatErrorType::IntTooBig => {
-                let message = if format[start..index].contains(&b'.') {
-                    "prec too big"
+        let spec = match parsed {
+            Ok(spec) => spec,
+            Err((typ, index)) => {
+                let end = if matches!(typ, CFormatErrorType::IncompleteFormat) {
+                    format.len()
                 } else {
-                    "width too big"
+                    index
                 };
-                Error::new("ValueError", message)
+                bytes_fields::consume_pending_stars(ctx, &format[field_start..end], &mut args)?;
+                return Err(match typ {
+                    CFormatErrorType::IntTooBig => {
+                        let message = if format[field_start..index].contains(&b'.') {
+                            "prec too big"
+                        } else {
+                            "width too big"
+                        };
+                        Error::new("ValueError", message)
+                    }
+                    CFormatErrorType::UnsupportedFormatChar(_) if args.len() == 0 => {
+                        type_error("not enough arguments for format string")
+                    }
+                    CFormatErrorType::UnsupportedFormatChar(c)
+                        if negative_format_char(&format[field_start..index], c) =>
+                    {
+                        Error::new("OverflowError", "character argument not in range(0x110000)")
+                    }
+                    _ => Error::new("ValueError", CFormatError { typ, index }.to_string()),
+                });
             }
-            CFormatErrorType::UnsupportedFormatChar(_) if args.len() == 0 => {
-                type_error("not enough arguments for format string")
-            }
-            CFormatErrorType::UnsupportedFormatChar(c)
-                if negative_format_char(&format[start + 1..index], c) =>
-            {
-                Error::new("OverflowError", "character argument not in range(0x110000)")
-            }
-            _ => Error::new("ValueError", CFormatError { typ, index }.to_string()),
-        })?;
+        };
+        if matches!(spec.format_char, 's' | 'b') {
+            let end = input.peek().map_or(format.len(), |&(i, _)| i);
+            bytes_fields::append(ctx, &spec, &mut args, &mut output, format.len() - end)?;
+            continue;
+        }
         if spec.format_char != 'o'
-            || format.get(start + 1) == Some(&b'(')
             || matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple))
             || matches!(
                 spec.precision,
@@ -549,37 +618,25 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
         {
             return Err(Error::new(
                 "NotImplementedError",
-                "bytes formatting supports positional octal fields with static width and precision",
+                "unsupported bytes format field",
             ));
         }
         let value = args
             .next()
             .ok_or_else(|| type_error("not enough arguments for format string"))?;
         let end = input.peek().map_or(format.len(), |&(i, _)| i);
-        let field = std::str::from_utf8(&format[start + 1..end])
-            .expect("positional octal fields are ASCII");
-        let rendered = render_percent_integer(ctx, value, &spec, field, None, None)?;
+        let field = std::str::from_utf8(&format[field_start..end]).expect("octal fields are ASCII");
+        let rendered = render_percent_number(ctx, value, &spec, field, None, None)?;
         // Keep space for the unprocessed literal bytes as well as this field.
         output
             .try_reserve(rendered.len().saturating_add(format.len() - end))
             .map_err(memory)?;
         output.extend_from_slice(rendered.as_bytes());
     }
-    if args.len() != 0 {
-        let mapping = match ctx.heap.get(rhs) {
-            Value::Dict(_) | Value::DefaultDict { .. } | Value::List(_) | Value::Range { .. } => {
-                true
-            }
-            Value::Instance { class, .. } => {
-                ctx.class_attr(*class, "__getitem__").is_some() || ctx.dict_storage(rhs).is_some()
-            }
-            _ => false,
-        };
-        if !mapping {
-            return Err(type_error(
-                "not all arguments converted during bytes formatting",
-            ));
-        }
+    if args.len() != 0 && !mapping {
+        return Err(type_error(
+            "not all arguments converted during bytes formatting",
+        ));
     }
     Ok(ctx.alloc(Value::Bytes(output)))
 }
@@ -646,7 +703,9 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                 let decorated = spec.precision.is_some()
                     || spec.min_field_width.is_some()
                     || !spec.flags.is_empty();
-                let number_field = matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X');
+                let float_field = matches!(spec.format_type, CFormatType::Float(_));
+                let number_field = float_field
+                    || decorated && matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X');
                 let star_width =
                     matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple));
                 let star_precision = matches!(
@@ -674,18 +733,18 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                 } else {
                     &mut args
                 };
-                let layout = (text_field || star_width || star_precision)
+                let layout = (text_field || float_field || star_width || star_precision)
                     .then(|| percent_layout(ctx, spec, field_args))
                     .transpose()?;
                 let arg = field_args
                     .next()
                     .ok_or_else(|| type_error("not enough arguments for format string"))?;
-                if decorated && number_field {
+                if number_field {
                     let (_, (start, _)) = positions
                         .find(|(i, _)| i == position)
                         .expect("parsed percent fields follow their source character positions");
                     let (width, precision) = layout.unwrap_or_default();
-                    let rendered = render_percent_integer(
+                    let rendered = render_percent_number(
                         ctx,
                         arg,
                         spec,
@@ -706,8 +765,6 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     },
                     'r' => ctx.repr(arg).into(),
                     'a' => ascii(&ctx.repr(arg)).into(),
-                    'd' | 'i' | 'u' => ctx.as_int(arg)?.to_string().into(),
-                    ch @ ('o' | 'x' | 'X') => format_value(ctx, arg, &ch.to_string())?.into(),
                     'c' => match ctx.heap.get(arg) {
                         Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
                         _ => u32::try_from(ctx.as_integer(arg)?)
@@ -764,6 +821,30 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if owner == "str" && name == "maketrans" {
+        return maketrans::table(ctx, args, kwargs);
+    }
+    if owner == "bytes" && name == "__mod__" {
+        let (receiver, args) = args.split_first().ok_or_else(|| {
+            type_error("descriptor '__mod__' of 'bytes' object needs an argument")
+        })?;
+        let Value::Bytes(format) = ctx.heap.get(ctx.scalar_value(*receiver)) else {
+            return Err(type_error(format!(
+                "descriptor '__mod__' requires a 'bytes' object but received a '{}'",
+                ctx.type_name(*receiver)
+            )));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __mod__() takes no keyword arguments"));
+        }
+        let [rhs] = args else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
+        };
+        return bytes_percent(ctx, &format.clone(), *rhs);
+    }
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {
             type_error("str.__new__(): not enough arguments")

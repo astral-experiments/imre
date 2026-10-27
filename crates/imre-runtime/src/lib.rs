@@ -1208,10 +1208,6 @@ fn parse_decimal_int_with_limit(original: &str, limit: u32) -> Result<Option<Int
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_input() -> *const Str {
-    // A preceding print must be visible before waiting for the next input line.
-    if let Err(error) = flush_stdout() {
-        return objects::errno_error(error).returning(std::ptr::null());
-    }
     finish(
         sys::read_input_line().and_then(|line| {
             StrOwner::try_new(Str::from(line))
