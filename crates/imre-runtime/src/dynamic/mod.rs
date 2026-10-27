@@ -74,6 +74,7 @@ pub(crate) struct Context {
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
+    call_depth: usize,
     pending: Option<Error>,
 }
 
