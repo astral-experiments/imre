@@ -258,6 +258,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
+        Value::Range(_) if matches!(attr, "__iter__" | "__reversed__") => "range",
+        Value::RangeIterator(iter)
+            if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
+        {
+            iter.kind
+        }
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
@@ -659,37 +665,6 @@ fn delete_attribute(
     Ok(NONE)
 }
 
-/// Compute Python's range length without overflowing at either i64 endpoint.
-pub(super) fn range_len(start: i64, stop: i64, step: i64) -> Result<usize> {
-    if step == 0 {
-        return Err(Error::new("ValueError", "range() arg 3 must not be zero"));
-    }
-    let delta = if step > 0 {
-        i128::from(stop) - i128::from(start)
-    } else {
-        i128::from(start) - i128::from(stop)
-    };
-    let len = if delta <= 0 {
-        0
-    } else {
-        1 + (delta - 1) / i128::from(step).abs()
-    };
-    usize::try_from(len).map_err(|_| Error::new("OverflowError", "range length is too large"))
-}
-
-pub(super) fn range_items(ctx: &mut Context, start: i64, stop: i64, step: i64) -> Result<Vec<Id>> {
-    let size = range_len(start, stop, step)?;
-    let mut result = Vec::new();
-    result
-        .try_reserve_exact(size)
-        .map_err(|_| Error::new("MemoryError", "range is too large to materialize"))?;
-    for index in 0..size {
-        let value = i128::from(start) + i128::from(step) * index as i128;
-        result.push(ctx.int(value as i64));
-    }
-    Ok(result)
-}
-
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -769,6 +744,9 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
+            "range" | "range_iterator" | "longrange_iterator" => {
+                super::range::method(ctx, owner, method, args, kwargs)
+            }
             "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
@@ -1036,6 +1014,9 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let object = args[0];
+            if let Value::Range(range) = ctx.heap.get(object) {
+                return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
+            }
             if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::Iterator {
                     sequence: Some(object),
@@ -1107,7 +1088,14 @@ pub(super) fn call(
                 }
                 Value::Str(v) => v.chars().count(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::Range { start, stop, step } => range_len(*start, *stop, *step)?,
+                Value::Range(range) => {
+                    return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
+                        Error::new(
+                            "OverflowError",
+                            "Python int too large to convert to C ssize_t",
+                        )
+                    });
+                }
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
                 }
@@ -1134,19 +1122,18 @@ pub(super) fn call(
         "range" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 3)?;
-            let first = ctx.as_integer(args[0])?;
+            let first = ctx.index_integer(args[0])?;
             let (start, stop) = if let Some(&stop) = args.get(1) {
-                (first, ctx.as_integer(stop)?)
+                (first, ctx.index_integer(stop)?)
             } else {
-                (0, first)
+                (crate::Int::from(0), first)
             };
             let step = args
                 .get(2)
-                .map(|&x| ctx.as_integer(x))
+                .map(|&x| ctx.index_integer(x))
                 .transpose()?
-                .unwrap_or(1);
-            range_len(start, stop, step)?;
-            Ok(ctx.alloc(Value::Range { start, stop, step }))
+                .unwrap_or_else(|| crate::Int::from(1));
+            Ok(ctx.alloc(Value::Range(super::range::Range::new(start, stop, step)?)))
         }
         "dict" | "list" | "tuple" | "set" | "frozenset" => {
             collections::construct(ctx, name, args, kwargs)

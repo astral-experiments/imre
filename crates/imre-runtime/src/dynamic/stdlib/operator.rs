@@ -307,6 +307,15 @@ impl Context {
             })?;
             return Ok(self.int(length));
         }
+        if let Value::RangeIterator(iter) = self.heap.get(value) {
+            let n = iter.remaining.to_i64().ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            return Ok(self.int(n));
+        }
         if let Value::DictIterator(iter) = self.heap.get(value) {
             return Ok(self.int(iter.length_hint(self) as i64));
         }

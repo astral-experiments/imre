@@ -243,7 +243,7 @@ impl Context {
                 | Value::Set { .. }
                 | Value::Str(_)
                 | Value::Bytes(_)
-                | Value::Range { .. }
+                | Value::Range(_)
                 | Value::Iterator { .. }
                 | Value::DictIterator(_)
         ) {
@@ -552,7 +552,8 @@ impl Context {
             | Value::List(_)
             | Value::Dict(_)
             | Value::Set { .. }
-            | Value::Range { .. }
+            | Value::Range(_)
+            | Value::RangeIterator(_)
             | Value::Slice(_)
             | Value::Enumerate { .. }
             | Value::Iterator { .. }
@@ -763,7 +764,7 @@ impl Context {
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | ("slice", Value::Slice(_))
-            | ("range", Value::Range { .. })
+            | ("range", Value::Range(_))
             | ("map", Value::Map { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
@@ -1568,6 +1569,13 @@ impl Context {
             }
             Value::Native(class) if class == "operator.itemgetter" && name == "__reduce__" => {
                 return Ok(self.builtin("operator.itemgetter.__reduce__"));
+            }
+            Value::Native(class)
+                if (class == "range" && matches!(name, "__iter__" | "__reversed__"))
+                    || (matches!(class.as_str(), "range_iterator" | "longrange_iterator")
+                        && matches!(name, "__iter__" | "__next__" | "__length_hint__")) =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(class)
                 if class == "enumerate" && matches!(name, "__iter__" | "__next__") =>
@@ -2403,6 +2411,8 @@ impl Context {
                                 | "bytes"
                                 | "bytearray"
                                 | "range"
+                                | "range_iterator"
+                                | "longrange_iterator"
                                 | "module"
                                 | "slice"
                                 | "function"
