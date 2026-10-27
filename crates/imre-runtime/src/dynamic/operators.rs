@@ -287,11 +287,158 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        self.format_value(id, false, &mut Vec::new())
+        self.render_containers(id, false, false)
+            .expect("unlimited rendering")
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        self.format_value(id, true, &mut Vec::new())
+        self.render_containers(id, true, false)
+            .expect("unlimited rendering")
+    }
+
+    /// Render container ancestors iteratively so recursive values do not consume the native stack.
+    pub(super) fn checked_format(&self, root: Id, quoted: bool) -> Result<String> {
+        self.render_containers(root, quoted, true)
+    }
+
+    fn render_containers(&self, root: Id, quoted: bool, checked: bool) -> Result<String> {
+        enum Part<'a> {
+            Value(Id, bool),
+            Text(&'a str),
+            Sequence(&'a [Id], usize),
+            Mapping(&'a [(Id, Id)], usize),
+            Leave(Id, &'static str),
+            ContextEnd(Id),
+            SliceEnd,
+        }
+        let mut output = String::new();
+        let mut work = vec![Part::Value(root, quoted)];
+        let mut active = Vec::new();
+        let mut ancestors = std::collections::HashSet::new();
+        let mut slice_depth = 0usize;
+        while let Some(part) = work.pop() {
+            match part {
+                Part::Text(text) => output.push_str(text),
+                Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::SliceEnd => {
+                    slice_depth -= 1;
+                    output.push(')');
+                }
+                Part::Leave(id, end) => {
+                    ancestors.remove(&id);
+                    debug_assert_eq!(active.pop(), Some(id));
+                    output.push_str(end);
+                }
+                Part::Sequence(items, index) => {
+                    if let Some(&item) = items.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::Sequence(items, index + 1));
+                        work.push(Part::Value(item, true));
+                    }
+                }
+                Part::Mapping(items, index) => {
+                    if let Some(&(key, value)) = items.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::Mapping(items, index + 1));
+                        work.push(Part::Value(value, true));
+                        work.push(Part::Text(": "));
+                        work.push(Part::Value(key, true));
+                    }
+                }
+                Part::Value(id, repr) => {
+                    match self.heap.get(id) {
+                        Value::Slice(items) => {
+                            if checked && slice_depth >= 15000 {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            slice_depth += 1;
+                            output.push_str("slice(");
+                            work.push(Part::SliceEnd);
+                            work.push(Part::Sequence(items, 0));
+                            continue;
+                        }
+                        Value::Instance {
+                            scalar: None,
+                            dictionary: Some(backing),
+                            ..
+                        } if self.enum_member(id).is_none() => {
+                            work.push(Part::Value(*backing, repr));
+                            continue;
+                        }
+                        Value::ContextVar { name, default, .. } => {
+                            output.push_str("<ContextVar name=");
+                            work.push(Part::ContextEnd(id));
+                            if let Some(default) = default {
+                                work.push(Part::Value(*default, true));
+                                work.push(Part::Text(" default="));
+                            }
+                            work.push(Part::Value(*name, true));
+                            continue;
+                        }
+                        Value::ContextToken { variable, used, .. } => {
+                            output.push_str(if *used {
+                                "<Token used var="
+                            } else {
+                                "<Token var="
+                            });
+                            work.push(Part::ContextEnd(id));
+                            work.push(Part::Value(*variable, true));
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    let (start, end, placeholder, sequence, mapping) = match self.heap.get(id) {
+                        Value::List(items) => ("[", "]", "[...]", Some(items.as_slice()), None),
+                        Value::Tuple(items) => (
+                            "(",
+                            if items.len() == 1 { ",)" } else { ")" },
+                            "(...)",
+                            Some(items.as_slice()),
+                            None,
+                        ),
+                        Value::Dict(items) => ("{", "}", "{...}", None, Some(items.as_slice())),
+                        Value::Set { items, frozen } => {
+                            if items.is_empty() {
+                                output.push_str(if *frozen { "frozenset()" } else { "set()" });
+                                continue;
+                            }
+                            (
+                                if *frozen { "frozenset({" } else { "{" },
+                                if *frozen { "})" } else { "}" },
+                                "set(...)",
+                                Some(items.as_slice()),
+                                None,
+                            )
+                        }
+                        _ => {
+                            output.push_str(&self.format_value(id, repr, &mut active));
+                            continue;
+                        }
+                    };
+                    if !ancestors.insert(id) {
+                        output.push_str(placeholder);
+                        continue;
+                    }
+                    active.push(id);
+                    output.push_str(start);
+                    work.push(Part::Leave(id, end));
+                    if let Some(items) = sequence {
+                        work.push(Part::Sequence(items, 0));
+                    }
+                    if let Some(items) = mapping {
+                        work.push(Part::Mapping(items, 0));
+                    }
+                }
+            }
+        }
+        Ok(output)
     }
 
     /// Renders positional values inside tuples and exception representations.
