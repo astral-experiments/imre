@@ -39,6 +39,26 @@ def current():
     equal_alias = GenericAlias(list, (0,))
     assert alias == equal_alias and equal_alias in {alias}
     assert {alias: "value"}[equal_alias] == "value"
+    left, right = 0, 0
+    for _ in range(30000):
+        left = frozenset((left,))
+        right = frozenset((right,))
+    assert left == right
+    left, right = 0, 0
+    for _ in range(30000):
+        left = frozenset((left, "sentinel"))
+        right = frozenset((right, "sentinel"))
+    assert left == right
+    left, right = 0, 0
+    for _ in range(10000):
+        left = frozenset(((left,),))
+        right = frozenset(((right,),))
+    assert left == right
+    left, right = 0, 0
+    for _ in range(10000):
+        left = frozenset((GenericAlias(list, (left,)),))
+        right = frozenset((GenericAlias(list, (right,)),))
+    assert left == right
     print("ok")
 
 
