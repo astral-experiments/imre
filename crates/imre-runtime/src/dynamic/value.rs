@@ -390,7 +390,7 @@ pub(super) enum Value {
         items: Vec<Id>,
         frozen: bool,
     },
-    Dict(Vec<(Id, Id)>),
+    Dict(super::dictionary::Entries),
     MappingProxy(Id),
     DictView {
         dict: Id,
@@ -399,7 +399,7 @@ pub(super) enum Value {
     DictIterator(DictIterator),
     DefaultDict {
         factory: Id,
-        entries: Vec<(Id, Id)>,
+        entries: super::dictionary::Entries,
     },
     Scope(Scope),
     ClassCell(Option<Id>),
@@ -770,7 +770,8 @@ pub(super) struct DictIterator {
     dict: Option<Id>,
     kind: DictViewKind,
     expected_len: Option<usize>,
-    index: usize,
+    position: usize,
+    remaining: usize,
 }
 
 impl DictIterator {
@@ -780,7 +781,8 @@ impl DictIterator {
             dict: Some(dict),
             kind,
             expected_len: Some(size),
-            index: 0,
+            position: 0,
+            remaining: size,
         }
     }
 
@@ -789,7 +791,7 @@ impl DictIterator {
         self.dict
             .and_then(|dict| ctx.dict_entries(dict))
             .filter(|entries| Some(entries.len()) == self.expected_len)
-            .map_or(0, |entries| entries.len() - self.index)
+            .map_or(0, |_| self.remaining)
     }
 
     /// Check the live size before each pull, including the one that reaches exhaustion.
@@ -797,7 +799,11 @@ impl DictIterator {
         let Some(dict) = self.dict else {
             return Ok(None);
         };
-        let entries = ctx.dict_entries(dict).expect("dictionary iterator source");
+        let storage = ctx.dict_storage(dict).expect("dictionary iterator source");
+        let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get(storage)
+        else {
+            unreachable!("dictionary storage");
+        };
         if self.expected_len != Some(entries.len()) {
             self.expected_len = None;
             return Err(Error::new(
@@ -805,11 +811,19 @@ impl DictIterator {
                 "dictionary changed size during iteration",
             ));
         }
-        let Some(&(key, value)) = entries.get(self.index) else {
+        let Some((position, key, value)) = entries.at(self.position) else {
             self.dict = None;
             return Ok(None);
         };
-        self.index += 1;
+        if self.remaining == 0 {
+            self.dict = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "dictionary keys changed during iteration",
+            ));
+        }
+        self.position = position + 1;
+        self.remaining -= 1;
         Ok(Some(match self.kind {
             DictViewKind::Keys => key,
             DictViewKind::Values => value,

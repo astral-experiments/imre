@@ -12,6 +12,11 @@ class StaticDeleter:
         obj.events.append('static descriptor')
 
 
+class Shadowed:
+    __class__ = "class field"
+    __dict__ = "dictionary field"
+
+
 class Subject:
     descriptor = Descriptor()
     static_deleter = StaticDeleter()
@@ -28,6 +33,12 @@ def function():
 
 
 def current():
+    shadowed = Shadowed()
+    shadowed.keep = "survives"
+    shadowed.__class__ = shadowed.__dict__ = "instance value"
+    del shadowed.__class__, shadowed.__dict__
+    print(shadowed.__class__, shadowed.__dict__, shadowed.keep)
+
     obj = Subject()
     obj.events = []
     obj.value = 1

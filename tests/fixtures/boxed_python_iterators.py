@@ -119,3 +119,13 @@ def current():
         1 in Broken()
     except ValueError as exc:
         print(str(exc))
+
+    calls = []
+
+    class Candidate:
+        def __eq__(self, other):
+            calls.append(other)
+            return other == 17
+
+    item = Candidate()
+    print(17 in [item], 17 in Rows([item]), item in [item], calls)

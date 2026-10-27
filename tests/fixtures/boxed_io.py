@@ -1,4 +1,5 @@
 import io
+import sys
 from io import RawIOBase
 
 
@@ -36,6 +37,12 @@ class ReadCount(RawIOBase):
 
 
 def exercise(path):
+    with open(path, "rb") as reader:
+        reader.read(1)
+        try:
+            reader.read(sys.maxsize)
+        except OverflowError as error:
+            print(error.args, reader.tell(), reader.read(1))
     from io import UnsupportedOperation
 
     target_path = path + ".output"

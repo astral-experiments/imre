@@ -738,9 +738,22 @@ pub(super) fn call(
             Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
         }
         "divmod" => {
-            positional(name, kwargs)?;
-            arity(name, args, 2, 2)?;
-            let (left, right) = (ctx.as_int(args[0])?, ctx.as_int(args[1])?);
+            if !kwargs.is_empty() {
+                return Err(type_error("divmod() takes no keyword arguments"));
+            }
+            let [a, b] = args else {
+                return Err(type_error(format!(
+                    "divmod expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            let (Ok(left), Ok(right)) = (ctx.as_int(*a), ctx.as_int(*b)) else {
+                return Err(type_error(format!(
+                    "unsupported operand type(s) for divmod(): '{}' and '{}'",
+                    ctx.type_name(*a),
+                    ctx.type_name(*b)
+                )));
+            };
             let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
             let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
             Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))

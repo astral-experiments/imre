@@ -52,6 +52,7 @@ impl Context {
                 | Value::Bytes(_)
                 | Value::Range { .. }
                 | Value::Iterator { .. }
+                | Value::DictIterator(_)
         ) {
             return Ok(false);
         }
@@ -1075,7 +1076,8 @@ impl Context {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_local_attribute(obj, name, None);
         }
-        if let Some(descriptor) = self.slot(obj, name)
+        let member = self.slot(obj, name);
+        if let Some(descriptor) = member
             && self.data_descriptor(descriptor)
         {
             match *self.heap.get(descriptor) {
@@ -1094,7 +1096,7 @@ impl Context {
             self.call(delete, vec![obj], Vec::new())?;
             return Ok(());
         }
-        if name == "__class__" {
+        if name == "__class__" && member.is_none() {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
         }
         match *self.heap.get(obj) {
@@ -1180,7 +1182,7 @@ impl Context {
                 let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
                     unreachable!()
                 };
-                if name == "__dict__" {
+                if name == "__dict__" && member.is_none() {
                     fields.clear();
                     return Ok(());
                 }

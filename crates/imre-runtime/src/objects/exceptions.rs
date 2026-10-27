@@ -873,7 +873,11 @@ impl Error {
 
     /// Installs a constant diagnostic, preserving a catchable error if either owner cannot grow.
     pub(crate) fn return_static_message<T>(kind: Kind, message: &'static str, sentinel: T) -> T {
-        let error = StrOwner::try_new(Str::const_new(message)).and_then(|message| {
+        Self::return_checked_message(kind, Str::const_new(message), sentinel)
+    }
+
+    pub(crate) fn return_checked_message<T>(kind: Kind, message: Str, sentinel: T) -> T {
+        let error = StrOwner::try_new(message).and_then(|message| {
             crate::ObjectOwner::try_new(exception_object(kind, Payload::Message(message), None))
         });
         match error {

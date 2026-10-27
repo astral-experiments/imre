@@ -638,6 +638,7 @@ impl Builtin {
             | Self::LengthResult
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
+            | Self::ArgparseChoiceDigits(_)
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
             | Self::DequeGet { .. }

@@ -14,6 +14,11 @@ def argument(keys: list[int], events: list[int]) -> int:
     return 7
 
 
+def ordered_receiver(events: list[int]) -> OrderedDict[str, int]:
+    events.append(5)
+    return OrderedDict(seed=1)
+
+
 def before(keys: list[int], events: list[int]) -> list[int]:
     events.append(10)
     return keys
@@ -38,6 +43,13 @@ def main() -> None:
     through_view = through_dict.fromkeys(iterable=[3, 1, 3], value=9)
     print(list(through_view))
     print(through_view[3])
+    list_keys: list[list[int]] = []
+    print(ordered.fromkeys(iterable=list_keys, value=9))
+    list_keys.append([1])
+    try:
+        print(ordered.fromkeys(iterable=list_keys, value=9))
+    except TypeError as error:
+        print(error)
     keys_arg = [4, 5]
     order: list[int] = []
     from_positional = ordered.fromkeys(before(keys_arg, order), value=argument(keys_arg, order))
@@ -50,6 +62,12 @@ def main() -> None:
     print(from_keywords[4])
     print(order)
     print(list(ordered.fromkeys(iterable=["b", "a", "b"])))
+    order.clear()
+    computed = ordered_receiver(order).fromkeys(
+        value=argument(keys_arg, order), iterable=before(keys_arg, order)
+    )
+    print(list(computed))
+    print(order)
 
     print(dict.fromkeys("éaé"))
     print(dict.fromkeys((4, 5), 0))
