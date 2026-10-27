@@ -4468,6 +4468,9 @@ impl<'a> Checker<'a> {
     }
 
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
+        if self.graph.local_metadata_import(self.module, statement) {
+            return Ok((Vec::new(), true));
+        }
         if let ast::Stmt::ImportFrom(import) = statement
             && let Some(bindings) = self.local_sys_import(import)?
         {
@@ -5324,6 +5327,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
             Some(Binding::Intrinsic(Intrinsic::BinasciiError)) => Some(69),
             Some(Binding::Intrinsic(Intrinsic::BinasciiIncomplete)) => Some(70),
+            Some(Binding::Intrinsic(Intrinsic::PackageNotFoundError)) => Some(71),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -7342,7 +7346,7 @@ impl<'a> Checker<'a> {
                         vec![],
                     ));
                 }
-                if matches!(attribute.attr.as_str(), "machinery" | "util")
+                if matches!(attribute.attr.as_str(), "machinery" | "metadata" | "util")
                     && self.resolve(&attribute.value)
                         == Some(Binding::IntrinsicModule(
                             crate::modules::IntrinsicModule::Importlib,
