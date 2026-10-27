@@ -29,6 +29,7 @@ def check(args, directory):
     cases.append(("slice-owner", "short", "A", "B"))
     cases += [(mode, shape, "A", "B") for mode in ("packed-slice", "packed-repeat")
               for shape in ("empty", "short")]
+    cases += [("dict-copy-owners", shape, "A", "B") for shape in ("empty", "full")]
     passed = 0
     for level in args.opt_levels:
         exe = directory / f"deferred-diff-O{level}"
@@ -54,6 +55,9 @@ def check(args, directory):
                 indices = (count,)
             elif argv[0] in ("pack-project", "restore"):
                 indices = {1, count // 2, count}
+            elif argv[0] == "dict-copy-owners":
+                # Insertion finishes before the two result owners are allocated.
+                indices = (count - 1, count)
             else:
                 indices = range(1, count + 1)
             refusal = b"refused\n" if argv[0] == "deepcopy-graph" else b"refused\nMemoryError()\n"
