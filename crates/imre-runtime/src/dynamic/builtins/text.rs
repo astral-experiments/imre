@@ -152,6 +152,11 @@ pub(super) fn construct(
                 let decoded = decode(ctx, value, encoding, errors)?;
                 return Ok(ctx.text(decoded));
             }
+            let target = ctx.weak_proxy_target(value)?;
+            if target != value {
+                ctx.heap.keep(target);
+            }
+            let value = target;
             if matches!(ctx.heap.get(value), Value::Str(_)) {
                 return Ok(value);
             }
