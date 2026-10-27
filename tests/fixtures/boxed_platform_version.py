@@ -10,7 +10,7 @@ def current():
     assert platform.python_version_tuple() == ("7", "42", "0")
     sys.version = "3.15.0a1 free-threading build (branch) [compiler]"
     assert platform.python_version() == "3.15.0a1"
-    for value in ("7.42", " 7.42 (branch) [cc]", "7.42 (branch) []", "7.42 (branch, bad-date) [cc]"):
+    for value in ("7.42", " 7.42 (branch) [cc]", "7.42 (branch) []", "7.42 (branch, bad-date) [cc]", "7.42.0 (Imre 1.2.3)"):
         sys.version = value
         try:
             platform.python_version()

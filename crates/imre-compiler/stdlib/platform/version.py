@@ -17,7 +17,6 @@ _jython = re.compile(
     r"[ \t\n\r\f\v]*\[([^\]]+)\]?"
 )
 _pypy = re.compile(r"([\w.+]+)\s*\(#?([^,]+),\s*([\w ]+),\s*([\w :]+)\)\s*\[PyPy [^\]]+\]?")
-_imre = re.compile(r"([0-9]+\.[0-9]+\.[0-9]+) \(Imre ([0-9]+\.[0-9]+\.[0-9]+)\)\Z")
 
 
 def _parse_version(text: str, host: str) -> tuple[str, str, str, str, str]:
@@ -28,9 +27,13 @@ def _parse_version(text: str, host: str) -> tuple[str, str, str, str, str]:
         name = "PyPy"
         match = _pypy.match(text)
     else:
-        native = _imre.match(text)
-        if native is not None:
-            return "Imre", native.group(1) or "", native.group(2) or "", "", "Imre"
+        if " (Imre " in text and sys.implementation.name == "imre":
+            language = sys.version_info
+            impl_version = sys.implementation.version
+            version = f"{language.major}.{language.minor}.{language.micro}"
+            release = f"{impl_version.major}.{impl_version.minor}.{impl_version.micro}"
+            if text == f"{version} (Imre {release})":
+                return "Imre", version, release, "", "Imre"
         name = "CPython"
         match = _cpython.match(text)
     if match is None:

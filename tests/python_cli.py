@@ -143,6 +143,11 @@ def main():
                 expected.stderr,
             )
 
+        compare(
+            "-IB", "-c", "import sys; sys.path; m = __import__(sys.argv[1]); "
+            "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
+        )
+
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
