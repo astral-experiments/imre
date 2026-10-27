@@ -309,7 +309,12 @@ pub(super) fn resolve_bases(ctx: &mut Context, bases: Id) -> Result<(Option<Id>,
     let mut resolved = Vec::with_capacity(raw.len());
     let mut original = None;
     for &base in &raw {
-        if matches!(ctx.heap.get(base), Value::Class { .. } | Value::Native(_)) {
+        let resolved_type = match ctx.heap.get(base) {
+            Value::Class { .. } => true,
+            Value::Native(name) => name != "typing.Callable",
+            _ => false,
+        };
+        if resolved_type {
             resolved.push(base);
             continue;
         }
@@ -340,6 +345,28 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
             "TypeError",
             "Cannot subclass an instance of TypeVar",
         ));
+    }
+    if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
+        let bases = ctx.items(bases)?;
+        let i = bases
+            .iter()
+            .position(|base| *base == id)
+            .ok_or_else(|| Error::new("ValueError", "tuple.index(x): x not in tuple"))?;
+        let callable = named_class(ctx, "collections.abc", "Callable");
+        let generic = named_class(ctx, "typing", "Generic");
+        let mut result = Vec::new();
+        if !bases.contains(&callable) {
+            result.push(callable);
+        }
+        let later_generic = bases[i + 1..].iter().any(|&base| {
+            matches!(ctx.heap.get(base), Value::Native(name) if name == "typing.Callable")
+                || matches!(ctx.heap.get(base), Value::GenericAlias(a) if a.kind.is_typing_alias())
+                || ctx.subclass(base, generic)
+        });
+        if !later_generic {
+            result.push(generic);
+        }
+        return Ok(ctx.alloc(Value::Tuple(result)));
     }
     let Value::GenericAlias(alias) = ctx.heap.get(id) else {
         unreachable!()
@@ -445,6 +472,14 @@ pub(super) fn class_parameters(
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     let attr = match ctx.heap.get(value) {
         Value::TypeVar(_) | Value::GenericAlias(_) if name == "__mro_entries__" => {
+            let callable = ctx.builtin("typing.alias_mro_entries");
+            ctx.alloc(Value::Method {
+                callable,
+                receiver: value,
+                explicit: false,
+            })
+        }
+        Value::Native(class) if class == "typing.Callable" && name == "__mro_entries__" => {
             let callable = ctx.builtin("typing.alias_mro_entries");
             ctx.alloc(Value::Method {
                 callable,
