@@ -605,6 +605,7 @@ def report(text):
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
             "boxed_namedtuple_repr.py",
+            "boxed_namedtuple_factory.py",
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",

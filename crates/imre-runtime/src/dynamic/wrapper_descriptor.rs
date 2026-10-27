@@ -20,6 +20,7 @@ impl Wrapper {
             "set.__repr__" => ("set", "__repr__"),
             "frozenset.__repr__" => ("frozenset", "__repr__"),
             "list.__init__" => ("list", "__init__"),
+            "tuple.__getitem__" => ("tuple", "__getitem__"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),
             "_thread._local.__delattr__" => (thread_local::CLASS, "__delattr__"),

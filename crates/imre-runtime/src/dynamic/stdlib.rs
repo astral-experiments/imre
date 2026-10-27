@@ -841,6 +841,12 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_collections._ordered_dict_") {
         return ordered_dict::call(ctx, operation, args, kwargs);
     }
+    if name == "collections.namedtuple" {
+        return super::namedtuple::factory(ctx, args, kwargs);
+    }
+    if name == "_collections._make" {
+        return super::namedtuple::make(ctx, args, kwargs);
+    }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }

@@ -1435,6 +1435,9 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::Native(class) if class == "tuple" && name == "__getitem__" => {
+                return Ok(self.builtin("tuple.__getitem__"));
+            }
             Value::Native(class) if matches!(class.as_str(), "map" | "filter") => match name {
                 "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
                 "__name__" | "__qualname__" => return Ok(self.text(&class)),
@@ -2986,6 +2989,22 @@ impl Context {
                                 "TypeError",
                                 format!("invalid argument {k:?} to {name}"),
                             ));
+                        }
+                    }
+                    if fields.len() != names.len()
+                        && let Some(defaults) = self.find_in_mro(callable, |base| {
+                            let Value::Class { scope, .. } = *self.heap.get(base) else {
+                                return None;
+                            };
+                            self.scope_data(scope)
+                                .class_namespace
+                                .as_ref()?
+                                .namedtuple_defaults
+                        })
+                        && let Value::Tuple(defaults) = self.heap.get(defaults)
+                    {
+                        for (name, value) in names.iter().rev().zip(defaults.iter().rev()) {
+                            fields.entry(name.clone()).or_insert(*value);
                         }
                     }
                     if fields.len() != names.len() {

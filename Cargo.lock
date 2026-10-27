@@ -719,6 +719,7 @@ dependencies = [
  "ruff_python_ast",
  "ruff_python_literal",
  "ruff_python_parser",
+ "ruff_python_stdlib",
  "ruff_text_size",
  "rustix",
  "ryu",

@@ -763,7 +763,7 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                         Value::Str(s) => Cow::Borrowed(s),
                         _ => ctx.display(arg).into(),
                     },
-                    'r' => ctx.repr(arg).into(),
+                    'r' => ctx.checked_format(arg, true)?.into(),
                     'a' => ascii(&ctx.repr(arg)).into(),
                     'c' => match ctx.heap.get(arg) {
                         Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),

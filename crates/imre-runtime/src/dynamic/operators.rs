@@ -1781,6 +1781,11 @@ impl Context {
             }
             return Err(self.lookup_error("KeyError", key));
         }
+        self.sequence_subscript(obj, key)
+    }
+
+    /// Read a native sequence directly once Python's subscription slots have been resolved.
+    pub(super) fn sequence_subscript(&mut self, obj: Id, key: Id) -> Result<Id> {
         let storage = self.scalar_value(obj);
         if let Value::Slice(parts) = *self.heap.get(key) {
             return self.slice(obj, parts);
@@ -2024,7 +2029,8 @@ impl Context {
                 | Value::List(_)
                 | Value::Tuple(_)
                 | Value::NamedTuple { .. }
-        ) {
+        ) && !matches!(self.heap.get(obj), Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some())
+        {
             return Err(Error::new(
                 "TypeError",
                 format!("'{}' object is not subscriptable", self.type_name(obj)),
