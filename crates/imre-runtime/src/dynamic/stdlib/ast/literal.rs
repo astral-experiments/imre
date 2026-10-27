@@ -243,18 +243,33 @@ fn convert(ctx: &mut Context, node: Id, depth: usize) -> Result<Id> {
         }));
     }
     if is(ctx, node, "ast.Dict") {
+        ctx.heap.keep(node);
         let keys = ctx.lookup_attr(node, "keys")?;
+        let key_count = builtins::call(ctx, "len", &[keys], &[])?;
         let values = ctx.lookup_attr(node, "values")?;
-        let keys = ctx.items(keys)?;
-        let values = ctx.items(values)?;
-        if keys.len() != values.len() {
+        let value_count = builtins::call(ctx, "len", &[values], &[])?;
+        if !ctx.equal(key_count, value_count) {
             return malformed(ctx, node);
         }
+        // CPython fetches the fields again for zip(map(...), map(...)).
+        let keys = ctx.lookup_attr(node, "keys")?;
+        let keys = ctx.iterator(keys)?;
+        ctx.heap.keep(keys);
+        let values = ctx.lookup_attr(node, "values")?;
+        let values = ctx.iterator(values)?;
+        ctx.heap.keep(values);
         let dict = ctx.dict(Vec::new());
-        for (key, value) in keys.into_iter().zip(values) {
+        let mark = ctx.heap.temporary_mark();
+        while let Some(key) = ctx.next_item(keys)? {
             let key = convert(ctx, key, depth + 1)?;
+            ctx.heap.keep(key);
+            let Some(value) = ctx.next_item(values)? else {
+                break;
+            };
             let value = convert(ctx, value, depth + 1)?;
+            ctx.heap.keep(value);
             ctx.set_dictionary_key(dict, key, value, None, true)?;
+            ctx.heap.release_temporaries_since(mark);
         }
         return Ok(dict);
     }
