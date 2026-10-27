@@ -316,9 +316,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
-        ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
-        ("_collections", "_ordered_dict_repr") => ctx.builtin("_collections._ordered_dict_repr"),
-        ("_collections", "_ordered_dict_view") => ctx.builtin("_collections._ordered_dict_view"),
+        (
+            "_collections",
+            "_count_elements" | "_ordered_dict_equal" | "_ordered_dict_repr" | "_ordered_dict_view",
+        ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
@@ -756,6 +757,19 @@ pub(super) fn call(
     }
     if name == "_collections._count_elements" {
         return count_elements(ctx, args, kwargs);
+    }
+    if name == "_collections._ordered_dict_equal" {
+        if let [left, right] = args
+            && kwargs.is_empty()
+            && let (Some(left), Some(right)) = (ctx.dict_storage(*left), ctx.dict_storage(*right))
+        {
+            return Ok(if ctx.dictionary_equal(left, right)? {
+                TRUE
+            } else {
+                FALSE
+            });
+        }
+        return Err(Error::new("TypeError", "expected two dictionaries"));
     }
     if name == "_collections._ordered_dict_repr" {
         let [object] = args else {

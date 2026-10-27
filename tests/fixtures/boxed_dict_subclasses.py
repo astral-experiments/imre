@@ -7,6 +7,11 @@ def ordered_dictionary():
     source = OrderedDict(b=[2], a=[1])
     assert source != OrderedDict(a=[1], b=[2])
     assert source == {"a": [1], "b": [2]}
+    class NoKeys(OrderedDict):
+        def keys(self):
+            raise AssertionError("comparison called keys")
+
+    assert NoKeys(b=2) == {"b": 2}
     shallow = source.copy()
     assert type(shallow) is OrderedDict and shallow["b"] is source["b"]
     cursor = iter(source.items())
