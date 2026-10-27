@@ -175,15 +175,16 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
         roots: usize,
         element_roots: usize,
         pending: Option<(Id, Id, bool)>,
+        repeated: bool,
     }
 
     ctx.check_call_depth(0)?;
     ctx.call_depth += 1;
     let roots = ctx.heap.temporary_mark();
+    let mut repeated_depth = 0;
     let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
         let mut active: HashMap<(Id, Id), usize> = HashMap::new();
         let mut frames: Vec<Frame> = Vec::new();
-        let mut deque_depth = 0;
         let mut request = Some((left, right, op == "=="));
         let mut answer: Option<bool> = None;
         loop {
@@ -211,25 +212,18 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 let repeats = active.get(&(a, b)).copied().unwrap_or(0);
-                if repeats > 0 {
-                    let previous = frames
-                        .iter()
-                        .rposition(|frame| frame.left == a && frame.right == b)
-                        .unwrap();
-                    let crosses_deque = is_deque
-                        || frames[previous + 1..]
-                            .iter()
-                            .any(|frame| matches!(frame.cursor, Cursor::Deque(..)));
-                    if !crosses_deque || deque_depth + ctx.call_depth >= 1000 {
-                        return Err(Error::new(
-                            "RecursionError",
-                            "maximum comparison depth exceeded",
-                        ));
-                    }
+                // Bound repeated pairs separately from acyclic nesting. A callback can
+                // terminate a cycle, so do not reject its first repeated list pair.
+                if repeats > 0 && ctx.deque_comparison_repeats >= 16_384 {
+                    return Err(Error::new(
+                        "RecursionError",
+                        "maximum comparison depth exceeded",
+                    ));
                 }
                 active.insert((a, b), repeats + 1);
-                if is_deque {
-                    deque_depth += 1;
+                if repeats > 0 {
+                    repeated_depth += 1;
+                    ctx.deque_comparison_repeats += 1;
                 }
                 frames
                     .try_reserve(1)
@@ -254,6 +248,7 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     roots: mark,
                     element_roots: ctx.heap.temporary_mark(),
                     pending: None,
+                    repeated: repeats > 0,
                 });
                 continue;
             }
@@ -266,8 +261,9 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     if matches!(parent.cursor, Cursor::Sequence(_)) {
                         let value = !parent.equal_op;
                         let parent = frames.pop().unwrap();
-                        if matches!(parent.cursor, Cursor::Deque(..)) {
-                            deque_depth -= 1;
+                        if parent.repeated {
+                            repeated_depth -= 1;
+                            ctx.deque_comparison_repeats -= 1;
                         }
                         let count = active.get_mut(&(parent.left, parent.right)).unwrap();
                         *count -= 1;
@@ -284,8 +280,9 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     ctx.heap.release_temporaries_since(parent.element_roots);
                 } else {
                     let parent = frames.pop().unwrap();
-                    if matches!(parent.cursor, Cursor::Deque(..)) {
-                        deque_depth -= 1;
+                    if parent.repeated {
+                        repeated_depth -= 1;
+                        ctx.deque_comparison_repeats -= 1;
                     }
                     let count = active.get_mut(&(parent.left, parent.right)).unwrap();
                     *count -= 1;
@@ -313,8 +310,9 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     if a.len() != b.len() {
                         let value = !frame.equal_op;
                         let frame = frames.pop().unwrap();
-                        if matches!(frame.cursor, Cursor::Deque(..)) {
-                            deque_depth -= 1;
+                        if frame.repeated {
+                            repeated_depth -= 1;
+                            ctx.deque_comparison_repeats -= 1;
                         }
                         let count = active.get_mut(&(frame.left, frame.right)).unwrap();
                         *count -= 1;
@@ -333,8 +331,9 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
             let (Some(x), Some(y)) = (x, y) else {
                 let value = if frame.equal_op { x == y } else { x != y };
                 let frame = frames.pop().unwrap();
-                if matches!(frame.cursor, Cursor::Deque(..)) {
-                    deque_depth -= 1;
+                if frame.repeated {
+                    repeated_depth -= 1;
+                    ctx.deque_comparison_repeats -= 1;
                 }
                 let count = active.get_mut(&(frame.left, frame.right)).unwrap();
                 *count -= 1;
@@ -366,8 +365,9 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     ctx.truth(value)?
                 };
                 let frame = frames.pop().unwrap();
-                if matches!(frame.cursor, Cursor::Deque(..)) {
-                    deque_depth -= 1;
+                if frame.repeated {
+                    repeated_depth -= 1;
+                    ctx.deque_comparison_repeats -= 1;
                 }
                 let count = active.get_mut(&(frame.left, frame.right)).unwrap();
                 *count -= 1;
@@ -380,6 +380,7 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
         }
     });
     ctx.heap.release_temporaries_since(roots);
+    ctx.deque_comparison_repeats -= repeated_depth;
     ctx.call_depth -= 1;
     result
 }
