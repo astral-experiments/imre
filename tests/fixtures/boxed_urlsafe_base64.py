@@ -10,6 +10,12 @@ def check():
             print("encoding", encoding)
             return bytearray(b"Yg==")
 
+    class TextResult(str):
+        def encode(self, encoding):
+            return Token("-_8=")
+
+    print(list(base64.urlsafe_b64decode(TextResult("unused"))))
+
     class Reject(str):
         def encode(self, encoding):
             raise LookupError("from encode")

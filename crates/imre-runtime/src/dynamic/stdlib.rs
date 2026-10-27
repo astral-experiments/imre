@@ -552,7 +552,7 @@ fn urlsafe_input(ctx: &mut Context, text: Id) -> Result<(Id, bool)> {
     if let Some(text) = ctx.string_storage(encoded)
         && let Value::Instance { class, fields, .. } = ctx.heap.get(encoded)
         && !fields.contains_key("translate")
-        && ctx.class_attr(*class, "translate").is_none()
+        && ctx.class_attr(*class, "translate") == ctx.builtins.get("str.translate").copied()
         && ctx.class_attr(*class, "__getattribute__").is_none()
     {
         return Ok((text, true));
