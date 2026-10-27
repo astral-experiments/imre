@@ -434,6 +434,12 @@ pub(crate) fn compile(
             let Some(name) = resolve(&owner, package, level, &requested) else {
                 continue;
             };
+            // Frozen stat is registered below, ahead of any filesystem module or package.
+            if name.split('.').next() == Some("stat")
+                && crate::modules::bundled_runtime_source("stat").is_some()
+            {
+                continue;
+            }
             let mut prefix = String::new();
             for part in name.split('.').filter(|s| !s.is_empty()) {
                 if !prefix.is_empty() {
@@ -506,7 +512,7 @@ pub(crate) fn compile(
         }
     }
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
-    for name in ["platform", "zipimport"] {
+    for name in ["platform", "stat", "zipimport"] {
         if !seen.contains(name)
             && let Some((file, source)) = crate::modules::bundled_runtime_source(name)
         {

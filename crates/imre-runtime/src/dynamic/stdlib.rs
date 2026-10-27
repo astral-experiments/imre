@@ -43,6 +43,9 @@ pub(super) mod urllib;
 mod zipimport;
 
 pub(super) fn is_module(name: &str) -> bool {
+    if name == "stat" {
+        return cfg!(any(target_os = "linux", target_os = "macos"));
+    }
     if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
         return true;
     }
