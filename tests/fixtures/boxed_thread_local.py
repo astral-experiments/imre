@@ -75,11 +75,16 @@ def attribute_names():
     setattr(hooks, key, 8)
     delattr(hooks, key)
 
+    class FallbackName(str):
+        pass
+
+    fallback_name = FallbackName("missing")
+
     class Fallback:
         def __getattr__(self, name):
-            return name is key
+            return name is fallback_name
 
-    print(getattr(Fallback(), key))
+    print("fallback", getattr(Fallback(), fallback_name))
 
     class RaisingComparison(str):
         def __eq__(self, other):
