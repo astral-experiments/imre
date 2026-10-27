@@ -64,7 +64,8 @@ pub(super) struct Trace {
     pub context: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
-    pub source_syntax: Option<[Id; 2]>,
+    /// Live members belong to the exception instance across traceback clones.
+    pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
     pub import_names: Option<[Id; 3]>,
     pub dictionary: Option<Id>,
     stop_value: Id,
@@ -86,7 +87,7 @@ pub(super) struct Error {
     pub args: Option<Id>,
     pub decode: Option<Box<DecodeState>>,
     pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
-    pub trace: Option<Box<Trace>>,
+    pub trace: Option<allocator_api2::boxed::Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
     pub import: Option<crate::shared::Shared<ImportFields>>,
 }
@@ -169,7 +170,12 @@ impl Error {
                     .chain(trace.context)
                     .chain(trace.cause)
                     .chain(trace.import_message)
-                    .chain(trace.source_syntax.into_iter().flatten())
+                    .chain(
+                        trace
+                            .source_syntax
+                            .iter()
+                            .flat_map(|fields| fields.iter().map(std::cell::Cell::get)),
+                    )
                     .chain(trace.import_names.into_iter().flatten())
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))

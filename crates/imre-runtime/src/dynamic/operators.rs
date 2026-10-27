@@ -13,6 +13,9 @@ enum RenderRoot<'a> {
 enum FormatPart {
     Value(Id, bool),
     Text(&'static str),
+    SyntaxMessage(Id),
+    SyntaxEnd(Id),
+    Suffix(String),
     Closing(usize),
     Sequence(Id, usize),
     Entries(Id, usize, bool),
@@ -41,6 +44,8 @@ impl FormatPart {
     fn keep_alive(&mut self, heap: &mut Heap) {
         match self {
             Self::Value(id, _)
+            | Self::SyntaxMessage(id)
+            | Self::SyntaxEnd(id)
             | Self::Sequence(id, _)
             | Self::Entries(id, _, _)
             | Self::DefaultDictFactory(id, _)
@@ -52,7 +57,8 @@ impl FormatPart {
                 let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
                 *self = Self::Sequence(tuple, *index);
             }
-            Self::Text(_)
+            Self::Suffix(_)
+            | Self::Text(_)
             | Self::Closing(_)
             | Self::SliceEnd
             | Self::NamedTupleEnd
@@ -762,9 +768,13 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        Self::render_containers(self, RenderRoot::Object(id), false, false, |_, _, _, _| {
-            Ok(None)
-        })
+        Self::render_containers(
+            self,
+            RenderRoot::Object(id),
+            false,
+            false,
+            |_, _, _, _, _| Ok(None),
+        )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
@@ -792,9 +802,13 @@ impl Context {
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        Self::render_containers(self, RenderRoot::Object(id), true, false, |_, _, _, _| {
-            Ok(None)
-        })
+        Self::render_containers(
+            self,
+            RenderRoot::Object(id),
+            true,
+            false,
+            |_, _, _, _, _| Ok(None),
+        )
         .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
     }
 
@@ -857,13 +871,17 @@ impl Context {
     }
 
     fn checked_render(&mut self, root: RenderRoot<'_>, quoted: bool) -> Result<String> {
-        Self::render_containers(self, root, quoted, true, |ctx, id, work, ancestors| {
-            ctx.element_repr(id, work, ancestors)
-        })
+        Self::render_containers(
+            self,
+            root,
+            quoted,
+            true,
+            |ctx, id, quoted, work, ancestors| ctx.element_format(id, quoted, work, ancestors),
+        )
     }
 
-    /// Resolve repr on heap instances and exceptions that retain their Python class.
-    fn repr_slot(&self, id: Id) -> Option<(Id, Id)> {
+    /// Resolve formatting methods on heap instances and exceptions that retain their Python class.
+    fn format_slot(&self, id: Id, name: &str) -> Option<(Id, Id)> {
         let class = match self.heap.get(id) {
             Value::Instance { class, .. }
             | Value::Raised(Error {
@@ -871,12 +889,12 @@ impl Context {
             }) => *class,
             _ => return None,
         };
-        self.class_attr(class, "__repr__").map(|slot| (class, slot))
+        self.class_attr(class, name).map(|slot| (class, slot))
     }
 
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
-        let Some((class, slot)) = self.repr_slot(id) else {
+        let Some((class, slot)) = self.format_slot(id, "__repr__") else {
             return Ok(None);
         };
         let hook = self.bind_attribute(slot, id, class)?;
@@ -894,13 +912,24 @@ impl Context {
     }
 
     /// Keep pending children alive while a hook mutates and reenters its container.
-    fn element_repr(
+    fn push_format_text(output: &mut String, text: &str) -> Result<()> {
+        output
+            .try_reserve(text.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        output.push_str(text);
+        Ok(())
+    }
+
+    fn element_format(
         &mut self,
         id: Id,
+        quoted: bool,
         work: &mut [FormatPart],
         ancestors: &[Id],
     ) -> Result<Option<String>> {
-        if self.repr_slot(id).is_none() {
+        if self.format_slot(id, "__repr__").is_none()
+            && (quoted || self.format_slot(id, "__str__").is_none())
+        {
             return Ok(None);
         }
         let mark = self.heap.temporary_mark();
@@ -910,9 +939,18 @@ impl Context {
             part.keep_alive(&mut self.heap);
         }
         self.repr_ancestors.extend_from_slice(ancestors);
-        let result = self.repr_override(id).and_then(|value| {
+        let converted = if quoted {
+            self.repr_override(id)
+        } else {
+            builtins::call(self, "str", &[id], &[]).map(Some)
+        };
+        let result = converted.and_then(|value| {
             value
-                .map(|s| self.str_value(s).map(str::to_owned))
+                .map(|id| {
+                    let mut text = String::new();
+                    Self::push_format_text(&mut text, self.str_value(id)?)?;
+                    Ok(text)
+                })
                 .transpose()
         });
         self.repr_ancestors.truncate(depth);
@@ -979,8 +1017,18 @@ impl Context {
                 }
                 repr |= self.is_builtin_error(error, "KeyError");
                 if let Value::Raised(next) = self.heap.get(*arg)
-                    && !(checked && repr && self.repr_slot(*arg).is_some())
+                    && !(checked && repr && self.format_slot(*arg, "__repr__").is_some())
                 {
+                    if !repr
+                        && next
+                            .trace
+                            .as_ref()
+                            .is_some_and(|trace| trace.source_syntax.is_some())
+                    {
+                        work.push(Part::Closing(closing));
+                        work.push(Part::Value(*arg, false));
+                        break;
+                    }
                     if !seen.insert(*arg) {
                         let op = if repr { "repr" } else { "str" };
                         return Err(Error::new(
@@ -1031,12 +1079,19 @@ impl Context {
         root: RenderRoot<'_>,
         quoted: bool,
         checked: bool,
-        mut element_repr: impl FnMut(&mut C, Id, &mut [FormatPart], &[Id]) -> Result<Option<String>>,
+        mut element_repr: impl FnMut(
+            &mut C,
+            Id,
+            bool,
+            &mut [FormatPart],
+            &[Id],
+        ) -> Result<Option<String>>,
     ) -> Result<String> {
         use FormatPart as Part;
         let mut output = String::new();
         let mut work = Vec::new();
         let mut active = Vec::new();
+        let mut syntax = std::collections::HashSet::new();
         let mut ancestors: std::collections::HashSet<Id> = if checked {
             ctx.repr_ancestors.iter().copied().collect()
         } else {
@@ -1212,16 +1267,55 @@ impl Context {
                         work.push(Part::Value(key, true));
                     }
                 }
+                Part::SyntaxMessage(id) => {
+                    if let Some(text) = element_repr(&mut ctx, id, false, &mut work, &active)? {
+                        Self::push_format_text(&mut output, &text)?;
+                    } else if let Some(storage) = ctx.string_storage(id) {
+                        let Value::Str(message) = ctx.heap.get(storage) else {
+                            unreachable!()
+                        };
+                        Self::push_format_text(&mut output, message)?;
+                    } else {
+                        work.push(Part::Value(id, false));
+                    }
+                }
+                Part::SyntaxEnd(id) => {
+                    syntax.remove(&id);
+                }
+                Part::Suffix(suffix) => Self::push_format_text(&mut output, &suffix)?,
                 Part::Value(id, repr) => {
                     if checked
                         && repr
-                        && let Some(text) = element_repr(&mut ctx, id, &mut work, &active)?
+                        && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
                     {
                         output.push_str(&text);
                         continue;
                     }
                     match ctx.heap.get(id) {
                         Value::Raised(error) => {
+                            if !repr
+                                && let Some(fields) = error
+                                    .trace
+                                    .as_ref()
+                                    .and_then(|trace| trace.source_syntax.as_ref())
+                            {
+                                syntax
+                                    .try_reserve(1)
+                                    .map_err(|_| Error::new("MemoryError", ""))?;
+                                work.try_reserve(3)
+                                    .map_err(|_| Error::new("MemoryError", ""))?;
+                                if !syntax.insert(id) {
+                                    return Err(Error::new(
+                                        "RecursionError",
+                                        "maximum recursion depth exceeded while getting the str of an object",
+                                    ));
+                                }
+                                let suffix = ctx.syntax_suffix(fields[1].get(), fields[2].get())?;
+                                work.push(Part::SyntaxEnd(id));
+                                work.push(Part::Suffix(suffix));
+                                work.push(Part::SyntaxMessage(fields[0].get()));
+                                continue;
+                            }
                             if !repr
                                 && let Some(super::os_error::Args::Python(fields)) =
                                     error.os_args.as_deref()
@@ -1429,7 +1523,7 @@ impl Context {
             RenderRoot::Exception(error),
             false,
             false,
-            |_, _, _, _| Ok(None),
+            |_, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -1652,7 +1746,7 @@ impl Context {
                 RenderRoot::Exception(error),
                 repr,
                 false,
-                |_, _, _, _| Ok(None),
+                |_, _, _, _, _| Ok(None),
             )
             .unwrap_or_else(|_| {
                 if repr {

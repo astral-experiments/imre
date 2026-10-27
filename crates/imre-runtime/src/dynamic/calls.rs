@@ -1115,28 +1115,13 @@ impl Context {
                 };
                 return self.instance_attribute(obj, class, field, name);
             }
-            if let Some([filename, original_args]) =
-                error.trace.as_ref().and_then(|trace| trace.source_syntax)
-                && let Value::Tuple(args) = self.heap.get(original_args)
+            if let Some(fields) = error
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.source_syntax.as_ref())
+                && let Some(slot) = super::source_code::syntax_member(name)
             {
-                match name {
-                    "msg" => return Ok(args[0]),
-                    "filename" => return Ok(filename),
-                    _ => {
-                        if let Some(index) =
-                            ["lineno", "offset", "text", "end_lineno", "end_offset"]
-                                .iter()
-                                .position(|&field| field == name)
-                        {
-                            if let Some(&location) = args.get(1)
-                                && let Value::Tuple(fields) = self.heap.get(location)
-                            {
-                                return Ok(fields.get(index + 1).copied().unwrap_or(NONE));
-                            }
-                            return Ok(NONE);
-                        }
-                    }
-                }
+                return Ok(fields[slot].get());
             }
             if name == "__dict__" {
                 return Ok(self.exception_dictionary(obj));
@@ -2006,6 +1991,9 @@ impl Context {
             self.call(delete, vec![obj], Vec::new())?;
             return Ok(());
         }
+        if self.update_syntax_member(obj, name, NONE) {
+            return Ok(());
+        }
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, None);
         }
@@ -2411,6 +2399,9 @@ impl Context {
                 .is_some_and(|fields| fields.iter().any(|field| field == name))
         {
             return Err(Error::new("AttributeError", "can't set attribute"));
+        }
+        if self.update_syntax_member(obj, name, value) {
+            return Ok(());
         }
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, Some(value));
