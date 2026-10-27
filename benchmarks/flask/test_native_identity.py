@@ -1,12 +1,11 @@
 """Regression controls for the standalone Flask benchmark helpers."""
 import json
 import os
+import shutil
 import signal
 from pathlib import Path
 import subprocess
 import sys
-import shutil
-import subprocess
 import tempfile
 import time
 import unittest
