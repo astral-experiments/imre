@@ -809,11 +809,11 @@ impl Context {
         Ok(())
     }
 
-    pub(super) fn python_instance_check(&self, value: Id, class: Id) -> Result<bool> {
+    pub(super) fn python_instance_check(&mut self, value: Id, class: Id) -> Result<bool> {
         match self.heap.get(class) {
             Value::Union(union) => self.python_instance_check(value, union.args),
             Value::Tuple(classes) => {
-                for &class in classes {
+                for class in classes.clone() {
                     if self.python_instance_check(value, class)? {
                         return Ok(true);
                     }
@@ -839,6 +839,15 @@ impl Context {
             Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
             _ => {
                 self.require_checkable_protocol(class)?;
+                if self.has_abc_subclass_hook(class) {
+                    let actual = self.exact_type(value)?;
+                    if actual == class {
+                        return Ok(true);
+                    }
+                    if let Some(result) = self.abc_hook_result(actual, class)? {
+                        return Ok(result);
+                    }
+                }
                 Ok(self.instance_of(value, class))
             }
         }

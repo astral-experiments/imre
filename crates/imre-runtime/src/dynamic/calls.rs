@@ -442,12 +442,12 @@ impl Context {
         }
     }
 
-    pub(super) fn python_subclass_check(&self, child: Id, parent: Id) -> Result<bool> {
+    pub(super) fn python_subclass_check(&mut self, child: Id, parent: Id) -> Result<bool> {
         if let Value::Union(union) = self.heap.get(parent) {
             return self.python_subclass_check(child, union.args);
         }
         if let Value::Tuple(classes) = self.heap.get(parent) {
-            for &class in classes {
+            for class in classes.clone() {
                 if self.python_subclass_check(child, class)? {
                     return Ok(true);
                 }
@@ -468,6 +468,11 @@ impl Context {
             ));
         }
         self.require_checkable_protocol(parent)?;
+        if self.has_abc_subclass_hook(parent)
+            && let Some(result) = self.abc_hook_result(child, parent)?
+        {
+            return Ok(result);
+        }
         Ok(self.subclass(child, parent))
     }
 
@@ -1629,7 +1634,9 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-                if name == "register" && super::mapping_abc::is_abc_class(self, obj) {
+                if name == "register"
+                    && (super::mapping_abc::is_abc_class(self, obj) || self.is_bundled_abc(obj))
+                {
                     let callable = self.builtin("abc.register");
                     return Ok(self.alloc(Value::Method {
                         callable,
