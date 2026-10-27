@@ -287,6 +287,7 @@ impl Context {
             | Value::Slice(_)
             | Value::Iterator { .. }
             | Value::Tuple(_)
+            | Value::DictIterator(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }

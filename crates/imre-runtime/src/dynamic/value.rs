@@ -191,6 +191,11 @@ impl Context {
             Value::Slice(_) => "slice",
             Value::Range { .. } => "range",
             Value::Iterator { kind, .. } => kind,
+            Value::DictIterator(iter) => match iter.kind {
+                DictViewKind::Keys => "dict_keyiterator",
+                DictViewKind::Values => "dict_valueiterator",
+                DictViewKind::Items => "dict_itemiterator",
+            },
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
@@ -356,6 +361,7 @@ pub(super) enum Value {
         dict: Id,
         kind: DictViewKind,
     },
+    DictIterator(DictIterator),
     DefaultDict {
         factory: Id,
         entries: Vec<(Id, Id)>,
@@ -513,6 +519,7 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
             Self::Count { current, step } => visit.extend([*current, *step]),
@@ -699,6 +706,59 @@ pub(super) enum DictViewKind {
     Keys,
     Values,
     Items,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DictIterator {
+    dict: Option<Id>,
+    kind: DictViewKind,
+    expected_len: Option<usize>,
+    index: usize,
+}
+
+impl DictIterator {
+    /// Capture the original size while keeping the entries live.
+    pub(super) fn new(dict: Id, kind: DictViewKind, size: usize) -> Self {
+        Self {
+            dict: Some(dict),
+            kind,
+            expected_len: Some(size),
+            index: 0,
+        }
+    }
+
+    /// An invalid or exhausted iterator has no remaining length hint.
+    pub(super) fn length_hint(&self, ctx: &Context) -> usize {
+        self.dict
+            .and_then(|dict| ctx.dict_entries(dict))
+            .filter(|entries| Some(entries.len()) == self.expected_len)
+            .map_or(0, |entries| entries.len() - self.index)
+    }
+
+    /// Check the live size before each pull, including the one that reaches exhaustion.
+    pub(super) fn next(&mut self, ctx: &mut Context) -> Result<Option<Id>> {
+        let Some(dict) = self.dict else {
+            return Ok(None);
+        };
+        let entries = ctx.dict_entries(dict).expect("dictionary iterator source");
+        if self.expected_len != Some(entries.len()) {
+            self.expected_len = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "dictionary changed size during iteration",
+            ));
+        }
+        let Some(&(key, value)) = entries.get(self.index) else {
+            self.dict = None;
+            return Ok(None);
+        };
+        self.index += 1;
+        Ok(Some(match self.kind {
+            DictViewKind::Keys => key,
+            DictViewKind::Values => value,
+            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
+        }))
+    }
 }
 
 /// Native frames hold temporaries until the next Python statement. A caller's

@@ -6,22 +6,6 @@ pub(super) fn entries(ctx: &Context, dict: Id) -> Result<&[(Id, Id)]> {
         .ok_or_else(|| type_error("expected a dictionary"))
 }
 
-pub(in super::super) fn view_items(
-    ctx: &mut Context,
-    dict: Id,
-    kind: DictViewKind,
-) -> Result<Vec<Id>> {
-    Ok(entries(ctx, dict)?
-        .to_vec()
-        .into_iter()
-        .map(|(key, value)| match kind {
-            DictViewKind::Keys => key,
-            DictViewKind::Values => value,
-            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
-        })
-        .collect())
-}
-
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some(input) = input
         && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
