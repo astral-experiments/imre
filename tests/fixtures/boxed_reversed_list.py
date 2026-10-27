@@ -38,6 +38,12 @@ def current():
         discarded = [None]
     print(list(cursor))
 
+    print(list(reversed(("first", "middle", "last"))))
+    cursor = reversed((["tuple reference"],))
+    for _ in range(5000):
+        discarded = [None]
+    print(list(cursor))
+
     class KeyStore:
         def __reversed__(self):
             return reversed(["old", "new"])
