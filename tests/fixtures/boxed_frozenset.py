@@ -59,6 +59,10 @@ def current():
         left = frozenset((GenericAlias(list, (left,)),))
         right = frozenset((GenericAlias(list, (right,)),))
     assert left == right
+    original = {1, 2}
+    copied = original.copy()
+    copied.add(3)
+    assert original == {1, 2} and copied == {1, 2, 3} and copied is not original
     print("ok")
 
 

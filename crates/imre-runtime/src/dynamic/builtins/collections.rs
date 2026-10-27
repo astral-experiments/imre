@@ -427,6 +427,7 @@ pub(super) fn method(
             | "set.issuperset"
             | "frozenset.issuperset"
             | "frozenset.copy"
+            | "set.copy"
             | "frozenset.__contains__"
             | "set.__contains__"
     ) && !kwargs.is_empty()
@@ -569,6 +570,21 @@ pub(super) fn method(
         "frozenset.copy" => {
             arity(name, args, 0, 0)?;
             Ok(receiver)
+        }
+        "set.copy" => {
+            arity(name, args, 0, 0)?;
+            let Value::Set {
+                entries,
+                frozen: false,
+            } = ctx.heap.get(receiver)
+            else {
+                return Err(type_error("descriptor 'copy' requires a 'set' object"));
+            };
+            let entries = entries.clone();
+            Ok(ctx.alloc(Value::Set {
+                entries,
+                frozen: false,
+            }))
         }
         "set.issuperset" | "frozenset.issuperset" => {
             let [source] = args else {
