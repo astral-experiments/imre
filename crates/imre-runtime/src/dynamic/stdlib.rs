@@ -347,8 +347,17 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "typing",
-            "TypeVar" | "Any" | "Callable" | "cast" | "overload" | "get_overloads"
-            | "clear_overloads" | "_overload_dummy" | "get_args" | "get_origin",
+            "TypeVar"
+            | "Any"
+            | "Callable"
+            | "cast"
+            | "overload"
+            | "get_overloads"
+            | "clear_overloads"
+            | "_overload_dummy"
+            | "get_args"
+            | "get_origin"
+            | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         ("datetime", "UTC") => datetime::utc(ctx),

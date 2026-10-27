@@ -100,3 +100,26 @@ def Optional(self, parameters):
     """Optional[X] is equivalent to Union[X, None]."""
     arg = _type_check(parameters, f"{repr(self)} requires a single type.")
     return _typing.Union[arg, type(None)]
+
+
+class _TypedCacheSpecialForm(_SpecialForm):
+    __module__ = __name__
+
+    @lru_cache
+    def _typed_getitem(self, parameters, types):
+        # As in _tp_cache(typed=True), only the immediate argument types are keys.
+        return self._getitem(self, *parameters)
+
+    def __getitem__(self, parameters):
+        if not isinstance(parameters, tuple):
+            parameters = (parameters,)
+        try:
+            return self._typed_getitem(parameters, tuple(type(p) for p in parameters))
+        except TypeError:
+            return self._getitem(self, *parameters)
+
+
+@_TypedCacheSpecialForm
+def Literal(self, *parameters):
+    """A type whose arguments are literal values."""
+    return _typing._LiteralGenericAlias(self, parameters)
