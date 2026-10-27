@@ -267,10 +267,7 @@ unsafe fn with_archive<T>(archive: *const Object, f: impl FnOnce(&Archive) -> T)
 pub unsafe extern "C" fn imre_zip_open(path: *const Str) -> *const Object {
     // SAFETY: the path is a live string owner for the entire open operation.
     let path: StrOwner = unsafe { StrOwner::acquire_word(path as usize) };
-    opened(files::open_file(&path, 0).and_then(|(file, _)| {
-        let file = crate::Shared::try_new(file).map_err(|_| Error::allocation())?;
-        Archive::open(Source::Owned(file), Some(path))
-    }))
+    opened(Source::open(&path).and_then(|source| Archive::open(source, Some(path))))
 }
 
 /// Open a caller-supplied binary stream; closing the archive never closes it.
@@ -375,6 +372,50 @@ pub unsafe extern "C" fn imre_zip_read(
         unsafe { with_archive(archive, |a| a.member(key, is_info)) }.and_then(|mut m| m.read(None));
     finish(
         result.map(|b| crate::BytesOwner::into_raw(crate::BytesOwner::new(b))),
+        std::ptr::null(),
+    )
+}
+
+/// Read a zipimport resource using its cached directory and a fresh file descriptor.
+///
+/// # Safety
+/// The caller roots a path-backed ZIP index and a string for the entire call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_zipimport_data(
+    archive: *const Object,
+    name: *const Str,
+) -> *const Bytes {
+    // SAFETY: the archive and name are rooted by the sealed zipimport operation.
+    let result = unsafe {
+        with_archive(archive, |a| {
+            let name = &*name;
+            if let Some(entry) = a.by_name.get(name) {
+                let path = a.filename.as_ref().ok_or_else(|| {
+                    Error::new(Kind::ValueError, "zipimport requires a path-backed archive")
+                })?;
+                return Member::open(Source::open(path)?, entry.zip_info(), || string_repr(name))?
+                    .read_import_data();
+            }
+            if name.ends_with('/')
+                && a.by_name
+                    .keys()
+                    .any(|member| member.starts_with(name.as_str()))
+            {
+                return Ok(Bytes::new());
+            }
+            Err(Error::from_errno(
+                Kind::OSError,
+                0,
+                "",
+                Some(super::exceptions::Filename::Str(StrOwner::new(
+                    name.clone(),
+                ))),
+                None,
+            ))
+        })
+    };
+    finish(
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }

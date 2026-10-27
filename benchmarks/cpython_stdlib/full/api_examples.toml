@@ -78,5 +78,6 @@ urllib = ["`urllib.parse.urlsplit` with named result fields, and `quote` and `un
 uuid = ["Construct a `UUID` from hexadecimal text or a 128-bit integer and read its canonical spelling, `hex` and `int`.","tests/fixtures/text/uuid_conversion.py"]
 warnings = ["Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`.","benchmarks/cpython_stdlib/full/warnings/README.md"]
 zipfile = ["Read stored and deflated members and report CRC failures.","benchmarks/cpython_stdlib/native_zip_members.py"]
+zipimport = ["Read stored and deflated resources with `zipimporter.get_data()`. Importing Python modules from ZIP paths is unsupported.","tests/fixtures/files/zipimport_resources.py"]
 weakref = ["Callback-free proxy for source-defined records, including cached identity, attribute and call forwarding, and ReferenceError after the referent is released.", "tests/fixtures/classes/weak_proxy.py"]
 zlib = ["`adler32` computes an unsigned checksum of bytes with an optional integer seed. Compressed-input failures preserve the `error` exception.","tests/fixtures/bytes/zlib_adler32.py"]

@@ -1087,6 +1087,7 @@ impl IntrinsicModule {
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
+            (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
@@ -3132,6 +3133,9 @@ impl<'a> Loader<'a> {
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
+            "zipimport" if cfg!(unix) => {
+                Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))
+            }
             "platform" => Some((
                 "platform.py",
                 concat!(

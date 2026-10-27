@@ -11,6 +11,7 @@ pub(crate) mod urlsplit;
 pub(crate) use expandtabs::expand_tabs;
 pub(crate) use lowercase::capitalize;
 pub(super) use lowercase::{lowercase, lowercase_chars};
+pub(crate) use normalization::normalize_unicode;
 
 use num_traits::{Signed, ToPrimitive};
 use std::fmt::Write;
