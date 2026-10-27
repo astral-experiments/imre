@@ -37,3 +37,12 @@ def current():
     print(list(cursor))
     print(Formatter().format("Hello, {} {name}!", "Málaga", name="東京"))
     print(Tagged().vformat("{data[x]}{0!s:>{width}}", ("hi",), {"data": {"x": 42}, "width": 5}))
+
+    print("[%5.2s][%-6.3r][%.2a][%4c]" % ("éπx", "abc", "a", "x"))
+    print("[%*.*s][%.*s]" % (-6, 2, "abc", -1, "hidden"))
+    print("%(name)6.2s/%(name)-4.1s" % {"name": "abcd"})
+    for args in (("bad", "value"), (2,), (2**80, "value")):
+        try:
+            print("%*s" % args)
+        except (TypeError, OverflowError) as error:
+            print(type(error).__name__)

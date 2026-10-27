@@ -1,8 +1,10 @@
-use num_traits::Signed;
+use std::borrow::Cow;
+
+use num_traits::{Signed, ToPrimitive};
 
 use ruff_python_literal::cformat::{
-    CFormatContext, CFormatError, CFormatErrorType, CFormatPart, CFormatPrecision, CFormatQuantity,
-    CFormatSpec, CFormatString,
+    CConversionFlags, CFormatContext, CFormatError, CFormatErrorType, CFormatPart,
+    CFormatPrecision, CFormatQuantity, CFormatSpec, CFormatString,
 };
 use ruff_python_literal::format::{
     FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
@@ -560,6 +562,50 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
+/// Consume a text field's width and precision before asking for the value itself.
+fn percent_text_layout(
+    ctx: &Context,
+    spec: &CFormatSpec,
+    args: &mut dyn Iterator<Item = Id>,
+) -> Result<(usize, Option<usize>, bool)> {
+    let mut star = || {
+        let arg = args
+            .next()
+            .ok_or_else(|| type_error("not enough arguments for format string"))?;
+        ctx.as_int(arg).map_err(|_| type_error("* wants int"))
+    };
+    let width = match spec.min_field_width {
+        None => 0,
+        Some(CFormatQuantity::Amount(n)) => {
+            isize::try_from(n).map_err(|_| Error::new("ValueError", "width too big"))?
+        }
+        Some(CFormatQuantity::FromValuesTuple) => star()?.big().to_isize().ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?,
+    };
+    let precision = match spec.precision {
+        None => None,
+        Some(CFormatPrecision::Dot) => Some(0),
+        Some(CFormatPrecision::Quantity(CFormatQuantity::Amount(n))) => Some(
+            i32::try_from(n).map_err(|_| Error::new("ValueError", "precision too big"))? as usize,
+        ),
+        Some(CFormatPrecision::Quantity(CFormatQuantity::FromValuesTuple)) => Some(
+            star()?
+                .big()
+                .to_i32()
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?
+                .max(0) as usize,
+        ),
+    };
+    let left = width < 0 || spec.flags.contains(CConversionFlags::LEFT_ADJUST);
+    Ok((width.checked_abs().unwrap_or(0) as usize, precision, left))
+}
+
 /// Old-style interpolation accepts a single operand, a positional tuple or a mapping.
 pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Result<Id> {
     let parsed = format
@@ -585,25 +631,34 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                         spec.precision,
                         Some(CFormatPrecision::Quantity(CFormatQuantity::FromValuesTuple))
                     );
-                if decorated && !number_field {
+                let text_field = decorated && matches!(spec.format_char, 's' | 'r' | 'a' | 'c');
+                if decorated && !number_field && !text_field {
                     return Err(Error::new(
                         "ValueError",
                         "unsupported flags, width or precision for percent interpolation",
                     ));
                 }
-                let arg = if let Some(name) = &spec.mapping_key {
+                let mut mapped;
+                let field_args: &mut dyn Iterator<Item = Id> = if let Some(name) = &spec.mapping_key
+                {
                     if !mapping {
                         return Err(type_error("format requires a mapping"));
                     }
                     // A mapping lookup consumes the single positional operand.
                     args.next();
                     let key = ctx.text(name);
-                    ctx.get_item(rhs, key)?
+                    mapped = std::iter::once(ctx.get_item(rhs, key)?);
+                    &mut mapped
                 } else {
-                    args.next()
-                        .ok_or_else(|| type_error("not enough arguments for format string"))?
+                    &mut args
                 };
-                if decorated {
+                let layout = text_field
+                    .then(|| percent_text_layout(ctx, spec, field_args))
+                    .transpose()?;
+                let arg = field_args
+                    .next()
+                    .ok_or_else(|| type_error("not enough arguments for format string"))?;
+                if decorated && number_field {
                     let (_, (start, _)) = positions
                         .find(|(i, _)| i == position)
                         .expect("parsed percent fields follow their source character positions");
@@ -614,19 +669,23 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     output.push_str(&rendered);
                     continue;
                 }
-                let rendered = match spec.format_char {
-                    's' => ctx.display(arg),
-                    'r' => ctx.repr(arg),
-                    'a' => ascii(&ctx.repr(arg)),
-                    'd' | 'i' | 'u' => ctx.as_int(arg)?.to_string(),
-                    ch @ ('o' | 'x' | 'X') => format_value(ctx, arg, &ch.to_string())?,
+                let rendered: Cow<'_, str> = match spec.format_char {
+                    's' => match ctx.heap.get(arg) {
+                        Value::Str(s) => Cow::Borrowed(s),
+                        _ => ctx.display(arg).into(),
+                    },
+                    'r' => ctx.repr(arg).into(),
+                    'a' => ascii(&ctx.repr(arg)).into(),
+                    'd' | 'i' | 'u' => ctx.as_int(arg)?.to_string().into(),
+                    ch @ ('o' | 'x' | 'X') => format_value(ctx, arg, &ch.to_string())?.into(),
                     'c' => match ctx.heap.get(arg) {
-                        Value::Str(s) if s.chars().count() == 1 => s.clone(),
+                        Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
                         _ => u32::try_from(ctx.as_integer(arg)?)
                             .ok()
                             .and_then(char::from_u32)
                             .ok_or_else(|| Error::new("OverflowError", "%c arg not in range"))?
-                            .to_string(),
+                            .to_string()
+                            .into(),
                     },
                     _ => {
                         return Err(Error::new(
@@ -635,7 +694,26 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                         ));
                     }
                 };
-                output.push_str(&rendered);
+                if let Some((width, precision, left)) = layout {
+                    let end = precision
+                        .filter(|_| spec.format_char != 'c')
+                        .and_then(|n| rendered.char_indices().nth(n))
+                        .map_or(rendered.len(), |(i, _)| i);
+                    let text = &rendered[..end];
+                    let padding = width.saturating_sub(text.chars().count());
+                    output
+                        .try_reserve(text.len().saturating_add(padding))
+                        .map_err(|_| Error::new("MemoryError", "formatted string is too long"))?;
+                    if !left {
+                        output.extend(std::iter::repeat_n(' ', padding));
+                    }
+                    output.push_str(text);
+                    if left {
+                        output.extend(std::iter::repeat_n(' ', padding));
+                    }
+                } else {
+                    output.push_str(&rendered);
+                }
             }
         }
     }
