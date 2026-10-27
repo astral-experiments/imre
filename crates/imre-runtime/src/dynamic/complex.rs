@@ -25,6 +25,25 @@ impl Complex {
 }
 
 impl Context {
+    /// Format an invalid argument's type as Python's `%T` formatter does.
+    fn complex_argument_type(&self, value: Id) -> String {
+        let name = self.type_name(value);
+        let Value::Instance { class, .. } = self.heap.get(value) else {
+            return name.to_owned();
+        };
+        let text_attr = |name| {
+            self.own_class_attr(*class, name)
+                .and_then(|value| self.str_value(value).ok())
+        };
+        let name = text_attr("__qualname__").unwrap_or(name);
+        match text_attr("__module__") {
+            Some(module) if !matches!(module, "builtins" | "__main__") => {
+                format!("{module}.{name}")
+            }
+            _ => name.to_owned(),
+        }
+    }
+
     /// Convert a real numeric operand without truncating floats or overflowing large integers.
     fn real_component(&self, value: Id) -> Result<Option<f64>> {
         match self.heap.get(value) {
@@ -84,7 +103,7 @@ impl Context {
             ) && self.slot(value, "__float__").is_none()
                 && self.slot(value, "__index__").is_none()
             {
-                let ty = self.type_name(value);
+                let ty = self.complex_argument_type(value);
                 let message = if single {
                     format!("complex() argument must be a string or a number, not {ty}")
                 } else {
