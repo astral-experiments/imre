@@ -44,6 +44,9 @@ impl Context {
             Value::Native(kind) if name == "__hash__" && kind == "object" => {
                 self.builtins.get("object.__hash__").copied()
             }
+            Value::Native(kind) if builtins::is_enum_base(kind) => {
+                self.builtins.get(&format!("enum.Enum.{name}")).copied()
+            }
             Value::Native(kind)
                 if name == "__hash__"
                     && matches!(kind.as_str(), "list" | "dict" | "set" | "bytearray") =>
@@ -429,6 +432,8 @@ impl Context {
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
+                            | "enum.Enum.__copy__"
+                            | "enum.Enum.__deepcopy__"
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
@@ -1705,6 +1710,7 @@ impl Context {
             }
             Value::Native(class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
+                    || builtins::is_enum_base(&class)
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
                     || (class == "int" && name == "to_bytes")
