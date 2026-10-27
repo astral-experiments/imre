@@ -6162,6 +6162,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
+                Intrinsic::ImportModule => {
+                    return Err(self.object_runtime_export("importlib.import_module", expression));
+                }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
                     return Ok(Expr {
@@ -8759,6 +8762,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ImportModule)) => {
+                return Err(self.object_runtime_export("importlib.import_module", call));
             }
             Some(Binding::Intrinsic(Intrinsic::AttrGetter)) => {
                 return Err(self.runtime_attrgetter(call));
