@@ -347,13 +347,21 @@ impl fmt::Display for Error {
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
+/// Data retained by class namespaces after their body has run.
+#[derive(Clone, Default)]
+pub(super) struct ClassNamespace {
+    pub bases: Id,
+    pub mro: Id,
+    pub annotation_thunks: Option<Id>,
+}
+
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
     pub class_cell: Option<Id>,
-    pub class_lineage: Option<(Id, Id)>,
+    pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
     pub closure: Box<ClosureScope>,
@@ -695,8 +703,9 @@ impl Value {
                     visit.extend(state.generator);
                     visit.extend(&state.history);
                 }
-                if let Some((bases, mro)) = scope.class_lineage {
-                    visit.extend([bases, mro]);
+                if let Some(class) = &scope.class_namespace {
+                    visit.extend([class.bases, class.mro]);
+                    visit.extend(class.annotation_thunks);
                 }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);

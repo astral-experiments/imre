@@ -593,7 +593,7 @@ impl Context {
             enum_namespace: None,
             is_abstract: false,
             class_cell: None,
-            class_lineage: None,
+            class_namespace: None,
             first_argument: None,
             names: Default::default(),
             closure: Default::default(),

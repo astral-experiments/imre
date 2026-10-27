@@ -1162,8 +1162,35 @@ impl Context {
                 }
             }
             Value::Class {
-                name: class_name, ..
+                name: class_name,
+                scope,
+                ..
             } => {
+                if name == "__annotations__"
+                    && let Some(thunks) = self
+                        .scope_data(scope)
+                        .class_namespace
+                        .as_ref()
+                        .and_then(|c| c.annotation_thunks)
+                {
+                    let entries = self.dict_entries(thunks).unwrap().to_vec();
+                    let mapping = self
+                        .own_class_attr(obj, name)
+                        .ok_or_else(|| self.missing_attribute(obj, name))?;
+                    let mut evaluated = Vec::with_capacity(entries.len());
+                    for (key, thunk) in entries {
+                        let value = self.call(thunk, Vec::new(), Vec::new())?;
+                        evaluated.push((key, value));
+                    }
+                    for (key, value) in evaluated {
+                        self.put_item(mapping, key, value)?;
+                    }
+                    let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                        unreachable!()
+                    };
+                    frame.class_namespace.as_mut().unwrap().annotation_thunks = None;
+                    return Ok(mapping);
+                }
                 if name == "__name__" {
                     return Ok(self.text(class_name));
                 }
@@ -1375,6 +1402,16 @@ impl Context {
                     "__annotate__" => {
                         Error::new("TypeError", "cannot delete __annotate__ attribute")
                     }
+                    "__annotations__"
+                        if self
+                            .scope_data(scope)
+                            .class_namespace
+                            .as_ref()
+                            .and_then(|c| c.annotation_thunks)
+                            .is_some() =>
+                    {
+                        Error::new("AttributeError", "__annotations__")
+                    }
                     _ => {
                         let key = self.text(name);
                         if self.remove_binding(scope, name, key)? {
@@ -1580,6 +1617,12 @@ impl Context {
             }
             Value::Class { scope, .. } => {
                 let scope = *scope;
+                if name == "__annotations__"
+                    && let Value::Scope(data) = self.heap.get_mut(scope)
+                    && let Some(namespace) = &mut data.class_namespace
+                {
+                    namespace.annotation_thunks = None;
+                }
                 self.bind(scope, name, value);
             }
             _ => {

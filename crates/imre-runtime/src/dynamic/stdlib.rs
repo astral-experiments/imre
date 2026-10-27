@@ -69,6 +69,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "binascii"
             | "json"
             | "_imre_logging"
+            | "_imre_dataclasses"
             | "marshal"
             | "pickle"
             | "datetime"
@@ -270,6 +271,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
+        ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
+            ctx.builtin(&format!("{module}.{name}"))
+        }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
@@ -628,6 +632,35 @@ pub(super) fn call(
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
+        match (method, args, kwargs) {
+            ("loaded_module", [name], []) => {
+                return Ok(ctx
+                    .modules
+                    .get(ctx.str_value(*name)?)
+                    .copied()
+                    .unwrap_or(NONE));
+            }
+            ("members", [class], []) => {
+                if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
+                    let names = ctx.scope_data(scope).names.clone();
+                    let entries = names
+                        .into_iter()
+                        .map(|(name, value)| (ctx.text(name), value))
+                        .collect();
+                    return Ok(ctx.dict(entries));
+                }
+            }
+            ("metadata", [dict], []) if ctx.dict_storage(*dict).is_some() => {
+                return Ok(ctx.alloc(Value::MappingProxy(*dict)));
+            }
+            _ => {}
+        }
+        return Err(Error::new(
+            "TypeError",
+            format!("invalid arguments to {name}"),
+        ));
     }
     if let Some(function) = name.strip_prefix("_imre_logging.") {
         return logging::call(ctx, function, args, kwargs);

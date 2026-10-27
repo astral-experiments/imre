@@ -393,7 +393,15 @@ pub(crate) fn compile(
                 if !seen.insert(prefix.clone()) {
                     continue;
                 }
-                if let Some((filename, source)) = crate::modules::bundled_runtime_source(&prefix) {
+                let bundled = if prefix == "dataclasses" {
+                    Some((
+                        "dataclasses.py",
+                        include_str!("../../stdlib/dataclasses.py"),
+                    ))
+                } else {
+                    crate::modules::bundled_runtime_source(&prefix)
+                };
+                if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
                     let imports = imports_for_module(&path, source)?;
