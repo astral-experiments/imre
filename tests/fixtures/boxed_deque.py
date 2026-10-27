@@ -84,4 +84,18 @@ def current():
         if queue.maxlen is None:
             assert queue.popleft() is marker
         assert not queue
+    alias = deque([1, 2], maxlen=2)
+    try:
+        alias.__init__([], -1)
+    except ValueError:
+        pass
+    assert list(alias) == [1, 2] and alias.maxlen == 2
+    try:
+        deque.__init__(alias, Source(), 3)
+    except ValueError:
+        pass
+    assert list(alias) == [marker] and alias.maxlen == 3
+    assert alias.clear() is None and not alias and alias.maxlen == 3
+    alias.append(marker)
+    assert alias.__init__(alias) is None and not alias and alias.maxlen is None
     print("deque passed")

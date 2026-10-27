@@ -102,19 +102,19 @@ impl<T, K> Ring<T, K> {
         *remaining -= 1;
         Ok(Some(&self.items[index]))
     }
-}
 
-const INDEX_OVERFLOW: &str = "cannot fit 'int' into an index-sized integer";
-
-impl Deque {
     /// Detach the old elements so their owners are released outside the storage borrow.
-    fn take_items(&mut self) -> VecDeque<OwnedWord> {
+    pub(crate) fn take_items(&mut self) -> VecDeque<T> {
         if !self.items.is_empty() {
             self.state = self.state.wrapping_add(1);
         }
         std::mem::take(&mut self.items)
     }
+}
 
+const INDEX_OVERFLOW: &str = "cannot fit 'int' into an index-sized integer";
+
+impl Deque {
     /// Convert an exact integer before normalizing negative positions against this ring.
     fn position(&self, at: &Int) -> Result<usize, Error> {
         let raw =
