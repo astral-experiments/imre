@@ -105,6 +105,48 @@ def current():
         except RuntimeError as error:
             print(error, length_hint(cursor))
 
+    for kind in range(4):
+        changed = {"first": 1, "second": 2}
+        source = (changed, changed.keys(), changed.values(), changed.items())[kind]
+        cursor = iter(source)
+        print(next(cursor))
+        del changed["first"]
+        changed["third"] = 3
+        print(next(cursor))
+        try:
+            next(cursor)
+        except RuntimeError as error:
+            print(error, length_hint(cursor))
+
+    # An unread deletion shifts the next original entry into its position. Newly
+    # appended entries follow the surviving originals, without yielding duplicates.
+    changed = {"first": 1, "second": 2, "third": 3}
+    early, late = iter(changed), iter(changed)
+    print(next(late))
+    del changed["second"]
+    changed["fourth"] = 4
+    print(list(early), list(late))
+
+    # A key-change error detaches the exhausted cursor, unlike a size-change error.
+    changed = {"first": 1, "second": 2}
+    cursor = iter(changed)
+    next(cursor)
+    del changed["first"]
+    changed["third"] = 3
+    print(next(cursor))
+    try:
+        next(cursor)
+    except RuntimeError as error:
+        print(error, next(cursor, "exhausted"))
+
+    # The sixth insertion compacts the five occupied slots of the initial table.
+    changed = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
+    cursor = iter(changed)
+    print(next(cursor))
+    del changed["a"]
+    changed["f"] = 6
+    print(list(cursor))
+
     def replace_and_append(value):
         if value == 1:
             sequence[1] = 3
