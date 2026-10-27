@@ -101,6 +101,24 @@ impl FileState {
         open_state(&super::text::try_owned_string(path)?, mode, true, false)
     }
 
+    /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
+    pub(crate) fn temporary(directory: Option<&str>) -> Result<Self> {
+        let file = super::tempdirs::anonymous_file(directory)?;
+        let fd = file.as_raw_fd();
+        let capacity = crate::text_output::binary_capacity(
+            file.metadata().map_err(errno_error)?.blksize().into(),
+        );
+        Ok(Self {
+            fd: Some(fd),
+            raw: false,
+            stream: Some(Stream::Random(random::Random::new(file, capacity)?)),
+            name: None,
+            encoding: None,
+            errors: None,
+            kind: FileKind::BinaryRandom,
+        })
+    }
+
     pub(crate) fn closed(&self) -> bool {
         self.stream.is_none()
     }
@@ -251,7 +269,7 @@ impl FileState {
         Ok(file)
     }
 
-    fn read_size(&mut self, value: &Int) -> Result<Bytes> {
+    pub(crate) fn read_size(&mut self, value: &Int) -> Result<Bytes> {
         // GzipFile checks its own closed state before forwarding the argument
         // to BufferedReader. A plain BufferedWriter validates a C int first.
         if self.kind == FileKind::Member {
@@ -399,7 +417,7 @@ impl FileState {
         if self.kind == FileKind::TextMemory {
             return Ok(());
         }
-        if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
+        if matches!(self.kind, FileKind::BinaryWrite | FileKind::BinaryRandom) && self.closed() {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
@@ -621,25 +639,8 @@ pub unsafe extern "C" fn imre_binary_open(path: *const Str, mode: u32) -> *const
 pub unsafe extern "C" fn imre_tempfile_new(directory: *const Str) -> *const Object {
     // SAFETY: the caller retains the optional directory through creation.
     let directory = unsafe { directory.as_ref() }.map(Str::as_str);
-    let result = super::tempdirs::anonymous_file(directory).and_then(|file| {
-        let fd = file.as_raw_fd();
-        let capacity = crate::text_output::binary_capacity(
-            file.metadata().map_err(errno_error)?.blksize().into(),
-        );
-        let stream = random::Random::new(file, capacity)?;
-        Ok(crate::ObjectOwner::into_raw(
-            FileState {
-                fd: Some(fd),
-                raw: false,
-                stream: Some(Stream::Random(stream)),
-                name: None,
-                encoding: None,
-                errors: None,
-                kind: FileKind::BinaryRandom,
-            }
-            .into_object(),
-        ))
-    });
+    let result = FileState::temporary(directory)
+        .map(|file| crate::ObjectOwner::into_raw(file.into_object()));
     finish(result, std::ptr::null())
 }
 

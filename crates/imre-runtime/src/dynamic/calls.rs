@@ -867,6 +867,9 @@ impl Context {
             }
             Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
             Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::BufferedRandom(file) if name == "closed" => {
+                return Ok(if file.borrow().closed() { TRUE } else { FALSE });
+            }
             Value::TextFile(file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
             }

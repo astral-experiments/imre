@@ -22,6 +22,7 @@ mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
+pub(super) mod tempfile;
 mod time;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
@@ -73,6 +74,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "datetime"
             | "email"
             | "email.utils"
+            | "tempfile"
             | "time"
             | "hashlib"
             | "hmac"
@@ -265,6 +267,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", "ASCII") => ctx.int(regex::ASCII),
@@ -637,6 +640,12 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
+    }
+    if name == "tempfile.TemporaryFile" {
+        return tempfile::open(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("BufferedRandom.") {
+        return tempfile::method(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
