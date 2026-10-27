@@ -63,6 +63,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/logging/boxed.py"),
             ),
         )),
+        "mimetypes" if cfg!(unix) => Some((
+            "mimetypes.py",
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/mimetypes/upstream/Lib/mimetypes.py"
+            ),
+        )),
         "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
         // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
         "string" => Some((
