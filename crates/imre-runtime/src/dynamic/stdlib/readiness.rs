@@ -42,24 +42,23 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     ctx.bind(class_scope, "__annotations__", annotations);
     ctx.bind(class_scope, "_fields", fields);
     let base = ctx.builtin("typing.NamedTuple");
-    let ancestors = ctx.lineage(base);
-    let key = ctx.alloc(Value::Class {
-        name: "SelectorKey".into(),
-        scope: class_scope,
-        ancestors,
-    });
+    let key = ctx
+        .allocate_class("SelectorKey".into(), class_scope, vec![base])
+        .expect("a single named tuple base has a linearization");
     ctx.bind(scope, "SelectorKey", key);
 }
 
-fn fd(ctx: &mut Context, obj: Id) -> Result<i32> {
+/// A positive Python descriptor may be wider than the kernel's descriptor type.
+/// Such a value is an ordinary missing key until an operation actually calls poll.
+fn fd(ctx: &mut Context, obj: Id) -> Result<Option<i32>> {
     let n = if matches!(ctx.heap.get(obj), Value::Int(_) | Value::Bool(_)) {
-        ctx.as_integer(obj)?
+        ctx.as_int(obj)?
     } else {
         let number = ctx
             .lookup_attr(obj, "fileno")
             .and_then(|f| ctx.call(f, Vec::new(), Vec::new()))
             .and_then(|v| builtins::call(ctx, "int", &[v], &[]))
-            .and_then(|v| ctx.as_integer(v));
+            .and_then(|v| ctx.as_int(v));
         number.map_err(|e| {
             if matches!(
                 e.kind.as_str(),
@@ -74,23 +73,22 @@ fn fd(ctx: &mut Context, obj: Id) -> Result<i32> {
             }
         })?
     };
-    if n < 0 {
+    if n.cmp(&crate::Int::from(0)).is_lt() {
         return Err(Error::new(
             "ValueError",
             format!("Invalid file descriptor: {n}"),
         ));
     }
-    i32::try_from(n)
-        .map_err(|_| Error::new("OverflowError", "Python int too large to convert to C int"))
+    Ok(n.to_i64().and_then(|n| i32::try_from(n).ok()))
 }
 
-fn reg_fd(ctx: &mut Context, handle: &RefCell<Selector>, obj: Id) -> Result<i32> {
+fn reg_fd(ctx: &mut Context, handle: &RefCell<Selector>, obj: Id) -> Result<Option<i32>> {
     match fd(ctx, obj) {
         Err(e) if e.kind == "ValueError" => {
             // Lookup by identity still permits unregistering a socket that was closed.
             for (&fd, key) in &handle.borrow().keys {
                 if key.fileobj == obj {
-                    return Ok(fd);
+                    return Ok(Some(fd));
                 }
             }
             Err(e)
@@ -139,11 +137,13 @@ fn timeout(ctx: &Context, value: Id) -> Result<Option<Duration>> {
     Ok(Some(Duration::from_millis(ms as u64)))
 }
 
-fn registered(ctx: &Context, selector: &Selector, obj: Id, fd: i32) -> Result<Registration> {
-    selector
-        .keys
-        .get(&fd)
-        .copied()
+fn registered(
+    ctx: &Context,
+    selector: &Selector,
+    obj: Id,
+    fd: Option<i32>,
+) -> Result<(i32, Registration)> {
+    fd.and_then(|fd| selector.keys.get(&fd).copied().map(|key| (fd, key)))
         .ok_or_else(|| Error::new("KeyError", format!("{} is not registered", ctx.repr(obj))))
 }
 
@@ -223,13 +223,16 @@ pub(super) fn call(
                 return Err(Error::new("ValueError", format!("Invalid events: {bits}")));
             }
             let fd = reg_fd(ctx, &handle, obj)?;
-            let fileobj = if name == "modify" {
-                let key = registered(ctx, &handle.borrow(), obj, fd)?;
+            let (fd, fileobj) = if name == "modify" {
+                let (fd, key) = registered(ctx, &handle.borrow(), obj, fd)?;
                 if key.interests == bits && ctx.equal(key.data, data) {
                     return Ok(key.key);
                 }
-                key.fileobj
+                (fd, key.fileobj)
             } else {
+                let fd = fd.ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?;
                 if handle.borrow().keys.contains_key(&fd) {
                     return Err(Error::new(
                         "KeyError",
@@ -241,7 +244,7 @@ pub(super) fn call(
                     .keys
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-                obj
+                (fd, obj)
             };
             let module = ctx.module("selectors")?;
             let class = ctx.lookup_attr(module, "SelectorKey")?;
@@ -271,7 +274,7 @@ pub(super) fn call(
             }
             let fd = reg_fd(ctx, &handle, obj)?;
             let mut selector = handle.borrow_mut();
-            let key = registered(ctx, &selector, obj, fd)?;
+            let (fd, key) = registered(ctx, &selector, obj, fd)?;
             if name == "unregister" {
                 selector.poll.remove(fd);
                 selector.keys.remove(&fd);

@@ -206,7 +206,19 @@ impl Context {
             Err(error) => return Err(error),
         }
         if matches!(self.heap.get(value), Value::Iterator { .. }) {
-            return Ok(self.int(self.iterator_remaining(value)?.len() as i64));
+            let length = i64::try_from(self.iterator_remaining(value)?.len()).map_err(|_| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            return Ok(self.int(length));
+        }
+        if let Value::DictIterator(iter) = self.heap.get(value) {
+            return Ok(self.int(iter.length_hint(self) as i64));
+        }
+        if let Value::Repeat(repeat) = self.heap.get(value) {
+            return Ok(self.int(repeat.remaining.map_or(default, |n| n as i64)));
         }
         if let Some(hint) = self.bound_slot(value, "__length_hint__")? {
             let hint = match self.call(hint, vec![], vec![]) {

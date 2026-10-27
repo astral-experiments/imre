@@ -6,6 +6,8 @@ mod delivery;
 mod handler;
 mod hierarchy;
 mod levels;
+pub(crate) use levels::{level_name, named_level};
+pub(crate) use locks::HandlerLock;
 pub(super) mod locks;
 pub(super) mod manager;
 pub(super) mod timed;
@@ -24,7 +26,7 @@ use super::mappings::IntKey;
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
 
 /// A logger owns its state whether or not a manager registered its name.
-pub(super) struct Logger {
+pub(crate) struct Logger {
     name: StrOwner,
     level: RefCell<Int>,
     enabled: cache::EnabledCache,
@@ -49,6 +51,72 @@ impl Logger {
 
     fn handle(self: &Rc<Self>) -> crate::ObjectOwner {
         crate::ObjectOwner::new(Object(StorageCell::new(Storage::Logger(self.clone()))))
+    }
+
+    pub(crate) fn standalone(name: &str, level: Int) -> Rc<Self> {
+        Self::new(StrOwner::new(Str::from(name)), level, true)
+    }
+
+    pub(crate) fn registered(name: &str) -> Rc<Self> {
+        LOGGERS.with_borrow_mut(|logs| logs.entry(name).logger.clone())
+    }
+
+    pub(crate) fn parent(&self) -> Option<Rc<Self>> {
+        LOGGERS.with_borrow(|logs| logs.parent(self).map(|entry| entry.logger.clone()))
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn level(&self) -> Int {
+        self.level.borrow().clone()
+    }
+
+    pub(crate) fn effective_level(&self) -> Int {
+        LOGGERS.with_borrow(|logs| logs.effective(self))
+    }
+
+    pub(crate) fn set_level(&self, value: &Int) {
+        LOGGERS.with_borrow(|logs| logs.set_level(self, value));
+    }
+
+    pub(crate) fn enabled_at(&self, value: &Int) -> Result<bool> {
+        LOGGERS.with_borrow(|logs| {
+            let key = IntKey(value.clone());
+            if let Some(enabled) = self.enabled.get(&key) {
+                return Ok(enabled);
+            }
+            let threshold = logs.effective(self);
+            let enabled = match (
+                value.as_small(),
+                logs.disable.as_small(),
+                threshold.as_small(),
+            ) {
+                (Some(level), Some(disable), Some(threshold)) => {
+                    level > disable && level >= threshold
+                }
+                _ => value.big() > logs.disable.big() && value.big() >= threshold.big(),
+            };
+            self.enabled.insert(key, enabled)?;
+            Ok(enabled)
+        })
+    }
+
+    pub(crate) fn propagate(&self) -> bool {
+        self.propagate.get()
+    }
+
+    pub(crate) fn set_propagate(&self, value: bool) {
+        self.propagate.set(value);
+    }
+
+    pub(crate) fn disabled(&self) -> bool {
+        self.disabled.get()
+    }
+
+    pub(crate) fn set_disabled(&self, value: bool) {
+        self.disabled.set(value);
     }
 }
 
@@ -93,6 +161,15 @@ impl Registry {
     fn set_level(&self, logger: &Logger, value: &Int) {
         logger.level.replace(value.clone());
         self.clear_enabled();
+    }
+
+    fn entry(&mut self, name: &str) -> &Entry {
+        let name = if name.is_empty() { "root" } else { name };
+        if !self.entries.contains_key(name) {
+            let entry = Entry::new(name, 0, self.entries.len());
+            self.entries.insert(name.into(), entry);
+        }
+        &self.entries[name]
     }
 
     /// Previously returned caches stay live when a level or the manager limit changes.
@@ -300,16 +377,7 @@ pub unsafe extern "C" fn imre_log_new(name: *const Str, level: usize) -> *const 
 pub unsafe extern "C" fn imre_log_get(word: usize) -> *const Object {
     // SAFETY: non-null optional payloads remain rooted for this call.
     let name = unsafe { (word as *const Str).as_ref() }.map_or("", Str::as_str);
-    let name = if name.is_empty() { "root" } else { name };
-    LOGGERS.with_borrow_mut(|logs| {
-        if let Some(entry) = logs.entries.get(name) {
-            return crate::ObjectOwner::into_raw(entry.handle.clone());
-        }
-        let entry = Entry::new(name, 0, logs.entries.len());
-        let result = crate::ObjectOwner::into_raw(entry.handle.clone());
-        logs.entries.insert(name.into(), entry);
-        result
-    })
+    LOGGERS.with_borrow_mut(|logs| crate::ObjectOwner::into_raw(logs.entry(name).handle.clone()))
 }
 
 /// # Safety
@@ -404,23 +472,7 @@ pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize)
 pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -> bool {
     // SAFETY: both arguments are rooted by the caller.
     let (logger, value) = unsafe { (state(logger), Int::borrow(level)) };
-    let result = LOGGERS.with_borrow(|logs| {
-        let key = IntKey((*value).clone());
-        if let Some(enabled) = logger.enabled.get(&key) {
-            return Ok(enabled);
-        }
-        let threshold = logs.effective(&logger);
-        let enabled = match (
-            value.as_small(),
-            logs.disable.as_small(),
-            threshold.as_small(),
-        ) {
-            (Some(level), Some(disable), Some(threshold)) => level > disable && level >= threshold,
-            _ => value.big() > logs.disable.big() && value.big() >= threshold.big(),
-        };
-        logger.enabled.insert(key, enabled)?;
-        Ok(enabled)
-    });
+    let result = logger.enabled_at(&value);
     finish(result, false)
 }
 

@@ -31,9 +31,11 @@ fn positive_columns(value: &str) -> Option<usize> {
 }
 
 pub(super) fn width() -> usize {
-    let columns = std::env::var("COLUMNS")
-        .ok()
-        .and_then(|value| positive_columns(&value))
+    let configured = super::super::processes::with_environment_value(b"COLUMNS", |bytes| {
+        std::str::from_utf8(bytes).ok().and_then(positive_columns)
+    });
+    let columns = configured
+        .flatten()
         .or_else(|| {
             let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
             // SAFETY: ioctl writes a winsize to this buffer only on success.

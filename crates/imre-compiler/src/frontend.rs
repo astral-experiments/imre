@@ -496,6 +496,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
         "ReferenceError" => return Some(53),
+        "BufferError" => return Some(54),
         "BlockingIOError" => return Some(44),
         "ConnectionError" => return Some(45),
         "BrokenPipeError" => return Some(46),
@@ -631,7 +632,7 @@ pub(crate) fn lower_with_caller_cache(
                         graph.runtime_overload(module_id, function.name.range());
                         typing::strip_overload(&mut function);
                     }
-                    if cached.is_some() {
+                    if cached.is_some() || inspect::marks_function(graph, module_id, &function) {
                         function.decorator_list.clear();
                     }
                     let element = native_generators::item_type(
@@ -899,12 +900,15 @@ pub(crate) fn lower_with_caller_cache(
         }
     }
     let initializer_start = definitions.len();
-    let class_globals = classes.declarations.has_class_values(graph.entry);
-    let helpers = Helpers::new(definitions.len() + graph.initializers(class_globals).count());
+    let entry_declarations = classes.declarations.has_class_values(graph.entry)
+        || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
+            matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
+        });
+    let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for (module_id, range) in graph.initializers(class_globals) {
+    for (module_id, range) in graph.initializers(entry_declarations) {
         let checker = Checker::new(
             graph,
             module_id,
@@ -5915,6 +5919,15 @@ impl<'a> Checker<'a> {
         })
     }
 
+    fn object_runtime_export(&self, name: &str, node: &impl Ranged) -> String {
+        self.graph.needs_object_runtime.set(true);
+        error(
+            self.source,
+            node,
+            &format!("{name} requires native Python object operations"),
+        )
+    }
+
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Attribute(attribute) = expression
             && let Some(field) = self.mime_attribute(attribute)
@@ -6136,6 +6149,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::ObjectRuntimeExport(name) => {
+                    return Err(self.object_runtime_export(name, expression));
+                }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
                     return Ok(Expr {
@@ -8731,6 +8747,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
+                return Err(self.object_runtime_export(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::AttrGetter)) => {
                 return Err(self.runtime_attrgetter(call));
             }
@@ -8886,6 +8905,9 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
                 return self.is_method_descriptor(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::InspectCoroutine { mark })) => {
+                return self.inspect_coroutine(call, mark);
             }
             Some(Binding::Intrinsic(Intrinsic::InspectGetattrStatic)) => {
                 return self.static_attribute(call);

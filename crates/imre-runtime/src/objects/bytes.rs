@@ -167,7 +167,8 @@ pub(super) fn repr(value: &[u8]) -> Result<Str> {
     Ok(Str::from(output))
 }
 
-pub(super) fn write_repr(output: &mut String, value: &[u8]) {
+/// Write the Python bytes representation, including its chosen quote and escapes.
+pub(crate) fn write_repr(output: &mut String, value: &[u8]) {
     write_quoted_repr(output, value).expect("writing to a String cannot fail");
 }
 
