@@ -377,6 +377,27 @@ impl Context {
         error
     }
 
+    /// A subsequent failure on the same decode updates only the byte range and reason.
+    pub(super) fn advance_decode_error(
+        &mut self,
+        exception: Id,
+        start: usize,
+        end: usize,
+        reason: &str,
+    ) {
+        let reason = self.text(reason);
+        let Value::Raised(Error {
+            decode: Some(state),
+            ..
+        }) = self.heap.get_mut(exception)
+        else {
+            unreachable!("active decoder exception");
+        };
+        state.start = start as i64;
+        state.end = end as i64;
+        state.reason = reason;
+    }
+
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let mut error = Error::new(kind, "");
         error.args = Some(self.alloc(Value::Tuple(args.to_vec())));

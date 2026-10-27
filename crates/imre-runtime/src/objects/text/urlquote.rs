@@ -180,14 +180,17 @@ fn unquoted(input: &[u8]) -> Result<Cow<'_, [u8]>> {
     }
 }
 
-fn decode_text(input: &[u8], codec: Codec, errors: &str) -> Result<String> {
+fn decode_text<E: From<Error>>(
+    input: &[u8],
+    mut decode: impl FnMut(&[u8]) -> std::result::Result<String, E>,
+) -> std::result::Result<String, E> {
     let mut out = String::new();
     out.try_reserve_exact(input.len())
         .map_err(|_| Error::allocation())?;
     for span in input.chunk_by(|a, b| a.is_ascii() == b.is_ascii()) {
         let decoded;
         let text = if span[0].is_ascii() {
-            decoded = codec.decode(&unquoted(span)?, Some(errors))?;
+            decoded = decode(&unquoted(span)?)?;
             decoded.as_str()
         } else {
             // SAFETY: an ASCII boundary cannot bisect a scalar in the original string.
@@ -242,12 +245,25 @@ pub(crate) fn decode_component(
     encoding: Option<&str>,
     errors: Option<&str>,
 ) -> Result<String> {
+    decode_component_with(input, encoding, errors, |codec, data, errors| {
+        codec.decode(data, Some(errors))
+    })
+}
+
+/// Supply the decoder used on percent-decoded ASCII spans, retaining non-ASCII text verbatim.
+pub(crate) fn decode_component_with<E: From<Error>>(
+    input: UrlInput<'_>,
+    encoding: Option<&str>,
+    errors: Option<&str>,
+    mut decode: impl FnMut(Codec, &[u8], &str) -> std::result::Result<String, E>,
+) -> std::result::Result<String, E> {
     let bytes = matches!(input, UrlInput::Bytes(_));
     if bytes && encoding.is_none() {
         return Err(Error::new(
             Kind::TypeError,
             "decode() argument 'encoding' must be str, not None",
-        ));
+        )
+        .into());
     }
     let encoding = encoding.unwrap_or("utf-8");
     check_option(encoding)?;
@@ -255,7 +271,8 @@ pub(crate) fn decode_component(
         return Err(Error::new(
             Kind::TypeError,
             "decode() argument 'errors' must be str, not None",
-        ));
+        )
+        .into());
     }
     let errors = errors.unwrap_or("replace");
     check_option(errors)?;
@@ -263,9 +280,10 @@ pub(crate) fn decode_component(
     if input.is_empty() {
         Ok(String::new())
     } else if bytes {
-        Codec::lookup(encoding)?.decode(&unquoted(input)?, Some(errors))
+        decode(Codec::lookup(encoding)?, &unquoted(input)?, errors)
     } else {
-        decode_text(input, Codec::lookup(encoding)?, errors)
+        let codec = Codec::lookup(encoding)?;
+        decode_text(input, |span| decode(codec, span, errors))
     }
 }
 

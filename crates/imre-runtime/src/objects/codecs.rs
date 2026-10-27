@@ -1,7 +1,7 @@
 //! Native text codecs shared by the registry and text files.
 pub(super) mod writer;
 
-use super::bytes::{ascii_decode_error, decode_error, owned_input};
+use super::bytes::{Utf8Issue, ascii_decode_error, owned_input};
 use super::charmaps::Charmap;
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Storage, StorageCell, Str, finish, object};
@@ -372,27 +372,14 @@ impl Codec {
                 } else {
                     data
                 };
-                let mut remaining = data;
-                loop {
-                    match std::str::from_utf8(remaining) {
-                        Ok(valid) => {
-                            text.try_reserve(valid.len())
-                                .map_err(|_| Error::allocation())?;
-                            text.push_str(valid);
-                            return Ok(text);
-                        }
-                        Err(error) => {
-                            let valid = error.valid_up_to();
-                            text.try_reserve(valid).map_err(|_| Error::allocation())?;
-                            text.push_str(std::str::from_utf8(&remaining[..valid]).unwrap());
-                            let end = error.error_len().map_or(remaining.len(), |len| valid + len);
-                            decoding_error(&mut text, errors, &remaining[valid..end], || {
-                                decode_error(data, error)
-                            })?;
-                            remaining = &remaining[end..];
-                        }
-                    }
+                let mut offset = 0;
+                while let Some(issue) = utf8_prefix(&mut text, data, offset)? {
+                    decoding_error(&mut text, errors, &data[issue.start..issue.end], || {
+                        issue.error(data)
+                    })?;
+                    offset = issue.end;
                 }
+                Ok(text)
             }
         }
     }
@@ -551,13 +538,36 @@ pub(super) fn option_error(kind: Kind, prefix: &str, value: &str, suffix: &str) 
     Error::new(kind, message)
 }
 
-fn unknown_handler(name: &str) -> Error {
+/// Append valid text until the next malformed sequence or the end of the bytes.
+pub(crate) fn utf8_prefix(
+    text: &mut String,
+    data: &[u8],
+    offset: usize,
+) -> Result<Option<Utf8Issue>> {
+    let (valid, issue) = match std::str::from_utf8(&data[offset..]) {
+        Ok(valid) => (valid, None),
+        Err(error) => {
+            let issue = Utf8Issue::new(data, offset, error);
+            // The validator has already checked this prefix.
+            (
+                std::str::from_utf8(&data[offset..issue.start]).unwrap(),
+                Some(issue),
+            )
+        }
+    };
+    text.try_reserve(valid.len())
+        .map_err(|_| Error::allocation())?;
+    text.push_str(valid);
+    Ok(issue)
+}
+
+pub(crate) fn unknown_handler(name: &str) -> Error {
     // CPython includes at most 400 UTF-8 bytes, ending before any partial character.
     let name = &name[..name.floor_char_boundary(400)];
     option_error(Kind::LookupError, "unknown error handler name '", name, "'")
 }
 
-fn decoding_error(
+pub(crate) fn decoding_error(
     text: &mut String,
     errors: Option<&str>,
     bytes: &[u8],
