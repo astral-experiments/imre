@@ -928,8 +928,7 @@ impl Context {
         {
             return Ok(error.stop_value());
         }
-        if matches!(name, "__new__" | "__init__")
-            && matches!(self.heap.get(obj), Value::Raised(_))
+        if matches!(name, "__new__" | "__init__") && matches!(self.heap.get(obj), Value::Raised(_))
         {
             let class = self.exact_type(obj)?;
             return self.instance_attribute(obj, class, None, name);
