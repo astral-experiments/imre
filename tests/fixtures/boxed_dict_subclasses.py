@@ -3,6 +3,15 @@
 
 def current():
     from collections import Counter
+    from collections import _count_elements
+    from _collections import _count_elements as native_count
+
+    counted = {"a": 4}
+    print(native_count is _count_elements, native_count(counted, "aba"), counted)
+    try:
+        native_count(None, 3)
+    except TypeError as error:
+        print(type(error).__name__)
 
     counts = Counter(a=10, b=5, c=0)
     print(counts.total(), counts["absent"], len(counts))

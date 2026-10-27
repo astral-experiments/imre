@@ -252,7 +252,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::TextFile(_)
             if matches!(
                 attr,
-                "read" | "readline" | "write" | "flush" | "close" | "__enter__" | "__exit__"
+                "read"
+                    | "readline"
+                    | "write"
+                    | "flush"
+                    | "close"
+                    | "isatty"
+                    | "__enter__"
+                    | "__exit__"
             ) =>
         {
             "TextIOWrapper"

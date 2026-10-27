@@ -3,7 +3,9 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
 use std::process::{Command, Stdio};
 
-use super::{Context, Error, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error};
+use super::{
+    Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error,
+};
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
@@ -430,6 +432,7 @@ pub(super) fn text_method(
             file.write(value)?;
             Ok(ctx.int(value.chars().count() as i64))
         }
+        "isatty" => Ok(if file.isatty()? { TRUE } else { FALSE }),
         "flush" => {
             file.flush()?;
             Ok(NONE)

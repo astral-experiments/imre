@@ -1,13 +1,8 @@
 """Integer counters for the runtime collections module."""
 
 import operator as _operator
+from _collections import _count_elements
 from itertools import repeat as _repeat
-
-
-def _count_elements(mapping, iterable):
-    get = mapping.get
-    for key in iterable:
-        mapping[key] = get(key, 0) + 1
 
 
 def _elements(items):
