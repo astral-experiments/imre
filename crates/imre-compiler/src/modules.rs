@@ -33,12 +33,12 @@ const KEYWORD_SOURCE: &str = include_str!("../stdlib/keyword.py");
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
-        "pkgutil" => Some((
-            "pkgutil.py",
+        "zipimport" if cfg!(unix) => Some((
+            "zipimport.py",
             concat!(
-                include_str!("../stdlib/pkgutil/boxed.py"),
+                include_str!("../stdlib/zipimport_boxed.py"),
                 "\n",
-                include_str!("../stdlib/pkgutil/iter_modules.py"),
+                include_str!("../stdlib/zipimport.py"),
             ),
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
@@ -49,6 +49,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
         "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
+        "pkgutil" => Some((
+            "pkgutil.py",
+            concat!(
+                include_str!("../stdlib/pkgutil/boxed.py"),
+                "\n",
+                include_str!("../stdlib/pkgutil/iter_modules.py"),
+            ),
+        )),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
@@ -770,6 +778,7 @@ impl IntrinsicModule {
             (Self::Numbers, "Number") => Intrinsic::Number,
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
+            (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }
@@ -3169,9 +3178,14 @@ impl<'a> Loader<'a> {
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
-            "zipimport" if cfg!(unix) => {
-                Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))
-            }
+            "zipimport" if cfg!(unix) => Some((
+                "zipimport.py",
+                concat!(
+                    include_str!("../stdlib/zipimport_typed.py"),
+                    "\n",
+                    include_str!("../stdlib/zipimport.py")
+                ),
+            )),
             "platform" => Some((
                 "platform.py",
                 concat!(

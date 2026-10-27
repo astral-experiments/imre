@@ -104,6 +104,7 @@ mod values;
 mod warnings;
 mod words;
 mod zipfile;
+pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
 pub(crate) use files::{FileState, errno_error, open_file};

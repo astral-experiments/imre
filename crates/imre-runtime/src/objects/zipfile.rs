@@ -117,7 +117,7 @@ impl Object {
     }
 }
 
-pub(super) struct Archive {
+pub(crate) struct Archive {
     source: Option<Source>,
     filename: Option<StrOwner>,
     filelist: ObjectOwner,
@@ -129,6 +129,41 @@ fn store(storage: Storage) -> Result<ObjectOwner> {
 }
 
 impl Archive {
+    /// Retain the central directory after closing the descriptor used to index it.
+    pub(crate) fn index_import(path: &str) -> Result<Self> {
+        let mut archive = Self::open(Source::open(path)?, Some(StrOwner::new(path.into())))?;
+        archive.source = None;
+        Ok(archive)
+    }
+
+    /// Reopen the archive to read one exact resource from this cached directory.
+    pub(crate) fn import_data(&self, name: &Str) -> Result<Bytes> {
+        if let Some(entry) = self.by_name.get(name) {
+            let path = self.filename.as_ref().ok_or_else(|| {
+                Error::new(Kind::ValueError, "zipimport requires a path-backed archive")
+            })?;
+            return Member::open(Source::open(path)?, entry.zip_info(), || string_repr(name))?
+                .read_import_data();
+        }
+        if name.ends_with('/')
+            && self
+                .by_name
+                .keys()
+                .any(|member| member.starts_with(name.as_str()))
+        {
+            return Ok(Bytes::new());
+        }
+        Err(Error::from_errno(
+            Kind::OSError,
+            0,
+            "",
+            Some(super::exceptions::Filename::Str(StrOwner::new(
+                name.clone(),
+            ))),
+            None,
+        ))
+    }
+
     fn open(source: Source, filename: Option<StrOwner>) -> Result<Self> {
         let entries = source.directory()?;
         let mut list = Words::new(5);
@@ -386,34 +421,7 @@ pub unsafe extern "C" fn imre_zipimport_data(
     name: *const Str,
 ) -> *const Bytes {
     // SAFETY: the archive and name are rooted by the sealed zipimport operation.
-    let result = unsafe {
-        with_archive(archive, |a| {
-            let name = &*name;
-            if let Some(entry) = a.by_name.get(name) {
-                let path = a.filename.as_ref().ok_or_else(|| {
-                    Error::new(Kind::ValueError, "zipimport requires a path-backed archive")
-                })?;
-                return Member::open(Source::open(path)?, entry.zip_info(), || string_repr(name))?
-                    .read_import_data();
-            }
-            if name.ends_with('/')
-                && a.by_name
-                    .keys()
-                    .any(|member| member.starts_with(name.as_str()))
-            {
-                return Ok(Bytes::new());
-            }
-            Err(Error::from_errno(
-                Kind::OSError,
-                0,
-                "",
-                Some(super::exceptions::Filename::Str(StrOwner::new(
-                    name.clone(),
-                ))),
-                None,
-            ))
-        })
-    };
+    let result = unsafe { with_archive(archive, |a| a.import_data(&*name)) };
     finish(
         result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),

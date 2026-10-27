@@ -39,6 +39,8 @@ exception_kinds!(
     TypeError,
     ValueError,
     EOFError,
+    SyntaxError,
+    IndentationError,
     UnicodeError,
     UnicodeDecodeError,
     UnicodeEncodeError,
