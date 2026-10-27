@@ -337,11 +337,21 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::List(_)
             if matches!(
                 attr,
-                "append" | "clear" | "extend" | "index" | "insert" | "pop" | "reverse" | "sort"
+                "append"
+                    | "clear"
+                    | "extend"
+                    | "index"
+                    | "insert"
+                    | "pop"
+                    | "reverse"
+                    | "sort"
+                    | "__init__"
+                    | "__repr__"
             ) =>
         {
             "list"
         }
+        Value::Tuple(_) if attr == "__repr__" => "tuple",
         Value::Set { frozen: false, .. }
             if matches!(
                 attr,
@@ -770,7 +780,9 @@ pub(super) fn call(
                 target.extend(data);
                 Ok(NONE)
             }
-            "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
+            "list" | "tuple" | "dict" | "set" | "frozenset" => {
+                collections::method(ctx, name, args, kwargs)
+            }
             "slice" => super::slice::method(ctx, method, args, kwargs),
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)

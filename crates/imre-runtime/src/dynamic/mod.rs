@@ -129,6 +129,32 @@ impl Context {
         }
     }
 
+    /// The native elements inherited by a Python-defined list or tuple subclass.
+    fn sequence_payload(&self, object: Id) -> Option<(Id, &[Id])> {
+        let Value::Instance {
+            scalar: Some(storage),
+            ..
+        } = self.heap.get(object)
+        else {
+            return None;
+        };
+        match self.heap.get(*storage) {
+            Value::List(items) | Value::Tuple(items) => Some((*storage, items)),
+            _ => None,
+        }
+    }
+
+    /// Slot descriptors require the native layout even when a proxy passes isinstance.
+    fn sequence_slot_accepts(&self, object: Id, owner: &str) -> bool {
+        match (owner, self.heap.get(self.scalar_value(object))) {
+            ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
+                true
+            }
+            ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            _ => false,
+        }
+    }
+
     fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
         match self.heap.get(self.dict_storage(value)?) {
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
@@ -317,6 +343,9 @@ impl Context {
                         self.type_name(result)
                     ),
                 ));
+            }
+            Value::Instance { .. } if let Some((storage, _)) = self.sequence_payload(id) => {
+                return self.iterator(storage);
             }
             _ => {
                 let values = self.items(id)?;
@@ -681,7 +710,7 @@ impl Context {
             return self.items(dict);
         }
         if let Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
-            self.heap.get(id)
+            self.heap.get(self.scalar_value(id))
         {
             return copy_ids(items);
         }
@@ -1002,6 +1031,8 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
+            "list" => &["__repr__", "__init__"],
+            "tuple" => &["__repr__"],
             "property" => property::METHODS,
             "int" => &["to_bytes"],
             "str" => {

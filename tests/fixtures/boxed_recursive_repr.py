@@ -55,3 +55,40 @@ def current():
 
     group = {Member(), 1}
     print(repr(group), len(group))
+
+    for kind in (list, tuple):
+        class Derived(kind):
+            def __repr__(self):
+                return "override"
+
+        values = Derived((1, 2))
+        slot = kind.__repr__
+        bound = slot.__get__(values, Derived)
+        print(slot.__qualname__, slot.__objclass__ is kind, bound.__self__ is values)
+        print(repr(values), slot(values), bound(), len(values), values[-1], list(values))
+        plain = kind((1, 2))
+        other = (tuple if kind is list else list)((1, 2))
+        print(values == plain, plain == values, values == other)
+
+        class NeverEqual(kind):
+            def __eq__(self, other):
+                return False
+
+        print(plain == NeverEqual((1, 2)))
+        print({slot: "registered"}[kind.__repr__])
+        try:
+            slot({})
+        except TypeError as error:
+            print(error)
+
+    class Appending:
+        def __repr__(self):
+            mutable.append("new")
+            return "appending"
+
+    mutable = [Appending(), "old"]
+    print(list.__repr__(mutable))
+    cycle = []
+    value = (cycle,)
+    cycle.append(value)
+    print(tuple.__repr__(value))
