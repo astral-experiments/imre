@@ -93,6 +93,14 @@ def current():
 
     fromkeys_construction()
     ordered_dictionary()
+    left, right = Counter(b=2, a=-3), Counter(a=5, c=4)
+    assert list((left + right).items()) == [("b", 2), ("a", 2), ("c", 4)]
+    assert -left == Counter(a=3) and +left == Counter(b=2)
+    alias = left
+    left |= right
+    assert alias is left and list(alias.items()) == [("b", 2), ("a", 5), ("c", 4)]
+    left -= left
+    assert not alias
     counted = {"a": 4}
     print(native_count is _count_elements, native_count(counted, "aba"), counted)
     try:
