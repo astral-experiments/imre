@@ -364,17 +364,29 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Set { frozen: false, .. }
             if matches!(
                 attr,
-                "add" | "copy" | "discard" | "update" | "issuperset" | "__contains__" | "__repr__"
+                "add"
+                    | "copy"
+                    | "discard"
+                    | "update"
+                    | "issuperset"
+                    | "__contains__"
+                    | "__reduce__"
+                    | "__repr__"
             ) =>
         {
             "set"
         }
         Value::Set { frozen: true, .. }
-            if matches!(attr, "copy" | "issuperset" | "__contains__" | "__repr__") =>
+            if matches!(
+                attr,
+                "copy" | "issuperset" | "__contains__" | "__reduce__" | "__repr__"
+            ) =>
         {
             "frozenset"
         }
-        Value::DefaultDict { .. } if matches!(attr, "copy" | "__copy__" | "__missing__") => {
+        Value::DefaultDict { .. }
+            if matches!(attr, "copy" | "__copy__" | "__missing__" | "__reduce__") =>
+        {
             "collections.defaultdict"
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",

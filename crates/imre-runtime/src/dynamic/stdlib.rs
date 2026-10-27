@@ -1132,6 +1132,7 @@ pub(super) fn call(
         | "collections.defaultdict"
         | "collections.defaultdict.copy"
         | "collections.defaultdict.__copy__"
+        | "collections.defaultdict.__reduce__"
         | "functools.lru_cache"
         | "functools._cached"
         | "contextlib.contextmanager"
@@ -1399,6 +1400,23 @@ pub(super) fn call(
         }
         "collections.defaultdict.__missing__" => {
             ctx.defaultdict_missing(argument(args, 0)?, argument(args, 1)?)?
+        }
+        "collections.defaultdict.__reduce__" => {
+            let receiver = argument(args, 0)?;
+            let Value::DefaultDict { factory, .. } = *ctx.heap.get(receiver) else {
+                return Err(Error::new(
+                    "TypeError",
+                    "defaultdict.__reduce__ requires a defaultdict",
+                ));
+            };
+            let args = ctx.alloc(Value::Tuple(if factory == NONE {
+                Vec::new()
+            } else {
+                vec![factory]
+            }));
+            let class = ctx.exact_type(receiver)?;
+            let items = ctx.dict_iterator(receiver, super::value::DictViewKind::Items, false);
+            ctx.alloc(Value::Tuple(vec![class, args, NONE, NONE, items]))
         }
         "contextlib.contextmanager" => {
             let callable = ctx.alloc(Value::Native("contextlib._manager".into()));
