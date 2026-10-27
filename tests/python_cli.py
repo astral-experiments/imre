@@ -4,6 +4,7 @@ import argparse
 import errno
 import json
 import os
+import platform
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,54 @@ def check_raise_site_allocation(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, b"original\nlater\n", b"refused\n" if ordinal else b"",
         ), (ordinal, result)
+
+
+def check_slice_stack(imre, imports, root, env):
+    def output(exe, depths, stack_mib=None):
+        set_stack = None
+        if stack_mib is not None:
+            import resource
+
+            def set_stack():
+                _, hard = resource.getrlimit(resource.RLIMIT_STACK)
+                resource.setrlimit(resource.RLIMIT_STACK, (stack_mib * 1024**2, hard))
+
+        command = imports + f"arithmetic.current({depths})"
+        result = subprocess.run(
+            [exe, "-IB", "-c", command], cwd=root, env=env, capture_output=True,
+            preexec_fn=set_stack, timeout=60,
+        )
+        assert (result.returncode, result.stderr) == (0, b""), result
+        return result.stdout
+
+    def compare(depths, stack_mib=None):
+        expected = output(sys.executable, depths, stack_mib)
+        actual = output(imre, depths, stack_mib)
+        assert actual == expected, (depths, stack_mib, actual, expected)
+        return expected
+
+    boundary = "(15500,)"
+    if sys.platform != "linux" or platform.machine() != "x86_64":
+        compare("")
+        compare(boundary)
+        return
+
+    for stack_mib, expected in ((8, b"recursion"), (96, b"760001 ")):
+        stdout = compare("", stack_mib)
+        for renderer in (b"repr", b"str"):
+            assert b"40000 " + renderer + b" " + expected in stdout, stdout
+
+    exhausted = compare(boundary, 6)
+    rendered = compare(boundary, 16)
+    for renderer in (b"repr", b"str"):
+        assert b"15500 " + renderer + b" recursion\n" in exhausted, exhausted
+        assert b"15500 " + renderer + b" 294501 " in rendered, rendered
+
+    # At 8 MiB the pinned GCC build fits 15,500 frames at 528 bytes per level.
+    # Clang and the native guard use 624 bytes per level and must raise here.
+    gcc_reference = sys.version_info[:3] == (3, 14, 5) and platform.python_compiler().strip() == "GCC 13.3.0"
+    assert output(sys.executable, boundary, 8) == (rendered if gcc_reference else exhausted)
+    assert output(imre, boundary, 8) == exhausted
 
 
 def main():
@@ -510,7 +559,10 @@ def report(text):
             "boxed_string_expandtabs.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
-            compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_slice_deep_repr.py":
+                check_slice_stack(imre, imports, root, env)
+            else:
+                compare("-IB", "-c", imports + "arithmetic.current()")
         if os.name == "posix":
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
