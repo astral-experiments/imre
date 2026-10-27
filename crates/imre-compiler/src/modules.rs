@@ -461,6 +461,7 @@ pub(crate) enum Intrinsic {
     SysJitPredicate(&'static str),
     Stdin,
     OsName,
+    OsPathsep { posix: bool },
     OsSeparator { alternate: bool, posix: bool },
     ErrnoAttribute,
     ErrnoFrom(usize),
@@ -781,6 +782,11 @@ impl IntrinsicModule {
         }
         if self == Self::Sys && name == "_jit" {
             return Some(Binding::IntrinsicModule(Self::SysJit));
+        }
+        if matches!(self, Self::Os | Self::OsPath | Self::PosixPath) && name == "pathsep" {
+            return Some(Binding::Intrinsic(Intrinsic::OsPathsep {
+                posix: self == Self::PosixPath,
+            }));
         }
         if matches!(self, Self::Os | Self::OsPath | Self::PosixPath)
             && matches!(name, "sep" | "altsep")
