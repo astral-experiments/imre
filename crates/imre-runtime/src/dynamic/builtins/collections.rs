@@ -243,7 +243,7 @@ pub(super) fn method(
     };
     if matches!(
         name,
-        "set.issuperset" | "frozenset.issuperset" | "frozenset.copy"
+        "dict.pop" | "set.issuperset" | "frozenset.issuperset" | "frozenset.copy"
     ) && !kwargs.is_empty()
     {
         return Err(type_error(format!("{name}() takes no keyword arguments")));
@@ -262,17 +262,24 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::DictView { dict: object, kind }))
         }
         "dict.pop" => {
-            arity(name, args, 1, 2)?;
-            let key = args[0];
+            let (key, default) = match args {
+                [key] => (*key, None),
+                [key, default] => (*key, Some(*default)),
+                [] => return Err(type_error("pop expected at least 1 argument, got 0")),
+                _ => {
+                    return Err(type_error(format!(
+                        "pop expected at most 2 arguments, got {}",
+                        args.len()
+                    )));
+                }
+            };
             // An empty dictionary takes the missing-key path without hashing the key.
             if !entries(ctx, receiver)?.is_empty()
                 && let Some(value) = remove_dict_item(ctx, receiver, key)?
             {
                 return Ok(value);
             }
-            args.get(1)
-                .copied()
-                .ok_or_else(|| ctx.lookup_error("KeyError", key))
+            default.ok_or_else(|| ctx.lookup_error("KeyError", key))
         }
         "dict.get" | "dict.setdefault" => {
             arity(name, args, 1, 2)?;
