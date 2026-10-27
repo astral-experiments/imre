@@ -687,14 +687,12 @@ pub(super) fn method(
         let width = match tabsize {
             None => 8,
             Some(id) => {
-                let index = ctx
-                    .index_value_with_bool_result(id, false)?
-                    .ok_or_else(|| {
-                        type_error(format!(
-                            "'{}' object cannot be interpreted as an integer",
-                            ctx.type_name(id)
-                        ))
-                    })?;
+                let index = ctx.index_value(id)?.ok_or_else(|| {
+                    type_error(format!(
+                        "'{}' object cannot be interpreted as an integer",
+                        ctx.type_name(id)
+                    ))
+                })?;
                 index
                     .to_i64()
                     .and_then(|n| i32::try_from(n).ok())
