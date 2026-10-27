@@ -96,6 +96,13 @@ def current():
     print(groups.clear(), groups["key"], saved)
     print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
 
+    groups["visits"].append(1)
+    plain_copy = dict.copy(groups)
+    other = groups.copy()
+    other["visits"].append(2)
+    print(plain_copy["visits"], groups["visits"], other["fresh"], list(groups))
+    print(type(plain_copy) is dict, type(other) is defaultdict, isinstance(other, dict), "fresh" in plain_copy)
+
     class ClearOnCompare:
         def __hash__(self):
             return 1
@@ -209,7 +216,17 @@ def current():
             return dict.__getitem__(self, key) + 10
 
     filtered = Filtered(data)
-    print(dict(filtered), {**filtered})
+    print(dict(filtered), {**filtered}, filtered.copy())
+
+    class MissingKeys(Filtered):
+        @property
+        def keys(self):
+            raise AttributeError("unavailable keys")
+
+    try:
+        dict.copy(MissingKeys(data))
+    except AttributeError as error:
+        print(error.args)
 
     pending = []
 

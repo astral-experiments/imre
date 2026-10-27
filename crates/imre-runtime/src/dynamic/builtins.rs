@@ -219,6 +219,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "__setitem__",
     "__delitem__",
     "clear",
+    "copy",
     "get",
     "items",
     "keys",
@@ -353,7 +354,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "frozenset"
         }
-        Value::DefaultDict { .. } if attr == "__missing__" => "collections.defaultdict",
+        Value::DefaultDict { .. } if matches!(attr, "copy" | "__missing__") => {
+            "collections.defaultdict"
+        }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Selector(_)
             if matches!(

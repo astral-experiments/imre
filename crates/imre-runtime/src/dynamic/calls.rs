@@ -2,6 +2,7 @@ use super::wrapper_descriptor::Wrapper;
 use super::*;
 
 pub(super) enum MappingOperation {
+    Copy,
     Update,
     Unpack,
 }
@@ -187,6 +188,15 @@ impl Context {
         self.class_attr(self.heap.get(object).instance_class()?, name)
     }
 
+    /// Return dictionary storage when the receiver still uses the builtin iterator.
+    pub(super) fn raw_dict_source(&self, value: Id) -> Option<Id> {
+        self.dict_storage(value).filter(|_| {
+            self.slot(value, "__iter__").is_none_or(
+                |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
+            )
+        })
+    }
+
     /// Dict copying uses raw entries for a dict with its original iterator.
     /// An overridden iterator opts into the mapping protocol, including key lookup.
     pub(super) fn for_each_mapping_item(
@@ -208,10 +218,7 @@ impl Context {
                 Err(error)
             };
         }
-        if self.slot(input, "__iter__").is_none_or(
-            |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
-        ) && let Some(storage) = self.dict_storage(input)
-        {
+        if let Some(storage) = self.raw_dict_source(input) {
             if storage == target {
                 return Ok(true);
             }
@@ -512,6 +519,7 @@ impl Context {
             return matches!(
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
+                    | ("collections.defaultdict", "dict")
                     | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
@@ -571,6 +579,7 @@ impl Context {
             | Value::ThreadLocal(_)
             | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::TextFile(_) => "_io.TextIOWrapper",
+            Value::DefaultDict { .. } => "collections.defaultdict",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
             Value::Weak(wr) => wr.kind.class(),
@@ -630,6 +639,7 @@ impl Context {
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
                             | "operator.itemgetter"
+                            | "collections.defaultdict"
                             | "itertools.count"
                             | super::deque::CLASS
                             | super::deque::ITERATOR
@@ -766,6 +776,7 @@ impl Context {
             | ("_io.TextIOWrapper", Value::TextFile(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
+            | ("collections.defaultdict", Value::DefaultDict { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | ("slice", Value::Slice(_))
@@ -1552,6 +1563,9 @@ impl Context {
             }
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
+            }
+            Value::Native(class) if class == "collections.defaultdict" && name == "copy" => {
+                return Ok(self.builtin("collections.defaultdict.copy"));
             }
             Value::Native(class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));

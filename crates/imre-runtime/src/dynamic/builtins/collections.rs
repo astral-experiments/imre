@@ -455,6 +455,31 @@ pub(super) fn method(
         positional(name, kwargs)?;
     }
     match name {
+        "dict.copy" => {
+            arity(name, args, 0, 0)?;
+            let copy = ctx.dict(Vec::new());
+            if entries(ctx, receiver)?.is_empty() {
+                return Ok(copy);
+            }
+            if let Some(storage) = ctx.raw_dict_source(object)
+                && let Value::Dict(entries) | Value::DefaultDict { entries, .. } =
+                    ctx.heap.get(storage)
+                && let Some(entries) = entries.clone_dense()
+            {
+                *ctx.heap.get_mut(copy) = Value::Dict(entries);
+            } else {
+                ctx.for_each_mapping_item(
+                    object,
+                    copy,
+                    MappingOperation::Copy,
+                    |ctx, key, value, hash| {
+                        ctx.set_dictionary_key(copy, key, value, hash, true)
+                            .map(|_| ())
+                    },
+                )?;
+            }
+            Ok(copy)
+        }
         "dict.clear" => {
             arity(name, args, 0, 0)?;
             let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
