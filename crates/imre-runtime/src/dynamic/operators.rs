@@ -9,6 +9,40 @@ enum RenderRoot<'a> {
     Exception(&'a Error),
 }
 
+enum FormatPart {
+    Value(Id, bool),
+    Text(&'static str),
+    Closing(usize),
+    Sequence(Id, usize),
+    Entries(Id, usize, bool),
+    SetMembers(Vec<Id>, usize),
+    Fields(Id, usize),
+    Leave(Id, &'static str),
+    ContextEnd(Id),
+    SliceEnd,
+    NamedTupleEnd,
+}
+
+impl FormatPart {
+    /// Values a suspended renderer will read after a Python callback returns.
+    fn keep_alive(&mut self, heap: &mut Heap) {
+        match self {
+            Self::Value(id, _)
+            | Self::Sequence(id, _)
+            | Self::Entries(id, _, _)
+            | Self::Fields(id, _)
+            | Self::Leave(id, _)
+            | Self::ContextEnd(id) => heap.keep(*id),
+            Self::SetMembers(members, index) => {
+                // One traced owner keeps the snapshot alive across every following callback.
+                let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
+                *self = Self::Sequence(tuple, *index);
+            }
+            Self::Text(_) | Self::Closing(_) | Self::SliceEnd | Self::NamedTupleEnd => {}
+        }
+    }
+}
+
 fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
     std::iter::successors(Some(start), move |&i| i.checked_add(step))
         .take_while(move |&i| if step > 0 { i < end } else { i > end })
@@ -166,7 +200,7 @@ impl Context {
         })
     }
     /// Unwrap nested method bindings and retain the identity comparison of their receivers.
-    fn method_equality_operands(&self, mut a: Id, mut b: Id) -> Option<(Id, Id, bool)> {
+    pub(super) fn method_equality_operands(&self, mut a: Id, mut b: Id) -> Option<(Id, Id, bool)> {
         let mut same_receivers = true;
         while a != b {
             let (
@@ -256,6 +290,36 @@ impl Context {
                 }
                 let a = self.dict_storage(a).unwrap_or(a);
                 let b = self.dict_storage(b).unwrap_or(b);
+                if matches!(
+                    (self.heap.get(a), self.heap.get(b)),
+                    (Value::Set { .. }, Value::Set { .. })
+                ) {
+                    if !self.dictionary_equal(a, b)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
+                if let (Value::Union(left), Value::Union(right)) =
+                    (self.heap.get(a), self.heap.get(b))
+                {
+                    let (left, right) = (*left, *right);
+                    self.heap.keep(a);
+                    self.heap.keep(b);
+                    if !left.checked_equal(right, self)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
+                if let (Value::GenericAlias(left), Value::GenericAlias(right)) =
+                    (self.heap.get(a), self.heap.get(b))
+                {
+                    if left.kind != right.kind || left.origin != right.origin {
+                        return Ok(false);
+                    }
+                    pair = Some((left.args, right.args));
+                    check_special = true;
+                    continue;
+                }
                 let children = match (self.heap.get(a), self.heap.get(b)) {
                     (Value::List(_), right) if !matches!(right, Value::List(_)) => {
                         return Ok(false);
@@ -419,6 +483,7 @@ impl Context {
                 a.kind == b.kind && a.origin == b.origin && equal(a.args, b.args)
             }
             (Value::Slice(x), Value::Slice(y)) => x.iter().zip(y).all(|(&i, &j)| equal(i, j)),
+            (Value::Union(a), Value::Union(b)) => a.structural_equal(*b, self, equal),
             (Value::List(x), Value::List(y)) => {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
             }
@@ -440,15 +505,156 @@ impl Context {
                             })
                         }))
             }
-            (Value::Set { entries: x, .. }, Value::Set { entries: y, .. }) => {
-                x.len() == y.len() && x.iter().all(|&(k, _)| y.iter().any(|&(j, _)| equal(k, j)))
-            }
+            (Value::Set { .. }, Value::Set { .. }) => self.equal_sets(a, b, remaining, exhausted),
             _ => match (self.sequence(a), self.sequence(b)) {
                 (Some(x), Some(y)) => {
                     x.len() == y.len() && x.iter().zip(y).all(|(&i, j)| equal(i, j))
                 }
                 _ => false,
             },
+        }
+    }
+    // Preserve set candidate order while visiting nested set and tuple pairs iteratively.
+    fn equal_sets(&self, a: Id, b: Id, remaining: usize, exhausted: &mut bool) -> bool {
+        struct Frame {
+            left: Id,
+            right: Id,
+            index: usize,
+            candidate: usize,
+            remaining: usize,
+            tuple: bool,
+        }
+        let mut frames = vec![Frame {
+            left: a,
+            right: b,
+            index: 0,
+            candidate: 0,
+            remaining,
+            tuple: false,
+        }];
+        let mut result = None;
+        loop {
+            let Some(frame) = frames.last_mut() else {
+                return result.unwrap_or(true);
+            };
+            if let Some(equal) = result.take() {
+                if equal {
+                    frame.index += 1;
+                    frame.candidate = 0;
+                } else if frame.tuple {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                } else {
+                    frame.candidate += 1;
+                }
+            }
+            let pair = if frame.tuple {
+                let (Value::Tuple(left), Value::Tuple(right)) =
+                    (self.heap.get(frame.left), self.heap.get(frame.right))
+                else {
+                    unreachable!()
+                };
+                if left.len() != right.len() {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                }
+                if frame.index == left.len() {
+                    frames.pop();
+                    result = Some(true);
+                    continue;
+                }
+                (left[frame.index], right[frame.index])
+            } else {
+                let (Value::Set { entries: left, .. }, Value::Set { entries: right, .. }) =
+                    (self.heap.get(frame.left), self.heap.get(frame.right))
+                else {
+                    unreachable!()
+                };
+                if left.len() != right.len()
+                    || frame.candidate == right.len() && frame.index < left.len()
+                {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                }
+                if frame.index == left.len() {
+                    frames.pop();
+                    result = Some(true);
+                    continue;
+                }
+                (left[frame.index].0, right[frame.candidate].0)
+            };
+            let (mut x, mut y) = pair;
+            let mut depth = frame.remaining - 1;
+            loop {
+                if x == y {
+                    result = Some(true);
+                    break;
+                }
+                if depth == 0 {
+                    *exhausted = true;
+                    result = Some(false);
+                    break;
+                }
+                let (raw_x, raw_y) = (x, y);
+                (x, y) = (self.scalar_value(x), self.scalar_value(y));
+                let tail = match (self.heap.get(x), self.heap.get(y)) {
+                    (Value::GenericAlias(a), Value::GenericAlias(b)) => {
+                        if a.kind != b.kind || a.origin != b.origin {
+                            result = Some(false);
+                            break;
+                        }
+                        Some((a.args, b.args))
+                    }
+                    (Value::Weak(a), Value::Weak(b))
+                        if a.kind == weakref::Kind::Reference
+                            && b.kind == weakref::Kind::Reference =>
+                    {
+                        match (a.target, b.target) {
+                            (Some(left), Some(right)) => Some((left, right)),
+                            _ => {
+                                result = Some(false);
+                                break;
+                            }
+                        }
+                    }
+                    (Value::Method { .. }, Value::Method { .. }) => {
+                        match self.method_equality_operands(x, y) {
+                            Some((left, right, true)) => Some((left, right)),
+                            _ => {
+                                result = Some(false);
+                                break;
+                            }
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(pair) = tail {
+                    (x, y) = pair;
+                    depth -= 1;
+                    continue;
+                }
+                let tuple = match (self.heap.get(x), self.heap.get(y)) {
+                    (Value::Set { .. }, Value::Set { .. }) => Some(false),
+                    (Value::Tuple(_), Value::Tuple(_)) => Some(true),
+                    _ => None,
+                };
+                if let Some(tuple) = tuple {
+                    frames.push(Frame {
+                        left: x,
+                        right: y,
+                        index: 0,
+                        candidate: 0,
+                        remaining: depth,
+                        tuple,
+                    });
+                } else {
+                    result = Some(self.equal_inner(raw_x, raw_y, depth, exhausted));
+                }
+                break;
+            }
         }
     }
     pub(super) fn compare(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
@@ -505,50 +711,199 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        self.render_containers(RenderRoot::Object(id), false, false)
-            .unwrap_or_else(|_| "<exception str() failed>".to_owned())
+        Self::render_containers(self, RenderRoot::Object(id), false, false, |_, _, _, _| {
+            Ok(None)
+        })
+        .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        self.render_containers(RenderRoot::Object(id), true, false)
-            .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
+        Self::render_containers(self, RenderRoot::Object(id), true, false, |_, _, _, _| {
+            Ok(None)
+        })
+        .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
     }
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
-    pub(super) fn checked_format(&self, root: Id, quoted: bool) -> Result<String> {
-        self.render_containers(RenderRoot::Object(root), quoted, true)
+    pub(super) fn checked_format(&mut self, root: Id, quoted: bool) -> Result<String> {
+        Self::render_containers(
+            self,
+            RenderRoot::Object(root),
+            quoted,
+            true,
+            |ctx, id, work, ancestors| ctx.element_repr(id, work, ancestors),
+        )
     }
 
-    fn render_containers(
-        &self,
+    /// Invoke the special method once and preserve an accepted string subclass.
+    pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
+        let Some(hook) = self.bound_slot(id, "__repr__")? else {
+            return Ok(None);
+        };
+        let result = self.call(hook, Vec::new(), Vec::new())?;
+        if self.str_value(result).is_err() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__repr__ returned non-string (type {})",
+                    self.type_name(result)
+                ),
+            ));
+        }
+        Ok(Some(result))
+    }
+
+    /// Keep pending children alive while a hook mutates and reenters its container.
+    fn element_repr(
+        &mut self,
+        id: Id,
+        work: &mut [FormatPart],
+        ancestors: &[Id],
+    ) -> Result<Option<String>> {
+        let Value::Instance { class, .. } = self.heap.get(id) else {
+            return Ok(None);
+        };
+        if self.class_attr(*class, "__repr__").is_none() {
+            return Ok(None);
+        }
+        let mark = self.heap.temporary_mark();
+        let depth = self.repr_ancestors.len();
+        self.heap.keep(id);
+        for part in work {
+            part.keep_alive(&mut self.heap);
+        }
+        self.repr_ancestors.extend_from_slice(ancestors);
+        let result = self.repr_override(id).and_then(|value| {
+            value
+                .map(|s| self.str_value(s).map(str::to_owned))
+                .transpose()
+        });
+        self.repr_ancestors.truncate(depth);
+        self.heap.release_temporaries_since(mark);
+        result
+    }
+
+    /// Write exception headers and queue their arguments on the same container worklist.
+    fn render_exception<'a>(
+        &'a self,
+        mut error: &'a Error,
+        mut repr: bool,
+        output: &mut String,
+        work: &mut Vec<FormatPart>,
+    ) -> Result<()> {
+        use FormatPart as Part;
+        let mut closing = 0;
+        let mut seen = std::collections::HashSet::new();
+        loop {
+            if repr {
+                output.push_str(error.kind.rsplit('.').next().unwrap_or(&error.kind));
+            } else if let Some(message) =
+                error.trace.as_ref().and_then(|trace| trace.import_message)
+                && let Value::Str(text) = self.heap.get(message)
+            {
+                output.push_str(text);
+                output.extend(std::iter::repeat_n(')', closing));
+                break;
+            } else if let Some(super::os_error::Args::Python(fields)) = error.os_args.as_deref()
+                && let Some(fragments) = fields.fragments()
+            {
+                work.try_reserve(9)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                work.push(Part::Closing(closing));
+                for part in fragments.into_iter().rev().flatten() {
+                    work.push(match part {
+                        super::os_error::Fragment::Text(text) => Part::Text(text),
+                        super::os_error::Fragment::Value(id, repr) => Part::Value(id, repr),
+                    });
+                }
+                break;
+            } else if matches!(
+                error.os_args.as_deref(),
+                Some(super::os_error::Args::Native { .. })
+            ) || error
+                .trace
+                .as_ref()
+                .is_some_and(|trace| trace.source_syntax.is_some())
+            {
+                output.push_str(&error.message);
+                output.extend(std::iter::repeat_n(')', closing));
+                break;
+            }
+            let args = self.exception_arguments(error);
+            if let Some([arg]) = args {
+                if repr {
+                    output.push('(');
+                    closing += 1;
+                }
+                repr |= self.is_builtin_error(error, "KeyError");
+                if let Value::Raised(next) = self.heap.get(*arg) {
+                    if !seen.insert(*arg) {
+                        let op = if repr { "repr" } else { "str" };
+                        return Err(Error::new(
+                            "RecursionError",
+                            format!(
+                                "maximum recursion depth exceeded while getting the {op} of an object"
+                            ),
+                        ));
+                    }
+                    error = next;
+                    continue;
+                }
+                work.push(Part::Closing(closing));
+                work.push(Part::Value(*arg, repr));
+            } else if let Some(tuple) = error.args {
+                work.push(Part::Closing(closing));
+                if repr || args.is_some_and(|items| !items.is_empty()) {
+                    work.push(Part::Value(tuple, true));
+                }
+            } else {
+                if repr {
+                    output.push('(');
+                    if let Some(super::os_error::Args::Native { source: os, .. }) =
+                        error.os_args.as_deref()
+                    {
+                        output.push_str(&format!(
+                            "{}, {}",
+                            os.errno,
+                            crate::objects::exceptions::string_repr(&os.description)
+                        ));
+                    } else if !error.message.is_empty() {
+                        output.push_str(&crate::objects::exceptions::string_repr(&error.message));
+                    }
+                    output.push(')');
+                } else {
+                    output.push_str(&error.message);
+                }
+                output.extend(std::iter::repeat_n(')', closing));
+            }
+            break;
+        }
+
+        Ok(())
+    }
+
+    fn render_containers<C: std::ops::Deref<Target = Self>>(
+        mut ctx: C,
         root: RenderRoot<'_>,
         quoted: bool,
         checked: bool,
+        mut element_repr: impl FnMut(&mut C, Id, &mut [FormatPart], &[Id]) -> Result<Option<String>>,
     ) -> Result<String> {
-        enum Part<'a> {
-            Value(Id, bool),
-            Exception(&'a Error, bool),
-            Closing(usize),
-            Text(&'a str),
-            Sequence(&'a [Id], usize),
-            Entries(&'a [(Id, Id)], usize, bool),
-            Fields(
-                &'a [String],
-                &'a std::collections::HashMap<String, Id>,
-                usize,
-            ),
-            Leave(Id, &'static str),
-            ContextEnd(Id),
-            SliceEnd,
-            NamedTupleEnd,
-        }
+        use FormatPart as Part;
         let mut output = String::new();
-        let mut work = vec![match root {
-            RenderRoot::Object(id) => Part::Value(id, quoted),
-            RenderRoot::Exception(error) => Part::Exception(error, quoted),
-        }];
+        let mut work = Vec::new();
+        match root {
+            RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
+            RenderRoot::Exception(error) => {
+                ctx.render_exception(error, quoted, &mut output, &mut work)?;
+            }
+        }
         let mut active = Vec::new();
-        let mut ancestors = std::collections::HashSet::new();
+        let mut ancestors: std::collections::HashSet<Id> = if checked {
+            ctx.repr_ancestors.iter().copied().collect()
+        } else {
+            Default::default()
+        };
         // CPython guards nested slice formatting against the thread's native stack.
         // The pinned x86-64 Linux reference build uses 624 bytes per slice
         // and keeps two native-stack margins before raising RecursionError.
@@ -567,95 +922,6 @@ impl Context {
         while let Some(part) = work.pop() {
             match part {
                 Part::Closing(count) => output.extend(std::iter::repeat_n(')', count)),
-                Part::Exception(mut error, mut repr) => {
-                    let mut closing = 0;
-                    let mut seen = std::collections::HashSet::new();
-                    loop {
-                        if repr {
-                            output.push_str(error.kind.rsplit('.').next().unwrap_or(&error.kind));
-                        } else if let Some(message) =
-                            error.trace.as_ref().and_then(|trace| trace.import_message)
-                            && let Value::Str(text) = self.heap.get(message)
-                        {
-                            output.push_str(text);
-                            output.extend(std::iter::repeat_n(')', closing));
-                            break;
-                        } else if let Some(super::os_error::Args::Python(fields)) =
-                            error.os_args.as_deref()
-                            && let Some(fragments) = fields.fragments()
-                        {
-                            work.try_reserve(9)
-                                .map_err(|_| Error::new("MemoryError", ""))?;
-                            work.push(Part::Closing(closing));
-                            for part in fragments.into_iter().rev().flatten() {
-                                work.push(match part {
-                                    super::os_error::Fragment::Text(text) => Part::Text(text),
-                                    super::os_error::Fragment::Value(id, repr) => {
-                                        Part::Value(id, repr)
-                                    }
-                                });
-                            }
-                            break;
-                        } else if matches!(
-                            error.os_args.as_deref(),
-                            Some(super::os_error::Args::Native { .. })
-                        ) {
-                            output.push_str(&error.message);
-                            output.extend(std::iter::repeat_n(')', closing));
-                            break;
-                        }
-                        let args = self.exception_arguments(error);
-                        if let Some([arg]) = args {
-                            if repr {
-                                output.push('(');
-                                closing += 1;
-                            }
-                            repr |= self.is_builtin_error(error, "KeyError");
-                            if let Value::Raised(next) = self.heap.get(*arg) {
-                                if !seen.insert(*arg) {
-                                    let op = if repr { "repr" } else { "str" };
-                                    return Err(Error::new(
-                                        "RecursionError",
-                                        format!(
-                                            "maximum recursion depth exceeded while getting the {op} of an object"
-                                        ),
-                                    ));
-                                }
-                                error = next;
-                                continue;
-                            }
-                            work.push(Part::Closing(closing));
-                            work.push(Part::Value(*arg, repr));
-                        } else if let Some(tuple) = error.args {
-                            work.push(Part::Closing(closing));
-                            if repr || args.is_some_and(|items| !items.is_empty()) {
-                                work.push(Part::Value(tuple, true));
-                            }
-                        } else {
-                            if repr {
-                                output.push('(');
-                                if let Some(super::os_error::Args::Native { source: os, .. }) =
-                                    error.os_args.as_deref()
-                                {
-                                    output.push_str(&format!(
-                                        "{}, {}",
-                                        os.errno,
-                                        crate::objects::exceptions::string_repr(&os.description)
-                                    ));
-                                } else if !error.message.is_empty() {
-                                    output.push_str(&crate::objects::exceptions::string_repr(
-                                        &error.message,
-                                    ));
-                                }
-                                output.push(')');
-                            } else {
-                                output.push_str(&error.message);
-                            }
-                            output.extend(std::iter::repeat_n(')', closing));
-                        }
-                        break;
-                    }
-                }
                 Part::Text(text) => output.push_str(text),
                 Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
                 Part::NamedTupleEnd => {
@@ -672,32 +938,64 @@ impl Context {
                     debug_assert_eq!(last, Some(id));
                     output.push_str(end);
                 }
-                Part::Sequence(items, index) => {
-                    if let Some(&item) = items.get(index) {
+                Part::Sequence(id, index) => {
+                    let item = match ctx.heap.get(id) {
+                        Value::Slice(v) => v.get(index),
+                        Value::List(v) | Value::Tuple(v) => v.get(index),
+                        _ => unreachable!("active sequence"),
+                    };
+                    if let Some(&item) = item {
                         if index != 0 {
                             output.push_str(", ");
                         }
-                        work.push(Part::Sequence(items, index + 1));
+                        work.push(Part::Sequence(id, index + 1));
                         work.push(Part::Value(item, true));
                     }
                 }
-                Part::Fields(names, fields, index) => {
+                Part::Fields(id, index) => {
+                    let Value::Instance { class, fields, .. } = ctx.heap.get(id) else {
+                        unreachable!("active named tuple")
+                    };
+                    let Some(names) = ctx.namedtuple_fields(*class) else {
+                        unreachable!("active named tuple layout")
+                    };
                     if let Some(name) = names.get(index) {
                         if index != 0 {
                             output.push_str(", ");
                         }
                         output.push_str(name);
                         output.push('=');
-                        work.push(Part::Fields(names, fields, index + 1));
-                        work.push(Part::Value(fields[name], true));
+                        work.push(Part::Fields(id, index + 1));
+                        work.push(Part::Value(
+                            *fields
+                                .get(name)
+                                .ok_or_else(|| Error::new("AttributeError", name.clone()))?,
+                            true,
+                        ));
                     }
                 }
-                Part::Entries(items, index, include_values) => {
-                    if let Some(&(key, value)) = items.get(index) {
+                Part::SetMembers(members, index) => {
+                    if let Some(&member) = members.get(index) {
                         if index != 0 {
                             output.push_str(", ");
                         }
-                        work.push(Part::Entries(items, index + 1, include_values));
+                        work.push(Part::SetMembers(members, index + 1));
+                        work.push(Part::Value(member, true));
+                    }
+                }
+                Part::Entries(id, index, include_values) => {
+                    let entry = match ctx.heap.get(id) {
+                        Value::Dict(entries) => entries.at(index),
+                        Value::Set { entries, .. } => {
+                            entries.get(index).map(|&(k, v)| (index, k, v))
+                        }
+                        _ => unreachable!("active dictionary or set"),
+                    };
+                    if let Some((position, key, value)) = entry {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::Entries(id, position + 1, include_values));
                         if include_values {
                             work.push(Part::Value(value, true));
                             work.push(Part::Text(": "));
@@ -706,7 +1004,14 @@ impl Context {
                     }
                 }
                 Part::Value(id, repr) => {
-                    match self.heap.get(id) {
+                    if checked
+                        && repr
+                        && let Some(text) = element_repr(&mut ctx, id, &mut work, &active)?
+                    {
+                        output.push_str(&text);
+                        continue;
+                    }
+                    match ctx.heap.get(id) {
                         Value::Raised(error) => {
                             if !repr
                                 && let Some(super::os_error::Args::Python(fields)) =
@@ -720,10 +1025,48 @@ impl Context {
                                 active.push(id);
                                 work.push(Part::Leave(id, ""));
                             }
-                            work.push(Part::Exception(error, repr));
+                            ctx.render_exception(error, repr, &mut output, &mut work)?;
                             continue;
                         }
-                        Value::Slice(items) => {
+                        Value::Module {
+                            scope,
+                            constructor: Some(_),
+                            ..
+                        } => {
+                            if !ancestors.insert(id) {
+                                if checked {
+                                    return Err(Error::new(
+                                        "RecursionError",
+                                        "maximum recursion depth exceeded",
+                                    ));
+                                }
+                                output.push_str("<module ...>");
+                                continue;
+                            }
+                            active.push(id);
+                            output.push_str("<module ");
+                            work.push(Part::Leave(id, ">"));
+                            if let Some(file) =
+                                ctx.scope_name(*scope, "__file__").filter(|&id| id != NONE)
+                            {
+                                work.push(Part::Value(file, true));
+                                work.push(Part::Text(" from "));
+                            } else if let Some(loader) = ctx
+                                .scope_name(*scope, "__loader__")
+                                .filter(|&id| id != NONE)
+                            {
+                                work.push(Part::Text(")"));
+                                work.push(Part::Value(loader, true));
+                                work.push(Part::Text(" ("));
+                            }
+                            if let Some(name) = ctx.scope_name(*scope, "__name__") {
+                                work.push(Part::Value(name, true));
+                            } else {
+                                work.push(Part::Text("'?'"));
+                            }
+                            continue;
+                        }
+                        Value::Slice(_) => {
                             if slice_budget.is_some_and(|limit| slice_depth >= limit) {
                                 return Err(Error::new(
                                     "RecursionError",
@@ -733,14 +1076,14 @@ impl Context {
                             slice_depth += 1;
                             output.push_str("slice(");
                             work.push(Part::SliceEnd);
-                            work.push(Part::Sequence(items, 0));
+                            work.push(Part::Sequence(id, 0));
                             continue;
                         }
                         Value::Instance {
                             scalar: None,
                             dictionary: Some(backing),
                             ..
-                        } if self.enum_member(id).is_none() => {
+                        } if ctx.enum_member(id).is_none() => {
                             work.push(Part::Value(*backing, repr));
                             continue;
                         }
@@ -749,17 +1092,17 @@ impl Context {
                                 name,
                                 namedtuple_fields: Some(names),
                                 ..
-                            } = self.heap.get(*class)
+                            } = ctx.heap.get(*class)
                                 && names.iter().all(|field| fields.contains_key(field)) =>
                         {
                             if checked {
-                                self.check_call_depth(namedtuple_depth)?;
+                                ctx.check_call_depth(namedtuple_depth)?;
                             }
                             namedtuple_depth += 1;
                             output.push_str(name);
                             output.push('(');
                             work.push(Part::NamedTupleEnd);
-                            work.push(Part::Fields(names, fields, 0));
+                            work.push(Part::Fields(id, 0));
                             continue;
                         }
                         Value::ContextVar { name, default, .. } => {
@@ -784,16 +1127,15 @@ impl Context {
                         }
                         _ => {}
                     }
-                    let (start, end, placeholder, sequence, entries) = match self.heap.get(id) {
-                        Value::List(items) => ("[", "]", "[...]", Some(items.as_slice()), None),
+                    let (start, end, placeholder, entries) = match ctx.heap.get(id) {
+                        Value::List(_) => ("[", "]", "[...]", None),
                         Value::Tuple(items) => (
                             "(",
                             if items.len() == 1 { ",)" } else { ")" },
                             "(...)",
-                            Some(items.as_slice()),
                             None,
                         ),
-                        Value::Dict(items) => ("{", "}", "{...}", None, Some((&items[..], true))),
+                        Value::Dict(_) => ("{", "}", "{...}", Some(true)),
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });
@@ -802,13 +1144,16 @@ impl Context {
                             (
                                 if *frozen { "frozenset({" } else { "{" },
                                 if *frozen { "})" } else { "}" },
-                                "set(...)",
-                                None,
-                                Some((&entries[..], false)),
+                                if *frozen {
+                                    "frozenset(...)"
+                                } else {
+                                    "set(...)"
+                                },
+                                Some(false),
                             )
                         }
                         _ => {
-                            output.push_str(&self.format_value(id, repr, &mut active));
+                            output.push_str(&ctx.format_value(id, repr, &mut active));
                             continue;
                         }
                     };
@@ -819,11 +1164,21 @@ impl Context {
                     active.push(id);
                     output.push_str(start);
                     work.push(Part::Leave(id, end));
-                    if let Some(items) = sequence {
-                        work.push(Part::Sequence(items, 0));
-                    }
-                    if let Some((items, include_values)) = entries {
-                        work.push(Part::Entries(items, 0, include_values));
+                    match entries {
+                        Some(false) if checked => {
+                            // CPython renders a snapshot so a hook can mutate the original set.
+                            let Value::Set { entries, .. } = ctx.heap.get(id) else {
+                                unreachable!()
+                            };
+                            let mut members = Vec::new();
+                            members
+                                .try_reserve_exact(entries.len())
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            members.extend(entries.iter().map(|&(key, _)| key));
+                            work.push(Part::SetMembers(members, 0));
+                        }
+                        Some(include_values) => work.push(Part::Entries(id, 0, include_values)),
+                        None => work.push(Part::Sequence(id, 0)),
                     }
                 }
             }
@@ -841,8 +1196,14 @@ impl Context {
 
     /// Escaping exceptions retain their type and frames if their arguments cannot render.
     pub(super) fn exception_message(&self, error: &Error) -> String {
-        self.render_containers(RenderRoot::Exception(error), false, false)
-            .unwrap_or_else(|_| "<exception str() failed>".to_owned())
+        Self::render_containers(
+            self,
+            RenderRoot::Exception(error),
+            false,
+            false,
+            |_, _, _, _| Ok(None),
+        )
+        .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
     /// Keeps recursive container arguments on the same formatting stack.
@@ -1034,17 +1395,26 @@ impl Context {
                     _ => format!("({body})"),
                 }
             }
-            Value::Raised(error) => self
-                .render_containers(RenderRoot::Exception(error), repr, false)
-                .unwrap_or_else(|_| {
-                    if repr {
-                        "<exception repr() failed>"
-                    } else {
-                        "<exception str() failed>"
-                    }
-                    .to_owned()
-                }),
+            Value::Raised(error) => Self::render_containers(
+                self,
+                RenderRoot::Exception(error),
+                repr,
+                false,
+                |_, _, _, _| Ok(None),
+            )
+            .unwrap_or_else(|_| {
+                if repr {
+                    "<exception repr() failed>"
+                } else {
+                    "<exception str() failed>"
+                }
+                .to_owned()
+            }),
             Value::GenericAlias(alias) => alias.repr(self),
+            Value::Union(union) => super::union::repr(self, *union),
+            Value::Class { .. } if self.classes.get("typing.Union") == Some(&id) => {
+                "<class 'typing.Union'>".to_owned()
+            }
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
             }
@@ -1065,6 +1435,10 @@ impl Context {
                 self.weakref_descriptor_owner(*owner)
             ),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
+            Value::Module {
+                constructor: Some(_),
+                ..
+            } => self.repr(id),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {
                 format!(
@@ -1104,6 +1478,9 @@ impl Context {
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        if let Some(value) = super::union::subscribe(self, obj, key) {
+            return value;
+        }
         if let Some(value) = super::typing::subscribe(self, obj, key) {
             return value;
         }
@@ -1504,6 +1881,11 @@ impl Context {
         };
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
+        }
+        if op == "|"
+            && let Some(result) = super::union::binary(self, a, b)
+        {
+            return result;
         }
         if let (Value::Slice(left), Value::Slice(right)) = (self.heap.get(a), self.heap.get(b))
             && matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")

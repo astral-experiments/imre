@@ -60,6 +60,7 @@ impl Context {
             scalar: Some(value),
             dictionary: None,
             property: None,
+            weak_reference: None,
             memory_stream: None,
         }))
     }

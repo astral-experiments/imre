@@ -1,13 +1,14 @@
 //! Hash and equality callbacks used by boxed dictionary lookups.
 
 use std::hash::{BuildHasher, RandomState};
+use std::ops::ControlFlow;
 use std::sync::LazyLock;
 
 use num_traits::ToPrimitive;
 
 use super::Entries;
 use crate::dynamic::value::{DictViewKind, NONE};
-use crate::dynamic::{Context, Error, Id, Result, Value};
+use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 
 const EMPTY: usize = usize::MAX;
 const DUMMY: usize = usize::MAX - 1;
@@ -49,6 +50,77 @@ impl Iterator for Probe {
             .wrapping_add(1)
             & self.mask;
         Some(index)
+    }
+}
+
+/// A suspended dictionary probe, resumed after comparing a resident key in Python.
+struct KeyLookup {
+    dict: Id,
+    key: Id,
+    hash: i64,
+    generation: usize,
+    slots: Probe,
+}
+
+impl KeyLookup {
+    fn new(ctx: &mut Context, dict: Id, key: Id, known_hash: Option<i64>) -> Result<Self> {
+        let hash = match known_hash {
+            Some(hash) => hash,
+            None => ctx
+                .dictionary_hash(key)
+                .map_err(|error| ctx.dictionary_hash_error(dict, key, error))?,
+        };
+        ctx.index_dictionary(dict)?;
+        let index = ctx
+            .stored_entries(dict)
+            .index
+            .as_ref()
+            .expect("indexed dictionary");
+        Ok(Self {
+            dict,
+            key,
+            hash,
+            generation: index.generation,
+            slots: Probe::new(hash, index.slots.len()),
+        })
+    }
+
+    /// Revalidate a resident after its equality callback, then find the next matching hash.
+    fn next(
+        &mut self,
+        ctx: &Context,
+        previous: Option<(usize, Id, bool)>,
+    ) -> ControlFlow<Option<usize>, (usize, Id)> {
+        let entries = ctx.stored_entries(self.dict);
+        let index = entries.index.as_ref().expect("indexed dictionary");
+        if let Some((position, resident, equal)) = previous {
+            let dense = entries.dense(position);
+            if self.generation != index.generation || dense.is_none_or(|n| entries[n].0 != resident)
+            {
+                self.generation = index.generation;
+                self.slots = Probe::new(self.hash, index.slots.len());
+            } else if equal {
+                return ControlFlow::Break(dense);
+            }
+        }
+        for bucket in &mut self.slots {
+            let position = index.slots[bucket];
+            if position == EMPTY {
+                return ControlFlow::Break(None);
+            }
+            if position == DUMMY {
+                continue;
+            }
+            let dense = entries.dense(position).expect("live dictionary slot");
+            let resident = entries[dense].0;
+            if resident == self.key {
+                return ControlFlow::Break(Some(dense));
+            }
+            if index.hashes[dense] == self.hash {
+                return ControlFlow::Continue((position, resident));
+            }
+        }
+        unreachable!("the dictionary probe always yields a bucket")
     }
 }
 
@@ -267,6 +339,9 @@ impl Context {
     }
 
     pub(in super::super) fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
+        if let Value::Union(union) = *self.heap.get(key) {
+            return union.hash(self);
+        }
         if let Value::Weak(wr) = *self.heap.get(key) {
             if wr.kind != super::super::weakref::Kind::Reference {
                 return Err(self.unhashable(key));
@@ -316,6 +391,12 @@ impl Context {
         }
         // Immutable scalar subclasses inherit the hash of their backing value.
         let key = self.scalar_value(key);
+        if let Value::GenericAlias(alias) = self.heap.get(key) {
+            let (origin, args) = (alias.origin, alias.args);
+            return Ok(normalized(
+                data_hash(&origin.to_ne_bytes()) ^ self.dictionary_hash(args)?,
+            ));
+        }
         if let Some(&hash) = self.heap.immutable_hashes.get(&key) {
             return Ok(hash);
         }
@@ -450,44 +531,174 @@ impl Context {
         None
     }
 
-    fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
+    pub(in super::super) fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
         if left == right {
             return Ok(true);
         }
-        if let Some(answer) = self.binary_special("==", left, right)? {
-            return self.truth(answer);
+        let roots = self.heap.temporary_mark();
+        self.heap.keep(left);
+        self.heap.keep(right);
+        let result = self.compare_key_pairs(left, right);
+        self.heap.release_temporaries_since(roots);
+        result
+    }
+
+    /// Suspend the enclosing tuple or live set probe while comparing a resident and its key.
+    fn compare_key_pairs(&mut self, left: Id, right: Id) -> Result<bool> {
+        enum Work {
+            Pair(Id, Id),
+            Tuple(std::iter::Zip<std::vec::IntoIter<Id>, std::vec::IntoIter<Id>>),
+            Set(Id, Id, usize),
+            Probe(KeyLookup, Option<(usize, Id)>),
+            Done(bool),
         }
-        if let (Value::Slice(a), Value::Slice(b)) = (self.heap.get(left), self.heap.get(right)) {
-            let answer = super::super::slice::compare(self, "==", *a, *b)?;
-            return self.truth(answer);
-        }
-        if let (Value::Set { entries: a, .. }, Value::Set { entries: b, .. }) =
-            (self.heap.get(left), self.heap.get(right))
-        {
-            if a.len() != b.len() {
-                return Ok(false);
-            }
-            let mut position = 0;
-            while let Some((at, key, _, hash)) = self.dictionary_pair(left, position) {
-                if self.find_dictionary_key(right, key, hash)?.1.is_none() {
-                    return Ok(false);
+
+        let mut frames = Vec::new();
+        let mut work = Work::Pair(left, right);
+        let mut equal = true;
+        loop {
+            let (resume, child) = match work {
+                Work::Pair(a, b)
+                    if a != b
+                        && matches!(
+                            (self.heap.get(a), self.heap.get(b)),
+                            (Value::Method { .. }, Value::Method { .. })
+                        ) =>
+                {
+                    match self.method_equality_operands(a, b) {
+                        Some((left, right, true)) => {
+                            work = Work::Pair(left, right);
+                            continue;
+                        }
+                        // Python compares the callables before testing receiver identity.
+                        Some((left, right, false)) => (Work::Done(false), Work::Pair(left, right)),
+                        None => {
+                            work = Work::Done(false);
+                            continue;
+                        }
+                    }
                 }
-                position = at + 1;
-            }
-            return Ok(true);
-        }
-        if let (Some(left), Some(right)) = (self.tuple_keys(left), self.tuple_keys(right)) {
-            if left.len() != right.len() {
-                return Ok(false);
-            }
-            for (a, b) in left.into_iter().zip(right) {
-                if !self.dictionary_equal(a, b)? {
-                    return Ok(false);
+                Work::Pair(left, right) => {
+                    equal = true;
+                    work = if left == right {
+                        Work::Done(true)
+                    } else if let (Value::Weak(a), Value::Weak(b)) =
+                        (self.heap.get(left), self.heap.get(right))
+                        && a.kind == weakref::Kind::Reference
+                        && b.kind == weakref::Kind::Reference
+                        && let (Some(a), Some(b)) = (a.target, b.target)
+                        && a != b
+                        && matches!(
+                            (self.heap.get(a), self.heap.get(b)),
+                            (Value::Set { .. }, Value::Set { .. })
+                                | (Value::GenericAlias(_), Value::GenericAlias(_))
+                                | (Value::Method { .. }, Value::Method { .. })
+                        )
+                    {
+                        // The references do not keep these targets alive across callbacks.
+                        self.heap.keep(a);
+                        self.heap.keep(b);
+                        Work::Pair(a, b)
+                    } else if let Some(answer) = self.binary_special("==", left, right)? {
+                        Work::Done(self.truth(answer)?)
+                    } else if let (Value::GenericAlias(a), Value::GenericAlias(b)) =
+                        (self.heap.get(left), self.heap.get(right))
+                    {
+                        if a.kind == b.kind && a.origin == b.origin {
+                            Work::Pair(a.args, b.args)
+                        } else {
+                            Work::Done(false)
+                        }
+                    } else if let (Value::Union(a), Value::Union(b)) =
+                        (self.heap.get(left), self.heap.get(right))
+                        && a.unhashable.is_none()
+                        && b.unhashable.is_none()
+                    {
+                        Work::Pair(a.members, b.members)
+                    } else if let (Value::Slice(a), Value::Slice(b)) =
+                        (self.heap.get(left), self.heap.get(right))
+                    {
+                        let answer = super::super::slice::compare(self, "==", *a, *b)?;
+                        Work::Done(self.truth(answer)?)
+                    } else if let (Value::Set { entries: a, .. }, Value::Set { entries: b, .. }) =
+                        (self.heap.get(left), self.heap.get(right))
+                    {
+                        if a.len() == b.len() {
+                            Work::Set(left, right, 0)
+                        } else {
+                            Work::Done(false)
+                        }
+                    } else if let (Some(a), Some(b)) =
+                        (self.tuple_keys(left), self.tuple_keys(right))
+                    {
+                        if a.len() == b.len() {
+                            Work::Tuple(a.into_iter().zip(b))
+                        } else {
+                            Work::Done(false)
+                        }
+                    } else {
+                        Work::Done(self.checked_equal_impl(left, right, false)?)
+                    };
+                    continue;
                 }
+                Work::Tuple(mut pairs) => {
+                    if equal && let Some((a, b)) = pairs.next() {
+                        (Work::Tuple(pairs), Work::Pair(a, b))
+                    } else {
+                        work = Work::Done(equal);
+                        continue;
+                    }
+                }
+                Work::Set(source, target, position) => {
+                    if equal
+                        && let Some((at, key, _, hash)) = self.dictionary_pair(source, position)
+                    {
+                        (
+                            Work::Set(source, target, at + 1),
+                            Work::Probe(KeyLookup::new(self, target, key, hash)?, None),
+                        )
+                    } else {
+                        work = Work::Done(equal);
+                        continue;
+                    }
+                }
+                Work::Probe(mut lookup, candidate) => {
+                    match lookup.next(self, candidate.map(|(position, id)| (position, id, equal))) {
+                        ControlFlow::Break(found) => {
+                            work = Work::Done(found.is_some());
+                            continue;
+                        }
+                        ControlFlow::Continue((position, resident)) => {
+                            let pair = Work::Pair(resident, lookup.key);
+                            (Work::Probe(lookup, Some((position, resident))), pair)
+                        }
+                    }
+                }
+                Work::Done(result) => {
+                    let Some((parent, roots)) = frames.pop() else {
+                        return Ok(result);
+                    };
+                    self.heap.release_temporaries_since(roots);
+                    equal = result;
+                    work = parent;
+                    continue;
+                }
+            };
+            frames
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            let roots = self.heap.temporary_mark();
+            match child {
+                Work::Pair(a, b) => {
+                    self.heap.keep(a);
+                    self.heap.keep(b);
+                }
+                Work::Probe(ref lookup, _) => self.heap.keep(lookup.key),
+                _ => unreachable!(),
             }
-            return Ok(true);
+            frames.push((resume, roots));
+            work = child;
         }
-        self.checked_equal_impl(left, right, false)
     }
 
     pub(in super::super) fn dictionary_pair(
@@ -529,49 +740,14 @@ impl Context {
     ) -> Result<(i64, Option<usize>)> {
         self.heap.keep(dict);
         self.heap.keep(key);
-        let hash = match known_hash {
-            Some(hash) => hash,
-            None => self
-                .dictionary_hash(key)
-                .map_err(|error| self.dictionary_hash_error(dict, key, error))?,
-        };
-        self.index_dictionary(dict)?;
-        'restart: loop {
-            let index = self
-                .stored_entries(dict)
-                .index
-                .as_ref()
-                .expect("indexed dictionary");
-            let generation = index.generation;
-            for bucket in Probe::new(hash, index.slots.len()) {
-                let entries = self.stored_entries(dict);
-                let index = entries.index.as_ref().expect("indexed dictionary");
-                let position = index.slots[bucket];
-                if position == EMPTY {
-                    return Ok((hash, None));
-                }
-                if position == DUMMY {
-                    continue;
-                }
-                let dense = entries.dense(position).expect("live dictionary slot");
-                let candidate = entries[dense].0;
-                if candidate == key {
-                    return Ok((hash, Some(dense)));
-                }
-                if index.hashes[dense] != hash {
-                    continue;
-                }
-                self.heap.keep(candidate);
-                let equal = self.dictionary_equal(candidate, key)?;
-                let entries = self.stored_entries(dict);
-                let index = entries.index.as_ref().expect("indexed dictionary");
-                let dense = entries.dense(position);
-                if index.generation != generation || dense.is_none_or(|n| entries[n].0 != candidate)
-                {
-                    continue 'restart;
-                }
-                if equal {
-                    return Ok((hash, dense));
+        let mut lookup = KeyLookup::new(self, dict, key, known_hash)?;
+        let mut previous = None;
+        loop {
+            match lookup.next(self, previous) {
+                ControlFlow::Break(found) => return Ok((lookup.hash, found)),
+                ControlFlow::Continue((position, resident)) => {
+                    self.heap.keep(resident);
+                    previous = Some((position, resident, self.dictionary_equal(resident, key)?));
                 }
             }
         }

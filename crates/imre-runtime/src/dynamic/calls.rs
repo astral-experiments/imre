@@ -38,7 +38,12 @@ impl Context {
                     .copied(),
                 _ => None,
             },
-            Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str" | "property") => {
+            Value::Native(kind)
+                if matches!(
+                    kind.as_str(),
+                    "dict" | "int" | "str" | "property" | "module" | weakref::REFERENCE_TYPE
+                ) =>
+            {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             _ => None,
@@ -178,10 +183,7 @@ impl Context {
 
     /// Special methods are looked up on the type, even if the instance shadows them.
     pub(super) fn slot(&self, object: Id, name: &str) -> Option<Id> {
-        let Value::Instance { class, .. } = self.heap.get(object) else {
-            return None;
-        };
-        self.class_attr(*class, name)
+        self.class_attr(self.heap.get(object).instance_class()?, name)
     }
 
     /// Dict copying uses raw entries for a dict with its original iterator.
@@ -275,7 +277,11 @@ impl Context {
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
         let class = match self.heap.get(object) {
-            Value::Instance { class, .. } => *class,
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => *class,
             Value::Raised(Error {
                 class: Some(class), ..
             }) if matches!(name, "__dir__" | "__str__") => *class,
@@ -362,6 +368,7 @@ impl Context {
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
+                            | "module.__init__"
                             | "int.to_bytes"
                             | "list.index"
                             | "list.pop"
@@ -370,8 +377,12 @@ impl Context {
                             | "list.sort"
                             | "map.__iter__"
                             | "map.__next__"
-                            | weakref::REFERENCE_HASH
-                    ) || name.starts_with("property.")
+                    ) || name
+                        .strip_prefix("weakref.ReferenceType.")
+                        .is_some_and(|method| {
+                            method != "__new__" && weakref::REFERENCE_METHODS.contains(&method)
+                        })
+                        || name.starts_with("property.")
                         || name.starts_with("dict.")
                         || name.starts_with("abc.")
                         || name
@@ -391,7 +402,7 @@ impl Context {
         Ok(value)
     }
 
-    fn instance_attribute(
+    pub(super) fn instance_attribute(
         &mut self,
         object: Id,
         class: Id,
@@ -416,6 +427,12 @@ impl Context {
             }
             // Without a Python class member, object.__class__ is a data descriptor.
             (None, _) if name == "__class__" => Ok(class),
+            (None, _)
+                if name == "__callback__"
+                    && let Some(wr) = self.heap.get(object).weak_reference() =>
+            {
+                Ok(wr.callback)
+            }
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
             (None, None) if matches!(name, "__getattribute__" | "__delattr__") => {
@@ -427,6 +444,9 @@ impl Context {
     }
 
     pub(super) fn python_subclass_check(&self, child: Id, parent: Id) -> Result<bool> {
+        if let Value::Union(union) = self.heap.get(parent) {
+            return self.python_subclass_check(child, union.args);
+        }
         if let Value::Tuple(classes) = self.heap.get(parent) {
             for &class in classes {
                 if self.python_subclass_check(child, class)? {
@@ -552,6 +572,7 @@ impl Context {
             Value::TypeVar(_) => "typing.TypeVar",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
+            Value::Union(_) => "typing.Union",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
@@ -641,7 +662,12 @@ impl Context {
     /// Return the actual class independently of an instance's Python-level __class__ attribute.
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
-            Value::Instance { class, .. } => Ok(*class),
+            Value::Union(_) => Ok(super::union::class(self)),
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => Ok(*class),
             Value::NamedTuple {
                 class: Some("time.struct_time"),
                 ..
@@ -674,6 +700,9 @@ impl Context {
     }
 
     pub(super) fn instance_of(&self, value: Id, class: Id) -> bool {
+        if self.classes.get("typing.Union") == Some(&class) {
+            return matches!(self.heap.get(value), Value::Union(_));
+        }
         if self.classes.get("collections.abc.Callable") == Some(&class) {
             return self.callable(value);
         }
@@ -687,8 +716,8 @@ impl Context {
         {
             return true;
         }
-        if let Value::Instance { class: actual, .. } = self.heap.get(value)
-            && self.subclass(*actual, class)
+        if let Some(actual) = self.heap.get(value).instance_class()
+            && self.subclass(actual, class)
         {
             return true;
         }
@@ -942,6 +971,16 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if let Value::Union(union) = *self.heap.get(obj) {
+            match name {
+                "__args__" => return Ok(union.args),
+                "__parameters__" => return Ok(union.parameters),
+                "__class__" | "__origin__" => return Ok(super::union::class(self)),
+                "__module__" => return Ok(self.text("typing")),
+                "__name__" | "__qualname__" => return Ok(self.text("Union")),
+                _ => {}
+            }
+        }
         if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
             if matches!(name, "name" | "value")
                 && let Some((_, member_name, value)) = self.enum_member(obj)
@@ -961,6 +1000,29 @@ impl Context {
                     self.exception_field(dictionary, name)?
                 };
                 return self.instance_attribute(obj, class, field, name);
+            }
+            if let Some([filename, original_args]) =
+                error.trace.as_ref().and_then(|trace| trace.source_syntax)
+                && let Value::Tuple(args) = self.heap.get(original_args)
+            {
+                match name {
+                    "msg" => return Ok(args[0]),
+                    "filename" => return Ok(filename),
+                    _ => {
+                        if let Some(index) =
+                            ["lineno", "offset", "text", "end_lineno", "end_offset"]
+                                .iter()
+                                .position(|&field| field == name)
+                        {
+                            if let Some(&location) = args.get(1)
+                                && let Value::Tuple(fields) = self.heap.get(location)
+                            {
+                                return Ok(fields.get(index + 1).copied().unwrap_or(NONE));
+                            }
+                            return Ok(NONE);
+                        }
+                    }
+                }
             }
             if name == "__dict__" {
                 return Ok(self.exception_dictionary(obj));
@@ -1068,6 +1130,13 @@ impl Context {
                     _ => 2,
                 }]);
             }
+            Value::Native(ref class) if class == "module" => match name {
+                "__doc__" => return Ok(self.text(module_type::DOC)),
+                "__init__" | "__new__" => return Ok(self.builtin(&format!("module.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text("module")),
+                "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
             Value::WeakrefDescriptor(owner) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text("__weakref__")),
@@ -1367,15 +1436,16 @@ impl Context {
                 _ => {}
             },
             Value::Weak(wr) if name == "__callback__" => return Ok(wr.callback),
-            Value::Weak(_) if name == "__hash__" => {
-                let callable = self.builtin(weakref::REFERENCE_HASH);
-                let class = self.builtin(weakref::Kind::Reference.class());
+            Value::Weak(_) if weakref::REFERENCE_METHODS.contains(&name) => {
+                let callable = self.builtin(&format!("{}.{name}", weakref::REFERENCE_TYPE));
+                let class = self.builtin(weakref::REFERENCE_TYPE);
                 return self.bind_attribute(callable, obj, class);
             }
             Value::Native(ref class)
-                if class == weakref::Kind::Reference.class() && name == "__hash__" =>
+                if class == weakref::REFERENCE_TYPE
+                    && weakref::REFERENCE_METHODS.contains(&name) =>
             {
-                return Ok(self.builtin(weakref::REFERENCE_HASH));
+                return Ok(self.builtin(&format!("{}.{name}", weakref::REFERENCE_TYPE)));
             }
             Value::Native(ref method)
                 if method == weakref::REFERENCE_HASH && name == "__qualname__" =>
@@ -1444,6 +1514,9 @@ impl Context {
             Value::Native(class) if class == "bool" && name == "to_bytes" => {
                 return Ok(self.builtin("int.to_bytes"));
             }
+            Value::Native(class) if class == "set" && name == "copy" => {
+                return Ok(self.builtin("set.copy"));
+            }
             Value::Native(class)
                 if class == "list"
                     && matches!(name, "clear" | "index" | "pop" | "reverse" | "sort") =>
@@ -1490,10 +1563,17 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                constructor,
                 ..
             } => {
                 if name == "__dict__" {
                     return Ok(self.module_globals(scope));
+                }
+                if name == "__class__" {
+                    return Ok(constructor.unwrap_or_else(|| self.builtin("module")));
+                }
+                if let Some(class) = constructor {
+                    return self.module_instance_attribute(obj, class, scope, name);
                 }
                 if let Some(value) = self.scope_name(scope, name) {
                     return Ok(value);
@@ -1669,6 +1749,12 @@ impl Context {
         }
         let exception_member = self.exception_member(obj, name);
         let member = self.slot(obj, name);
+        if name == "__callback__"
+            && member.is_none()
+            && self.heap.get(obj).weak_reference().is_some()
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if let Some(descriptor) = member.or(exception_member)
             && self.data_descriptor(descriptor)
         {
@@ -1741,7 +1827,12 @@ impl Context {
             Value::StaticMethod { dictionary, .. } => {
                 super::static_method::update_attribute(self, obj, dictionary, name, None)
             }
-            Value::Module { scope, .. } => {
+            Value::Module {
+                scope, constructor, ..
+            } => {
+                if constructor.is_some() {
+                    self.update_module_annotations(scope, name, None)?;
+                }
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
@@ -1931,6 +2022,12 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if name == "__callback__"
+            && self.slot(obj, name).is_none()
+            && self.heap.get(obj).weak_reference().is_some()
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_base_local_attribute(obj, name, Some(value));
         }
@@ -2092,15 +2189,19 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                constructor,
                 ..
             } => {
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
-                if module == "sys" && name == "path" {
+                if constructor.is_none() && module == "sys" && name == "path" {
                     self.sys_path = value;
                 }
                 let scope = *scope;
+                if constructor.is_some() {
+                    self.update_module_annotations(scope, name, Some(value))?;
+                }
                 self.bind(scope, name, value);
             }
             Value::Instance { class, fields, .. } if Some(*class) != object_class => {
@@ -2141,6 +2242,7 @@ impl Context {
             class,
             dictionary,
             property,
+            weak_reference: None,
             memory_stream: None,
             fields: HashMap::new(),
             scalar: None,
@@ -2178,6 +2280,7 @@ impl Context {
             scalar: Some(value),
             dictionary: None,
             property: None,
+            weak_reference: None,
             memory_stream: None,
         }))
     }
@@ -2217,6 +2320,7 @@ impl Context {
             dictionary: None,
             scalar: Some(text),
             property: None,
+            weak_reference: None,
             memory_stream: None,
         }))
     }
@@ -2240,17 +2344,7 @@ impl Context {
     ) -> Result<Id> {
         match self.heap.get(callable).clone() {
             Value::Weak(wr) => match wr.kind {
-                weakref::Kind::Reference if args.is_empty() && kwargs.is_empty() => {
-                    Ok(wr.target.unwrap_or(NONE))
-                }
-                weakref::Kind::Reference if !kwargs.is_empty() => Err(Error::new(
-                    "TypeError",
-                    "weakref() takes no keyword arguments",
-                )),
-                weakref::Kind::Reference => Err(Error::new(
-                    "TypeError",
-                    format!("weakref expected 0 arguments, got {}", args.len()),
-                )),
+                weakref::Kind::Reference => wr.call(&args, &kwargs),
                 weakref::Kind::CallableProxy => self.call(wr.upgrade()?, args, kwargs),
                 weakref::Kind::Proxy => Err(Error::new(
                     "TypeError",
@@ -2296,6 +2390,7 @@ impl Context {
                                 | "bytes"
                                 | "bytearray"
                                 | "range"
+                                | "module"
                                 | "slice"
                                 | "function"
                                 | "method"
@@ -2415,7 +2510,9 @@ impl Context {
                         {
                             return Ok(*value);
                         }
-                        if matches!(
+                        if let Some(text) = self.string_storage(*value) {
+                            *value = text;
+                        } else if matches!(
                             self.heap.get(self.scalar_value(*value)),
                             Value::Int(_) | Value::Bool(_)
                         ) {
@@ -2428,6 +2525,12 @@ impl Context {
                 }
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
+                }
+                if self.classes.get("typing.Union") == Some(&callable) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "cannot create 'typing.Union' instances",
+                    ));
                 }
                 if self.scope_data(scope).is_abstract {
                     return Err(self.abstract_class_error(scope, &name)?);
@@ -2474,6 +2577,7 @@ impl Context {
                         dictionary: None,
                         scalar: None,
                         property: None,
+                        weak_reference: None,
                         memory_stream: None,
                     }));
                 }
@@ -2492,6 +2596,8 @@ impl Context {
                         return Ok(instance);
                     }
                     instance
+                } else if self.has_base(callable, "module") {
+                    self.allocate_module(callable)
                 } else if let Some(kind) = string_base {
                     self.new_string(kind, callable, &args, &kwargs)?
                 } else if float_subclass {

@@ -160,6 +160,7 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
     match ctx.heap.get(value) {
         Value::Weak(wr) if wr.kind != super::super::weakref::Kind::Reference => Some(value),
         Value::Weak(wr) => wr.target.and_then(|target| unhashable_part(ctx, target)),
+        Value::Union(union) => unhashable_part(ctx, union.args),
         Value::List(_)
         | Value::ByteArray(_)
         | Value::Context(_)
@@ -427,6 +428,7 @@ pub(super) fn method(
             | "set.issuperset"
             | "frozenset.issuperset"
             | "frozenset.copy"
+            | "set.copy"
             | "frozenset.__contains__"
             | "set.__contains__"
     ) && !kwargs.is_empty()
@@ -569,6 +571,21 @@ pub(super) fn method(
         "frozenset.copy" => {
             arity(name, args, 0, 0)?;
             Ok(receiver)
+        }
+        "set.copy" => {
+            arity(name, args, 0, 0)?;
+            let Value::Set {
+                entries,
+                frozen: false,
+            } = ctx.heap.get(receiver)
+            else {
+                return Err(type_error("descriptor 'copy' requires a 'set' object"));
+            };
+            let entries = entries.clone();
+            Ok(ctx.alloc(Value::Set {
+                entries,
+                frozen: false,
+            }))
         }
         "set.issuperset" | "frozenset.issuperset" => {
             let [source] = args else {

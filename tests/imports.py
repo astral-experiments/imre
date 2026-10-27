@@ -16,6 +16,10 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "weakref_of_imported_value_struct": ({
+        "records.py": "from imre import struct as layout\n@layout\nclass Point:\n    x: float\n",
+        "main.py": "from records import Point\nfrom weakref import ref\nref(Point(1.0))\n",
+    }, "weakref.ref requires native Python object operations"),
     "unused_struct_keeps_return_checks": ({
         "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
     }, "expected int, got str"),
@@ -130,6 +134,24 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "weak_method_export": {
+        "main.py": (
+            "from weakref import WeakMethod\n"
+            "class Receiver:\n    def accept(self, value): return value\n"
+            "receiver = Receiver()\nsaved = WeakMethod(receiver.accept)\n"
+            "print(saved().__self__ is receiver, saved()(42))\n"
+            "del receiver\nprint(saved() is None)\n"
+        ),
+    },
+    "weak_key_dictionary_export": {
+        "main.py": (
+            "from weakref import WeakKeyDictionary, ref\n"
+            "class Stream: pass\n"
+            "stream = Stream()\ncache = WeakKeyDictionary()\n"
+            "cache[stream] = 'cached'\n"
+            "print(ref(stream)() is stream, cache.get(stream))\n"
+        ),
+    },
     "imported_struct_timestamp": {
         "main.py": (
             "from wire import encode, decode\nimport struct\n"
@@ -399,7 +421,7 @@ def main() -> None:
                     continue
                 for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
                     with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
-                        archive.writestr(f"{pkg}/__init__.py", "from witness import seen\nseen.append(__name__)\n")
+                        archive.writestr(f"{pkg}/__init__.py", "# coding: (ordinary comment)\nfrom witness import seen\nseen.append(__name__)\n")
                         archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
