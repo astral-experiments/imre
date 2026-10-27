@@ -86,7 +86,12 @@ REJECTED = {
     "guard_reads_later_import": ({"main.py": "import helper\n", "helper.py": 'if __name__ == "helper":\n    raise ValueError(message)\nfrom child import message\n', "child.py": 'message = "late"\n'}, "imports must precede"),
     "library_computed_before_import": ({"main.py": "import package\n", "package/__init__.py": "metadata = str(7)\nfrom .child import f\n", "package/child.py": HELPER}, "imports must precede"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
-    "namespace_package": ({"main.py": "import package.child\n", "package/child.py": HELPER}, "namespace-package"),
+    "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
+    "namespace_preserves_annotation": ({
+        "main.py": "import helper\n",
+        "space/child.py": "value = 3\n",
+        "helper.py": "from space.child import value\ndef result() -> int:\n    return 'wrong'\nresult()\n",
+    }, "expected int, got str"),
     "child_overwrites_definition": ({"main.py": "import package.child\n", "package/__init__.py": "def child() -> int:\n    return 1\n", "package/child.py": HELPER}, "overwrite"),
     "entry_self_import": ({"main.py": "import main\n"}, "entry module"),
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
@@ -103,6 +108,11 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "namespace_package": {
+        "main.py": "import package.child\nfrom package.nested import sibling\nprint(package.child.f())\nprint(sibling.read())\n",
+        "package/child.py": "def f() -> int:\n    return 41\n",
+        "package/nested/sibling.py": "from ..child import f\ndef read() -> int:\n    return f() + 1\n",
+    },
     "native_ast_import": {
         "main.py": (
             "import ast as trees\nfrom ast import parse, walk\n"
