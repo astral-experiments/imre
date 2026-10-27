@@ -79,6 +79,47 @@ fn extend(ctx: &mut Context, queue: Id, source: Id) -> Result<()> {
     Ok(())
 }
 
+/// Compare through live cursors so a callback can mutate either deque or raise.
+pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Result<bool> {
+    if left == right {
+        return Ok(op == "==");
+    }
+    let (Value::Deque(a), Value::Deque(b)) = (ctx.heap.get(left), ctx.heap.get(right)) else {
+        unreachable!()
+    };
+    if a.items.len() != b.items.len() {
+        return Ok(op == "!=");
+    }
+    ctx.check_call_depth(0)?;
+    ctx.call_depth += 1;
+    let roots = ctx.heap.temporary_mark();
+    let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+        let a = ctx.iterator(left)?;
+        ctx.heap.keep(a);
+        let b = ctx.iterator(right)?;
+        ctx.heap.keep(b);
+        let elements = ctx.heap.temporary_mark();
+        loop {
+            ctx.heap.release_temporaries_since(elements);
+            let x = ctx.next_item(a)?;
+            let y = ctx.next_item(b)?;
+            let (Some(x), Some(y)) = (x, y) else {
+                return Ok(if op == "==" { x == y } else { x != y });
+            };
+            ctx.heap.keep(x);
+            ctx.heap.keep(y);
+            if !ctx.checked_equal(x, y)? {
+                // The first differing pair answers the originally requested operation.
+                let result = ctx.binary(op, x, y)?;
+                return ctx.truth(result);
+            }
+        }
+    });
+    ctx.heap.release_temporaries_since(roots);
+    ctx.call_depth -= 1;
+    result
+}
+
 /// A Python equality callback may mutate the queue or raise before a match is removed.
 fn remove(ctx: &mut Context, queue: Id, value: Id) -> Result<()> {
     let Value::Deque(ring) = ctx.heap.get(queue) else {

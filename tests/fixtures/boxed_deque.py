@@ -32,6 +32,24 @@ def current():
         raise AssertionError("changed deque")
     assert list(queue) == [3, "last"]
 
+    left, right = deque([1, 2], 2), deque([1, 2], 5)
+    assert left == right and [left] == [right] and not (left != right)
+    right.append(3)
+    assert left != right and not (left == right)
+
+    class Item:
+        def __eq__(self, other):
+            left.append(7)
+            return True
+
+    left, right = deque([Item()]), deque([Item()])
+    try:
+        left == right
+    except RuntimeError as error:
+        assert str(error) == "deque mutated during iteration"
+    else:
+        raise AssertionError("changed deque during comparison")
+
     queue = deque([1, 2, 3, 4], maxlen=4)
     forward, backward = iter(queue), reversed(queue)
     assert (next(forward), next(backward)) == (1, 4)

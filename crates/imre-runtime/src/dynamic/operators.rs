@@ -2354,6 +2354,12 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        if matches!(op, "==" | "!=")
+            && matches!(self.heap.get(a), Value::Deque(_))
+            && matches!(self.heap.get(b), Value::Deque(_))
+        {
+            return deque::compare(self, op, a, b).map(|result| Some(builtins::boolean(result)));
+        }
         if self.heap.has_weak_values
             && matches!(op, "==" | "!=")
             && let (Value::Weak(left), Value::Weak(right)) = (self.heap.get(a), self.heap.get(b))
