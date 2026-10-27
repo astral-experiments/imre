@@ -408,6 +408,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_itertools_count.py",
             "boxed_print_streams.py",
+            "boxed_redirect_streams.py",
             "boxed_itertools_repeat.py",
             "boxed_thread_local.py",
             "boxed_dict_subclasses.py",

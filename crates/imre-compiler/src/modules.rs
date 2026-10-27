@@ -37,7 +37,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             concat!(
                 include_str!("../stdlib/contextlib.py"),
                 "\n",
-                include_str!("../stdlib/contextlib_exitstack.py")
+                include_str!("../stdlib/contextlib_exitstack.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_redirect.py")
             ),
         )),
         "_imre_socketserver_poll" => Some((
@@ -771,6 +773,12 @@ impl IntrinsicModule {
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
+            (Self::Contextlib, "redirect_stdout") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.redirect_stdout")
+            }
+            (Self::Contextlib, "redirect_stderr") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
+            }
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
