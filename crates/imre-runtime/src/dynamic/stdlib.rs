@@ -98,6 +98,41 @@ fn argument(args: &[Id], index: usize) -> Result<Id> {
         .ok_or_else(|| Error::new("TypeError", "missing required argument"))
 }
 
+/// Bind the one positional-or-keyword parameter of a Python function.
+fn single_argument(name: &str, param: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let mut value = args.first().copied();
+    for (key, arg) in kwargs {
+        if key != param {
+            let mut message = format!("{name}() got an unexpected keyword argument '{key}'");
+            if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &[param]) {
+                message.push_str(&format!(". Did you mean '{hint}'?"));
+            }
+            return Err(Error::new("TypeError", message));
+        }
+        if value.replace(*arg).is_some() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() got multiple values for argument '{param}'"),
+            ));
+        }
+    }
+    if args.len() > 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() takes 1 positional argument but {} were given",
+                args.len()
+            ),
+        ));
+    }
+    value.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!("{name}() missing 1 required positional argument: '{param}'"),
+        )
+    })
+}
+
 fn option(args: &[Id], index: usize, kwargs: &[(String, Id)], name: &str) -> Result<Option<Id>> {
     let by_name = kwargs
         .iter()
@@ -577,6 +612,10 @@ pub(super) fn call(
     if name.starts_with("re.") {
         return regex::module_call(ctx, name, args, kwargs);
     }
+    let urlsafe = matches!(
+        name,
+        "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode"
+    );
     let (max_args, keywords): (usize, &[&str]) = match name {
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
@@ -587,7 +626,6 @@ pub(super) fn call(
             &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
         ),
         "hashlib.sha1" => (1, &["data", "usedforsecurity"]),
-        "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => (1, &["s"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -625,10 +663,11 @@ pub(super) fn call(
         | "file.__enter__" => (1, &[]),
         _ => (0, &[]),
     };
-    if args.len() > max_args
-        || kwargs
-            .iter()
-            .any(|(key, _)| !keywords.contains(&key.as_str()))
+    if !urlsafe
+        && (args.len() > max_args
+            || kwargs
+                .iter()
+                .any(|(key, _)| !keywords.contains(&key.as_str())))
     {
         return Err(Error::new(
             "TypeError",
@@ -643,9 +682,8 @@ pub(super) fn call(
             );
         }
         "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
-        "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => {
-            let id = option(args, 0, kwargs, "s")?
-                .ok_or_else(|| Error::new("TypeError", "missing required argument 's'"))?;
+        _ if urlsafe => {
+            let id = single_argument(name.trim_start_matches("base64."), "s", args, kwargs)?;
             let decode = name == "base64.urlsafe_b64decode";
             let bytes = match ctx.heap.get(id) {
                 Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
