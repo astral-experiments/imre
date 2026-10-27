@@ -1999,14 +1999,14 @@ pub unsafe extern "C" fn imre_dict_copy(value: *const Object) -> *const Object {
             .0
             .with(|storage| storage.dictionary().copy_values(Ok))
     };
-    super::exceptions::finish(
-        result.map(|copy| {
-            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-                Storage::Dictionary(TableOwner::new(copy)),
-            ))))
-        }),
-        std::ptr::null(),
-    )
+    let result = result.and_then(|copy| {
+        let storage =
+            Storage::Dictionary(TableOwner::try_new(copy).map_err(|_| Error::memory_error())?);
+        crate::ObjectOwner::try_new(Object(StorageCell::new(storage)))
+            .map(crate::ObjectOwner::into_raw)
+            .map_err(|_| Error::memory_error())
+    });
+    super::exceptions::finish(result, std::ptr::null())
 }
 
 /// Constructs an integer-valued Counter with non-inserting zero subscriptions.
