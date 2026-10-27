@@ -260,7 +260,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::List(_)
             if matches!(
                 attr,
-                "append" | "extend" | "insert" | "pop" | "reverse" | "sort"
+                "append" | "clear" | "extend" | "insert" | "pop" | "reverse" | "sort"
             ) =>
         {
             "list"

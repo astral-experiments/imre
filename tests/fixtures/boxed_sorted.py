@@ -44,6 +44,8 @@ def current():
     print(values.sort(reverse=True), alias)
     cursor = iter(values)
     print(next(cursor), list.reverse(alias), values, list(cursor))
+    cursor = iter(values)
+    print(list.clear(alias), values, list(cursor))
 
     unsafe = bytes((*range(0x21), 0x25, 0x7F)).decode()
     for extra in ("", "&=+#", "/?#", ":@/?#"):

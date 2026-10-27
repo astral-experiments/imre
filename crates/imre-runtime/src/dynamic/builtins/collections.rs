@@ -289,7 +289,7 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if let Some(method @ ("pop" | "reverse" | "sort")) = name.strip_prefix("list.") {
+    if let Some(method @ ("clear" | "pop" | "reverse" | "sort")) = name.strip_prefix("list.") {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(
                 "unbound method {name}() needs an argument"
@@ -306,18 +306,22 @@ pub(super) fn method(
             "sort" => list_sort(ctx, receiver, args, kwargs),
             _ => {
                 if !kwargs.is_empty() {
-                    return Err(type_error("list.reverse() takes no keyword arguments"));
+                    return Err(type_error(format!("{name}() takes no keyword arguments")));
                 }
                 if !args.is_empty() {
                     return Err(type_error(format!(
-                        "list.reverse() takes no arguments ({} given)",
+                        "{name}() takes no arguments ({} given)",
                         args.len()
                     )));
                 }
                 let Value::List(items) = ctx.heap.get_mut(receiver) else {
                     unreachable!()
                 };
-                items.reverse();
+                if method == "reverse" {
+                    items.reverse();
+                } else {
+                    items.clear();
+                }
                 Ok(NONE)
             }
         };
