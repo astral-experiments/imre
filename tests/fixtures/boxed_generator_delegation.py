@@ -61,9 +61,17 @@ def indexed_values(owner, trace):
         yield owner[0]
 
 
+def boolean_values(items, trace):
+    for item in items:
+        yield (item and visited(trace, 'and', 7)) or visited(trace, 'or', 9)
+
+
 def current():
     owner, trace = ['initial'], []
     print(list(indexed_values(owner, trace)), owner, trace)
+    trace = []
+    assert list(boolean_values([0, 2], trace)) == [9, 7]
+    assert trace == ['or', 'and']
     print(wrapped.__doc__)
     two = wrapped([("a", [1, 2]), ("b", [3])])
     print(two.gi_code is wrapped.__code__, events)

@@ -9,6 +9,18 @@ pub(super) enum MappingOperation {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if name == "__hash__" {
+            if matches!(self.heap.get(class), Value::Native(_)) {
+                return self.own_class_attr(class, name);
+            }
+            return self
+                .find_in_mro(class, |base| {
+                    let slot = self.own_class_attr(base, name);
+                    (slot.is_some() || matches!(self.heap.get(base), Value::Native(_)))
+                        .then_some(slot)
+                })
+                .flatten();
+        }
         self.find_in_mro(class, |base| self.own_class_attr(base, name))
     }
 
@@ -29,6 +41,15 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if name == "__hash__" && kind == "object" => {
+                self.builtins.get("object.__hash__").copied()
+            }
+            Value::Native(kind)
+                if name == "__hash__"
+                    && matches!(kind.as_str(), "list" | "dict" | "set" | "bytearray") =>
+            {
+                Some(NONE)
+            }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
                 "__new__" => self
                     .builtins
@@ -253,6 +274,7 @@ impl Context {
                 | Value::Range(_)
                 | Value::Iterator { .. }
                 | Value::DictIterator(_)
+                | Value::MappingViewIterator { .. }
         ) {
             return Ok(false);
         }
@@ -332,7 +354,20 @@ impl Context {
             || self.slot(descriptor, "__delete__").is_some()
     }
 
+    /// Bind the inherited dictionary constructor to the class used for the result.
+    fn bind_dict_fromkeys(&mut self, owner: Id) -> Id {
+        let callable = self.builtin("dict.fromkeys");
+        self.alloc(Value::Method {
+            callable,
+            receiver: owner,
+            explicit: false,
+        })
+    }
+
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
+        if matches!(self.heap.get(value), Value::Native(name) if name == "dict.fromkeys") {
+            return Ok(self.bind_dict_fromkeys(owner));
+        }
         if let Value::ClassMethod(callable) = *self.heap.get(value) {
             return Ok(self.alloc(Value::Method {
                 callable,
@@ -568,6 +603,7 @@ impl Context {
             | Value::Iterator { .. }
             | Value::Tuple(_)
             | Value::DictIterator(_)
+            | Value::MappingViewIterator { .. }
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
@@ -588,6 +624,7 @@ impl Context {
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
             Value::Deque(_) => super::deque::CLASS,
+            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
             Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
             Value::ItemGetter(_) => "operator.itemgetter",
@@ -643,6 +680,7 @@ impl Context {
                             | "itertools.count"
                             | super::deque::CLASS
                             | super::deque::ITERATOR
+                            | super::deque::REVERSE_ITERATOR
                             | "itertools.repeat"
                             | "weakref.ReferenceType"
                             | "weakref.ProxyType"
@@ -791,7 +829,8 @@ impl Context {
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
-            | (super::deque::ITERATOR, Value::DequeIterator { .. })
+            | (super::deque::ITERATOR, Value::DequeIterator { reverse: false, .. })
+            | (super::deque::REVERSE_ITERATOR, Value::DequeIterator { reverse: true, .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
@@ -1324,7 +1363,10 @@ impl Context {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
             Value::Native(class)
-                if matches!(class.as_str(), super::deque::CLASS | super::deque::ITERATOR) =>
+                if matches!(
+                    class.as_str(),
+                    super::deque::CLASS | super::deque::ITERATOR | super::deque::REVERSE_ITERATOR
+                ) =>
             {
                 match name {
                     "__name__" | "__qualname__" => {
@@ -1567,6 +1609,16 @@ impl Context {
             Value::Native(class) if class == "collections.defaultdict" && name == "copy" => {
                 return Ok(self.builtin("collections.defaultdict.copy"));
             }
+            Value::Native(class)
+                if name == "fromkeys"
+                    && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
+            {
+                return Ok(self.bind_dict_fromkeys(obj));
+            }
+            Value::Dict(_) | Value::DefaultDict { .. } if name == "fromkeys" => {
+                let owner = self.exact_type(obj)?;
+                return Ok(self.bind_dict_fromkeys(owner));
+            }
             Value::Native(class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
             }
@@ -1595,7 +1647,11 @@ impl Context {
                 if class == "object"
                     && matches!(
                         name,
-                        "__getattribute__" | "__setattr__" | "__delattr__" | "__init__"
+                        "__hash__"
+                            | "__getattribute__"
+                            | "__setattr__"
+                            | "__delattr__"
+                            | "__init__"
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
@@ -2956,6 +3012,14 @@ impl Context {
         else {
             return Err(Error::new("TypeError", "invalid class body"));
         };
+        #[derive(serde::Deserialize)]
+        struct ClassBindings {
+            #[serde(default)]
+            scope_nonlocals: std::collections::HashSet<String>,
+        }
+        let parameters = self.code_object(code).parameters;
+        let bindings: ClassBindings = serde_json::from_str(self.str_value(parameters)?)
+            .map_err(|e| Error::new("SystemError", e.to_string()))?;
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
         let enum_namespace = self.enum_namespace(&bases);
@@ -2965,6 +3029,7 @@ impl Context {
             unreachable!()
         };
         body_scope.class_body = Some(Vec::new());
+        body_scope.closure.nonlocals = bindings.scope_nonlocals;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
         let mut globals = parent;
@@ -2982,12 +3047,19 @@ impl Context {
             self.bind(scope, "__qualname__", qualname);
         }
         let annotations = self.dict(Vec::new());
-        self.bind(scope, "__annotations__", annotations);
+        self.bind_local(scope, "__annotations__", annotations);
         self.execute(code, scope, FrameOwner::Function(body))?;
+        if let Value::Scope(frame) = self.heap.get_mut(scope) {
+            frame.closure.nonlocals.clear();
+        }
+        if self.scope_name(scope, "__qualname__").is_none() {
+            let qualname = self.text(&name);
+            self.bind_local(scope, "__qualname__", qualname);
+        }
         if self.scope_name(scope, "__module__").is_none() {
             let namespace = self.module_globals(parent);
             if let Some(name) = self.dict_named_item(namespace, "__name__") {
-                self.bind(scope, "__module__", name);
+                self.bind_local(scope, "__module__", name);
             }
         }
         // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.

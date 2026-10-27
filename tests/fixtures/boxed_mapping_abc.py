@@ -46,6 +46,12 @@ def current():
     data.clear()
     print(len(data), list(view))
 
+    data.update({"a": 1, "b": 2})
+    values = iter(data.values())
+    print(next(values))
+    data["b"] = 3
+    print(next(values))
+
 
     class Registered:
         pass

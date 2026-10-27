@@ -327,12 +327,61 @@ pub(super) fn construct(
     }
 }
 
+/// Build a fresh mapping through the bound class, sharing the supplied value.
+fn fromkeys(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&class, args)) = args.split_first() else {
+        return Err(type_error("dict.fromkeys needs a class"));
+    };
+    if !kwargs.is_empty() {
+        let name = ctx.class_name(class);
+        let name = match ctx.own_class_attr(class, "__qualname__") {
+            Some(qualname) => ctx.str_value(qualname)?,
+            None => name.rsplit('.').next().unwrap_or(name),
+        };
+        return Err(type_error(format!(
+            "{name}.fromkeys() takes no keyword arguments"
+        )));
+    }
+    let (keys, value) = match args {
+        [keys] => (*keys, NONE),
+        [keys, value] => (*keys, *value),
+        [] => return Err(type_error("fromkeys expected at least 1 argument, got 0")),
+        _ => {
+            return Err(type_error(format!(
+                "fromkeys expected at most 2 arguments, got {}",
+                args.len()
+            )));
+        }
+    };
+    let result = ctx.call(class, Vec::new(), Vec::new())?;
+    ctx.heap.keep(result);
+    if matches!(ctx.heap.get(result), Value::Dict(_))
+        && matches!(ctx.heap.get(keys), Value::Dict(_) | Value::Set { .. })
+    {
+        let mut position = 0;
+        while let Some((at, key, _, hash)) = ctx.dictionary_pair(keys, position) {
+            ctx.set_dictionary_key(result, key, value, hash, true)?;
+            position = at + 1;
+        }
+    } else {
+        let iterator = ctx.iterator(keys)?;
+        ctx.heap.keep(iterator);
+        while let Some(key) = ctx.next_item(iterator)? {
+            ctx.put_item(result, key, value)?;
+        }
+    }
+    Ok(result)
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "dict.fromkeys" {
+        return fromkeys(ctx, args, kwargs);
+    }
     if let Some(method @ ("clear" | "index" | "pop" | "reverse" | "sort")) =
         name.strip_prefix("list.")
     {

@@ -898,8 +898,7 @@ impl Context {
                 self.put_item(object, key, value)?;
             }
             Instruction::Unless(e, destination) => {
-                let value = eval(self, e)?;
-                if !self.truth(value)? {
+                if !self.source_condition(code, scope, e)? {
                     *ip = *destination;
                 }
             }
@@ -1065,6 +1064,41 @@ impl Context {
         Ok(value)
     }
 
+    /// Preserve the selected operand and any truth test that short-circuited a nested expression.
+    fn source_bool_operand(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        expr: &ast::Expr,
+    ) -> Result<(Id, Option<bool>)> {
+        let ast::Expr::BoolOp(op) = expr else {
+            return Ok((self.source_expr(code, scope, expr)?, None));
+        };
+        let (last, operands) = op
+            .values
+            .split_last()
+            .expect("boolean expression has operands");
+        let stop = op.op == ast::BoolOp::Or;
+        for operand in operands {
+            let (value, known) = self.source_bool_operand(code, scope, operand)?;
+            if known.map_or_else(|| self.truth(value), Ok)? == stop {
+                return Ok((value, Some(stop)));
+            }
+        }
+        self.source_bool_operand(code, scope, last)
+    }
+
+    /// Evaluate a branch condition without testing a short-circuited operand twice.
+    fn source_condition(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<bool> {
+        if let ast::Expr::UnaryOp(op) = expr
+            && op.op == ast::UnaryOp::Not
+        {
+            return Ok(!self.source_condition(code, scope, &op.operand)?);
+        }
+        let (value, known) = self.source_bool_operand(code, scope, expr)?;
+        known.map_or_else(|| self.truth(value), Ok)
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -1141,6 +1175,7 @@ impl Context {
                 let k = eval(self, &v.slice)?;
                 self.get_item(base, k)
             }
+            Expr::BoolOp(_) => Ok(self.source_bool_operand(code, scope, expr)?.0),
             Expr::BinOp(v) => {
                 let a = eval(self, &v.left)?;
                 let b = eval(self, &v.right)?;
@@ -1168,8 +1203,7 @@ impl Context {
                 unreachable!("comparison has at least one operator")
             }
             Expr::If(v) => {
-                let test = eval(self, &v.test)?;
-                let branch = if self.truth(test)? {
+                let branch = if self.source_condition(code, scope, &v.test)? {
                     &v.body
                 } else {
                     &v.orelse

@@ -220,6 +220,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "__delitem__",
     "clear",
     "copy",
+    "fromkeys",
     "get",
     "items",
     "keys",
@@ -717,6 +718,23 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
+    if name == "object.__hash__" {
+        let Some((&receiver, rest)) = args.split_first() else {
+            return Err(type_error(
+                "descriptor '__hash__' of 'object' object needs an argument",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __hash__() takes no keyword arguments"));
+        }
+        if !rest.is_empty() {
+            return Err(type_error(format!(
+                "expected 0 arguments, got {}",
+                rest.len()
+            )));
+        }
+        return Ok(ctx.int(Context::identity_hash(receiver)));
+    }
     if name == "object.__init__" {
         if args.len() != 1 || !kwargs.is_empty() {
             return Err(type_error(
@@ -1026,6 +1044,10 @@ pub(super) fn call(
             let object = args[0];
             if let Value::Range(range) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
+            }
+            if let Value::Deque(ring) = ctx.heap.get(object) {
+                let iter = super::deque::iterator(object, ring, true);
+                return Ok(ctx.alloc(iter));
             }
             let start = match ctx.heap.get(object) {
                 Value::List(items) => Some((items.len(), "list_reverseiterator")),
