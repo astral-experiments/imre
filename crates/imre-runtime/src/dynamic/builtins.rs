@@ -194,6 +194,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "__contains__",
     "__getitem__",
     "__setitem__",
+    "clear",
     "get",
     "items",
     "keys",

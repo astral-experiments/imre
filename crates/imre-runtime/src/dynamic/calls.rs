@@ -1211,6 +1211,9 @@ impl Context {
             Value::Native(class) if class == "bool" && name == "to_bytes" => {
                 return Ok(self.builtin("int.to_bytes"));
             }
+            Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
+                return Ok(self.builtin("dict.clear"));
+            }
             Value::Native(class)
                 if class == "list" && matches!(name, "clear" | "pop" | "reverse" | "sort") =>
             {

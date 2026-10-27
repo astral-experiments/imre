@@ -407,6 +407,19 @@ pub(super) fn method(
         positional(name, kwargs)?;
     }
     match name {
+        "dict.clear" => {
+            arity(name, args, 0, 0)?;
+            let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
+                ctx.heap.get_mut(receiver)
+            else {
+                unreachable!("dictionary payload")
+            };
+            for (key, value) in std::mem::take(entries) {
+                ctx.heap.weak_edge_removed(key);
+                ctx.heap.weak_edge_removed(value);
+            }
+            Ok(NONE)
+        }
         "dict.keys" | "dict.values" | "dict.items" => {
             arity(name, args, 0, 0)?;
             let kind = match name {

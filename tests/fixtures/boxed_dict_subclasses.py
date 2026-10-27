@@ -2,7 +2,7 @@
 
 
 def current():
-    from collections import Counter
+    from collections import Counter, defaultdict
     from collections import _count_elements
     from _collections import _count_elements as native_count
 
@@ -31,6 +31,14 @@ def current():
     counts["a"] = 0
     counts["b"] = 2
     print(list(elements))
+
+    order = counts.keys()
+    print(Counter.clear(counts), list(order), counts["absent"])
+    groups = defaultdict(list)
+    saved = groups["key"]
+    saved.append(7)
+    print(groups.clear(), groups["key"], saved)
+    print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
 
     class Data(dict):
         pass
