@@ -116,20 +116,17 @@ impl Function<'_, '_> {
                 result
             }
             ast::Expr::Generator(v) => {
-                let [generator] = v.generators.as_slice() else {
-                    return self.unsupported("generator expression with multiple for clauses");
-                };
-                if generator.is_async {
+                if v.generators.iter().any(|generator| generator.is_async) {
                     return self.unsupported("async generator expression");
                 }
-                let iterable = self.expr(&generator.iter);
+                let iterable = self.expr(&v.generators[0].iter);
                 let iter = self.op("iter", &[&iterable]);
                 let step = self.define(
                     v.start(),
                     "<genexpr>",
                     None,
                     None,
-                    Body::Generator(generator, &v.elt),
+                    Body::Generator(&v.generators, &v.elt),
                 );
                 self.op("generator", &[&step, &iter])
             }
@@ -264,32 +261,68 @@ impl Function<'_, '_> {
         out
     }
 
-    /// Each resume uses the same lexical scope and advances the outer iterator before
-    /// evaluating filters or the yielded expression. None marks natural exhaustion.
-    pub(super) fn generator_step(&mut self, generator: &ast::Comprehension, element: &ast::Expr) {
-        let iter = self.lookup(".iterator");
-        let step = self.name("b");
-        let body = self.name("b");
+    /// Resume the innermost active loop, returning to its parent when it runs out of items.
+    pub(super) fn generator_step(
+        &mut self,
+        generators: &[ast::Comprehension],
+        element: &ast::Expr,
+    ) {
+        let outer = self.lookup(".iterator");
+        let loops: Vec<_> = (0..generators.len())
+            .map(|i| (self.name("b"), format!(".iterator.{i}")))
+            .collect();
         let done = self.name("b");
-        self.jump(&step);
-        self.label(&step);
-        let more = self.op("more", &[&iter]);
-        let cond = self.value(&format!("icmp eq i64 {more}, 2"));
-        self.branch(&cond, &body, &done);
-        self.label(&body);
-        self.checkpoint(element);
-        let item = self.op("next", &[&iter]);
-        self.assign(&generator.target, &item);
-        for filter in &generator.ifs {
-            let value = self.expr(filter);
-            let yes = self.truth(&value);
-            let keep = self.name("b");
-            self.branch(&yes, &keep, &step);
-            self.label(&keep);
+        if loops.len() > 1 {
+            // Only the initial call has the outer iterator in .iterator. Every yield is
+            // inside the last clause, with each active iterator saved in the frame.
+            let first = self.name("b");
+            let resumed = self.value(&format!("icmp eq i64 {outer}, 0"));
+            self.branch(&resumed, &loops.last().unwrap().0, &first);
+            self.label(&first);
+            self.bind(&loops[0].1, &outer);
+            self.bind(".iterator", "0");
         }
-        let item = self.expr(element);
-        let yielded = self.op("yielded", &[&item]);
-        self.end(&format!("ret i64 {yielded}"));
+        self.jump(&loops[0].0);
+        for (i, generator) in generators.iter().enumerate() {
+            let (step, slot) = &loops[i];
+            let body = self.name("b");
+            let exhausted = if i == 0 { done.clone() } else { self.name("b") };
+            self.label(step);
+            let iter = if loops.len() == 1 {
+                outer.clone()
+            } else {
+                self.lookup(slot)
+            };
+            let more = self.op("more", &[&iter]);
+            let cond = self.value(&format!("icmp eq i64 {more}, 2"));
+            self.branch(&cond, &body, &exhausted);
+            self.label(&body);
+            self.checkpoint(element);
+            let item = self.op("next", &[&iter]);
+            self.assign(&generator.target, &item);
+            for filter in &generator.ifs {
+                let value = self.expr(filter);
+                let yes = self.truth(&value);
+                let keep = self.name("b");
+                self.branch(&yes, &keep, step);
+                self.label(&keep);
+            }
+            if let Some(child) = generators.get(i + 1) {
+                let iterable = self.expr(&child.iter);
+                let iterator = self.op("iter", &[&iterable]);
+                self.bind(&loops[i + 1].1, &iterator);
+                self.jump(&loops[i + 1].0);
+            } else {
+                let item = self.expr(element);
+                let yielded = self.op("yielded", &[&item]);
+                self.end(&format!("ret i64 {yielded}"));
+            }
+            if i > 0 {
+                self.label(&exhausted);
+                self.bind(slot, "0");
+                self.jump(&loops[i - 1].0);
+            }
+        }
         self.label(&done);
     }
 

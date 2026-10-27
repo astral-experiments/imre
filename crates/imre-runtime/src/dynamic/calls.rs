@@ -72,7 +72,7 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) =>
+                ) || (name == "__repr__" && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -369,7 +369,7 @@ impl Context {
     fn native_data_descriptor(&self, descriptor: Id) -> bool {
         matches!(
             self.heap.get(descriptor),
-            Value::Property(_) | Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_)
+            Value::Property(_) | Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_)
         )
     }
 
@@ -415,7 +415,7 @@ impl Context {
             let method = match self.heap.get(value) {
                 Value::Property(property) => return property.read(self, receiver),
                 Value::WeakrefDescriptor(owner) => return self.weakref_list(*owner, receiver),
-                Value::ReadOnlyDescriptor { get, .. } => {
+                Value::GetSetDescriptor { get, .. } => {
                     return self.call(*get, vec![receiver], Vec::new());
                 }
                 Value::Function { .. }
@@ -667,7 +667,7 @@ impl Context {
             Value::Union(_) => "typing.Union",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
-            Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
+            Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::MappingProxy(_) => "mappingproxy",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
@@ -758,6 +758,10 @@ impl Context {
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
+            Value::TextFile(_) => {
+                self.module("io")?;
+                Ok(self.builtins["_io.TextIOWrapper"])
+            }
             Value::Instance { class, .. }
             | Value::Module {
                 constructor: Some(class),
@@ -807,7 +811,9 @@ impl Context {
         if let Some(actual) = self
             .builtin_type_name(value)
             .and_then(|name| self.builtins.get(name))
-            && super::mapping_abc::registered_subclass(self, *actual, class)
+            && (super::mapping_abc::registered_subclass(self, *actual, class)
+                || matches!(self.heap.get(value), Value::TextFile(_))
+                    && self.direct_subclass(*actual, class))
         {
             return true;
         }
@@ -1716,6 +1722,7 @@ impl Context {
             }
             Value::Native(class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
+                    || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
                     || (class == "int" && name == "to_bytes")
@@ -1966,7 +1973,11 @@ impl Context {
             match *self.heap.get(descriptor) {
                 Value::Property(property) => return property.remove(self, obj),
                 Value::WeakrefDescriptor(owner) => return Err(self.readonly_weakref(owner)),
-                Value::ReadOnlyDescriptor { owner, name, .. } => {
+                Value::GetSetDescriptor { set: Some(set), .. } => {
+                    self.call(set, vec![obj], Vec::new())?;
+                    return Ok(());
+                }
+                Value::GetSetDescriptor { owner, name, .. } => {
                     return Err(Error::new(
                         "AttributeError",
                         format!("attribute '{name}' of '{owner}' objects is not writable"),
@@ -2324,7 +2335,14 @@ impl Context {
             if let Value::WeakrefDescriptor(owner) = *self.heap.get(descriptor) {
                 return Err(self.readonly_weakref(owner));
             }
-            if let Value::ReadOnlyDescriptor { owner, name, .. } = *self.heap.get(descriptor) {
+            if let Value::GetSetDescriptor {
+                owner, name, set, ..
+            } = *self.heap.get(descriptor)
+            {
+                if let Some(set) = set {
+                    self.call(set, vec![obj, value], Vec::new())?;
+                    return Ok(());
+                }
                 return Err(Error::new(
                     "AttributeError",
                     format!("attribute '{name}' of '{owner}' objects is not writable"),
@@ -2947,6 +2965,9 @@ impl Context {
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
                 let tuple_subclass = self.has_base(callable, "tuple");
+                let set_kind = ["set", "frozenset"]
+                    .into_iter()
+                    .find(|kind| self.has_base(callable, kind));
                 let instance = if let Some(new) = new {
                     let allocate = self.bind_attribute(new, NONE, callable)?;
                     let positional = std::iter::once(callable)
@@ -2970,16 +2991,25 @@ impl Context {
                     let dictionary = self
                         .has_base(callable, "dict")
                         .then(|| self.dict(Vec::new()));
-                    let sequence = if self.has_base(callable, "list") {
+                    let storage = if self.has_base(callable, "list") {
                         Some(self.alloc(Value::List(Vec::new())))
                     } else if tuple_subclass {
                         Some(builtins::call(self, "tuple", &args, &kwargs)?)
+                    } else if let Some(kind) = set_kind {
+                        let custom_init = self.class_attr(callable, "__init__").is_some();
+                        let items = if kind == "set" && custom_init {
+                            &[][..]
+                        } else {
+                            &args
+                        };
+                        let keywords = if custom_init { &[][..] } else { &kwargs };
+                        Some(builtins::call(self, kind, items, keywords)?)
                     } else {
                         None
                     };
                     let object = self.instance(callable, dictionary);
                     if let Value::Instance { scalar, .. } = self.heap.get_mut(object) {
-                        *scalar = sequence;
+                        *scalar = storage;
                     }
                     object
                 };
@@ -3000,6 +3030,7 @@ impl Context {
                     && string_base.is_none()
                     && !float_subclass
                     && !tuple_subclass
+                    && set_kind.is_none()
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(
