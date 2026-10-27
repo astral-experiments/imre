@@ -78,10 +78,14 @@ thread_local! {
     static INTERNED: RefCell<Interned> = RefCell::default();
 }
 
+/// Share a canonical native owner between typed and runtime-loaded Python.
+pub(crate) fn intern_owner(value: &StrOwner) -> StrOwner {
+    INTERNED.with_borrow_mut(|table| table.intern(value))
+}
+
 /// Keep module metadata in the same table as interned literals and sys.intern.
 pub(crate) fn canonical(name: &'static str) -> StrOwner {
-    let value = StrOwner::new(Str::const_new(name));
-    INTERNED.with_borrow_mut(|table| table.intern(&value))
+    intern_owner(&StrOwner::new(Str::const_new(name)))
 }
 
 /// # Safety
@@ -90,7 +94,7 @@ pub(crate) fn canonical(name: &'static str) -> StrOwner {
 pub unsafe extern "C" fn imre_sys_intern(value: *const Str) -> *const Str {
     // SAFETY: borrow the caller's owner without consuming its strong reference.
     let value = ManuallyDrop::new(unsafe { StrOwner::from_raw(value) });
-    INTERNED.with_borrow_mut(|table| StrOwner::into_raw(table.intern(&value)))
+    StrOwner::into_raw(intern_owner(&value))
 }
 
 /// # Safety
@@ -107,7 +111,7 @@ pub unsafe extern "C" fn imre_sys_is_interned(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_interned_literal(data: *const u8, len: usize) -> *const Str {
     // SAFETY: the literal's backing bytes remain live as long as the program.
     let literal = StrOwner::new(Str::const_new(unsafe { crate::text(data, len) }));
-    INTERNED.with_borrow_mut(|table| StrOwner::into_raw(table.intern(&literal)))
+    StrOwner::into_raw(intern_owner(&literal))
 }
 
 #[cfg(test)]

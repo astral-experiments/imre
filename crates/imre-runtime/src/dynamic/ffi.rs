@@ -576,9 +576,20 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .map(crate::Int::new)
             .map(Value::Int)
             .ok_or_else(|| Error::new("ValueError", "invalid integer literal")),
-        1 => std::str::from_utf8(data)
-            .map(|s| Value::Str(s.to_owned()))
-            .map_err(|e| Error::new("UnicodeError", e.to_string())),
+        1 | 5 => {
+            let id = std::str::from_utf8(data)
+                .map(|text| {
+                    if kind == 1 {
+                        return ctx.heap.string_literal(text);
+                    }
+                    for name in text.split('\0') {
+                        ctx.heap.string_literal(name);
+                    }
+                    NONE
+                })
+                .map_err(|e| Error::new("UnicodeError", e.to_string()));
+            return finish(ctx, id);
+        }
         2 => Ok(Value::Bytes(data.to_vec())),
         3 => data
             .try_into()
@@ -1005,8 +1016,9 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 }
 
 impl Context {
-    pub(super) fn checkpoint(&mut self, live: &[Id], location: value::Location, caught: Id) {
-        let Some(callbacks) = self.heap.statement(
+    pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
+        (
+            &mut self.heap,
             self.modules
                 .values()
                 .chain(self.classes.values())
@@ -1021,10 +1033,12 @@ impl Context {
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
                 .chain([self.argv, self.sys_path, self.token_missing]),
-            live,
-            location,
-            caught,
-        ) else {
+        )
+    }
+
+    pub(super) fn checkpoint(&mut self, live: &[Id], location: value::Location, caught: Id) {
+        let (heap, roots) = self.heap_and_roots();
+        let Some(callbacks) = heap.statement(roots, live, location, caught) else {
             return;
         };
         for (callback, reference) in callbacks {
