@@ -27,6 +27,20 @@ impl<T, K> Ring<T, K> {
         }
     }
 
+    /// Copy element references into an independent ring with the same bound.
+    pub(crate) fn shallow_copy(&self) -> Result<Self, Error>
+    where
+        T: Clone,
+        K: Copy,
+    {
+        let mut copy = Self::new(self.kind, self.maxlen);
+        copy.items
+            .try_reserve(self.items.len())
+            .map_err(|_| Error::new(Kind::MemoryError, ""))?;
+        copy.items.extend(self.items.iter().cloned());
+        Ok(copy)
+    }
+
     /// Reserve before acquiring the item and return an evicted owner to the caller.
     pub(crate) fn push(
         &mut self,
@@ -231,20 +245,9 @@ pub unsafe extern "C" fn imre_deque_append(
 pub unsafe extern "C" fn imre_deque_copy(value: *const Object) -> *const Object {
     // SAFETY: reserve before cloning, and only independent owners escape.
     let copy = unsafe {
-        object(value).0.with(|storage| {
-            let source = storage.deque();
-            let mut items = VecDeque::new();
-            items
-                .try_reserve(source.items.len())
-                .map_err(|_| Error::new(Kind::MemoryError, ""))?;
-            items.extend(source.items.iter().cloned());
-            Ok(Deque {
-                items,
-                kind: source.kind,
-                maxlen: source.maxlen,
-                state: 0,
-            })
-        })
+        object(value)
+            .0
+            .with(|storage| storage.deque().shallow_copy())
     };
     finish(
         copy.map(|deque| {

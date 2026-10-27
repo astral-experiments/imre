@@ -67,6 +67,20 @@ def boolean_values(items, trace):
 
 
 def current():
+    comparisons = []
+    class Item:
+        def __lt__(self, other):
+            return self
+        def __bool__(self):
+            comparisons.append(1)
+            return len(comparisons) > 1
+    def choose(item):
+        if item < item < item:
+            yield "taken"
+        else:
+            yield "else"
+    assert list(choose(Item())) == ["else"]
+    assert comparisons == [1]
     owner, trace = ['initial'], []
     print(list(indexed_values(owner, trace)), owner, trace)
     trace = []

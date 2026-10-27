@@ -377,6 +377,27 @@ impl Context {
         error
     }
 
+    /// A subsequent failure on the same decode updates only the byte range and reason.
+    pub(super) fn advance_decode_error(
+        &mut self,
+        exception: Id,
+        start: usize,
+        end: usize,
+        reason: &str,
+    ) {
+        let reason = self.text(reason);
+        let Value::Raised(Error {
+            decode: Some(state),
+            ..
+        }) = self.heap.get_mut(exception)
+        else {
+            unreachable!("active decoder exception");
+        };
+        state.start = start as i64;
+        state.end = end as i64;
+        state.reason = reason;
+    }
+
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let mut error = Error::new(kind, "");
         error.args = Some(self.alloc(Value::Tuple(args.to_vec())));
@@ -450,6 +471,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
+    /// Backing dictionary shared by live class namespace proxies.
+    pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
@@ -660,6 +683,8 @@ pub(super) enum Value {
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
+        table: Id,
+        marker: Id,
     },
     Yielded(Id),
     AstWalk {
@@ -741,9 +766,8 @@ pub(super) enum FormatKind {
 
 #[derive(Clone)]
 pub(super) struct CachedCall {
-    pub args: Vec<Id>,
-    pub kwargs: Vec<(String, Id)>,
-    pub result: Id,
+    pub key: Id,
+    pub hash: i64,
 }
 
 impl Value {
@@ -853,6 +877,7 @@ impl Value {
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.dictionary);
                 }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
@@ -968,13 +993,14 @@ impl Value {
                 visit.extend([*function, *args, *keywords]);
                 visit.extend(coroutine_marker);
             }
-            Self::Cached { function, entries } => {
-                visit.push(*function);
-                for call in entries {
-                    visit.extend(&call.args);
-                    visit.extend(call.kwargs.iter().map(|(_, id)| *id));
-                    visit.push(call.result);
-                }
+            Self::Cached {
+                function,
+                entries,
+                table,
+                marker,
+            } => {
+                visit.extend([*function, *table, *marker]);
+                visit.extend(entries.iter().map(|call| call.key));
             }
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),

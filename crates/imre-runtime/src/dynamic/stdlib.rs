@@ -493,7 +493,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
         | ("random", "random")
-        | ("codecs", "lookup")
+        | ("codecs", "lookup" | "register_error" | "lookup_error")
         | ("marshal", "loads")
         | ("pickle", "dumps")
         | (
@@ -515,6 +515,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("warnings", "warn")
         | ("fnmatch", "filter")
         | ("subprocess", "run") => ctx.alloc(Value::Native(format!("{module}.{name}"))),
+        (
+            "codecs",
+            "strict_errors"
+            | "ignore_errors"
+            | "replace_errors"
+            | "xmlcharrefreplace_errors"
+            | "backslashreplace_errors"
+            | "namereplace_errors",
+        ) => ctx.builtin(&format!("codecs.{name}")),
         _ => {
             return Err(Error::new(
                 "AttributeError",
@@ -938,8 +947,14 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("time.") {
         return time::call(ctx, method, args, kwargs);
     }
-    if name == "codecs.lookup" {
-        return codecs::lookup(ctx, args, kwargs);
+    if let Some(function) = name.strip_prefix("codecs.") {
+        return match function {
+            "lookup" => codecs::lookup(ctx, args, kwargs),
+            "register_error" | "lookup_error" => {
+                codecs::error_registry(ctx, function, args, kwargs)
+            }
+            _ => codecs::builtin_handler(ctx, function, args, kwargs),
+        };
     }
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);
@@ -1318,10 +1333,7 @@ pub(super) fn call(
                 && matches!(ctx.heap.get(args[0]), Value::Function { .. })
                 && kwargs.is_empty()
             {
-                ctx.alloc(Value::Cached {
-                    function: args[0],
-                    entries: Vec::new(),
-                })
+                ctx.cached_function(args[0])
             } else {
                 return Err(Error::new(
                     "NotImplementedError",
@@ -1329,10 +1341,7 @@ pub(super) fn call(
                 ));
             }
         }
-        "functools._cached" => ctx.alloc(Value::Cached {
-            function: argument(args, 0)?,
-            entries: Vec::new(),
-        }),
+        "functools._cached" => ctx.cached_function(argument(args, 0)?),
         "collections.defaultdict" => ctx.alloc(Value::DefaultDict {
             factory: args.first().copied().unwrap_or(NONE),
             entries: Default::default(),

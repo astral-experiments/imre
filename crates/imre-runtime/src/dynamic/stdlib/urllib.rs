@@ -143,11 +143,26 @@ fn unquote(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) 
     if source.is_unescaped_text() {
         return Ok(id);
     }
-    let text = urlquote::decode_component(
-        source,
-        codec_option(ctx, encoding, "utf-8", "encoding")?,
-        codec_option(ctx, errors, "replace", "errors")?,
-    )?;
+    let encoding = codec_option(ctx, encoding, "utf-8", "encoding")?;
+    let errors = codec_option(ctx, errors, "replace", "errors")?;
+    let text = if errors.is_some_and(|name| super::codecs::uses_python_handler(ctx, name)) {
+        // A Python callback can allocate and move the boxed heap.
+        let options = (encoding.map(str::to_owned), errors.map(str::to_owned));
+        let owned = ctx.heap.get(id).clone();
+        let input = match &owned {
+            Value::Str(s) => UrlInput::Text(s),
+            Value::Bytes(b) => UrlInput::Bytes(b),
+            _ => unreachable!(),
+        };
+        urlquote::decode_component_with(
+            input,
+            options.0.as_deref(),
+            options.1.as_deref(),
+            |codec, data, policy| super::codecs::decode_slice(ctx, codec, data, policy),
+        )?
+    } else {
+        urlquote::decode_component(source, encoding, errors).map_err(|e| ctx.decode_error(e))?
+    };
     Ok(ctx.text(text))
 }
 
