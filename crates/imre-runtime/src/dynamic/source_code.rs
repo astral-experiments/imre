@@ -861,6 +861,15 @@ impl Context {
                 let b = eval(self, &v.right)?;
                 self.op(v.op.as_str(), a, b, NONE)
             }
+            Expr::UnaryOp(v) => {
+                let value = eval(self, &v.operand)?;
+                let op = match v.op {
+                    ast::UnaryOp::UAdd => "pos",
+                    ast::UnaryOp::USub => "neg",
+                    op => op.as_str(),
+                };
+                self.op(op, value, NONE, NONE)
+            }
             Expr::Compare(v) => {
                 let mut left = eval(self, &v.operands[0])?;
                 for (op, right) in v.ops.iter().zip(&v.operands[1..]) {

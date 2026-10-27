@@ -38,7 +38,7 @@ def stopped(cause):
 
 
 def raise_after_yield(error, cause):
-    yield 1
+    yield -1, +1, ~1, not 1
     raise error from cause
 
 
