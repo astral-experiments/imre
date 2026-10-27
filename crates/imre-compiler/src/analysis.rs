@@ -361,7 +361,7 @@ impl Session {
 
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
-    fn diagnostic_copy(&self) -> Result<Self, String> {
+    pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
         let mut copy = Self::new(&self.root, &self.extension_roots)?;
         for &file in &self.files {
             let path = file
@@ -571,6 +571,27 @@ impl Session {
             value.inferred_type(&model),
             Some(ty_python_semantic::types::Type::Never)
         )
+    }
+
+    /// Check annotated return types when a program leaves the exact native type checker.
+    pub(crate) fn check_return_types(
+        &mut self,
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+    ) -> Result<(), String> {
+        let mut rules = RuleSelection::default();
+        let rule = default_lint_registry()
+            .get("invalid-return-type")
+            .expect("registered ty lint");
+        rules.enable(
+            rule,
+            Severity::Error,
+            ty_python_semantic::lint::LintSource::Default,
+        );
+        DiagnosticRules::get(&self.db)
+            .set_rules(&mut self.db)
+            .to(Arc::new(rules));
+        self.errors(skipped, overloads)
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.

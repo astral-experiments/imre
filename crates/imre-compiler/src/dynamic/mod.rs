@@ -23,6 +23,8 @@ struct Imports {
     runtime_imports: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
+    pkgutil_names: HashSet<String>,
+    get_data_names: HashSet<String>,
     machinery_names: HashSet<String>,
     typed_machinery_receivers: HashSet<String>,
 }
@@ -178,6 +180,7 @@ impl<'a> Visitor<'a> for Imports {
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
+                        "pkgutil" => self.pkgutil_names.insert(bound.to_string()),
                         "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
                         "importlib.machinery" => self.machinery_names.insert(bound.to_string()),
                         _ => false,
@@ -190,6 +193,10 @@ impl<'a> Visitor<'a> for Imports {
                 self.add(imp.level, name);
                 for a in &imp.names {
                     let suffix = a.name.as_str();
+                    if imp.level == 0 && name == "pkgutil" && suffix == "get_data" {
+                        self.get_data_names
+                            .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
+                    }
                     if imp.level == 0 && name == "importlib" && suffix == "machinery" {
                         self.runtime_imports = true;
                         self.machinery_names
@@ -222,6 +229,35 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        // A resource lookup can be the first operation to load its package.
+        if let Expr::Call(call) = e
+            && match &*call.func {
+                Expr::Name(name) => self.get_data_names.contains(name.id.as_str()),
+                Expr::Attribute(attr) => {
+                    attr.attr.as_str() == "get_data"
+                        && matches!(&*attr.value, Expr::Name(name) if self.pkgutil_names.contains(name.id.as_str()))
+                }
+                _ => false,
+            }
+            && let Some(Expr::StringLiteral(package)) = call
+                .arguments
+                .args
+                .first()
+                .or_else(|| call.arguments.find_keyword("package").map(|kw| &kw.value))
+        {
+            let name = package.value.to_string();
+            if name.split('.').all(|part| {
+                let path = Path::new(part);
+                path.file_name() == Some(path.as_os_str()) && !part.contains('\0')
+            }) {
+                self.add(0, &name);
+            }
+        }
+        // Changes to sys.path can select a ZIP loader at runtime. Register the same
+        // spec factory used for explicit import_module and find_spec calls.
+        if cfg!(unix) && self.sys_path(e) {
+            self.add(0, "importlib");
+        }
         if let Expr::Attribute(a) = e
             && typed_machinery_export(a.attr.as_str())
             && let Some(receiver) = UnqualifiedName::from_expr(&a.value)
@@ -292,6 +328,7 @@ pub(crate) fn compile(
     options: &CompileOptions,
     runtime_imports: bool,
     registered_imports: RegisteredImports,
+    check_returns: impl FnOnce() -> Result<(), String>,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -424,6 +461,16 @@ pub(crate) fn compile(
                 if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
+                    let pkgutil_source;
+                    let source = if prefix == "pkgutil" {
+                        pkgutil_source = format!(
+                            "{source}\n_module_suffixes = {}\n",
+                            crate::modules::pkgutil_suffixes()
+                        );
+                        &pkgutil_source
+                    } else {
+                        source
+                    };
                     let imports = imports_for_module(&path, source)?;
                     sources.push((prefix.clone(), path, source.to_owned()));
                     work.push_back((prefix.clone(), package, imports));
@@ -440,6 +487,10 @@ pub(crate) fn compile(
                     } else {
                         inputs.missing.extend([init, file]);
                         if stem.is_dir() {
+                            inputs.directories.push((
+                                stem.clone(),
+                                stem.canonicalize().map_err(|e| e.to_string())?,
+                            ));
                             sources.push((prefix.clone(), stem, String::new()));
                         } else {
                             inputs.missing.push(stem);
@@ -485,6 +536,7 @@ pub(crate) fn compile(
         "command":command.is_some(),"paths":paths,
     });
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    check_returns()?;
     let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
     Ok(Some(Compilation {
         llvm_ir,

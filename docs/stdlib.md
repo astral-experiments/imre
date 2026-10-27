@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 87 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 42 modules with recorded suites, 118 complete test executions pass natively at both optimization levels; 15,152 of 15,299 upstream executions have a classification.
+**At a glance:** 89 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 42 modules with recorded suites, 118 complete test executions pass natively at both optimization levels; 15,152 of 15,299 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -54,12 +54,14 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `keyword` | Yes | Check hard and soft keywords with `iskeyword` and `issoftkeyword`. [Evidence](../benchmarks/cpython_stdlib/full/keyword/README.md) | [6 / 11](../benchmarks/cpython_stdlib/full/keyword/) | 3 | 0 |
 | `linecache` | Yes | Filesystem-backed `getline`, cache population and invalidation. [Evidence](../benchmarks/cpython_stdlib/full/linecache/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/linecache/) | 8 | 10 |
 | `logging` | Yes | Send runtime-loaded log messages to `sys.stderr` with `getLogger` and `StreamHandler`, change the handler stream, and rotate log files by size or time. [Evidence](../benchmarks/cpython_stdlib/full/logging/README.md) | [0 / 272](../benchmarks/cpython_stdlib/full/logging/) | 25 | 55 |
+| `marshal` | Yes | Decode integer, bytes, boolean, and None records with `loads`. [Evidence](../tests/fixtures/boxed_bytecache.py) | — | — | — |
 | `math` | Yes | `prod` multiplies integer factors from iterables with an optional integer start. [Evidence](../tests/fixtures/iterables/math_product.py) | — | — | — |
 | `mimetypes` | Yes | Guess the MIME type and encoding of a filename or URL with POSIX host tables or a custom database. [Evidence](../benchmarks/cpython_stdlib/full/mimetypes/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/mimetypes/) | 7 | 10 |
 | `numbers` | Yes | Check typed numeric values and builtin classes against `Number` with `isinstance` and `issubclass`. [Evidence](../tests/fixtures/unions/numeric_membership.py) | — | — | — |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 30 | 15 |
 | `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 136 | 63 |
+| `pickle` | Yes | Encode integers and booleans with `dumps(value, protocol=2)`. [Evidence](../tests/fixtures/boxed_bytecache.py) | — | — | — |
 | `pkgutil` | Yes | No API example recorded. | — | — | — |
 | `platform` | Yes | Read `system()`, `machine()`, and the running Python version from `python_version()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — | — |
@@ -145,7 +147,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `locale` |
 | `lzma` |
 | `mailbox` |
-| `marshal` |
 | `mmap` |
 | `modulefinder` |
 | `msvcrt` |
@@ -157,7 +158,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `opcode` |
 | `optparse` |
 | `pdb` |
-| `pickle` |
 | `pickletools` |
 | `plistlib` |
 | `poplib` |

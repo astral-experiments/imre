@@ -38,7 +38,11 @@ pub(super) fn attrgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
 
 pub(super) fn itemgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     check_args("itemgetter", args, kwargs, 1..=usize::MAX)?;
-    let keys = ctx.alloc(Value::Tuple(args.to_vec()));
+    let mut keys = Vec::new();
+    keys.try_reserve_exact(args.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    keys.extend_from_slice(args);
+    let keys = ctx.alloc(Value::Tuple(keys));
     Ok(ctx.alloc(Value::ItemGetter(keys)))
 }
 

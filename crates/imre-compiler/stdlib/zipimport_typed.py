@@ -25,3 +25,7 @@ def _index(path: str) -> bool:
 
 def _read(path: str, key: str) -> bytes:
     return _indexes[path]._read_import_data(key)
+
+
+class zipimporter(_ZipResourceLoader):
+    """Read stored or deflated ZIP resources."""

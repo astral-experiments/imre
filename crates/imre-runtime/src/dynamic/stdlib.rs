@@ -32,6 +32,7 @@ mod marshal;
 mod math;
 mod operator;
 mod pickle;
+mod pkgutil;
 mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
@@ -64,6 +65,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "posix"
             | "posixpath"
             | "_imre_posixpath"
+            | "_imre_pkgutil"
             | "fnmatch"
             | "itertools"
             | "operator"
@@ -451,8 +453,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
+        | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_posixpath", "extension_start" | "isfile")
-        | ("_imre_zipimport", "exists" | "index" | "read")
+        | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -680,6 +683,9 @@ pub(super) fn call(
     if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
         return posixpath::call(ctx, name, args, kwargs);
     }
+    if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
+        return pkgutil::call(ctx, operation, args, kwargs);
+    }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
     }
@@ -706,7 +712,7 @@ pub(super) fn call(
             ("find_spec", [fullname, original], []) => {
                 let fullname = ctx.str_value(*fullname)?.to_owned();
                 let original = ctx.str_value(*original)?.to_owned();
-                return ctx.find_spec(&fullname, &original);
+                return ctx.find_spec(&fullname, &original, false);
             }
             ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
             ("loader_fields", [object], []) => {
@@ -974,6 +980,20 @@ pub(super) fn call(
                 .iter()
                 .any(|(key, _)| !keywords.contains(&key.as_str())))
     {
+        if name == "file.flush"
+            && let Some((&receiver, positional)) = args.split_first()
+        {
+            let class = ctx.type_name(receiver).trim_start_matches("_io.");
+            let message = if kwargs.is_empty() {
+                format!(
+                    "{class}.flush() takes no arguments ({} given)",
+                    positional.len()
+                )
+            } else {
+                format!("{class}.flush() takes no keyword arguments")
+            };
+            return Err(Error::new("TypeError", message));
+        }
         return Err(Error::new(
             "TypeError",
             format!("unsupported arguments to {name}"),

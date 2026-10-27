@@ -62,12 +62,118 @@ impl Context {
         Some(error)
     }
 
+    /// Lazily allocate the exact dictionary exposed through BaseException.__dict__.
+    fn exception_dictionary(&mut self, obj: Id) -> Id {
+        let Value::Raised(error) = self.heap.get(obj) else {
+            unreachable!()
+        };
+        if let Some(dictionary) = error.trace.as_ref().and_then(|trace| trace.dictionary) {
+            return dictionary;
+        }
+        let dictionary = self.dict(Vec::new());
+        let Value::Raised(error) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        error.tracing().dictionary = Some(dictionary);
+        dictionary
+    }
+
+    /// Instance attributes use raw dict storage even when __dict__ was set to a subclass.
+    fn exception_field(&mut self, dictionary: Option<Id>, name: &str) -> Result<Option<Id>> {
+        let Some(dictionary) = dictionary else {
+            return Ok(None);
+        };
+        let storage = self.dict_storage(dictionary).expect("exception dictionary");
+        let key = self.text(name);
+        let (_, index) = self.find_dictionary_key(storage, key, None)?;
+        Ok(index.map(|i| self.dict_entries(storage).expect("exception dictionary")[i].1))
+    }
+
+    fn update_exception_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<()> {
+        let dictionary = if value.is_some() {
+            self.exception_dictionary(obj)
+        } else {
+            let Value::Raised(error) = self.heap.get(obj) else {
+                unreachable!()
+            };
+            let Some(dictionary) = error.trace.as_ref().and_then(|trace| trace.dictionary) else {
+                return Err(self.missing_attribute(obj, name));
+            };
+            dictionary
+        };
+        let storage = self.dict_storage(dictionary).expect("exception dictionary");
+        if let Some(value) = value {
+            let key = self.text(name);
+            self.put_item(storage, key, value)
+        } else {
+            self.delete_dict_attribute(obj, storage, name)
+        }
+    }
+
+    /// Native member descriptors take precedence over entries in the instance dictionary.
+    fn native_exception_descriptor(&self, error: &Error, name: &str) -> bool {
+        let inherits = |kind| {
+            self.builtins
+                .get(kind)
+                .is_some_and(|class| self.raised_error_matches(error, *class))
+        };
+        match name {
+            "args"
+            | "__class__"
+            | "__context__"
+            | "__cause__"
+            | "__traceback__"
+            | "__suppress_context__" => true,
+            "value" => inherits("StopIteration"),
+            "msg" => inherits("ImportError") || inherits("SyntaxError"),
+            "name" => {
+                inherits("ImportError") || inherits("AttributeError") || inherits("NameError")
+            }
+            "obj" => inherits("AttributeError"),
+            "path" | "name_from" => inherits("ImportError"),
+            "code" => inherits("SystemExit"),
+            "filename" => inherits("OSError") || inherits("SyntaxError"),
+            "errno" | "strerror" | "filename2" | "characters_written" => inherits("OSError"),
+            "lineno"
+            | "offset"
+            | "text"
+            | "end_lineno"
+            | "end_offset"
+            | "print_file_and_line"
+            | "_metadata" => inherits("SyntaxError"),
+            "encoding" | "object" | "start" | "end" | "reason" => {
+                inherits("UnicodeEncodeError")
+                    || inherits("UnicodeDecodeError")
+                    || inherits("UnicodeTranslateError")
+            }
+            "message" | "exceptions" => inherits("BaseExceptionGroup"),
+            _ => false,
+        }
+    }
+
     /// Find a Python-declared member on an exception that retains its original class.
     fn exception_member(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
         self.class_attr(error.class?, name)
+    }
+
+    /// Bind an override only if it precedes the built-in numeric method in the MRO.
+    pub(super) fn bound_numeric_slot(&mut self, value: Id, slot: &str) -> Result<Option<Id>> {
+        let class = match *self.heap.get(value) {
+            Value::Instance { class, .. } => class,
+            Value::Raised(_) => self.exact_type(value)?,
+            _ => return Ok(None),
+        };
+        let method = self.find_in_mro(class, |base| match self.heap.get(base) {
+            Value::Native(name) if matches!(name.as_str(), "int" | "float") => Some(None),
+            _ => self.own_class_attr(base, slot).map(Some),
+        });
+        method
+            .flatten()
+            .map(|method| self.bind_attribute(method, value, class))
+            .transpose()
     }
 
     /// Special methods are looked up on the type, even if the instance shadows them.
@@ -417,7 +523,7 @@ impl Context {
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
-            | Value::Cell { .. }
+            | Value::Cell(_)
             | Value::Generator { .. }
             | Value::Module { .. }
             | Value::ThreadLocal(_)
@@ -772,15 +878,20 @@ impl Context {
             }
             return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
         }
-        if let Value::Raised(error) = self.heap.get(obj)
-            && let Some(class) = error.class
-        {
-            let field = error
-                .trace
-                .as_ref()
-                .and_then(|trace| trace.fields.get(name).copied());
-            if field.is_some() || self.class_attr(class, name).is_some() {
+        if let Value::Raised(error) = self.heap.get(obj) {
+            let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
+            if let Some(class) = error.class
+                && let Some(member) = self.class_attr(class, name)
+            {
+                let field = if self.data_descriptor(member) {
+                    None
+                } else {
+                    self.exception_field(dictionary, name)?
+                };
                 return self.instance_attribute(obj, class, field, name);
+            }
+            if name == "__dict__" {
+                return Ok(self.exception_dictionary(obj));
             }
         }
         if name == "value"
@@ -907,13 +1018,8 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Cell {
-                scope,
-                name: cell_name,
-            } if name == "cell_contents" => {
-                return self
-                    .scope_name(scope, &cell_name)
-                    .ok_or_else(|| Error::new("ValueError", "Cell is empty"));
+            Value::Cell(contents) if name == "cell_contents" => {
+                return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
@@ -1377,6 +1483,14 @@ impl Context {
             }
             _ => {}
         }
+        if let Value::Raised(error) = self.heap.get(obj)
+            && !self.native_exception_descriptor(error, name)
+        {
+            let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
+            if let Some(field) = self.exception_field(dictionary, name)? {
+                return Ok(field);
+            }
+        }
         self.builtin_attribute(obj, name)
     }
 
@@ -1449,14 +1563,10 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
-        if let Value::Cell {
-            scope,
-            name: cell_name,
-        } = self.heap.get(obj).clone()
-            && name == "cell_contents"
+        if name == "cell_contents"
+            && let Value::Cell(contents) = self.heap.get_mut(obj)
         {
-            let key = self.text(&cell_name);
-            self.remove_binding(scope, &cell_name, key)?;
+            *contents = None;
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
@@ -1483,18 +1593,11 @@ impl Context {
             self.call(delete, vec![obj], Vec::new())?;
             return Ok(());
         }
-        if let Value::Raised(error) = self.heap.get_mut(obj) {
-            if error
-                .trace
-                .as_mut()
-                .and_then(|trace| trace.fields.remove(name))
-                .is_some()
-            {
-                return Ok(());
-            }
-            if exception_member.is_some() {
-                return Err(self.missing_attribute(obj, name));
-            }
+        if exception_member.is_some() {
+            return self.update_exception_field(obj, name, None);
+        }
+        if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return Err(Error::new("TypeError", "cannot delete __dict__"));
         }
         if name == "value"
             && let Some(error) = self.stop_iteration_error(obj)
@@ -1514,6 +1617,11 @@ impl Context {
                 return Ok(());
             }
             return Err(Error::new("AttributeError", "readonly attribute"));
+        }
+        if let Value::Raised(error) = self.heap.get(obj)
+            && !self.native_exception_descriptor(error, name)
+        {
+            return self.update_exception_field(obj, name, None);
         }
         match *self.heap.get(obj) {
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
@@ -1691,13 +1799,10 @@ impl Context {
                 Some(value),
             );
         }
-        if let Value::Cell {
-            scope,
-            name: cell_name,
-        } = self.heap.get(obj).clone()
-            && name == "cell_contents"
+        if name == "cell_contents"
+            && let Value::Cell(contents) = self.heap.get_mut(obj)
         {
-            self.bind(scope, &cell_name, value);
+            *contents = Some(value);
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
@@ -1733,10 +1838,23 @@ impl Context {
         {
             return Err(Error::new("AttributeError", "can't set attribute"));
         }
-        if exception_member.is_some()
-            && let Value::Raised(error) = self.heap.get_mut(obj)
-        {
-            error.tracing().fields.insert(name.to_owned(), value);
+        if exception_member.is_some() {
+            return self.update_exception_field(obj, name, Some(value));
+        }
+        if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            if self.dict_storage(value).is_none() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__dict__ must be set to a dictionary, not a '{}'",
+                        self.type_name(value)
+                    ),
+                ));
+            }
+            let Value::Raised(error) = self.heap.get_mut(obj) else {
+                unreachable!()
+            };
+            error.tracing().dictionary = Some(value);
             return Ok(());
         }
         if name == "value"
@@ -1759,6 +1877,11 @@ impl Context {
                 }
                 _ => {}
             }
+        }
+        if let Value::Raised(error) = self.heap.get(obj)
+            && !self.native_exception_descriptor(error, name)
+        {
+            return self.update_exception_field(obj, name, Some(value));
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {

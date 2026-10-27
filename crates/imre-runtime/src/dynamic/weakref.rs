@@ -78,16 +78,12 @@ impl Context {
             .chain(ancestors)
             .any(|&base| match self.heap.get(base) {
                 Value::Native(name) => matches!(name.as_str(), "set" | "frozenset"),
-                Value::Class { scope, .. } => match self.scope_name(*scope, "__slots__") {
-                    None => true,
-                    Some(slots) => match self.heap.get(slots) {
-                        Value::Str(name) => name == "__weakref__",
-                        Value::Tuple(names) | Value::List(names) => names.iter().any(|&name| {
-                            self.str_value(name).is_ok_and(|name| name == "__weakref__")
-                        }),
-                        _ => false,
-                    },
-                },
+                Value::Class { scope, .. } => self
+                    .scope_data(*scope)
+                    .class_namespace
+                    .as_deref()
+                    .and_then(|namespace| namespace.slot_names.as_deref())
+                    .is_none_or(|names| names.iter().any(|name| name == "__weakref__")),
                 _ => false,
             })
     }
@@ -95,6 +91,9 @@ impl Context {
     fn weakrefable(&self, value: Id) -> bool {
         match self.heap.get(value) {
             Value::Instance { class, .. } => self.class_instances_support_weakref(*class),
+            Value::Raised(error) => error
+                .class
+                .is_some_and(|class| self.class_instances_support_weakref(class)),
             Value::Class { .. }
             | Value::Function { .. }
             | Value::Module { .. }
