@@ -11,6 +11,7 @@ crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 allocator-api2 = "=0.2.21"
+imre-ast = { path = "../imre-ast" }
 imre-regex = { path = "../imre-regex" }
 indexmap = "=2.14.2"
 base64 = "=0.22.1"
