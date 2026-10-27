@@ -6,8 +6,8 @@ An ahead-of-time compiler for typed Python, written in Rust.
 > This README includes human edits; all code changes, PR summaries, and additional
 > documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
 >
-> Imre implements only a small part of Python and its standard library, and future
-> development and maintenance are uncertain. Use at your own risk.
+> Imre implements only a small part of Python and its standard library,
+> with no guarantee of future development or maintenance. Use at your own risk.
 
 ## Benchmarks
 
