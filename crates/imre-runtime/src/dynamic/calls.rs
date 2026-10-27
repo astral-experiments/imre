@@ -215,6 +215,8 @@ impl Context {
                         name.as_str(),
                         "ast.AST.__init__"
                             | "object.__getattribute__"
+                            | "enum.auto.__init__"
+                            | "enum.auto.__repr__"
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
@@ -2174,11 +2176,14 @@ impl Context {
         };
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
+        let enum_namespace = self.enum_namespace(&bases);
+        let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
         let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         body_scope.class_body = Some(Vec::new());
+        body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
         let mut globals = parent;
         while let Some(outer) = self.scope_data(globals).parent {
@@ -2254,10 +2259,8 @@ impl Context {
         }
         self.init_abstract_class(class, &name, scope)?;
         self.classes.insert(name, class);
-        if self.has_base(class, "enum.Enum") {
-            let scalar = self
-                .has_base(class, "enum.IntFlag")
-                .then(|| self.builtin("enum.IntFlag"));
+        if let Some(kind) = enum_kind {
+            let scalar = kind.scalar_base().map(|base| self.builtin(base));
             self.populate_enum(class, scalar)?;
         }
         Ok(class)

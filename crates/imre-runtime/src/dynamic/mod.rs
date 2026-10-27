@@ -590,6 +590,7 @@ impl Context {
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
         self.alloc(Value::Scope(Scope {
             class_body: None,
+            enum_namespace: None,
             is_abstract: false,
             class_cell: None,
             class_lineage: None,
