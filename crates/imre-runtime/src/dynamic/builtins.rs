@@ -493,7 +493,7 @@ fn set_attribute(
     if base {
         ctx.default_set_attr(*obj, &attr_name, *value)?;
     } else {
-        ctx.set_attr(*obj, &attr_name, *value)?;
+        ctx.set_named_attr(*obj, &attr_name, Some(*attr), *value)?;
     }
     Ok(NONE)
 }
@@ -527,11 +527,11 @@ fn delete_attribute(
     if base && ctx.builtin_type_name(*obj) == Some("type") {
         return Err(type_error("can't apply this __delattr__ to type object"));
     }
-    let attr = attribute_name(ctx, *attr)?;
+    let name = attribute_name(ctx, *attr)?;
     if base {
-        ctx.default_delete_attr(*obj, &attr)?;
+        ctx.default_delete_attr(*obj, &name)?;
     } else {
-        ctx.delete_attr(*obj, &attr)?;
+        ctx.delete_named_attr(*obj, &name, Some(*attr))?;
     }
     Ok(NONE)
 }
@@ -740,7 +740,7 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
             let attr = attribute_name(ctx, args[1])?;
-            match ctx.lookup_attr(args[0], &attr) {
+            match ctx.lookup_named_attr(args[0], &attr, Some(args[1])) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
                 Err(e) if name == "hasattr" && ctx.is_attribute_error(&e) => Ok(FALSE),
                 Err(e) if args.len() == 3 && ctx.is_attribute_error(&e) => Ok(args[2]),

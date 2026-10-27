@@ -38,6 +38,65 @@ def current():
         except (AttributeError, TypeError) as error:
             print(type(error).__name__, str(error))
     print(state.item, backing is state.__dict__)
+    attribute_names()
+
+
+def attribute_names():
+    class Key(str):
+        def __eq__(self, other):
+            print("compared", other)
+            return True
+
+        def __repr__(self):
+            return "<original key>"
+
+    key = Key("item")
+    state = local()
+    state.item = 7
+    print(getattr(state, key) is state.__dict__, hasattr(state, key))
+    for action in (lambda: setattr(state, key, 8), lambda: delattr(state, key)):
+        try:
+            action()
+        except AttributeError as error:
+            print(type(error).__name__, str(error), state.item)
+
+    class Hooks:
+        def __getattribute__(self, name):
+            return name is key
+
+        def __setattr__(self, name, value):
+            print("set", name is key)
+
+        def __delattr__(self, name):
+            print("delete", name is key)
+
+    hooks = Hooks()
+    print(getattr(hooks, key))
+    setattr(hooks, key, 8)
+    delattr(hooks, key)
+
+    class Fallback:
+        def __getattr__(self, name):
+            return name is key
+
+    print(getattr(Fallback(), key))
+
+    class RaisingComparison(str):
+        def __eq__(self, other):
+            raise LookupError("name comparison")
+
+    class RaisingRepr(Key):
+        def __repr__(self):
+            raise LookupError("name repr")
+
+    bad = RaisingComparison("item")
+    for action in (lambda: getattr(state, bad), lambda: hasattr(state, bad),
+                   lambda: setattr(state, bad, 8), lambda: delattr(state, bad),
+                   lambda: setattr(state, RaisingRepr("item"), 8)):
+        try:
+            action()
+        except LookupError as error:
+            print(error.args, state.item)
 
 
 if __name__ == "__main__":
