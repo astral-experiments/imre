@@ -93,8 +93,8 @@ pub(crate) use text::translate;
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, urlquote, urlsplit};
 pub(crate) use text::{
-    expand_tabs, find_text, normalize_unicode, ord_byte, ord_char, partition_text, python_isspace,
-    split_parts,
+    expand_tabs, find_text, normalize_unicode, ord_byte, ord_char, partition_text, python_alnum,
+    python_isspace, split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};

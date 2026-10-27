@@ -1032,19 +1032,24 @@ pub(super) fn method(
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
-    if name == "isspace" {
+    if matches!(name, "isalnum" | "isspace") {
         if !kwargs.is_empty() {
-            return Err(type_error("str.isspace() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "str.{name}() takes no keyword arguments"
+            )));
         }
         if !args.is_empty() {
             return Err(type_error(format!(
-                "str.isspace() takes no arguments ({} given)",
+                "str.{name}() takes no arguments ({} given)",
                 args.len()
             )));
         }
-        return Ok(boolean(crate::objects::python_isspace(
-            ctx.str_value(receiver)?,
-        )));
+        let predicate = if name == "isalnum" {
+            crate::objects::python_alnum
+        } else {
+            crate::objects::python_isspace
+        };
+        return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }
     if name == "translate" {
         positional(name, kwargs)?;

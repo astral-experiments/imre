@@ -230,7 +230,7 @@ pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str)
 }
 
 /// CPython 3.14's alphanumeric characters are Unicode 16 letters and numbers.
-pub(super) fn python_alnum(text: &str) -> bool {
+pub(crate) fn python_alnum(text: &str) -> bool {
     if text.is_ascii() {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
     }
