@@ -823,6 +823,29 @@ impl Context {
                 .is_some_and(|&base| self.raised_error_matches(error, base))
     }
 
+    /// Materialize native exception arguments before their backing fields can change.
+    fn exception_argument_tuple(&mut self, obj: Id, error: Error) -> Id {
+        if let Some(args) = error.args {
+            return args;
+        }
+        let fields = if let Some(os) = error.os_args {
+            vec![self.int(os.errno), self.text(os.description)]
+        } else if error.message.is_empty() {
+            Vec::new()
+        } else {
+            vec![
+                self.import_error_message(obj, None)
+                    .unwrap_or_else(|| self.text(error.message)),
+            ]
+        };
+        let tuple = self.alloc(Value::Tuple(fields));
+        let Value::Raised(error) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        error.args = Some(tuple);
+        tuple
+    }
+
     /// Preserve ImportError's original message when its arguments are replaced.
     pub(super) fn import_error_message(&mut self, obj: Id, replacement: Option<Id>) -> Option<Id> {
         let Value::Raised(error) = self.heap.get(obj) else {
@@ -832,6 +855,9 @@ impl Context {
             return None;
         }
         let message = if let Some(message) = replacement {
+            if error.args.is_none() {
+                self.exception_argument_tuple(obj, error.clone());
+            }
             message
         } else {
             if let Some(message) = error.trace.as_ref().and_then(|trace| trace.import_message) {
@@ -1303,25 +1329,7 @@ impl Context {
                 return Ok(value.map_or(NONE, |value| self.text(value)));
             }
             Value::Raised(error) if name == "args" => {
-                if let Some(args) = error.args {
-                    return Ok(args);
-                }
-                let fields = if let Some(os) = error.os_args {
-                    vec![self.int(os.errno), self.text(os.description)]
-                } else if error.message.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![
-                        self.import_error_message(obj, None)
-                            .unwrap_or_else(|| self.text(error.message)),
-                    ]
-                };
-                let tuple = self.alloc(Value::Tuple(fields));
-                let Value::Raised(error) = self.heap.get_mut(obj) else {
-                    unreachable!()
-                };
-                error.args = Some(tuple);
-                return Ok(tuple);
+                return Ok(self.exception_argument_tuple(obj, error));
             }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),

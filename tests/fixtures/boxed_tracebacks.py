@@ -247,3 +247,12 @@ BaseException.__init__(imported, "replacement")
 print(imported.msg, imported.args, str(imported), imported.name is module_name)
 imported.__init__("bound")
 print(imported.msg, imported.args, imported.name)
+
+# A loader error keeps its original args even when msg is written first.
+from importlib import import_module
+
+try:
+    import_module("missing_" + "boxed_args_package.child")
+except ImportError as imported:
+    imported.msg = "replacement"
+    print(str(imported), imported.args)
