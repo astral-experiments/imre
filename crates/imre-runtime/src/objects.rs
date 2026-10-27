@@ -87,7 +87,7 @@ pub(crate) use text::{
     expand_tabs, find_text, ord_byte, ord_char, partition_text, python_isspace, split_parts,
 };
 mod typing;
-pub(crate) use text::short_string;
+pub(crate) use text::{chr_scalar, short_string};
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
