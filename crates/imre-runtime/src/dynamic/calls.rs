@@ -423,6 +423,7 @@ impl Context {
                             | "list.index"
                             | "list.pop"
                             | "list.clear"
+                            | "list.copy"
                             | "list.reverse"
                             | "list.sort"
                             | "map.__iter__"
@@ -1675,7 +1676,10 @@ impl Context {
             }
             Value::Native(class)
                 if class == "list"
-                    && matches!(name, "clear" | "index" | "pop" | "reverse" | "sort") =>
+                    && matches!(
+                        name,
+                        "clear" | "copy" | "index" | "pop" | "reverse" | "sort"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("list.{name}")));
             }

@@ -478,7 +478,7 @@ pub(super) fn method(
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
-    if let Some(method @ ("clear" | "index" | "pop" | "reverse" | "sort")) =
+    if let Some(method @ ("clear" | "copy" | "index" | "pop" | "reverse" | "sort")) =
         name.strip_prefix("list.")
     {
         let Some((&receiver, args)) = args.split_first() else {
@@ -510,6 +510,10 @@ pub(super) fn method(
                 let Value::List(items) = ctx.heap.get_mut(receiver) else {
                     unreachable!()
                 };
+                if method == "copy" {
+                    let copy = items.clone();
+                    return Ok(ctx.alloc(Value::List(copy)));
+                }
                 if method == "reverse" {
                     items.reverse();
                 } else {

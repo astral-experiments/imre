@@ -18,6 +18,14 @@ class DrainingIndex:
 
 
 def current():
+    from copy import copy
+
+    element = []
+    original = [element, element]
+    for clone in (original.copy(), list.copy(original), copy(original)):
+        assert clone is not original and clone[0] is clone[1] is element
+        clone.pop()
+    assert len(original) == 2
     retained = {}
     items = [retained, 2, 3]
     alias = items
