@@ -313,6 +313,11 @@ pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_dedent(text: *const Str) -> *const Str {
     // SAFETY: the input stays live and no user code runs while it is borrowed.
     let text = unsafe { &*text };
+    StrOwner::into_raw(StrOwner::new(dedent(text)))
+}
+
+/// Remove common indentation with the same whitespace rules in both runtimes.
+pub(crate) fn dedent(text: &str) -> Str {
     let blank = |line: &str| line.chars().all(python_whitespace);
     let mut lines = text.split('\n').filter(|line| !blank(line));
     let first = lines.next().unwrap_or("");
@@ -338,7 +343,7 @@ pub unsafe extern "C" fn imre_str_dedent(text: *const Str) -> *const Str {
             result.push_str(&line[margin.len()..]);
         }
     }
-    StrOwner::into_raw(StrOwner::new(result))
+    result
 }
 
 thread_local! {

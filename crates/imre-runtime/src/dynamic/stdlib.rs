@@ -28,6 +28,7 @@ pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
 mod json;
 mod logging;
+mod metadata;
 mod marshal;
 mod math;
 mod operator;
@@ -70,6 +71,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "posix"
             | "posixpath"
             | "_imre_posixpath"
+            | "_imre_metadata"
             | "_imre_pkgutil"
             | "fnmatch"
             | "itertools"
@@ -480,6 +482,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
+        | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
         | ("_imre_posixpath", "extension_start" | "isfile")
         | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
@@ -770,6 +773,9 @@ pub(super) fn call(
         || name.starts_with("_imre_posixpath.")
     {
         return posixpath::call(ctx, name, args, kwargs);
+    }
+    if let Some(operation) = name.strip_prefix("_imre_metadata.") {
+        return metadata::call(ctx, operation, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
         return pkgutil::call(ctx, operation, args, kwargs);
