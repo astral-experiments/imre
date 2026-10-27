@@ -450,15 +450,156 @@ impl Context {
                             })
                         }))
             }
-            (Value::Set { entries: x, .. }, Value::Set { entries: y, .. }) => {
-                x.len() == y.len() && x.iter().all(|&(k, _)| y.iter().any(|&(j, _)| equal(k, j)))
-            }
+            (Value::Set { .. }, Value::Set { .. }) => self.equal_sets(a, b, remaining, exhausted),
             _ => match (self.sequence(a), self.sequence(b)) {
                 (Some(x), Some(y)) => {
                     x.len() == y.len() && x.iter().zip(y).all(|(&i, j)| equal(i, j))
                 }
                 _ => false,
             },
+        }
+    }
+    // Preserve set candidate order while visiting nested set and tuple pairs iteratively.
+    fn equal_sets(&self, a: Id, b: Id, remaining: usize, exhausted: &mut bool) -> bool {
+        struct Frame {
+            left: Id,
+            right: Id,
+            index: usize,
+            candidate: usize,
+            remaining: usize,
+            tuple: bool,
+        }
+        let mut frames = vec![Frame {
+            left: a,
+            right: b,
+            index: 0,
+            candidate: 0,
+            remaining,
+            tuple: false,
+        }];
+        let mut result = None;
+        loop {
+            let Some(frame) = frames.last_mut() else {
+                return result.unwrap_or(true);
+            };
+            if let Some(equal) = result.take() {
+                if equal {
+                    frame.index += 1;
+                    frame.candidate = 0;
+                } else if frame.tuple {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                } else {
+                    frame.candidate += 1;
+                }
+            }
+            let pair = if frame.tuple {
+                let (Value::Tuple(left), Value::Tuple(right)) =
+                    (self.heap.get(frame.left), self.heap.get(frame.right))
+                else {
+                    unreachable!()
+                };
+                if left.len() != right.len() {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                }
+                if frame.index == left.len() {
+                    frames.pop();
+                    result = Some(true);
+                    continue;
+                }
+                (left[frame.index], right[frame.index])
+            } else {
+                let (Value::Set { entries: left, .. }, Value::Set { entries: right, .. }) =
+                    (self.heap.get(frame.left), self.heap.get(frame.right))
+                else {
+                    unreachable!()
+                };
+                if left.len() != right.len()
+                    || frame.candidate == right.len() && frame.index < left.len()
+                {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                }
+                if frame.index == left.len() {
+                    frames.pop();
+                    result = Some(true);
+                    continue;
+                }
+                (left[frame.index].0, right[frame.candidate].0)
+            };
+            let (mut x, mut y) = pair;
+            let mut depth = frame.remaining - 1;
+            loop {
+                if x == y {
+                    result = Some(true);
+                    break;
+                }
+                if depth == 0 {
+                    *exhausted = true;
+                    result = Some(false);
+                    break;
+                }
+                let (raw_x, raw_y) = (x, y);
+                (x, y) = (self.scalar_value(x), self.scalar_value(y));
+                let tail = match (self.heap.get(x), self.heap.get(y)) {
+                    (Value::GenericAlias(a), Value::GenericAlias(b)) => {
+                        if a.kind != b.kind || a.origin != b.origin {
+                            result = Some(false);
+                            break;
+                        }
+                        Some((a.args, b.args))
+                    }
+                    (Value::Weak(a), Value::Weak(b))
+                        if a.kind == weakref::Kind::Reference
+                            && b.kind == weakref::Kind::Reference =>
+                    {
+                        match (a.target, b.target) {
+                            (Some(left), Some(right)) => Some((left, right)),
+                            _ => {
+                                result = Some(false);
+                                break;
+                            }
+                        }
+                    }
+                    (Value::Method { .. }, Value::Method { .. }) => {
+                        match self.method_equality_operands(x, y) {
+                            Some((left, right, true)) => Some((left, right)),
+                            _ => {
+                                result = Some(false);
+                                break;
+                            }
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(pair) = tail {
+                    (x, y) = pair;
+                    depth -= 1;
+                    continue;
+                }
+                let tuple = match (self.heap.get(x), self.heap.get(y)) {
+                    (Value::Set { .. }, Value::Set { .. }) => Some(false),
+                    (Value::Tuple(_), Value::Tuple(_)) => Some(true),
+                    _ => None,
+                };
+                if let Some(tuple) = tuple {
+                    frames.push(Frame {
+                        left: x,
+                        right: y,
+                        index: 0,
+                        candidate: 0,
+                        remaining: depth,
+                        tuple,
+                    });
+                } else {
+                    result = Some(self.equal_inner(raw_x, raw_y, depth, exhausted));
+                }
+                break;
+            }
         }
     }
     pub(super) fn compare(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
