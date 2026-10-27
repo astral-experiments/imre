@@ -42,22 +42,26 @@ impl AliasKind {
     }
 }
 
+/// Render a type used in a generic alias or a union.
+pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
+    match ctx.heap.get(id) {
+        Value::Ellipsis => "...".to_owned(),
+        Value::Native(name) => name.clone(),
+        Value::Class { name, scope, .. } => format!("{}.{name}", ctx.scope_data(*scope).module),
+        _ => ctx.repr(id),
+    }
+}
+
 impl Alias {
     pub(super) fn repr(&self, ctx: &Context) -> String {
-        let type_repr = |id| match ctx.heap.get(id) {
-            Value::Ellipsis => "...".to_owned(),
-            Value::Native(name) => name.clone(),
-            Value::Class { name, scope, .. } => format!("{}.{name}", ctx.scope_data(*scope).module),
-            _ => ctx.repr(id),
-        };
         let Value::Tuple(args) = ctx.heap.get(self.args) else {
             unreachable!()
         };
-        let mut args: Vec<_> = args.iter().map(|&id| type_repr(id)).collect();
+        let mut args: Vec<_> = args.iter().map(|&id| type_repr(ctx, id)).collect();
         let origin = if self.kind == AliasKind::Callable {
             "typing.Callable".to_owned()
         } else {
-            type_repr(self.origin)
+            type_repr(ctx, self.origin)
         };
         let params = if matches!(self.kind, AliasKind::Callable | AliasKind::AbcCallable)
             && args.first().is_none_or(|arg| arg != "...")
@@ -125,15 +129,18 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
     class
 }
 
-fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
+pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
     let mut vars = Vec::new();
     for &arg in args {
         let members = match ctx.heap.get(arg) {
             Value::TypeVar(_) => std::slice::from_ref(&arg),
-            Value::GenericAlias(alias) => match ctx.heap.get(alias.parameters) {
-                Value::Tuple(members) => members.as_slice(),
-                _ => unreachable!(),
-            },
+            Value::GenericAlias(Alias { parameters, .. })
+            | Value::Union(super::union::Union { parameters, .. }) => {
+                match ctx.heap.get(*parameters) {
+                    Value::Tuple(members) => members.as_slice(),
+                    _ => unreachable!(),
+                }
+            }
             _ => continue,
         };
         for &param in members {
@@ -719,6 +726,7 @@ pub(super) fn call(
         ("Any", _) => Err(Error::new("TypeError", "Any cannot be instantiated")),
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
             Value::GenericAlias(a) => a.origin,
+            Value::Union(_) => super::union::class(ctx),
             Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(v) => *v,
             Value::Native(name) if name == "typing.Callable" => {
                 named_class(ctx, "collections.abc", "Callable")
@@ -742,6 +750,7 @@ pub(super) fn call(
                 }
             }
             Value::GenericAlias(a) => a.args,
+            Value::Union(u) => u.args,
             _ => ctx.alloc(Value::Tuple(vec![])),
         }),
         ("alias_mro_entries", [id, bases]) => alias_bases(ctx, *id, *bases),
@@ -802,6 +811,7 @@ impl Context {
 
     pub(super) fn python_instance_check(&self, value: Id, class: Id) -> Result<bool> {
         match self.heap.get(class) {
+            Value::Union(union) => self.python_instance_check(value, union.args),
             Value::Tuple(classes) => {
                 for &class in classes {
                     if self.python_instance_check(value, class)? {

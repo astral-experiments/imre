@@ -578,6 +578,7 @@ def report(text):
             "boxed_math_rounding.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
+            "boxed_class_union.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",

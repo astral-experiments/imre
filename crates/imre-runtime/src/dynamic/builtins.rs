@@ -82,6 +82,7 @@ exception_kinds!(
 
 const FUNCTIONS: &[&str] = &[
     "len",
+    "hash",
     "reversed",
     "dir",
     "sorted",
@@ -953,6 +954,12 @@ pub(super) fn call(
             let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
             let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
             Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
+        }
+        "hash" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let hash = ctx.dictionary_hash(args[0])?;
+            Ok(ctx.int(hash))
         }
         "chr" | "ord" => {
             if !kwargs.is_empty() {
