@@ -517,9 +517,15 @@ impl Initialization {
             if module.snapshots.contains_key(&index)
                 || crate::modules::value_name(statement).is_some()
             {
-                body.push(checker.initialize_global(statement, definition)?);
+                match checker.initialize_global(statement, definition) {
+                    Ok(value) => body.push(value),
+                    // Each module binding has one initializer. Leave its layout unknown
+                    // and continue discovering calls that do not read this binding.
+                    Err(error) if checker.defer_object_error(&error) => continue,
+                    Err(error) => return Err(error),
+                }
             } else {
-                body.extend(checker.statement(statement)?.0);
+                body.extend(checker.statement(statement, &[])?.0);
             }
             checkpoints.push(Checkpoint {
                 statement: index,
