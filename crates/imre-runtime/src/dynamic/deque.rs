@@ -7,6 +7,8 @@ pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
 pub(super) const METHODS: &[&str] = &[
     "append",
     "appendleft",
+    "copy",
+    "__copy__",
     "extend",
     "remove",
     "pop",
@@ -170,6 +172,10 @@ pub(super) fn method(
         ));
     }
     match name {
+        "copy" | "__copy__" => {
+            let copy = ring.shallow_copy()?;
+            Ok(ctx.alloc(Value::Deque(Box::new(copy))))
+        }
         "reverse" => {
             ring.reverse();
             Ok(NONE)
