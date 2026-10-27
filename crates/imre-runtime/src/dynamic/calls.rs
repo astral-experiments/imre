@@ -607,6 +607,9 @@ impl Context {
     }
 
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.local_attribute(obj, name);
+        }
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return self.default_get_attr(obj, name);
         };
@@ -628,9 +631,6 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
-        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.local_attribute(obj, name);
-        }
         if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
             if matches!(name, "name" | "value")
                 && let Some((_, member_name, value)) = self.enum_member(obj)
@@ -1105,6 +1105,9 @@ impl Context {
         Err(self.missing_attribute(obj, name))
     }
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, None);
+        }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
@@ -1134,7 +1137,7 @@ impl Context {
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, None);
+            return self.update_base_local_attribute(obj, name, None);
         }
         let member = self.slot(obj, name);
         if let Some(descriptor) = member
@@ -1268,6 +1271,9 @@ impl Context {
     }
 
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, Some(value));
+        }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
@@ -1283,7 +1289,7 @@ impl Context {
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, Some(value));
+            return self.update_base_local_attribute(obj, name, Some(value));
         }
         if name == "__abstractmethods__"
             && let Value::Class { scope, .. } = *self.heap.get(obj)
