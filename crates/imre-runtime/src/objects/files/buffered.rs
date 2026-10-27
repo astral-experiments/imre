@@ -118,6 +118,17 @@ impl Output {
         self.raw.flush()
     }
 
+    /// Include buffered bytes in the binary offset without publishing them to the file.
+    pub(super) fn binary_position(&mut self) -> io::Result<u64> {
+        let pending = self.raw.buffer.len() - self.raw.written;
+        Ok(self.raw.inner.stream_position()? + pending as u64)
+    }
+
+    pub(super) fn binary_seek(&mut self, offset: SeekFrom) -> io::Result<u64> {
+        self.raw.flush()?;
+        self.raw.inner.seek(offset)
+    }
+
     pub(super) fn finish(mut self) -> (File, io::Result<()>) {
         let flushed = self.flush();
         (self.raw.inner, flushed)

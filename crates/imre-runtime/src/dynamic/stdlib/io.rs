@@ -4,11 +4,13 @@ use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod bytes_io;
+mod text_wrapper;
 
 #[derive(Clone)]
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
+    Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
 }
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
@@ -27,6 +29,11 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         object,
         &[
             "closed",
+            "__del__",
+            "__iter__",
+            "__next__",
+            "readlines",
+            "writelines",
             "close",
             "flush",
             "readable",
@@ -47,6 +54,8 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
     let text = class(ctx, module, "TextIOBase", io, &[]);
+    let wrapper = class(ctx, module, "TextIOWrapper", text, text_wrapper::METHODS);
+    ctx.builtins.insert("_io.TextIOWrapper".into(), wrapper);
     let string_io = class(
         ctx,
         module,
@@ -62,24 +71,34 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     let owner = ctx
         .allocate_class(name.into(), scope, vec![base])
         .expect("a single I/O base has a linearization");
-    let module_name = ctx.text(if matches!(name, "StringIO" | "BytesIO") {
-        "_io"
-    } else {
-        "io"
-    });
+    let module_name = ctx.text(
+        if matches!(name, "StringIO" | "BytesIO" | "TextIOWrapper") {
+            "_io"
+        } else {
+            "io"
+        },
+    );
     ctx.bind(scope, "__module__", module_name);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
-    let descriptor_owner = if name == "BytesIO" {
-        "_io.BytesIO"
-    } else {
-        "_io._IOBase"
+    let wrapper = name == "TextIOWrapper";
+    let descriptor_owner = match name {
+        "TextIOWrapper" => "_io.TextIOWrapper",
+        "BytesIO" => "_io.BytesIO",
+        _ => "_io._IOBase",
     };
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
-        let attr = if name == "closed" {
-            ctx.alloc(Value::ReadOnlyDescriptor {
+        let attr = if name == "closed" || wrapper && text_wrapper::property(name) {
+            let set = (wrapper && name == "_CHUNK_SIZE").then(|| {
+                ctx.alloc(Value::IoMethod {
+                    owner,
+                    name: "set_chunk_size",
+                })
+            });
+            ctx.alloc(Value::GetSetDescriptor {
                 get: method,
+                set,
                 owner: descriptor_owner,
                 name,
             })
@@ -90,6 +109,92 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     }
     ctx.bind(module, name, owner);
     owner
+}
+
+fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
+    let message = match name {
+        "read" | "read1" | "readline" | "readlines" | "truncate" if n > 1 => {
+            format!("{name} expected at most 1 argument, got {n}")
+        }
+        "seek" if n == 0 => "seek expected at least 1 argument, got 0".into(),
+        "seek" if n > 2 => format!("seek expected at most 2 arguments, got {n}"),
+        "write" | "readinto" | "writelines" if n != 1 => {
+            format!("{owner}.{name}() takes exactly one argument ({n} given)")
+        }
+        "read" | "read1" | "readline" | "readlines" | "writelines" | "seek" | "write"
+        | "readinto" | "truncate" | "__exit__" => {
+            return Ok(());
+        }
+        _ if n != 0 => format!("{owner}.{name}() takes no arguments ({n} given)"),
+        _ => return Ok(()),
+    };
+    Err(Error::new("TypeError", message))
+}
+
+/// IOBase consumes the receiver's actual iterator and each writer override.
+fn lines(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("_IOBase.{name}() takes no keyword arguments"),
+        ));
+    }
+    argument_count("_IOBase", name, args.len())?;
+    if matches!(name, "__iter__" | "writelines") {
+        let closed = ctx.lookup_attr(receiver, "closed")?;
+        if ctx.truth(closed)? {
+            return Err(Error::new("ValueError", "I/O operation on closed file."));
+        }
+    }
+    match name {
+        "__iter__" => Ok(receiver),
+        "__next__" => {
+            let method = ctx.lookup_attr(receiver, "readline")?;
+            let line = ctx.call(method, Vec::new(), Vec::new())?;
+            let len = ctx.builtin("len");
+            let length = ctx.call(len, vec![line], Vec::new())?;
+            if ctx.truth(length)? {
+                Ok(line)
+            } else {
+                Err(Error::new("StopIteration", ""))
+            }
+        }
+        "writelines" => {
+            let iterator = ctx.iterator(args[0])?;
+            while let Some(line) = ctx.next_item(iterator)? {
+                let write = ctx.lookup_attr(receiver, "write")?;
+                ctx.call(write, vec![line], Vec::new())?;
+            }
+            Ok(NONE)
+        }
+        _ => {
+            let mut hint = super::files::read_length(ctx, args.first().copied())?;
+            let bounded = hint > 0;
+            let iter = ctx.iterator(receiver)?;
+            let mut result = Vec::new();
+            while let Some(line) = ctx.next_item(iter)? {
+                result
+                    .try_reserve(1)
+                    .map_err(|_| crate::Error::allocation())?;
+                result.push(line);
+                if bounded {
+                    let len = ctx.builtin("len");
+                    let length = ctx.call(len, vec![line], Vec::new())?;
+                    hint -= ctx.as_integer(length)?;
+                    if hint < 0 {
+                        break;
+                    }
+                }
+            }
+            Ok(ctx.alloc(Value::List(result)))
+        }
+    }
 }
 
 /// Call an inherited I/O method with its bound receiver or an explicit class-level receiver.
@@ -129,6 +234,41 @@ pub(in super::super) fn call(
             format!("invalid receiver for {name}")
         };
         return Err(Error::new("TypeError", message));
+    }
+    if matches!(name, "__iter__" | "__next__" | "readlines" | "writelines") {
+        return lines(ctx, receiver, name, rest, kwargs);
+    }
+    if name == "__del__" {
+        if !rest.is_empty() || !kwargs.is_empty() {
+            return Err(Error::new("TypeError", "expected no arguments to __del__"));
+        }
+        // A detached or partially initialized stream can no longer be closed.
+        let closed = ctx
+            .lookup_attr(receiver, "closed")
+            .and_then(|id| ctx.truth(id));
+        if matches!(closed, Ok(false)) {
+            let _ = ctx.set_attr(receiver, "_finalizing", TRUE);
+            if let Err(error) = ctx
+                .lookup_attr(receiver, "close")
+                .and_then(|f| ctx.call(f, Vec::new(), Vec::new()))
+            {
+                eprintln!(
+                    "Exception ignored while finalizing file {}: {error}",
+                    ctx.repr(receiver)
+                );
+            }
+        }
+        return Ok(NONE);
+    }
+    if ctx
+        .builtins
+        .get("_io.TextIOWrapper")
+        .is_some_and(|&class| ctx.instance_of(receiver, class))
+    {
+        if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {
+            return super::files::text_method(ctx, name, args, kwargs);
+        }
+        return text_wrapper::call(ctx, receiver, name, rest, kwargs);
     }
     if bytes_io == Some(owner)
         || matches!(name, "__enter__" | "__exit__")

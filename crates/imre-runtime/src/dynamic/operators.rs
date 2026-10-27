@@ -1379,6 +1379,27 @@ impl Context {
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
+    /// Render a class using its Python module and qualified name.
+    fn class_repr(&self, name: &str, scope: Id) -> String {
+        let scope = self.scope_data(scope);
+        let attr = |key: &str| {
+            scope
+                .names
+                .get(key)
+                .and_then(|&id| match self.heap.get(id) {
+                    Value::Str(s) => Some(s.as_str()),
+                    _ => None,
+                })
+        };
+        let module = attr("__module__").unwrap_or(&scope.module);
+        let name = attr("__qualname__").unwrap_or(name);
+        if module == "builtins" {
+            format!("<class '{name}'>")
+        } else {
+            format!("<class '{module}.{name}'>")
+        }
+    }
+
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
@@ -1607,7 +1628,8 @@ impl Context {
                 "<attribute '__weakref__' of '{}' objects>",
                 self.weakref_descriptor_owner(*owner)
             ),
-            Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
+            Value::Class { name, scope, .. } => self.class_repr(name, *scope),
+            Value::Native(name) => format!("<class '{name}'>"),
             Value::Module {
                 constructor: Some(_),
                 ..
