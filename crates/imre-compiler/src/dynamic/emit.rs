@@ -371,6 +371,12 @@ impl Function<'_, '_> {
         }
         self.lit(1, value.as_bytes())
     }
+    /// Emit a code-object name, including a Unicode identifier that would not intern as a literal.
+    fn code_name(&mut self, name: &str) -> String {
+        self.output.interned_identifiers.insert(name.to_owned());
+        self.lit(6, name.as_bytes())
+    }
+
     fn integer(&mut self, n: impl ToString) -> String {
         self.lit(0, n.to_string().as_bytes())
     }
@@ -385,17 +391,17 @@ impl Function<'_, '_> {
         } else {
             "lookup"
         };
-        let name = self.text(name);
+        let name = self.code_name(name);
         self.op(op, &[&self.scope.clone(), &name])
     }
 
     fn bind(&mut self, name: &str, value: &str) {
-        let name = self.text(name);
+        let name = self.code_name(name);
         self.op("assign", &[&self.scope.clone(), &name, value]);
     }
 
     fn attr(&mut self, object: &str, name: &str) -> String {
-        let name = self.text(name);
+        let name = self.code_name(name);
         self.op("attr", &[object, &name])
     }
 
