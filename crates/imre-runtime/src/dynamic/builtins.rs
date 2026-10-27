@@ -270,7 +270,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
-        Value::List(_) if matches!(attr, "append" | "extend" | "insert" | "pop" | "sort") => "list",
+        Value::List(_)
+            if matches!(
+                attr,
+                "append" | "clear" | "extend" | "insert" | "pop" | "reverse" | "sort"
+            ) =>
+        {
+            "list"
+        }
         Value::Set { frozen: false, .. }
             if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
         {
