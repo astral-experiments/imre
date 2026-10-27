@@ -64,6 +64,8 @@ def current():
     ):
         print(text.find(needle, start, end))
     print("Host: localhost".find(":"), "localhost".find(":"))
+    for value in ("", " ", "\t\n", "\x1c\x1f", " x", Text("\r")):
+        print(value.isspace(), str.isspace(value))
     for value in ("\0", "A", "é", "東", "🦊", b"\xff", bytearray(b"Z"), "", "é🦊", b"", bytearray(b"ab"), None, 4):
         try:
             print(ord(value))

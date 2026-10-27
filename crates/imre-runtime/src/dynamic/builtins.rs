@@ -176,6 +176,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "isspace",
     "join",
     "lower",
     "lstrip",
