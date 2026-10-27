@@ -1876,13 +1876,23 @@ impl Context {
             self.context_key(item)?;
             return Ok(bindings.contains_key(&item));
         }
-        if let Value::Str(hay) = self.heap.get(container) {
-            return Ok(hay.contains(self.str_value(item)?));
+        let scalar = self.scalar_value(container);
+        if let Value::Str(hay) = self.heap.get(scalar) {
+            let needle = self.str_value(item).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "'in <string>' requires string as left operand, not {:.100}",
+                        self.type_name(item)
+                    ),
+                )
+            })?;
+            return Ok(hay.contains(needle));
         }
-        if matches!(self.heap.get(container), Value::Bytes(_)) {
+        if matches!(self.heap.get(scalar), Value::Bytes(_)) {
             // CPython falls back to the buffer protocol when integer conversion fails.
             let number = self.index_value(item).ok().flatten();
-            let Value::Bytes(data) = self.heap.get(container) else {
+            let Value::Bytes(data) = self.heap.get(scalar) else {
                 unreachable!()
             };
             if let Some(number) = number {
