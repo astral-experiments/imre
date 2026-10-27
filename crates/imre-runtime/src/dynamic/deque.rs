@@ -3,6 +3,7 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const CLASS: &str = "collections.deque";
 pub(super) const ITERATOR: &str = "collections._deque_iterator";
+pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
 pub(super) const METHODS: &[&str] = &[
     "append",
     "appendleft",
@@ -10,9 +11,21 @@ pub(super) const METHODS: &[&str] = &[
     "remove",
     "pop",
     "popleft",
+    "reverse",
     "__len__",
     "__iter__",
+    "__reversed__",
 ];
+
+/// Capture the current length and generation for a live cursor in either direction.
+pub(super) fn iterator(deque: Id, ring: &crate::objects::DequeRing<Id>, reverse: bool) -> Value {
+    Value::DequeIterator {
+        deque,
+        state: ring.state,
+        remaining: ring.items.len(),
+        reverse,
+    }
+}
 
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [iterable, maxlen] =
@@ -157,6 +170,14 @@ pub(super) fn method(
         ));
     }
     match name {
+        "reverse" => {
+            ring.reverse();
+            Ok(NONE)
+        }
+        "__reversed__" => {
+            let iter = iterator(receiver, ring, true);
+            Ok(ctx.alloc(iter))
+        }
         "pop" | "popleft" => {
             let item = ring.pop(name == "popleft")?;
             ctx.heap.weak_edge_removed(item);

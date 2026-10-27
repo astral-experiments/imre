@@ -624,6 +624,7 @@ impl Context {
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
             Value::Deque(_) => super::deque::CLASS,
+            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
             Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
             Value::ItemGetter(_) => "operator.itemgetter",
@@ -679,6 +680,7 @@ impl Context {
                             | "itertools.count"
                             | super::deque::CLASS
                             | super::deque::ITERATOR
+                            | super::deque::REVERSE_ITERATOR
                             | "itertools.repeat"
                             | "weakref.ReferenceType"
                             | "weakref.ProxyType"
@@ -827,7 +829,8 @@ impl Context {
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
-            | (super::deque::ITERATOR, Value::DequeIterator { .. })
+            | (super::deque::ITERATOR, Value::DequeIterator { reverse: false, .. })
+            | (super::deque::REVERSE_ITERATOR, Value::DequeIterator { reverse: true, .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
@@ -1360,7 +1363,10 @@ impl Context {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
             Value::Native(class)
-                if matches!(class.as_str(), super::deque::CLASS | super::deque::ITERATOR) =>
+                if matches!(
+                    class.as_str(),
+                    super::deque::CLASS | super::deque::ITERATOR | super::deque::REVERSE_ITERATOR
+                ) =>
             {
                 match name {
                     "__name__" | "__qualname__" => {
