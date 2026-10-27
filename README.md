@@ -82,6 +82,18 @@ for field in ["name", "score"]:
     print(getattr(results[0], field))
 ```
 
+**Supported**
+
+- Statically resolved imports and functions with declared or inferred signatures
+- Classes and dataclasses with fixed fields, typed containers, and arbitrary-precision integers
+- Loops, comprehensions, and generator expressions passed directly to functions such as `sum` and `sorted`
+
+**Unsupported**
+
+- Dynamically typed storage (`Any`) and unrestricted unions
+- Dynamic attributes and general-purpose reflection
+- Recursive calls and async generators
+
 ## Design
 
 Types are part of Imre's compilation contract: variables, containers, and class
@@ -126,9 +138,6 @@ points[0] = Point(3.0, 4.0)
 print(original.x)  # 1.0
 print(points[0].x)  # 3.0
 ```
-
-The same example runs on CPython with the repository’s `stdlib` directory on
-`PYTHONPATH`.
 
 For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
 
