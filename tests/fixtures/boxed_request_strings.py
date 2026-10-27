@@ -82,3 +82,8 @@ def current():
             print(ord(value))
         except TypeError as error:
             print(error)
+    for value in (0, 65, 255, 0x10000, 0x10ffff, -1, 1 << 100, 65.0):
+        try:
+            print(ord(chr(value)))
+        except (TypeError, ValueError) as error:
+            print(type(error).__name__)

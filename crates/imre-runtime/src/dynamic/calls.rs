@@ -286,6 +286,7 @@ impl Context {
             | Value::Set { .. }
             | Value::Range { .. }
             | Value::Slice(_)
+            | Value::Enumerate { .. }
             | Value::Iterator { .. }
             | Value::Tuple(_)
             | Value::DictIterator(_)
