@@ -274,7 +274,13 @@ impl Context {
             "call" => {
                 let args = self.items(b)?;
                 let kwargs = self.keyword_args(c)?;
-                self.call(a, args, kwargs)
+                let result = self.call(a, args, kwargs)?;
+                if matches!(self.heap.get(a), Value::Native(name) if name == "bool")
+                    && let Some(mark) = self.heap.argument_mark(b)
+                {
+                    self.discard_truth(mark);
+                }
+                Ok(result)
             }
             "class" => self.class(a, b, c),
             "coroutine_function" => {
@@ -1066,6 +1072,20 @@ pub(super) unsafe extern "C" fn imre_dyn_failed(ctx: *const Context) -> bool {
     unsafe { (*ctx).pending.is_some() }
 }
 
+/// Record the caller's temporary root boundary before a truth operand runs.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usize {
+    // SAFETY: the generated caller owns this context for the entire expression.
+    unsafe { (&*ctx).heap.temporary_mark() }
+}
+
+/// Release a consumed truth operand on the branch that no longer needs it.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
+    // SAFETY: the mark comes from the same active Python frame.
+    unsafe { (&mut *ctx).discard_truth(mark) }
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_statement(
     ctx: *mut Context,
@@ -1144,10 +1164,22 @@ impl Context {
     /// Flush unreachable file owners before the caller evaluates its next operand.
     pub(super) fn leave_frame(&mut self, result: Id, returning: bool) {
         if self.heap.leave(result, returning) {
-            let (heap, roots) = self.heap_and_roots();
-            if let Some(callbacks) = heap.collect(roots) {
-                self.run_weak_callbacks(callbacks);
-            }
+            self.collect_unreachable();
+        }
+    }
+
+    /// Publish the surviving roots before the next operand can observe a discarded writer.
+    fn discard_truth(&mut self, mark: usize) {
+        if self.heap.discard_truth(mark) {
+            self.collect_unreachable();
+        }
+    }
+
+    /// Sweep using the active frames and the context's roots before running callbacks.
+    fn collect_unreachable(&mut self) {
+        let (heap, roots) = self.heap_and_roots();
+        if let Some(callbacks) = heap.collect(roots) {
+            self.run_weak_callbacks(callbacks);
         }
     }
 

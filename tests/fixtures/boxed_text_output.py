@@ -36,6 +36,15 @@ def exercise(path):
     with open(path, "rb") as reader:
         assert (finish(), reader.read()) == (None, b"loop!")
 
+    with open(path, "rb") as reader:
+        assert (buffered() and reader.read()) == b"loop"
+    with open(path, "rb") as reader:
+        assert (bool(buffered()), reader.read()) == (True, b"loop")
+    selected = buffered() or None
+    with open(path, "rb") as reader:
+        assert reader.read() == b""
+    selected.close()
+
     sample = "Málaga 東京🧪e\u0301\n"
     with open(path, "w") as ready:
         alias = ready

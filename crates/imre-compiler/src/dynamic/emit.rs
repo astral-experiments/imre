@@ -20,6 +20,8 @@ declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
 declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
 declare i1 @imre_dyn_failed(ptr)
+declare i64 @imre_dyn_truth_mark(ptr)
+declare void @imre_dyn_discard_truth(ptr, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
@@ -405,6 +407,27 @@ impl Function<'_, '_> {
     fn truth(&mut self, value: &str) -> String {
         let boolean = self.op("truth", &[value]);
         self.value(&format!("icmp eq i64 {boolean}, 2"))
+    }
+
+    /// Save the caller's earlier operands before evaluating a consumed truth test.
+    fn truth_mark(&mut self) -> String {
+        self.value("call i64 @imre_dyn_truth_mark(ptr %ctx)")
+    }
+
+    /// End the lifetime of the operands evaluated after the mark.
+    fn discard_truth(&mut self, mark: &str) {
+        self.line(&format!(
+            "call void @imre_dyn_discard_truth(ptr %ctx, i64 {mark})"
+        ));
+    }
+
+    /// A condition leaves only its truth value live in the selected branch.
+    fn truth_expr(&mut self, expr: &ast::Expr) -> String {
+        let mark = self.truth_mark();
+        let value = self.expr(expr);
+        let condition = self.truth(&value);
+        self.discard_truth(&mark);
+        condition
     }
 
     fn select(
