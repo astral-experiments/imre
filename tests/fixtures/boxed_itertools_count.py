@@ -1,6 +1,14 @@
 from itertools import count
 
 
+class Number:
+    def __init__(self, value):
+        self.value = value
+
+    def __add__(self, other):
+        return Number(self.value + other.value)
+
+
 def current():
     counter = count()
     alias = iter(counter)
@@ -19,6 +27,9 @@ def current():
     start = 1 << 300
     cursor = count(start, 2)
     print(cursor.__next__() is start)
+
+    cursor = count(Number(1), Number(2))
+    print(next(cursor).value, next(cursor).value)
 
     for start, step in ((0.5, 1 << 1100), (1 << 1100, 0.5)):
         cursor = count(start, step)
