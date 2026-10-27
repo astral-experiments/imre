@@ -171,7 +171,9 @@ pub(in crate::dynamic) fn decode(
         }
     };
     let consumed = data.len();
-    let decoded = codec.decode(data, policy)?;
+    let decoded = codec
+        .decode(data, policy)
+        .map_err(|err| ctx.decode_error(err))?;
     let text = ctx.text(decoded);
     let length = ctx.alloc(Value::Int(crate::Int::from_usize(consumed)));
     Ok(ctx.alloc(Value::Tuple(vec![text, length])))

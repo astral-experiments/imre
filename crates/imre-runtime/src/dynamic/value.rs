@@ -83,10 +83,21 @@ pub(super) struct Error {
     pub class: Option<Id>,
     pub message: String,
     pub args: Option<Id>,
+    pub decode: Option<Box<DecodeState>>,
     pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
     pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
     pub import: Option<crate::shared::Shared<ImportFields>>,
+}
+
+/// The decoder reuses these writable fields while BaseException.args keeps its first tuple.
+#[derive(Clone, Debug)]
+pub(super) struct DecodeState {
+    pub encoding: Id,
+    pub object: Id,
+    pub start: i64,
+    pub end: i64,
+    pub reason: Id,
 }
 
 impl Error {
@@ -96,6 +107,7 @@ impl Error {
             class: None,
             message: message.into(),
             args: None,
+            decode: None,
             os_args: None,
             trace: None,
             exit_status: None,
@@ -140,6 +152,11 @@ impl Error {
         self.args
             .into_iter()
             .chain(self.class)
+            .chain(
+                self.decode
+                    .iter()
+                    .flat_map(|d| [d.encoding, d.object, d.reason]),
+            )
             .chain(self.os_args.iter().flat_map(|args| args.roots()))
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
@@ -324,6 +341,38 @@ impl Context {
     pub(super) fn lookup_error(&mut self, kind: &str, key: Id) -> Error {
         let mut error = Error::new(kind, self.repr(key));
         error.args = Some(self.alloc(Value::Tuple(vec![key])));
+        error
+    }
+
+    /// Keep the decoder's original object and offsets when crossing into boxed Python.
+    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
+        let decoded = native.decode_args().map(|args| {
+            let encoding = self.text(args.encoding);
+            let object = self.alloc(Value::Bytes(args.object.to_vec()));
+            let reason = self.text(args.reason);
+            let values = vec![
+                encoding,
+                object,
+                self.int(args.start),
+                self.int(args.end),
+                reason,
+            ];
+            let state = DecodeState {
+                encoding,
+                object,
+                start: args.start,
+                end: args.end,
+                reason,
+            };
+            (self.alloc(Value::Tuple(values)), state)
+        });
+        let mut error = Error::from(native);
+        if error.kind == "UnicodeDecodeError"
+            && let Some((values, state)) = decoded
+        {
+            error.args = Some(values);
+            error.decode = Some(Box::new(state));
+        }
         error
     }
 

@@ -1506,8 +1506,33 @@ impl Context {
                 };
                 return Ok(value.map_or(NONE, |value| self.text(value)));
             }
-            Value::Raised(error) if name == "args" => {
-                return Ok(self.exception_argument_tuple(obj, error));
+            Value::Raised(error) => {
+                if let Some(state) = &error.decode {
+                    match name {
+                        "encoding" => return Ok(state.encoding),
+                        "object" => return Ok(state.object),
+                        "start" => return Ok(self.int(state.start)),
+                        "end" => return Ok(self.int(state.end)),
+                        "reason" => return Ok(state.reason),
+                        _ => {}
+                    }
+                }
+                if name == "args" {
+                    return Ok(self.exception_argument_tuple(obj, error));
+                }
+                if error.kind == "UnicodeDecodeError"
+                    && let Some([encoding, object, start, end, reason]) =
+                        self.exception_arguments(&error)
+                {
+                    match name {
+                        "encoding" => return Ok(*encoding),
+                        "object" => return Ok(*object),
+                        "start" => return Ok(*start),
+                        "end" => return Ok(*end),
+                        "reason" => return Ok(*reason),
+                        _ => {}
+                    }
+                }
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
             Value::Native(class) if class == "collections.defaultdict" && name == "__missing__" => {
@@ -2140,6 +2165,49 @@ impl Context {
                 super::thread_local::Name::from_lookup(name, original),
                 Some(value),
             );
+        }
+        if matches!(
+            self.heap.get(obj),
+            Value::Raised(Error {
+                decode: Some(_),
+                ..
+            })
+        ) && matches!(name, "encoding" | "object" | "start" | "end" | "reason")
+        {
+            let offset = if matches!(name, "start" | "end") {
+                let integer = self
+                    .as_int(value)
+                    .map_err(|_| Error::new("TypeError", "an integer is required"))?;
+                Some(
+                    integer
+                        .to_i64()
+                        .and_then(|n| isize::try_from(n).ok())
+                        .ok_or_else(|| {
+                            Error::new(
+                                "OverflowError",
+                                "Python int too large to convert to C ssize_t",
+                            )
+                        })? as i64,
+                )
+            } else {
+                None
+            };
+            let Value::Raised(Error {
+                decode: Some(state),
+                ..
+            }) = self.heap.get_mut(obj)
+            else {
+                unreachable!();
+            };
+            match name {
+                "encoding" => state.encoding = value,
+                "object" => state.object = value,
+                "start" => state.start = offset.unwrap(),
+                "end" => state.end = offset.unwrap(),
+                "reason" => state.reason = value,
+                _ => unreachable!(),
+            }
+            return Ok(());
         }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
