@@ -1004,6 +1004,15 @@ impl Heap {
         self.frames.last_mut().unwrap().live.push(value);
     }
 
+    /// Mark temporary roots that must survive the next iteration of a native loop.
+    pub fn temporary_mark(&self) -> usize {
+        self.frames.last().unwrap().live.len()
+    }
+
+    pub fn release_temporaries_since(&mut self, mark: usize) {
+        self.frames.last_mut().unwrap().live.truncate(mark);
+    }
+
     pub fn active_exception(&self) -> Id {
         self.frames.last().unwrap().active
     }
