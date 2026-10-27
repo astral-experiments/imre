@@ -718,6 +718,12 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
+    if name == super::deque::CLASS {
+        return super::deque::construct(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("collections.deque.") {
+        return super::deque::method(ctx, method, args, kwargs);
+    }
     if name == "itertools.repeat" {
         return itertools::repeat(ctx, args, kwargs);
     }

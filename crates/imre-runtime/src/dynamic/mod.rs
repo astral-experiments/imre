@@ -5,6 +5,7 @@ mod abstract_class;
 mod builtins;
 mod calls;
 mod complex;
+mod deque;
 mod dictionary;
 mod enums;
 mod ffi;
@@ -235,6 +236,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::RangeIterator(_)
+                | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
@@ -265,6 +267,14 @@ impl Context {
         }
         let (sequence, kind) = match *self.heap.get(id) {
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
+            Value::Deque(ref ring) => {
+                let cursor = Value::DequeIterator {
+                    deque: id,
+                    state: ring.state,
+                    remaining: ring.items.len(),
+                };
+                return Ok(self.alloc(cursor));
+            }
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
             Value::Bytes(_) => (id, "bytes_iterator"),
@@ -327,6 +337,7 @@ impl Context {
         if matches!(
             self.heap.get(source),
             Value::Instance { .. }
+                | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
@@ -444,6 +455,24 @@ impl Context {
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
+            Value::DequeIterator {
+                deque,
+                state,
+                remaining,
+            } => {
+                let (deque, state, remaining) = (*deque, *state, *remaining);
+                let Value::Deque(ring) = self.heap.get(deque) else {
+                    unreachable!()
+                };
+                let item = ring.cursor_item(state, remaining, false)?.copied();
+                if item.is_some() {
+                    let Value::DequeIterator { remaining, .. } = self.heap.get_mut(id) else {
+                        unreachable!()
+                    };
+                    *remaining -= 1;
+                }
+                return Ok(item);
+            }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::DictIterator(iter) => {
@@ -528,6 +557,7 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
+                | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }
@@ -548,6 +578,14 @@ impl Context {
                 items.push(item);
             }
             return Ok(items);
+        }
+        if let Value::Deque(ring) = self.heap.get(id) {
+            let mut values = Vec::new();
+            values
+                .try_reserve(ring.items.len())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            values.extend(&ring.items);
+            return Ok(values);
         }
         if let Some(values) = self.enum_values(id) {
             let Value::Dict(entries) = self.heap.get(values) else {
@@ -1202,6 +1240,8 @@ impl Context {
                 }
             }
             "collections" => {
+                let deque = self.builtin(deque::CLASS);
+                self.bind(scope, "deque", deque);
                 let abc = self.module("_collections_abc")?;
                 self.bind(scope, "abc", abc);
                 self.modules.insert("collections.abc".to_owned(), abc);
