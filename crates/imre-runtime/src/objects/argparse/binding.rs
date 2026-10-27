@@ -1,5 +1,7 @@
 //! Bound actions retain their converted values until the namespace takes ownership.
 
+mod range_labels;
+
 use crate::StrOwner;
 use std::borrow::Cow;
 
@@ -35,7 +37,7 @@ impl IntegerRange {
         }) && ((n - &self.0) % &self.2).is_zero()
     }
 
-    fn iter(&self) -> impl Iterator<Item = BigInt> + '_ {
+    pub(super) fn iter(&self) -> impl Iterator<Item = BigInt> + '_ {
         std::iter::successors(Some(self.0.clone()), |n| Some(n + &self.2)).take_while(|n| {
             if self.2.is_positive() {
                 n < &self.1

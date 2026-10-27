@@ -728,7 +728,7 @@ unsafe fn write_repr_with(
                     if let Some((word, kind, tail)) = view.begin(output)? {
                         pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
                         pending.push(ReprTask::ContextEnd(tail, check_digits));
-                        check_digits = false;
+                        check_digits = true;
                         Some(ReprTask::Word(word, kind))
                     } else {
                         None

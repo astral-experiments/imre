@@ -3,6 +3,15 @@
 
 def current():
     from collections import Counter
+    from collections import _count_elements
+    from _collections import _count_elements as native_count
+
+    counted = {"a": 4}
+    print(native_count is _count_elements, native_count(counted, "aba"), counted)
+    try:
+        native_count(None, 3)
+    except TypeError as error:
+        print(type(error).__name__)
 
     counts = Counter(a=10, b=5, c=0)
     print(counts.total(), counts["absent"], len(counts))
@@ -152,6 +161,33 @@ def current():
     except ValueError:
         print(copied, list(pairs))
 
+    class Probed:
+        def __init__(self, fail=False):
+            self.lookups = 0
+            self.fail = fail
+
+        @property
+        def keys(self):
+            self.lookups += 1
+            if self.lookups == 1:
+                return lambda: ["first"]
+            if self.fail:
+                raise ValueError("second lookup")
+            return lambda: ["second"]
+
+        def __getitem__(self, key):
+            return key
+
+    probed = Probed()
+    print(dict(probed), probed.lookups)
+    probed = Probed()
+    print({**probed}, probed.lookups)
+    try:
+        received = {"kept": 1}
+        received.update(Probed(True))
+    except ValueError as error:
+        print(error.args, received)
+
     class FailsLater(Filtered):
         def keys(self):
             return ("visits", "absent")
@@ -162,6 +198,25 @@ def current():
     except KeyError as error:
         print(received, error.args)
 
+    class MutableKeys:
+        def __init__(self, as_view):
+            self.names = [("first", 1), ("before", 2)]
+            self.by_index = {0: self.names[0], 1: self.names[1]}
+            self.as_view = as_view
+
+        def keys(self):
+            return self.by_index.values() if self.as_view else self.names
+
+        def __getitem__(self, key):
+            if key[0] == "first":
+                self.names[1] = ("after", 3)
+                self.by_index[1] = self.names[1]
+                for _ in range(6000):
+                    []
+            return key[1]
+
+    print(dict(MutableKeys(False)), dict(MutableKeys(True)))
+
     def only_view():
         owner = Data(held=["live"])
         return owner.items()
@@ -170,6 +225,44 @@ def current():
     for _ in range(6000):
         []
     print(list(view), list(values), session.writes)
+
+    class ViewPair(dict):
+        def __iter__(self):
+            source["b"] = ("new", 2)
+            if grow:
+                source["c"] = ("later", 3)
+            return dict.__iter__({"first": None, 1: None})
+
+    for grow in (False, True):
+        source = {"a": ViewPair(), "b": ("old", 0)}
+        copied = {}
+        try:
+            copied.update(source.values())
+        except RuntimeError as error:
+            print(error.args)
+        print(copied)
+
+    from operator import delitem
+
+    source = {"first": 1}
+    cursor = iter(source)
+    key = next(cursor)
+    delitem(source, key)
+    source[key] = 2
+    try:
+        next(cursor)
+    except RuntimeError as error:
+        print(error, length_hint(cursor))
+
+    source = {"a": 1, "b": 2, "c": 3}
+    cursor = dict.__iter__(source)
+    for first in cursor:
+        break
+    for key in ("a", "b", "c"):
+        delitem(source, key)
+    for key in ("d", "e", "f"):
+        source[key] = key
+    print(first, list(cursor))
 
     try:
         empty[()]

@@ -5567,6 +5567,13 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ArgparseChoiceDigits(digits) => {
+                self.line(format!(
+                    "call void @imre_argparse_choice_digits(i64 {digits})"
+                ));
+                self.check_error();
+                none()
+            }
             Builtin::ArgparseText { usage, output } => {
                 let file = args.get(2).map_or("null", |file| &file.value.operand);
                 let text = self.checked_instruction(format!(
@@ -9757,6 +9764,7 @@ declare i32 @imre_text_flush(ptr)
 declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
+declare void @imre_argparse_choice_digits(i64)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_stdout()

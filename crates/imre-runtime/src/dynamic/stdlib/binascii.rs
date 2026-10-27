@@ -59,14 +59,7 @@ pub(super) fn call(
     // Argument Clinic converts the input before invoking the flag's __bool__.
     let option = if let Some((_, value)) = kwargs.first() {
         input(ctx, *data, decode)?;
-        if matches!(ctx.heap.get(*data), Value::ByteArray(_)) {
-            ctx.bytearray_exports.push(*data);
-            let result = ctx.truth(*value);
-            ctx.bytearray_exports.pop();
-            result?
-        } else {
-            ctx.truth(*value)?
-        }
+        ctx.truth_with_buffer_export(*data, *value)?
     } else {
         !decode
     };

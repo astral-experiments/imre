@@ -249,6 +249,7 @@ impl Context {
                 FormatKind::Field => "fieldnameiterator",
             },
             Value::Partial { .. } => "partial",
+            Value::PartialPlaceholder => "_PlaceholderType",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
@@ -390,7 +391,7 @@ pub(super) enum Value {
         items: Vec<Id>,
         frozen: bool,
     },
-    Dict(Vec<(Id, Id)>),
+    Dict(super::dictionary::Entries),
     MappingProxy(Id),
     DictView {
         dict: Id,
@@ -399,7 +400,7 @@ pub(super) enum Value {
     DictIterator(DictIterator),
     DefaultDict {
         factory: Id,
-        entries: Vec<(Id, Id)>,
+        entries: super::dictionary::Entries,
     },
     Scope(Scope),
     ClassCell(Option<Id>),
@@ -420,6 +421,7 @@ pub(super) enum Value {
         scope: Id,
         class_cell: Option<Id>,
         defaults: Id,
+        kwdefaults: Id,
     },
     Code(CodeObject),
     Generator {
@@ -481,12 +483,16 @@ pub(super) enum Value {
         keywords: Id,
         coroutine_marker: Option<Id>,
     },
+    PartialPlaceholder,
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
     },
     Yielded(Id),
-    AstWalk(std::collections::VecDeque<Id>),
+    AstWalk {
+        queue: std::collections::VecDeque<Id>,
+        running: bool,
+    },
     Enumerate {
         input: Id,
         next_index: crate::Int,
@@ -516,6 +522,7 @@ pub(super) enum Value {
         sequence: Option<Id>,
         offset: usize,
         reverse: bool,
+        context: Option<std::rc::Rc<HashMap<Id, Id>>>,
     },
     FormatIterator {
         input: Id,
@@ -562,10 +569,23 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut Vec<Id>) {
+        for (key, value) in bindings {
+            visit.extend([*key, *value]);
+        }
+    }
+
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
-            Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::Iterator {
+                sequence, context, ..
+            } => {
+                visit.extend(*sequence);
+                if let Some(bindings) = context {
+                    Self::visit_bindings(bindings, visit);
+                }
+            }
             Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
@@ -597,11 +617,7 @@ impl Value {
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
             }
-            Self::Context(bindings) => {
-                for (key, value) in bindings.iter() {
-                    visit.extend([*key, *value]);
-                }
-            }
+            Self::Context(bindings) => Self::visit_bindings(bindings, visit),
             Self::ContextVar { name, default, .. } => {
                 visit.push(*name);
                 visit.extend(default);
@@ -618,7 +634,7 @@ impl Value {
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
-            Self::AstWalk(queue) => visit.extend(queue),
+            Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
@@ -656,10 +672,11 @@ impl Value {
                 class_cell,
                 code,
                 defaults,
+                kwdefaults,
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *code, *defaults]);
+                visit.extend([*scope, *code, *defaults, *kwdefaults]);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
@@ -751,6 +768,7 @@ impl Value {
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
+            | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
             | Self::TextFile(_) => {}
@@ -770,7 +788,8 @@ pub(super) struct DictIterator {
     dict: Option<Id>,
     kind: DictViewKind,
     expected_len: Option<usize>,
-    index: usize,
+    position: usize,
+    remaining: usize,
 }
 
 impl DictIterator {
@@ -780,7 +799,8 @@ impl DictIterator {
             dict: Some(dict),
             kind,
             expected_len: Some(size),
-            index: 0,
+            position: 0,
+            remaining: size,
         }
     }
 
@@ -789,7 +809,7 @@ impl DictIterator {
         self.dict
             .and_then(|dict| ctx.dict_entries(dict))
             .filter(|entries| Some(entries.len()) == self.expected_len)
-            .map_or(0, |entries| entries.len() - self.index)
+            .map_or(0, |_| self.remaining)
     }
 
     /// Check the live size before each pull, including the one that reaches exhaustion.
@@ -797,7 +817,11 @@ impl DictIterator {
         let Some(dict) = self.dict else {
             return Ok(None);
         };
-        let entries = ctx.dict_entries(dict).expect("dictionary iterator source");
+        let storage = ctx.dict_storage(dict).expect("dictionary iterator source");
+        let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get(storage)
+        else {
+            unreachable!("dictionary storage");
+        };
         if self.expected_len != Some(entries.len()) {
             self.expected_len = None;
             return Err(Error::new(
@@ -805,11 +829,19 @@ impl DictIterator {
                 "dictionary changed size during iteration",
             ));
         }
-        let Some(&(key, value)) = entries.get(self.index) else {
+        let Some((position, key, value)) = entries.at(self.position) else {
             self.dict = None;
             return Ok(None);
         };
-        self.index += 1;
+        if self.remaining == 0 {
+            self.dict = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "dictionary keys changed during iteration",
+            ));
+        }
+        self.position = position + 1;
+        self.remaining -= 1;
         Ok(Some(match self.kind {
             DictViewKind::Keys => key,
             DictViewKind::Values => value,
@@ -979,5 +1011,43 @@ impl Heap {
         self.next_collection = (self.slots.len() - self.free.len())
             .saturating_mul(2)
             .max(4096);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exhausted_context_iterator_traces_bindings_until_dropped() {
+        let mut heap = Heap::new();
+        let name = heap.alloc(Value::Str("key".into()));
+        let key = heap.alloc(Value::ContextVar {
+            name,
+            default: None,
+            repr_active: std::cell::Cell::new(false),
+        });
+        let value = heap.alloc(Value::List(Vec::new()));
+        let view = heap.alloc(Value::Iterator {
+            sequence: None,
+            offset: 1,
+            reverse: false,
+            kind: "values",
+            context: Some(std::rc::Rc::new(HashMap::from([(key, value)]))),
+        });
+        let location = Location {
+            file: "test".into(),
+            line: 1,
+            span: None,
+        };
+        heap.next_collection = 0;
+        heap.statement(std::iter::empty(), &[view], location.clone(), NONE);
+        assert!(matches!(heap.get(key), Value::ContextVar { .. }));
+        assert!(matches!(heap.get(value), Value::List(_)));
+
+        heap.next_collection = 0;
+        heap.statement(std::iter::empty(), &[], location, NONE);
+        assert!(heap.slots[key as usize].is_none());
+        assert!(heap.slots[value as usize].is_none());
     }
 }

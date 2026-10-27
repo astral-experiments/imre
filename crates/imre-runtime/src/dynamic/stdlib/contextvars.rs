@@ -16,6 +16,30 @@ impl Context {
         }
     }
 
+    pub(in super::super) fn context_iterator(&mut self, context: Id, name: &str) -> Id {
+        let bindings = Rc::clone(self.bindings(context));
+        let values = bindings
+            .iter()
+            .map(|(&key, &value)| match name {
+                "Context.keys" => key,
+                "Context.values" => value,
+                _ => self.alloc(Value::Tuple(vec![key, value])),
+            })
+            .collect();
+        let sequence = self.alloc(Value::Tuple(values));
+        self.alloc(Value::Iterator {
+            sequence: Some(sequence),
+            offset: 0,
+            reverse: false,
+            kind: match name {
+                "Context.keys" => "keys",
+                "Context.values" => "values",
+                _ => "items",
+            },
+            context: Some(bindings),
+        })
+    }
+
     fn bindings(&self, context: Id) -> &Rc<std::collections::HashMap<Id, Id>> {
         let Value::Context(bindings) = self.heap.get(context) else {
             unreachable!("contextvars receiver is an exact Context");
@@ -141,17 +165,7 @@ pub(super) fn call(
                 .unwrap_or(NONE))
         }
         ("Context.keys" | "Context.values" | "Context.items", [context], []) => {
-            let bindings = Rc::clone(ctx.bindings(*context));
-            let values = bindings
-                .iter()
-                .map(|(&key, &value)| match name {
-                    "Context.keys" => key,
-                    "Context.values" => value,
-                    _ => ctx.alloc(Value::Tuple(vec![key, value])),
-                })
-                .collect();
-            let sequence = ctx.alloc(Value::Tuple(values));
-            ctx.iterator(sequence)
+            Ok(ctx.context_iterator(*context, name))
         }
         ("Context.run", [context, callable, rest @ ..], kwargs) => {
             if ctx.contexts.contains(context) {

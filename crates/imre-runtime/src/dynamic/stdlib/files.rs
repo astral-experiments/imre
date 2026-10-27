@@ -3,7 +3,9 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
 use std::process::{Command, Stdio};
 
-use super::{Context, Error, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error};
+use super::{
+    Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error,
+};
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
@@ -211,6 +213,30 @@ fn run_process(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
     ))
 }
 
+fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
+    let Some(id) = size.filter(|&id| id != NONE) else {
+        return Ok(-1);
+    };
+    let integer = ctx.index_value(id)?.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "argument should be integer or None, not '{}'",
+                ctx.type_name(id)
+            ),
+        )
+    })?;
+    integer.to_i64().ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            format!(
+                "cannot fit '{}' into an index-sized integer",
+                ctx.type_name(id)
+            ),
+        )
+    })
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -235,8 +261,8 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected a file"));
     };
     let handle = handle.clone();
-    let mut slot = match handle.as_ref() {
-        BinaryFile::Reader(slot) => slot.borrow_mut(),
+    let slot = match handle.as_ref() {
+        BinaryFile::Reader(slot) => slot,
         BinaryFile::Writer(file) => {
             let mut file = file.borrow_mut();
             return match (name, &args[1..]) {
@@ -285,6 +311,12 @@ pub(super) fn call(
             };
         }
     };
+    // A Python size conversion may read from or close this same handle.
+    let length = match name {
+        "file.read" | "file.readline" => Some(read_length(ctx, args.get(1).copied())?),
+        _ => None,
+    };
+    let mut slot = slot.borrow_mut();
     if name == "file.write" {
         return Err(Error::new("UnsupportedOperation", "write"));
     }
@@ -302,17 +334,12 @@ pub(super) fn call(
             "file.readline" => "readline of closed file",
             "file.readinto" => "readinto of closed file",
             "file.seek" => "seek of closed file",
-            "file.__enter__" => "I/O operation on closed file.",
+            "file.__enter__" | "file.flush" => "I/O operation on closed file.",
             _ => "I/O operation on closed file",
         };
         Error::new("ValueError", message)
     });
-    if matches!(name, "file.read" | "file.readline") {
-        let length = args
-            .get(1)
-            .map(|&id| ctx.as_integer(id))
-            .transpose()?
-            .unwrap_or(-1);
+    if let Some(length) = length {
         if name == "file.read" && length < -1 {
             return Err(Error::new(
                 "ValueError",
@@ -321,12 +348,28 @@ pub(super) fn call(
         }
         let mut bytes = Vec::new();
         let mut input = reader?.take(u64::try_from(length).unwrap_or(u64::MAX));
+        let requested = if name == "file.read" {
+            usize::try_from(length).ok()
+        } else {
+            None
+        };
+        if let Some(size) = requested {
+            if size > crate::MAX_BYTES_LEN {
+                return Err(Error::new("OverflowError", "byte string is too large"));
+            }
+            bytes
+                .try_reserve_exact(size)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
         if name == "file.readline" {
             input.read_until(b'\n', &mut bytes)
         } else {
             input.read_to_end(&mut bytes)
         }
         .map_err(os_error)?;
+        if requested.is_some_and(|size| bytes.len() < size) {
+            bytes.shrink_to_fit();
+        }
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
     let f = reader?;
@@ -430,6 +473,7 @@ pub(super) fn text_method(
             file.write(value)?;
             Ok(ctx.int(value.chars().count() as i64))
         }
+        "isatty" => Ok(if file.isatty()? { TRUE } else { FALSE }),
         "flush" => {
             file.flush()?;
             Ok(NONE)

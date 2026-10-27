@@ -102,6 +102,14 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "native_ast_import": {
+        "main.py": (
+            "import ast as trees\nfrom ast import parse, walk\n"
+            "tree = parse('value', mode='eval')\n"
+            "print(trees.parse is parse, trees.walk is walk)\n"
+            "print([type(node).__name__ for node in walk(tree)])\n"
+        ),
+    },
     "conditional_function_export": {
         "main.py": (
             "from helper import selected as chosen\nimport helper\n"
@@ -115,6 +123,14 @@ ACCEPTED = {
             "else:\n    def selected():\n        return 'other'\n"
             "if guard(''):\n    def other():\n        return 'always'\n"
             "else:\n    def other():\n        return 'unreachable'\n"
+        ),
+    },
+    "conditional_function_then_definition": {
+        "main.py": "from helper import selected\nprint(selected())\n",
+        "helper.py": (
+            "if True:\n    def selected():\n        return 'branch'\n"
+            "else:\n    def selected():\n        return 'other'\n"
+            "def selected():\n    return 'final'\n"
         ),
     },
     "ready_function_in_cycle": {

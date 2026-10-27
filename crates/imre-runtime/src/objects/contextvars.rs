@@ -235,6 +235,9 @@ fn description(obj: &Object) -> Result<String, Error> {
 fn missing(key: &Object, kind: Kind) -> Error {
     // SAFETY: the exception independently owns the variable passed as its only argument.
     let word = unsafe { WordKind::new(5).acquire(key as *const Object as usize) };
+    if kind == Kind::KeyError {
+        return Error::key(word);
+    }
     match description(key) {
         Ok(text) => Error::object_argument(kind, text, word),
         Err(error) => error,
@@ -363,7 +366,10 @@ pub unsafe extern "C" fn imre_contextvars_reset(key: *const Object, tok: *const 
         context.replace(t.key.clone(), t.old.clone());
         Ok(())
     });
-    finish(result, ());
+    // Formatting an invalid token can raise while rendering its variable's default.
+    if super::exceptions::imre_error_pending() == 0 {
+        finish(result, ());
+    }
 }
 /// # Safety
 /// An exact variable roots its immutable name.

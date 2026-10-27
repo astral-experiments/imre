@@ -1,4 +1,5 @@
 import io
+import sys
 from io import RawIOBase
 
 
@@ -35,7 +36,26 @@ class ReadCount(RawIOBase):
         return self.count
 
 
+class ReadSize:
+    def __init__(self, stream):
+        self.stream = stream
+
+    def __index__(self):
+        print("size consumed", self.stream.read(1))
+        return 1
+
+
 def exercise(path):
+    with open(path, "rb") as reader:
+        reader.read(1)
+        try:
+            reader.read(sys.maxsize)
+        except OverflowError as error:
+            print(error.args, reader.tell(), reader.read(1))
+    with open(path, "rb") as stream:
+        print(stream.read(ReadSize(stream)), stream.tell())
+        stream.seek(0)
+        print(stream.readline(ReadSize(stream)), stream.tell())
     from io import UnsupportedOperation
 
     target_path = path + ".output"
@@ -109,6 +129,7 @@ def exercise(path):
         lambda: stream.readinto(bytearray(1)),
         lambda: stream.seek(0),
         lambda: stream.__enter__(),
+        lambda: stream.flush(),
         lambda: stream.tell(),
     ):
         try:

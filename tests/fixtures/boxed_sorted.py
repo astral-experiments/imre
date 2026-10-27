@@ -27,6 +27,26 @@ def broken_key(value):
 
 
 def current():
+    values = [3, 1, 2]
+    alias = values
+
+    def append_during_sort(value):
+        if value == 3:
+            print(len(alias))
+            alias.append(4)
+            alias.pop()
+        return value
+
+    try:
+        list.sort(values, key=append_during_sort)
+    except ValueError as error:
+        print(str(error), alias)
+    print(values.sort(reverse=True), alias)
+    cursor = iter(values)
+    print(next(cursor), list.reverse(alias), values, list(cursor))
+    cursor = iter(values)
+    print(list.clear(alias), values, list(cursor))
+
     unsafe = bytes((*range(0x21), 0x25, 0x7F)).decode()
     for extra in ("", "&=+#", "/?#", ":@/?#"):
         print([ord(c) for c in sorted(unsafe + extra)])

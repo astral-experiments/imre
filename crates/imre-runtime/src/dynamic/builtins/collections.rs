@@ -1,3 +1,4 @@
+use super::super::calls::MappingOperation;
 use super::super::value::DictViewKind;
 use super::*;
 
@@ -9,19 +10,50 @@ pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
             args.len()
         )));
     };
-    let mut values = ctx.items(*iterable)?;
-    // Python callbacks can remove every reference from the input while sorting.
+    let values = ctx.items(*iterable)?;
+    let list = ctx.alloc(Value::List(values));
+    list_sort(ctx, list, &[], kwargs)?;
+    Ok(list)
+}
+
+/// Leave an empty list visible to callbacks and restore its original elements on every exit.
+fn list_sort(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [key, reverse] = bind_method_arguments("sort", args, kwargs, ["key", "reverse"], 0)?;
+    let reverse = ctx.optional_truth(reverse, false)?;
+    let Value::List(live) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    let mut values = std::mem::take(live);
     for &value in &values {
         ctx.heap.keep(value);
     }
-    let [key, reverse] = bind_method_arguments("sort", &[], kwargs, ["key", "reverse"], 0)?;
-    let reverse = ctx.optional_truth(reverse, false)?;
+    let result = sort_list_items(ctx, &mut values, key, reverse);
+    let Value::List(live) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    // An append allocates storage even if the callback subsequently pops the item.
+    let modified = live.capacity() != 0;
+    *live = values;
+    result?;
+    if modified {
+        return Err(Error::new("ValueError", "list modified during sort"));
+    }
+    Ok(NONE)
+}
+
+/// Evaluate each key in input order before changing the order of the items.
+fn sort_list_items(
+    ctx: &mut Context,
+    values: &mut [Id],
+    key: Option<Id>,
+    reverse: bool,
+) -> Result<()> {
     if let Some(key) = key.filter(|&key| key != NONE) {
         let mut keyed = Vec::new();
         keyed
             .try_reserve_exact(values.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for &value in &values {
+        for &value in values.iter() {
             let sort_key = ctx.call(key, vec![value], vec![])?;
             ctx.heap.keep(sort_key);
             keyed.push((sort_key, value));
@@ -31,9 +63,9 @@ pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
             *slot = value;
         }
     } else {
-        sort_values(ctx, &mut values, reverse, |value| value)?;
+        sort_values(ctx, values, reverse, |value| value)?;
     }
-    Ok(ctx.alloc(Value::List(values)))
+    Ok(())
 }
 
 fn sort_values<T: Copy>(
@@ -53,6 +85,14 @@ fn sort_values<T: Copy>(
     )
 }
 
+/// Borrows the current list storage between iterator callbacks.
+fn list_items_mut(ctx: &mut Context, receiver: Id) -> Result<&mut Vec<Id>> {
+    match ctx.heap.get_mut(receiver) {
+        Value::List(items) => Ok(items),
+        _ => Err(type_error("expected list")),
+    }
+}
+
 pub(super) fn entries(ctx: &Context, dict: Id) -> Result<&[(Id, Id)]> {
     ctx.dict_entries(dict)
         .ok_or_else(|| type_error("expected a dictionary"))
@@ -60,7 +100,9 @@ pub(super) fn entries(ctx: &Context, dict: Id) -> Result<&[(Id, Id)]> {
 
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some(input) = input
-        && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
+        && !ctx.for_each_mapping_item(input, MappingOperation::Update, |ctx, key, value| {
+            ctx.put_item(dict, key, value)
+        })?
     {
         let iterator = ctx.iterator(input)?;
         for index in 0.. {
@@ -258,8 +300,42 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "list.pop" {
-        return list_pop(ctx, args, kwargs);
+    if let Some(method @ ("clear" | "pop" | "reverse" | "sort")) = name.strip_prefix("list.") {
+        let Some((&receiver, args)) = args.split_first() else {
+            return Err(type_error(format!(
+                "unbound method {name}() needs an argument"
+            )));
+        };
+        if !matches!(ctx.heap.get(receiver), Value::List(_)) {
+            return Err(type_error(format!(
+                "descriptor '{method}' for 'list' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            )));
+        }
+        return match method {
+            "pop" => list_pop(ctx, receiver, args, kwargs),
+            "sort" => list_sort(ctx, receiver, args, kwargs),
+            _ => {
+                if !kwargs.is_empty() {
+                    return Err(type_error(format!("{name}() takes no keyword arguments")));
+                }
+                if !args.is_empty() {
+                    return Err(type_error(format!(
+                        "{name}() takes no arguments ({} given)",
+                        args.len()
+                    )));
+                }
+                let Value::List(items) = ctx.heap.get_mut(receiver) else {
+                    unreachable!()
+                };
+                if method == "reverse" {
+                    items.reverse();
+                } else {
+                    items.clear();
+                }
+                Ok(NONE)
+            }
+        };
     }
     let slot = matches!(
         name,
@@ -382,25 +458,42 @@ pub(super) fn method(
             update(ctx, receiver, args.first().copied(), kwargs)?;
             Ok(NONE)
         }
-        "list.append" | "list.extend" => {
+        "list.append" => {
             arity(name, args, 1, 1)?;
-            let added = if name == "list.extend" {
-                ctx.items(args[0])?
+            list_items_mut(ctx, receiver)?.push(args[0]);
+            Ok(NONE)
+        }
+        "list.extend" => {
+            arity(name, args, 1, 1)?;
+            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(args[0]) {
+                let added = items.clone();
+                list_items_mut(ctx, receiver)?.extend(added);
             } else {
-                vec![args[0]]
-            };
-            let Value::List(items) = ctx.heap.get_mut(receiver) else {
-                return Err(type_error("expected list"));
-            };
-            items.extend(added);
+                let iterator = ctx.iterator(args[0])?;
+                ctx.heap.keep(iterator);
+                let default = ctx.int(8);
+                let hint = ctx.length_hint(args[0], Some(default))?;
+                let hint = ctx.as_integer(hint)? as usize;
+                let items = list_items_mut(ctx, receiver)?;
+                if hint <= isize::MAX as usize - items.len() {
+                    items
+                        .try_reserve(hint)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                }
+                while let Some(item) = ctx.next_item(iterator)? {
+                    let items = list_items_mut(ctx, receiver)?;
+                    items
+                        .try_reserve(1)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    items.push(item);
+                }
+            }
             Ok(NONE)
         }
         "list.insert" => {
             arity(name, args, 2, 2)?;
             let index = ctx.as_integer(args[0])?;
-            let Value::List(items) = ctx.heap.get_mut(receiver) else {
-                return Err(type_error("expected list"));
-            };
+            let items = list_items_mut(ctx, receiver)?;
             let len = items.len() as i64;
             let index = if index < 0 {
                 (len + index).max(0)
@@ -450,16 +543,7 @@ pub(super) fn method(
     }
 }
 
-fn list_pop(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let Some((&receiver, args)) = args.split_first() else {
-        return Err(type_error("unbound method list.pop() needs an argument"));
-    };
-    if !matches!(ctx.heap.get(receiver), Value::List(_)) {
-        return Err(type_error(format!(
-            "descriptor 'pop' for 'list' objects doesn't apply to a '{}' object",
-            ctx.type_name(receiver)
-        )));
-    }
+fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error("list.pop() takes no keyword arguments"));
     }

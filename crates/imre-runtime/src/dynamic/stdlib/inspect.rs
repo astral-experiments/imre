@@ -1,5 +1,5 @@
 //! Coroutine function flags and the identity marker from Lib/inspect.py.
-use super::{Context, Error, FALSE, Id, Result, TRUE, Value};
+use super::{Context, FALSE, Id, Result, TRUE, Value};
 
 pub(super) fn marker(ctx: &mut Context) -> Id {
     let key = "inspect._is_coroutine_mark";
@@ -30,36 +30,7 @@ pub(super) fn call(
     } else {
         "obj"
     };
-    let mut value = args.first().copied();
-    for (key, arg) in kwargs {
-        if key != param {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() got an unexpected keyword argument '{key}'"),
-            ));
-        }
-        if value.replace(*arg).is_some() {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() got multiple values for argument '{param}'"),
-            ));
-        }
-    }
-    if args.len() > 1 {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "{name}() takes 1 positional argument but {} were given",
-                args.len()
-            ),
-        ));
-    }
-    let mut obj = value.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!("{name}() missing 1 required positional argument: '{param}'"),
-        )
-    })?;
+    let mut obj = super::single_argument(name, param, args, kwargs)?;
     if name == "markcoroutinefunction" {
         obj = attribute(ctx, obj, "__func__")?.unwrap_or(obj);
         let mark = marker(ctx);
