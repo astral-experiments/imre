@@ -64,6 +64,7 @@ pub(super) struct Trace {
 #[derive(Clone, Debug)]
 pub(super) struct Error {
     pub kind: String,
+    pub class: Option<Id>,
     pub message: String,
     pub args: Option<Vec<Id>>,
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
@@ -75,6 +76,7 @@ impl Error {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
         Self {
             kind: kind.to_owned(),
+            class: None,
             message: message.into(),
             args: None,
             os_args: None,
@@ -88,6 +90,7 @@ impl Error {
             .iter()
             .flatten()
             .copied()
+            .chain(self.class)
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
                     .frames
