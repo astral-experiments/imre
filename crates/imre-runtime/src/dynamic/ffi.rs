@@ -57,8 +57,14 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
-            "lookup" => {
+            "lookup" | "lookup_class_local" => {
                 let name = self.str_value(b)?.to_owned();
+                if op == "lookup_class_local" {
+                    if let Some(value) = self.scope_name(a, &name) {
+                        return Ok(value);
+                    }
+                    return self.lookup(self.root_scope(a), &name);
+                }
                 self.lookup(a, &name)
             }
             "assign" => {
@@ -79,10 +85,7 @@ impl Context {
                 let name = self.str_value(b)?.to_owned();
                 let scope = self.binding_scope(a, &name);
                 if !self.remove_binding(scope, &name, b)? && op == "delname" {
-                    return Err(Error::new(
-                        "NameError",
-                        format!("name '{name}' is not defined"),
-                    ));
+                    return Err(self.missing_binding(a, scope, &name));
                 }
                 Ok(NONE)
             }
@@ -451,6 +454,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         contexts: Vec::new(),
         bytearray_exports: Vec::new(),
         sorting_lists: Vec::new(),
+        repr_ancestors: Vec::new(),
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,

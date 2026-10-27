@@ -85,6 +85,7 @@ exception_kinds!(
 
 const FUNCTIONS: &[&str] = &[
     "len",
+    "hash",
     "reversed",
     "dir",
     "sorted",
@@ -234,6 +235,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "format",
     "isalnum",
     "isspace",
+    "isupper",
     "join",
     "lower",
     "lstrip",
@@ -331,7 +333,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "list"
         }
         Value::Set { frozen: false, .. }
-            if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
+            if matches!(
+                attr,
+                "add" | "copy" | "update" | "issuperset" | "__contains__"
+            ) =>
         {
             "set"
         }
@@ -740,6 +745,7 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "module" => ctx.module_method(method, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
@@ -810,6 +816,12 @@ pub(super) fn call(
                 receiver,
                 explicit: true,
             }))
+        }
+        "module" => {
+            let class = ctx.builtin("module");
+            let instance = ctx.allocate_module(class);
+            ctx.init_module(instance, args, kwargs)?;
+            Ok(instance)
         }
         "object" => {
             if !args.is_empty() || !kwargs.is_empty() {
@@ -949,6 +961,12 @@ pub(super) fn call(
             let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
             let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
             Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
+        }
+        "hash" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let hash = ctx.dictionary_hash(args[0])?;
+            Ok(ctx.int(hash))
         }
         "chr" | "ord" => {
             if !kwargs.is_empty() {

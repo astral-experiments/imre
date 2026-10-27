@@ -13,7 +13,7 @@ BLOCKED = {
         import threading
         from contextvars import Context
         t = threading.Thread(context=Context()); t.start(); t.join()
-    """, "threading"),
+    """, "unsupported sealed standard-library export threading.Thread"),
     "task_context": ("""
         import asyncio
         from contextvars import Context

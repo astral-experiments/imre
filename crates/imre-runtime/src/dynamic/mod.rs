@@ -12,6 +12,7 @@ mod function_fields;
 mod importlib;
 mod iterators;
 mod mapping_abc;
+mod module_type;
 mod operators;
 mod os_error;
 mod property;
@@ -23,6 +24,7 @@ mod super_object;
 mod thread_local;
 mod thread_lock;
 mod typing;
+mod union;
 mod value;
 mod weakref;
 mod zip;
@@ -71,6 +73,8 @@ pub(crate) struct Context {
     bytearray_exports: Vec<Id>,
     // Active sorts temporarily detach their list storage while Python callbacks run.
     sorting_lists: Vec<Id>,
+    // Container ancestors visible to a reentrant Python __repr__.
+    repr_ancestors: Vec<Id>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
@@ -630,7 +634,13 @@ impl Context {
         };
         s
     }
-    fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+    fn root_scope(&self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        scope
+    }
+    fn binding_scope(&self, scope: Id, name: &str) -> Id {
         if self.scope_data(scope).closure.nonlocals.contains(name) {
             let mut cursor = self.scope_data(scope).parent;
             while let Some(parent) = cursor {
@@ -642,9 +652,7 @@ impl Context {
             }
         }
         if self.scope_data(scope).globals.contains(name) {
-            while let Some(parent) = self.scope_data(scope).parent {
-                scope = parent;
-            }
+            return self.root_scope(scope);
         }
         scope
     }
@@ -681,10 +689,8 @@ impl Context {
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
-    fn module_globals(&mut self, mut scope: Id) -> Id {
-        while let Some(parent) = self.scope_data(scope).parent {
-            scope = parent;
-        }
+    fn module_globals(&mut self, scope: Id) -> Id {
+        let scope = self.root_scope(scope);
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
@@ -766,7 +772,31 @@ impl Context {
             self.heap.weak_edge_removed(previous);
         }
     }
+    /// Describe a missing binding in the scope that owns it.
+    fn missing_binding(&self, origin: Id, scope: Id, name: &str) -> Error {
+        let frame = self.scope_data(scope);
+        let declared = frame.class_body.is_none() && frame.closure.declared.contains(name);
+        if declared && origin == scope {
+            Error::new(
+                "UnboundLocalError",
+                format!(
+                    "cannot access local variable '{name}' where it is not associated with a value"
+                ),
+            )
+        } else if declared || frame.closure.cells.contains_key(name) {
+            Error::new(
+                "NameError",
+                format!(
+                    "cannot access free variable '{name}' where it is not associated with a value in enclosing scope"
+                ),
+            )
+        } else {
+            Error::new("NameError", format!("name '{name}' is not defined"))
+        }
+    }
+
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
+        let origin = scope;
         loop {
             scope = self.binding_scope(scope, name);
             if let Some(locals) = self.scope_data(scope).exec_locals {
@@ -777,18 +807,18 @@ impl Context {
             }
             let s = self.scope_data(scope);
             if s.closure.cells.contains_key(name) {
-                return self.scope_name(scope, name).ok_or_else(|| {
-                    Error::new(
-                        "NameError",
-                        format!("free variable '{name}' is not associated with a value"),
-                    )
-                });
+                return self
+                    .scope_name(scope, name)
+                    .ok_or_else(|| self.missing_binding(origin, scope, name));
             }
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
             if let Some(id) = self.scope_name(scope, name) {
                 return Ok(id);
+            }
+            if s.class_body.is_none() && s.closure.declared.contains(name) {
+                return Err(self.missing_binding(origin, scope, name));
             }
             if name == "__class__"
                 && s.class_body.is_none()
@@ -812,10 +842,7 @@ impl Context {
         if builtins::is_builtin(name) {
             return Ok(self.builtin(name));
         }
-        Err(Error::new(
-            "NameError",
-            format!("name '{name}' is not defined"),
-        ))
+        Err(self.missing_binding(origin, scope, name))
     }
     fn builtin(&mut self, name: &str) -> Id {
         if let Some(&value) = self.builtins.get(name) {
@@ -835,6 +862,7 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
+            weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
         for method in methods {
@@ -1106,6 +1134,7 @@ impl Context {
             scope,
             origin,
             initializing: source.is_some(),
+            constructor: None,
         });
         self.modules.insert(name.to_owned(), module);
         match name {

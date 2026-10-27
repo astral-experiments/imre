@@ -86,17 +86,11 @@ pub(super) fn construct(
         "repr" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            if let Some(repr) = ctx.bound_slot(args[0], "__repr__")? {
-                let result = ctx.call(repr, Vec::new(), Vec::new())?;
-                if ctx.str_value(result).is_err() {
-                    return Err(type_error(format!(
-                        "__repr__ returned non-string (type {})",
-                        ctx.type_name(result)
-                    )));
-                }
+            if let Some(result) = ctx.repr_override(args[0])? {
                 return Ok(result);
             }
-            Ok(ctx.text(ctx.checked_format(args[0], true)?))
+            let text = ctx.checked_format(args[0], true)?;
+            Ok(ctx.text(text))
         }
         "int" => {
             if kwargs.iter().any(|(k, _)| k != "base") {
@@ -188,7 +182,8 @@ pub(super) fn construct(
                 }
                 return Ok(result);
             }
-            Ok(ctx.text(ctx.checked_format(value, false)?))
+            let text = ctx.checked_format(value, false)?;
+            Ok(ctx.text(text))
         }
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
@@ -1048,7 +1043,13 @@ pub(super) fn method(
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
-    if matches!(name, "isalnum" | "isspace") {
+    let predicate: Option<fn(&str) -> bool> = match name {
+        "isalnum" => Some(crate::objects::python_alnum),
+        "isspace" => Some(crate::objects::python_isspace),
+        "isupper" => Some(crate::objects::python_isupper),
+        _ => None,
+    };
+    if let Some(predicate) = predicate {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "str.{name}() takes no keyword arguments"
@@ -1060,11 +1061,6 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let predicate = if name == "isalnum" {
-            crate::objects::python_alnum
-        } else {
-            crate::objects::python_isspace
-        };
         return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }
     if name == "translate" {

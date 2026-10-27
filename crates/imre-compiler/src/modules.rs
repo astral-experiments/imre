@@ -92,6 +92,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_collections_abc.py",
             include_str!("../stdlib/_collections_abc.py"),
         )),
+        // CPython 3.14.5 Lib/weakref.py and Lib/_weakrefset.py.
+        "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
+        "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
@@ -1112,6 +1115,11 @@ impl IntrinsicModule {
             (Self::Threading, "local") | (Self::Thread, "_local") => {
                 Intrinsic::ObjectRuntimeExport("_thread._local")
             }
+            (Self::WeakRef, "WeakKeyDictionary") => {
+                Intrinsic::ObjectRuntimeExport("weakref.WeakKeyDictionary")
+            }
+            (Self::WeakRef, "ref") => Intrinsic::ObjectRuntimeExport("weakref.ref"),
+            (Self::WeakRef, "WeakMethod") => Intrinsic::ObjectRuntimeExport("weakref.WeakMethod"),
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
@@ -1416,6 +1424,19 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// The native value-struct decorator has no corresponding Python object runtime export.
+    pub(crate) fn imports_struct_decorator(&self) -> bool {
+        self.modules.iter().any(|module| {
+            module.bindings.values().any(|binding| {
+                matches!(
+                    binding,
+                    Binding::Intrinsic(Intrinsic::Struct)
+                        | Binding::IntrinsicModule(IntrinsicModule::Imre)
+                )
+            })
+        })
+    }
+
     pub(crate) fn is_abstract_context_manager(&self, definition: DefinitionId) -> bool {
         let source = &self.modules[definition.module];
         source.is_bundled(CONTEXTLIB_ABSTRACT)
