@@ -39,6 +39,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/zipimport_boxed.py"),
                 "\n",
                 include_str!("../stdlib/zipimport.py"),
+                "\n",
+                include_str!("../stdlib/zipimport_source.py"),
             ),
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
@@ -3186,9 +3188,9 @@ impl<'a> Loader<'a> {
             "zipimport" if cfg!(unix) => Some((
                 "zipimport.py",
                 concat!(
-                    include_str!("../stdlib/zipimport_typed.py"),
+                    include_str!("../stdlib/zipimport.py"),
                     "\n",
-                    include_str!("../stdlib/zipimport.py")
+                    include_str!("../stdlib/zipimport_typed.py"),
                 ),
             )),
             "platform" => Some((

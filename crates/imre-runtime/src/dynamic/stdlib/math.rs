@@ -31,16 +31,8 @@ pub(super) fn round(
         "ceil" => "__ceil__",
         _ => unreachable!(),
     };
-    if let Value::Instance { class, .. } = *ctx.heap.get(value) {
-        // A later mixin cannot override a method already supplied by int or float.
-        let method = ctx.find_in_mro(class, |base| match ctx.heap.get(base) {
-            Value::Native(name) if matches!(name.as_str(), "int" | "float") => Some(None),
-            _ => ctx.own_class_attr(base, slot).map(Some),
-        });
-        if let Some(Some(method)) = method {
-            let method = ctx.bind_attribute(method, value, class)?;
-            return ctx.call(method, Vec::new(), Vec::new());
-        }
+    if let Some(method) = ctx.bound_numeric_slot(value, slot)? {
+        return ctx.call(method, Vec::new(), Vec::new());
     }
     let scalar = ctx.scalar_value(value);
     let number = match *ctx.heap.get(scalar) {
