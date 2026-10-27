@@ -59,7 +59,11 @@ class _SocketWriter:
             raise ValueError("I/O operation on closed file.")
 
     def close(self) -> None:
-        self.closed = True
+        if not self.closed:
+            try:
+                self.flush()
+            finally:
+                self.closed = True
 
 
 class StreamRequestHandler(BaseRequestHandler):
@@ -123,6 +127,11 @@ class StreamRequestHandler(BaseRequestHandler):
         self._writer = (value,)
 
     def finish(self) -> None:
+        if not self.wfile.closed:
+            try:
+                self.wfile.flush()
+            except OSError:
+                pass
         self.wfile.close()
         self.rfile.close()
 
