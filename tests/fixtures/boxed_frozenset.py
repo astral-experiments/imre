@@ -34,6 +34,27 @@ def current():
             print(str(exc))
         else:
             raise AssertionError("unhashable argument accepted")
+    left, right = 0, 0
+    for _ in range(30000):
+        left = frozenset((left,))
+        right = frozenset((right,))
+    assert left == right
+    left, right = 0, 0
+    for _ in range(30000):
+        left = frozenset((left, "sentinel"))
+        right = frozenset((right, "sentinel"))
+    assert left == right
+    left, right = 0, 0
+    for _ in range(10000):
+        left = frozenset(((left,),))
+        right = frozenset(((right,),))
+    assert left == right
+    from types import GenericAlias
+    left, right = 0, 0
+    for _ in range(10000):
+        left = frozenset((GenericAlias(list, (left,)),))
+        right = frozenset((GenericAlias(list, (right,)),))
+    assert left == right
     print("ok")
 
 
