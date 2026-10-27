@@ -243,9 +243,9 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::BufferedRandom(_) => "_io.BufferedRandom",
-            Value::Deque(_) => "deque",
-            Value::DequeIterator { reverse: true, .. } => "_deque_reverse_iterator",
-            Value::DequeIterator { .. } => "_deque_iterator",
+            Value::Deque(_) => super::deque::CLASS,
+            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
+            Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::List(_) => "list",
             Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
