@@ -86,6 +86,15 @@ pub(crate) struct Context {
     slot_depth: usize,
 }
 
+fn copy_ids(values: &[Id]) -> Result<Vec<Id>> {
+    let mut copied = Vec::new();
+    copied
+        .try_reserve_exact(values.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    copied.extend_from_slice(values);
+    Ok(copied)
+}
+
 impl Context {
     fn code_object(&self, id: Id) -> &value::CodeObject {
         let Value::Code(code) = self.heap.get(id) else {
@@ -538,10 +547,12 @@ impl Context {
         if let Value::MappingProxy(dict) = *self.heap.get(id) {
             return self.items(dict);
         }
+        if let Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
+            self.heap.get(id)
+        {
+            return copy_ids(items);
+        }
         match self.heap.get(id).clone() {
-            Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
-                Ok(items)
-            }
             Value::Set { entries, .. }
             | Value::Dict(entries)
             | Value::DefaultDict { entries, .. } => {

@@ -98,6 +98,26 @@ def check_slice_stack(imre, imports, root, env):
     assert output(imre, boundary, 8) == exhausted
 
 
+def check_argument_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "argument_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
+    ])
+    cases = [
+        ((), 0, b"113 113 2\n", b""),
+        ((), 1, b"caught () 0\n113 113 1\n", b"refused\n"),
+    ]
+    for arguments, ordinal, stdout, stderr in cases:
+        result = run(imre, "-B", fixtures / "boxed_call_arguments.py", *arguments, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -123,6 +143,7 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_argument_allocation(imre, root, run)
             check_raise_site_allocation(imre, root, run)
             check_getter_allocation(imre, root, run)
 
