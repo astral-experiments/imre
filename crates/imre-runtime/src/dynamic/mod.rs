@@ -142,7 +142,7 @@ impl Context {
     }
 
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
-        match self.heap.get(id) {
+        match self.heap.get(self.scalar_value(id)) {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
             _ => Err(Error::new(
                 "TypeError",
@@ -995,6 +995,11 @@ impl Context {
         });
         self.modules.insert(name.to_owned(), module);
         match name {
+            "os" => {
+                let path = self.module("posixpath")?;
+                self.bind(scope, "path", path);
+                self.modules.insert("os.path".to_owned(), path);
+            }
             "io" => stdlib::io::install(self, scope),
             "_io" => {
                 self.module("io")?;

@@ -30,6 +30,7 @@ mod logging;
 mod marshal;
 mod operator;
 mod pickle;
+mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
 mod socket;
@@ -52,7 +53,9 @@ pub(super) fn is_module(name: &str) -> bool {
             | "sysconfig"
             | "ast"
             | "os"
-            | "os.path"
+            | "posix"
+            | "posixpath"
+            | "_imre_posixpath"
             | "fnmatch"
             | "itertools"
             | "operator"
@@ -359,8 +362,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
+        ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         ("os", "name") => ctx.text("posix"),
-        ("os" | "os.path", "sep") => ctx.text("/"),
+        ("os" | "posixpath", "sep") => ctx.text("/"),
         ("importlib.machinery", "EXTENSION_SUFFIXES") => {
             let suffix = ctx.text(
                 ctx.config["archive_suffix"]
@@ -389,8 +394,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_preferred_scheme",
         )
         | ("site", "getsitepackages")
-        | ("os", "confstr" | "fsdecode" | "uname")
-        | ("os.path", "join" | "abspath" | "dirname")
+        | ("os", "confstr" | "uname")
+        | ("_imre_posixpath", "extension_start" | "isfile")
         | (
             "platform",
             "system"
@@ -468,6 +473,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
+    }
+    if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
+        return posixpath::call(ctx, name, args, kwargs);
     }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
@@ -637,7 +645,6 @@ pub(super) fn call(
         | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
         | "os.confstr"
-        | "os.fsdecode"
         | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
@@ -823,23 +830,6 @@ pub(super) fn call(
                 }
             })?;
             value.map_or(NONE, |value| ctx.text(value))
-        }
-        "os.fsdecode" => {
-            let item = argument(args, 0)?;
-            match ctx.heap.get(item) {
-                Value::Str(_) => item,
-                Value::Bytes(bytes) => {
-                    let decoded: Option<String> =
-                        system::fsdecode(bytes).map(char::from_u32).collect();
-                    ctx.text(decoded.ok_or_else(|| {
-                        Error::new(
-                            "UnicodeError",
-                            "surrogate-escaped filenames are not representable as Imre strings",
-                        )
-                    })?)
-                }
-                _ => return Err(Error::new("TypeError", "expected a path string or bytes")),
-            }
         }
         "struct.calcsize" => {
             let size = system::struct_calcsize(ctx.str_value(argument(args, 0)?)?)
