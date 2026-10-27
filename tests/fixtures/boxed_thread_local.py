@@ -17,9 +17,15 @@ def current():
     del state.stack
     backing["__class__"] = "shadow"
     print(state.__class__, getattr(state, "__class__"), type(state) is local)
+    print(object.__getattribute__(state, "__class__") is local)
     del backing["__class__"]
     print(state.__class__ is local)
+    state.item = 7
     for action in (
+        lambda: object.__getattribute__(state, "item"),
+        lambda: object.__getattribute__(state, "__dict__"),
+        lambda: object.__setattr__(state, "item", 8),
+        lambda: object.__delattr__(state, "item"),
         lambda: state.stack,
         lambda: delattr(state, "missing"),
         lambda: setattr(state, "__dict__", {}),
@@ -31,6 +37,7 @@ def current():
             action()
         except (AttributeError, TypeError) as error:
             print(type(error).__name__, str(error))
+    print(state.item, backing is state.__dict__)
 
 
 if __name__ == "__main__":

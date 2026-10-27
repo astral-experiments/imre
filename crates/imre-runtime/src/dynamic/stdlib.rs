@@ -418,6 +418,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.alloc(Value::Native(format!("operator.{name}")))
         }
         ("subprocess", "PIPE") => ctx.int(-1),
+        ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
         ("sys", "exit" | "exc_info" | "exception")
         | (
             "sysconfig",
@@ -648,6 +649,15 @@ pub(super) fn call(
                 "the first argument must be callable",
             ));
         }
+        if bound
+            .last()
+            .is_some_and(|&id| matches!(ctx.heap.get(id), Value::PartialPlaceholder))
+        {
+            return Err(Error::new(
+                "TypeError",
+                "trailing Placeholders are not allowed",
+            ));
+        }
         let (function, mut args, keywords) = match ctx.heap.get(function).clone() {
             Value::Partial {
                 function,
@@ -663,9 +673,23 @@ pub(super) fn call(
             }
             _ => (function, Vec::new(), ctx.dict(Vec::new())),
         };
-        args.extend(bound);
+        let mut supplied = bound.iter().copied();
+        for argument in &mut args {
+            if matches!(ctx.heap.get(*argument), Value::PartialPlaceholder)
+                && let Some(value) = supplied.next()
+            {
+                *argument = value;
+            }
+        }
+        args.extend(supplied);
         let args = ctx.alloc(Value::Tuple(args));
         for (name, value) in kwargs {
+            if matches!(ctx.heap.get(*value), Value::PartialPlaceholder) {
+                return Err(Error::new(
+                    "TypeError",
+                    "Placeholder cannot be passed as a keyword argument",
+                ));
+            }
             let name = ctx.text(name);
             ctx.put_item(keywords, name, *value)?;
         }

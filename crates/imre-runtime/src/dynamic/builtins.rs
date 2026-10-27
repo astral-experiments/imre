@@ -853,6 +853,7 @@ pub(super) fn call(
                     offset: items.len(),
                     reverse: true,
                     kind: "list_reverseiterator",
+                    context: None,
                 }));
             }
             if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
@@ -897,7 +898,11 @@ pub(super) fn call(
             let size = match ctx.heap.get(args[0]) {
                 Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => v.len(),
                 Value::NamedTuple { values, .. } => values.len(),
-                Value::Context(bindings) => bindings.len(),
+                Value::Context(bindings)
+                | Value::Iterator {
+                    context: Some(bindings),
+                    ..
+                } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
                     collections::entries(ctx, *dict)?.len()

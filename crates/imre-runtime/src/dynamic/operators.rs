@@ -111,7 +111,11 @@ impl Context {
                 .dict_entries(*dict)
                 .expect("dict view backing")
                 .is_empty(),
-            Value::Context(bindings) => !bindings.is_empty(),
+            Value::Context(bindings)
+            | Value::Iterator {
+                context: Some(bindings),
+                ..
+            } => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
                     start < stop
@@ -475,7 +479,7 @@ impl Context {
                             Some(items.as_slice()),
                             None,
                         ),
-                        Value::Dict(items) => ("{", "}", "{...}", None, Some(items.as_slice())),
+                        Value::Dict(items) => ("{", "}", "{...}", None, Some(&items[..])),
                         Value::Set { items, frozen } => {
                             if items.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });
@@ -584,6 +588,7 @@ impl Context {
             }
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
+            Value::PartialPlaceholder => "Placeholder".to_owned(),
             Value::None => "None".into(),
             Value::Ellipsis => "Ellipsis".into(),
             Value::NotImplemented => "NotImplemented".into(),
