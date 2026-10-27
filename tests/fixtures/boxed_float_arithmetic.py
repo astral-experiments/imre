@@ -5,6 +5,16 @@ def div(a,b): return a/b
 def floordiv(a,b): return a//b
 def mod(a,b): return a%b
 def current():
+    for value in (-(1 << 130), True, False, -0.0, float('-inf')):
+        magnitude = abs(value)
+        print(type(magnitude).__name__, repr(magnitude))
+    for call in (lambda: abs(), lambda: abs(1, 2), lambda: abs(x=2)):
+        try:
+            call()
+        except TypeError as error:
+            print(error.args)
+        else:
+            raise AssertionError("invalid abs call accepted")
     for name,func in (('+',add), ('-',sub), ('*',mul), ('/',div), ('//',floordiv), ('%',mod)):
         for a,b in ((1.5,0.5),(1,0.5),(0.5,1),(-7.0,3.0),(7.0,-3.0),(0.0,-3.0),(-0.0,3.0),(1.0,0.0),(1e308,1e-308)):
             try: print(name,repr(func(a,b)))
