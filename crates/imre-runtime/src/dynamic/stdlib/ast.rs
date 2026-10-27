@@ -206,13 +206,43 @@ fn parsed_instance(
     })
 }
 
-pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id>> {
-    let Value::AstWalk(queue) = ctx.heap.get_mut(iter) else {
+pub(in super::super) fn has_item(ctx: &Context, iter: Id) -> Result<bool> {
+    let Value::AstWalk { queue, running } = ctx.heap.get(iter) else {
         unreachable!()
     };
-    let Some(node) = queue.pop_front() else {
+    if *running {
+        return Err(Error::new("ValueError", "generator already executing"));
+    }
+    Ok(!queue.is_empty())
+}
+
+pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id>> {
+    if !has_item(ctx, iter)? {
         return Ok(None);
+    }
+    let Value::AstWalk { queue, running } = ctx.heap.get_mut(iter) else {
+        unreachable!()
     };
+    let node = queue.pop_front().expect("checked nonempty AST walk");
+    *running = true;
+    let result = children(ctx, node);
+    let Value::AstWalk { queue, running } = ctx.heap.get_mut(iter) else {
+        unreachable!()
+    };
+    *running = false;
+    match result {
+        Ok(children) => {
+            queue.extend(children);
+            Ok(Some(node))
+        }
+        Err(error) => {
+            queue.clear();
+            Err(error)
+        }
+    }
+}
+
+fn children(ctx: &mut Context, node: Id) -> Result<Vec<Id>> {
     ctx.heap.keep(node);
     let fields = ctx.lookup_attr(node, "_fields")?;
     let fields = ctx.items(fields)?;
@@ -239,11 +269,7 @@ pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id
             ctx.heap.keep(child);
         }
     }
-    let Value::AstWalk(queue) = ctx.heap.get_mut(iter) else {
-        unreachable!()
-    };
-    queue.extend(children);
-    Ok(Some(node))
+    Ok(children)
 }
 
 pub(super) fn call(
@@ -267,7 +293,10 @@ pub(super) fn call(
                     "walk() missing 1 required positional argument: 'node'",
                 )
             })?;
-            Ok(ctx.alloc(Value::AstWalk(VecDeque::from([node]))))
+            Ok(ctx.alloc(Value::AstWalk {
+                queue: VecDeque::from([node]),
+                running: false,
+            }))
         }
         "parse" => parse::parse(ctx, args, kwargs),
         _ => Err(Error::new(

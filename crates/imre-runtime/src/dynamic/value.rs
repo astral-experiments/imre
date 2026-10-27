@@ -487,7 +487,10 @@ pub(super) enum Value {
         entries: Vec<CachedCall>,
     },
     Yielded(Id),
-    AstWalk(std::collections::VecDeque<Id>),
+    AstWalk {
+        queue: std::collections::VecDeque<Id>,
+        running: bool,
+    },
     Enumerate {
         input: Id,
         next_index: crate::Int,
@@ -619,7 +622,7 @@ impl Value {
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
-            Self::AstWalk(queue) => visit.extend(queue),
+            Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
