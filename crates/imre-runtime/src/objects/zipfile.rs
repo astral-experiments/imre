@@ -136,6 +136,16 @@ impl Archive {
         Ok(archive)
     }
 
+    /// Find an exact ZIP member or an implicit directory in the central index.
+    pub(crate) fn contains_import(&self, name: &Str) -> bool {
+        self.by_name.contains_key(name)
+            || (name.ends_with('/')
+                && self
+                    .by_name
+                    .keys()
+                    .any(|entry| entry.starts_with(name.as_str())))
+    }
+
     /// Reopen the archive to read one exact resource from this cached directory.
     pub(crate) fn import_data(&self, name: &Str) -> Result<Bytes> {
         if let Some(entry) = self.by_name.get(name) {
@@ -145,12 +155,7 @@ impl Archive {
             return Member::open(Source::open(path)?, entry.zip_info(), || string_repr(name))?
                 .read_import_data();
         }
-        if name.ends_with('/')
-            && self
-                .by_name
-                .keys()
-                .any(|member| member.starts_with(name.as_str()))
-        {
+        if self.contains_import(name) {
             return Ok(Bytes::new());
         }
         Err(Error::from_errno(

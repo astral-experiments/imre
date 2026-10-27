@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 import shutil
 import subprocess
 import sys
@@ -127,6 +128,21 @@ ACCEPTED = {
         "orchard/__init__.py": "print('package init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
+    },
+    "zip_source_spec": {
+        "main.py": (
+            "import sys\nimport zipimport\nfrom importlib import import_module\n"
+            "from importlib.util import find_spec\nfrom witness import seen\n"
+            "for name in ('stored', 'deflated'):\n"
+            "    sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/' + name + '.zip')\n"
+            "    assert find_spec(name) is not None and name not in seen\n"
+            "    package = import_module(name)\n    spec = find_spec(name)\n"
+            "    assert package is import_module(name) and package.__spec__ is spec\n"
+            "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
+            "    assert spec.submodule_search_locations is package.__path__\n"
+            "    print(seen, spec.loader.get_data(package.__path__[0] + '/message.txt'))\n"
+        ),
+        "witness.py": "seen = []\n",
     },
     "registered_source_spec": {
         "main.py": (
@@ -280,6 +296,13 @@ def main() -> None:
         for name, files in ACCEPTED.items():
             case = temporary / name
             write_files(case, files)
+            if name == "zip_source_spec":
+                if os.name != "posix":
+                    continue
+                for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
+                    with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
+                        archive.writestr(f"{pkg}/__init__.py", "from witness import seen\nseen.append(__name__)\n")
+                        archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
             for level in args.opt_levels:
@@ -339,6 +362,45 @@ def main() -> None:
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
             checks += 1
+
+        # The imported object operation precedes the call that supplies flag's type.
+        for name, function, diagnostic in [
+            ("annotated", "def choose(flag: bool) -> int:\n    return flag\n", "expected int, got bool"),
+            ("inferred", "def choose(flag):\n    if flag:\n        return 1\n    return 'one'\n", "inferred returns require"),
+            ("unused_object", "def choose(flag):\n    parsed = ast.parse('1')\n    if flag:\n        return 1\n    return 'one'\n", "inferred returns require"),
+            ("live_object", "def choose(flag) -> int:\n    parsed = ast.parse('1')\n    print(parsed)\n    return 'one'\n", "invalid-return-type"),
+        ]:
+            case = temporary / ("object_return_" + name)
+            write_files(case, {
+                "main.py": "import helper\n",
+                "helper.py": "import ast\ntree = ast.parse('1')\n" + function + "choose(True)\n",
+            })
+            command = [compiler, "check", str(case / "main.py")]
+            for flags in ([], ["--reachable-only"]):
+                result = run(command + flags, temporary)
+                assert result.returncode == 1 and diagnostic in result.stderr, (name, result)
+            require_success(run(command + ["--runtime-imports"], temporary))
+            checks += 3
+
+        # A TypeError raised while evaluating a return operand can still be caught.
+        caught = temporary / "object_return_operand"
+        write_files(caught, {
+            "main.py": "from helper import wrapper\ntry:\n    wrapper()\nexcept TypeError:\n    print('caught')\n",
+            "helper.py": "import ast\nast.parse('1')\ndef take(value: int) -> int:\n    return value\n"
+                         "def wrapper() -> int:\n    return take('argument')\n",
+        })
+        for level in args.opt_levels:
+            executable = temporary / f"operand-{level}"
+            for flags in ([], ["--reachable-only"]):
+                command = [compiler, "build", str(caught / "main.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level), *build_flags, *flags]
+                if args.sanitize:
+                    command += ["--sanitize"]
+                require_success(run(command, temporary))
+                result = run([str(executable)], temporary)
+                require_success(result)
+                assert result.stdout == "caught\n", result
+                checks += 1
 
         collision = temporary / "collisions"
         write_files(collision, {"main.py": IMPORT, "helper.py": HELPER})

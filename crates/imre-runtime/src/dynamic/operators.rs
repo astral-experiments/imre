@@ -199,7 +199,10 @@ impl Context {
 
         enum Children {
             Sequence(usize),
-            Dict(usize),
+            Dict {
+                position: usize,
+                roots: Option<usize>,
+            },
             Context(usize),
         }
         let mut active = HashSet::new();
@@ -256,7 +259,10 @@ impl Context {
                         if x.len() != y.len() {
                             return Ok(false);
                         }
-                        Some(Children::Dict(0))
+                        Some(Children::Dict {
+                            position: 0,
+                            roots: None,
+                        })
                     }
                     (Value::Context(x), Value::Context(y)) => {
                         if x.len() != y.len() {
@@ -307,19 +313,19 @@ impl Context {
                             None
                         }
                     }
-                    Children::Dict(index) => {
-                        let x = self.dict_entries(a).expect("dict parent");
-                        let y = self.dict_entries(b).expect("dict parent");
-                        if x.len() != y.len() {
-                            return Ok(false);
-                        }
-                        if let Some(&(key, value)) = x.get(*index) {
-                            *index += 1;
-                            let Some(&(_, right)) = y.iter().find(|&&(k, _)| self.equal(key, k))
-                            else {
+                    Children::Dict { position, roots } => {
+                        // Retain one entry across reentrant key and value comparisons.
+                        let roots = *roots.get_or_insert_with(|| self.heap.temporary_mark());
+                        self.heap.release_temporaries_since(roots);
+                        if let Some((at, key, left, hash)) = self.dictionary_pair(a, *position) {
+                            *position = at + 1;
+                            self.heap.keep(left);
+                            let Some(index) = self.find_dictionary_key(b, key, hash)?.1 else {
                                 return Ok(false);
                             };
-                            Some((value, right))
+                            let right = self.dict_entries(b).expect("dict parent")[index].1;
+                            self.heap.keep(right);
+                            Some((left, right))
                         } else {
                             None
                         }

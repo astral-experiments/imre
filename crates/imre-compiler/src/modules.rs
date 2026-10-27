@@ -39,6 +39,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/zipimport_boxed.py"),
                 "\n",
                 include_str!("../stdlib/zipimport.py"),
+                "\n",
+                include_str!("../stdlib/zipimport_source.py"),
             ),
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
@@ -1291,6 +1293,8 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
+    pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
+    pub(crate) return_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
@@ -2386,6 +2390,8 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
+            deferred_object_error: Default::default(),
+            return_errors: Default::default(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -3160,9 +3166,9 @@ impl<'a> Loader<'a> {
             "zipimport" if cfg!(unix) => Some((
                 "zipimport.py",
                 concat!(
-                    include_str!("../stdlib/zipimport_typed.py"),
+                    include_str!("../stdlib/zipimport.py"),
                     "\n",
-                    include_str!("../stdlib/zipimport.py")
+                    include_str!("../stdlib/zipimport_typed.py"),
                 ),
             )),
             "platform" => Some((

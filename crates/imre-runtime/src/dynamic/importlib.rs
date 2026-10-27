@@ -8,6 +8,22 @@ use super::{
     value::{self, Code, Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 
+/// A registered disk body or the live loader for an indexed ZIP source.
+#[derive(Clone, Copy)]
+pub(super) enum SourceBody {
+    Compiled(Code),
+    Zip(Id),
+}
+
+impl SourceBody {
+    fn loader(self) -> Id {
+        match self {
+            Self::Compiled(_) => NONE,
+            Self::Zip(loader) => loader,
+        }
+    }
+}
+
 impl Context {
     /// Select the same registered module for a lookup and for an executing import.
     pub(super) fn registered_source(
@@ -17,48 +33,94 @@ impl Context {
         search: Id,
         top_level: bool,
         locations: &mut Vec<PathBuf>,
-    ) -> Result<Option<(PathBuf, Code)>> {
-        let mut selected = None;
+    ) -> Result<Option<(PathBuf, SourceBody)>> {
         let mut namespace = None;
         // A bundled package contributes its own __path__. A first-party
         // regular package can never acquire one of its children implicitly.
         let search = self.items(search)?;
-        let bundle = self.config["bundled_root"]
-            .as_str()
-            .map(std::path::Path::new);
+        let bundle = self.config["bundled_root"].as_str().map(PathBuf::from);
         let roots = search
-            .iter()
-            .filter_map(|&id| self.str_value(id).ok().map(std::path::Path::new));
-        for root in roots.chain(bundle.filter(|_| top_level)) {
-            let root = if root.as_os_str().is_empty() {
+            .into_iter()
+            .filter_map(|id| self.str_value(id).ok().map(PathBuf::from))
+            .collect::<Vec<_>>();
+        for spelling in roots
+            .into_iter()
+            .chain(bundle.iter().filter(|_| top_level).cloned())
+        {
+            let root = if spelling.as_os_str().is_empty() {
                 std::env::current_dir()
-            } else if bundle.is_some_and(|dir| root.starts_with(dir)) {
-                Ok(root.to_owned())
+            } else if bundle.as_ref().is_some_and(|dir| spelling.starts_with(dir)) {
+                Ok(spelling.clone())
             } else {
-                std::path::absolute(root)
+                std::path::absolute(&spelling)
             };
             let Ok(root) = root else { continue };
             let stem = root.join(child);
-            let Some(choices) = self.sources.get(name) else {
-                continue;
-            };
-            if let Some(module) = choices
-                .iter()
-                .find(|m| m.path == stem.join("__init__.py") || m.path == stem.with_extension("py"))
-            {
-                locations.clear();
-                if module.path.ends_with("__init__.py") {
-                    locations.push(stem);
+            if let Some(choices) = self.sources.get(name) {
+                if let Some(module) = choices.iter().find(|m| {
+                    m.path == stem.join("__init__.py") || m.path == stem.with_extension("py")
+                }) {
+                    locations.clear();
+                    if module.path.ends_with("__init__.py") {
+                        locations.push(stem);
+                    }
+                    return Ok(Some((
+                        module.path.clone(),
+                        SourceBody::Compiled(module.code),
+                    )));
                 }
-                selected = Some((module.path.clone(), module.code));
-                break;
+                if let Some(module) = choices.iter().find(|m| m.path == stem) {
+                    locations.push(stem);
+                    namespace
+                        .get_or_insert((module.path.clone(), SourceBody::Compiled(module.code)));
+                    continue;
+                }
             }
-            if let Some(module) = choices.iter().find(|m| m.path == stem) {
-                locations.push(stem);
-                namespace.get_or_insert((module.path.clone(), module.code));
+            // A path below an archive is virtual. Preserve its spelling because the
+            // loader exposes it in __file__, __path__, and resource names.
+            if cfg!(unix)
+                && !spelling.as_os_str().is_empty()
+                && spelling
+                    .ancestors()
+                    .find_map(|p| p.metadata().ok())
+                    .is_some_and(|m| m.is_file())
+                && let Some((origin, loader)) = self.zip_source(&spelling, name)?
+            {
+                if loader == NONE {
+                    locations.push(origin.clone());
+                    namespace.get_or_insert((origin, SourceBody::Zip(NONE)));
+                } else {
+                    locations.clear();
+                    if origin.ends_with("__init__.py") {
+                        locations.push(
+                            origin
+                                .parent()
+                                .expect("ZIP package contains a member")
+                                .to_owned(),
+                        );
+                    }
+                    return Ok(Some((origin, SourceBody::Zip(loader))));
+                }
             }
         }
-        Ok(selected.or(namespace))
+        Ok(namespace)
+    }
+
+    /// Resolve one archive or virtual archive prefix through its cached path importer.
+    fn zip_source(&mut self, root: &Path, name: &str) -> Result<Option<(PathBuf, Id)>> {
+        let module = self.module("zipimport")?;
+        let find = self.lookup_attr(module, "_find_at")?;
+        let path = self.text(root.to_string_lossy());
+        let name = self.text(name);
+        let result = self.call(find, vec![path, name], vec![])?;
+        if result == NONE {
+            return Ok(None);
+        }
+        let parts = self.items(result)?;
+        let [origin, loader] = parts.as_slice() else {
+            return Err(Error::new("TypeError", "expected a ZIP origin and loader"));
+        };
+        Ok(Some((PathBuf::from(self.str_value(*origin)?), *loader)))
     }
 
     pub(super) fn module_code(&mut self, entry: Code, path: &Path) -> Id {
@@ -98,10 +160,10 @@ impl Context {
         Ok(self.module_code(entry, &path))
     }
 
-    fn file_spec(&mut self, name: Id, origin: Id, locations: Id) -> Result<Id> {
+    fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {
         let importlib = self.module("importlib")?;
         let make = self.lookup_attr(importlib, "_file_spec")?;
-        self.call(make, vec![name, origin, locations], vec![])
+        self.call(make, vec![name, origin, locations, loader], vec![])
     }
 
     pub(super) fn initialize_source(
@@ -110,9 +172,10 @@ impl Context {
         scope: Id,
         name: Id,
         origin: Id,
+        loader: Id,
     ) -> Result<Id> {
         let locations = self.scope_name(scope, "__path__").unwrap_or(NONE);
-        let spec = self.file_spec(name, origin, locations)?;
+        let spec = self.file_spec(name, origin, locations, loader)?;
         let loader = self.lookup_attr(spec, "loader")?;
         self.bind(scope, "__spec__", spec);
         self.bind(scope, "__loader__", loader);
@@ -185,7 +248,7 @@ impl Context {
             ));
         }
         let mut locations = Vec::new();
-        let Some((path, _)) =
+        let Some((path, body)) =
             self.registered_source(fullname, child, search, top_level, &mut locations)?
         else {
             return Ok(NONE);
@@ -207,6 +270,6 @@ impl Context {
                 .collect();
             self.alloc(Value::List(values))
         };
-        self.file_spec(name, origin, locations)
+        self.file_spec(name, origin, locations, body.loader())
     }
 }

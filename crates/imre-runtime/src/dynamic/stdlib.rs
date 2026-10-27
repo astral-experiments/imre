@@ -455,7 +455,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
         | ("_imre_posixpath", "extension_start" | "isfile")
-        | ("_imre_zipimport", "exists" | "index" | "read")
+        | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -980,6 +980,20 @@ pub(super) fn call(
                 .iter()
                 .any(|(key, _)| !keywords.contains(&key.as_str())))
     {
+        if name == "file.flush"
+            && let Some((&receiver, positional)) = args.split_first()
+        {
+            let class = ctx.type_name(receiver).trim_start_matches("_io.");
+            let message = if kwargs.is_empty() {
+                format!(
+                    "{class}.flush() takes no arguments ({} given)",
+                    positional.len()
+                )
+            } else {
+                format!("{class}.flush() takes no keyword arguments")
+            };
+            return Err(Error::new("TypeError", message));
+        }
         return Err(Error::new(
             "TypeError",
             format!("unsupported arguments to {name}"),

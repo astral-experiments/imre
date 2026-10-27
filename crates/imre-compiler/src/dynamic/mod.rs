@@ -222,6 +222,11 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        // Changes to sys.path can select a ZIP loader at runtime. Register the same
+        // spec factory used for explicit import_module and find_spec calls.
+        if cfg!(unix) && self.sys_path(e) {
+            self.add(0, "importlib");
+        }
         if let Expr::Attribute(a) = e
             && typed_machinery_export(a.attr.as_str())
             && let Some(receiver) = UnqualifiedName::from_expr(&a.value)
@@ -292,6 +297,7 @@ pub(crate) fn compile(
     options: &CompileOptions,
     runtime_imports: bool,
     registered_imports: RegisteredImports,
+    check_returns: impl FnOnce() -> Result<(), String>,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -485,6 +491,7 @@ pub(crate) fn compile(
         "command":command.is_some(),"paths":paths,
     });
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    check_returns()?;
     let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
     Ok(Some(Compilation {
         llvm_ir,
