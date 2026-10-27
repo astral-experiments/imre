@@ -681,7 +681,9 @@ impl Context {
         {
             return Err(Error::new("TypeError", "unhashable key"));
         }
-        for value in self.items(container)? {
+        let iterator = self.iterator(container)?;
+        self.heap.keep(iterator);
+        while let Some(value) = self.next_item(iterator)? {
             if self.checked_equal(value, item)? {
                 return Ok(true);
             }
