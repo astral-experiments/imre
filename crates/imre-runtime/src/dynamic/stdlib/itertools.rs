@@ -1,5 +1,4 @@
 use super::{Context, Error, Id, Result, Value};
-use crate::objects::CountValue;
 
 /// Build the shared repeat cursor, converting a supplied count exactly once.
 pub(super) fn repeat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -24,12 +23,37 @@ pub(super) fn repeat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
     Ok(ctx.alloc(Value::Repeat(cursor)))
 }
 
-fn number(ctx: &Context, id: Id) -> Result<CountValue> {
-    match ctx.heap.get(id) {
-        Value::Int(n) => Ok(CountValue::Int(n.clone())),
-        Value::Float(n) => Ok(CountValue::Float(*n)),
-        Value::Bool(b) => Ok(CountValue::Int(crate::Int::from(i64::from(*b)))),
-        _ => Err(Error::new("TypeError", "a number is required")),
+fn number(ctx: &Context, id: Id) -> Result<()> {
+    const SLOTS: &[&str] = &[
+        "__add__",
+        "__sub__",
+        "__mul__",
+        "__matmul__",
+        "__truediv__",
+        "__floordiv__",
+        "__mod__",
+        "__divmod__",
+        "__pow__",
+        "__neg__",
+        "__pos__",
+        "__abs__",
+        "__bool__",
+        "__invert__",
+        "__lshift__",
+        "__rshift__",
+        "__and__",
+        "__xor__",
+        "__or__",
+        "__int__",
+        "__float__",
+        "__index__",
+    ];
+    if matches!(ctx.heap.get(id), Value::Int(_) | Value::Float(_) | Value::Bool(_))
+        || SLOTS.iter().any(|name| ctx.slot(id, name).is_some())
+    {
+        Ok(())
+    } else {
+        Err(Error::new("TypeError", "a number is required"))
     }
 }
 
@@ -40,9 +64,10 @@ pub(super) fn count(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let mut current = start.unwrap_or_else(|| ctx.int(0));
     let step = step.unwrap_or_else(|| ctx.int(1));
     number(ctx, current)?;
-    let delta = number(ctx, step)?;
+    number(ctx, step)?;
     if let Value::Bool(b) = *ctx.heap.get(current)
-        && matches!(delta, CountValue::Int(n) if n.as_small() == Some(1))
+        && (matches!(ctx.heap.get(step), Value::Bool(true))
+            || matches!(ctx.heap.get(step), Value::Int(n) if n.as_small() == Some(1)))
     {
         current = ctx.int(i64::from(b));
     }
@@ -54,11 +79,7 @@ pub(in crate::dynamic) fn advance(ctx: &mut Context, id: Id) -> Result<Id> {
     let Value::Count { current, step } = *ctx.heap.get(id) else {
         unreachable!("count cursor")
     };
-    let following = number(ctx, current)?.successor(&number(ctx, step)?)?;
-    let following = ctx.alloc(match following {
-        CountValue::Int(n) => Value::Int(n),
-        CountValue::Float(n) => Value::Float(n),
-    });
+    let following = ctx.binary("+", current, step)?;
     let Value::Count { current, .. } = ctx.heap.get_mut(id) else {
         unreachable!("count cursor")
     };
