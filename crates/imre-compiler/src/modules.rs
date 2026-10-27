@@ -328,6 +328,7 @@ pub(crate) enum Intrinsic {
     FileEncodingUsesUtf8,
     PrintActiveException,
     TracebackPrintExc,
+    TracebackFormatter(&'static str),
     HandlerLevelType,
     TextOutputType,
     HandlerFallback,
@@ -952,6 +953,15 @@ impl IntrinsicModule {
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Traceback, "print_exc") => Intrinsic::TracebackPrintExc,
+            (Self::Traceback, "format_exc") => {
+                Intrinsic::TracebackFormatter("traceback.format_exc")
+            }
+            (Self::Traceback, "format_exception") => {
+                Intrinsic::TracebackFormatter("traceback.format_exception")
+            }
+            (Self::Traceback, "print_exception") => {
+                Intrinsic::TracebackFormatter("traceback.print_exception")
+            }
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
@@ -1340,6 +1350,7 @@ pub(crate) struct SourceGraph {
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
     pub(crate) handled_tracebacks: bool,
+    pub(crate) traceback_objects: bool,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
@@ -2428,12 +2439,15 @@ impl<'a> Loader<'a> {
         let mut graph = SourceGraph {
             command_startup: None,
             virtual_command: false,
+            traceback_objects: false,
             handled_tracebacks: self.modules.iter().any(|module| {
                 module.bindings.values().any(|binding| {
                     matches!(
                         binding,
                         Binding::IntrinsicModule(IntrinsicModule::Traceback)
-                            | Binding::Intrinsic(Intrinsic::TracebackPrintExc)
+                            | Binding::Intrinsic(
+                                Intrinsic::TracebackPrintExc | Intrinsic::TracebackFormatter(_)
+                            )
                     )
                 })
             }),
@@ -2475,6 +2489,12 @@ impl<'a> Loader<'a> {
         }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.mutable_documents = graph.uses_mutable_documents();
+        if graph.handled_tracebacks {
+            graph.traceback_objects = graph.reachable.as_ref().map_or_else(
+                || reachability::Reachable::collect(&graph, false).traceback_objects,
+                |roots| roots.traceback_objects,
+            );
+        }
         graph.mutable_builtin_len = graph.writes_builtin_len();
         Ok(graph)
     }

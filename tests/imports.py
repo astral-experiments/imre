@@ -66,6 +66,18 @@ REJECTED = {
     }, "no static binding"),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
+    "unused_traceback_import": ({
+        "main.py": "import helper\n",
+        "helper.py": "import traceback as tb\ndef bad() -> int:\n    return 'wrong'\n",
+    }, "expected int, got str"),
+    "unused_traceback_formatter": ({
+        "main.py": "from helper import bad\nprint(bad())\n",
+        "helper.py": "from traceback import format_exc\ndef bad() -> int:\n    return 'wrong'\n",
+    }, "expected int, got str"),
+    "live_traceback_and_invalid_return": ({
+        "main.py": "from helper import bad, render\nprint(render())\nprint(bad())\n",
+        "helper.py": "import traceback as tb\ndef render():\n    return tb.format_exc()\ndef bad() -> int:\n    return 'wrong'\n",
+    }, "invalid-return-type"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
     "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
     "wrong_imported_argument": ({"main.py": 'from helper import f\nprint(f("wrong"))\n', "helper.py": HELPER}, "int"),
@@ -130,6 +142,19 @@ ACCEPTED = {
         "main.py": "import package.child\nfrom package.nested import sibling\nprint(package.child.f())\nprint(sibling.read())\n",
         "package/child.py": "def f() -> int:\n    return 41\n",
         "package/nested/sibling.py": "from ..child import f\ndef read() -> int:\n    return f() + 1\n",
+    },
+    "imported_traceback_handler": {
+        "main.py": "from handler import capture\nprint(capture())\n",
+        "handler.py": (
+            "import traceback as tb\nfrom io import StringIO\n"
+            "class Writer:\n    def __init__(self):\n        self.stream = StringIO()\n"
+            "def capture():\n"
+            "    try:\n        raise ValueError('app factory')\n"
+            "    except ValueError:\n"
+            "        stream = Writer().stream\n"
+            "        tb.print_exc(limit=0, file=stream)\n"
+            "        return stream.getvalue() == tb.format_exc(0), stream.getvalue()\n"
+        ),
     },
     "native_ast_import": {
         "main.py": (

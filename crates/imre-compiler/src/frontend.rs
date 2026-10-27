@@ -6035,6 +6035,10 @@ impl<'a> Checker<'a> {
 
     fn object_runtime_export(&self, name: &str, node: &impl Ranged) -> String {
         self.graph.needs_object_runtime.set(true);
+        self.object_export_error(name, node)
+    }
+
+    fn object_export_error(&self, name: &str, node: &impl Ranged) -> String {
         self.classified_error(
             FailureKind::ObjectOperation,
             node,
@@ -6266,6 +6270,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::TracebackFormatter(name) => {
+                    return Err(self.object_export_error(name, expression));
+                }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
@@ -8879,6 +8886,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
+            Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
+                return Err(self.object_export_error(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
             }
@@ -8978,6 +8988,9 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
             Some(Binding::Intrinsic(Intrinsic::TracebackPrintExc)) => {
+                if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
+                    return Err(self.object_export_error("traceback.print_exc", call));
+                }
                 let args = self.arguments(call, &[], None)?;
                 return Ok(self.ordered_builtin(
                     Builtin::Logging(ir::LogOperation::PrintActiveException),

@@ -239,8 +239,10 @@ fn object_fallback<T>(
     {
         return Err(error);
     }
-    let runtime_imports =
-        options.runtime_imports || graph.as_ref().is_some_and(|g| g.needs_object_runtime.get());
+    let runtime_imports = options.runtime_imports
+        || graph
+            .as_ref()
+            .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
     let registered_imports = graph
         .as_ref()
         .filter(|_| runtime_imports)
