@@ -1001,10 +1001,10 @@ impl Context {
                     "list indices must be integers or slices, not str",
                 ));
             }
-            let key = self.text(name);
+            let key = self.heap.code_name(name);
             self.put_item(locals, key, value)
         } else if let Some(globals) = self.scope_data(scope).exec_globals {
-            let key = self.text(name);
+            let key = self.heap.code_name(name);
             let storage = self
                 .dict_storage(globals.dict)
                 .expect("exec globals dictionary");

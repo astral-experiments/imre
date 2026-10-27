@@ -946,7 +946,7 @@ impl Context {
         let names = std::mem::take(&mut frame.names);
         let entries = names
             .into_iter()
-            .map(|(name, v)| (self.text(name), v))
+            .map(|(name, v)| (self.heap.code_name(&name), v))
             .collect();
         let dict = self.dict(entries);
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
@@ -1004,7 +1004,7 @@ impl Context {
             return;
         }
         if let Some(namespace) = self.scope_data(scope).namespace {
-            let key = self.text(name);
+            let key = self.heap.code_name(name);
             let storage = self.dict_storage(namespace).expect("module namespace");
             self.put_item(storage, key, value)
                 .expect("string key in module dictionary");
