@@ -95,16 +95,31 @@ class _SpecialForm(_Final, _NotIterable):
             return self._getitem(self, parameters)
 
 
-def _type_check(arg, message):
+def _type_check(arg, message, *, allow_special_forms=False):
     protocol = getattr(_typing, "Protocol", None)
+    if allow_special_forms and arg is Final:
+        return arg
     if isinstance(arg, _SpecialForm) or arg is _typing.Generic or (protocol is not None and arg is protocol):
         raise TypeError(f"Plain {repr(arg)} is not valid as type argument")
     origin = _typing.get_origin(arg)
-    if origin is _typing.Generic or (protocol is not None and origin is protocol):
+    if (
+        origin is _typing.Generic
+        or (protocol is not None and origin is protocol)
+        or (not allow_special_forms and origin is Final)
+    ):
         raise TypeError(f"{repr(arg)} is not valid as type argument")
     if type(arg) is tuple:
         raise TypeError(f"{message} Got {repr(arg)[:100]}.")
     return arg
+
+
+@_SpecialForm
+def Final(self, parameters):
+    """Special typing construct to indicate final names to type checkers."""
+    item = _type_check(parameters, f"{self} accepts only single type.", allow_special_forms=True)
+    if isinstance(item, str):
+        raise NotImplementedError("string Final arguments require typing.ForwardRef")
+    return _typing._GenericAlias(self, (type(None) if item is None else item,))
 
 
 @_SpecialForm

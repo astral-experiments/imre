@@ -6,7 +6,8 @@ use super::Context;
 use super::value::{Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 impl Context {
-    fn module_class(&self, module: &str, name: &str) -> Option<Id> {
+    /// Look up a value in an already loaded module without invoking its attribute hooks.
+    pub(super) fn module_value(&self, module: &str, name: &str) -> Option<Id> {
         let Value::Module { scope, .. } = self.heap.get(*self.modules.get(module)?) else {
             return None;
         };
@@ -40,7 +41,7 @@ impl Context {
 
     /// Recognize the bundled ABC and its nominal subclasses, which inherit its metaclass.
     pub(super) fn is_bundled_abc(&self, class: Id) -> bool {
-        self.module_class("abc", "ABC")
+        self.module_value("abc", "ABC")
             .is_some_and(|abc| self.direct_subclass(class, abc))
     }
 
@@ -65,7 +66,7 @@ impl Context {
 
     pub(super) fn structural_context_manager(&self, class: Id, target: Id) -> bool {
         matches!(self.heap.get(target), Value::Class { name, .. } if name == "AbstractContextManager")
-            && self.module_class("contextlib", "AbstractContextManager") == Some(target)
+            && self.module_value("contextlib", "AbstractContextManager") == Some(target)
             && ["__enter__", "__exit__"].iter().all(|name| {
                 self.class_attr(class, name)
                     .is_some_and(|value| value != NONE)
