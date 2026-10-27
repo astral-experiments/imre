@@ -238,7 +238,7 @@ impl Context {
             return matches!(
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
-                    | ("enum.IntEnum", "int" | "enum.Enum")
+                    | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
         }

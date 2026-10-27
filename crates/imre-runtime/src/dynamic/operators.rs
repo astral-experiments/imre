@@ -328,6 +328,12 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::Instance { class, .. } = value
+            && self.classes.get("re.RegexFlag") == Some(class)
+            && let Ok(bits) = self.as_integer(id)
+        {
+            return super::stdlib::regex::flag_repr(bits);
+        }
         if let Value::Instance { scalar, .. } = value
             && (repr || scalar.is_none())
             && let Some((class, name, member_value)) = self.enum_member(id)
@@ -381,6 +387,7 @@ impl Context {
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
+            Value::RegexPattern(pattern) => pattern.repr(self),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
             Value::Repeat(repeat) => {

@@ -8,9 +8,84 @@ use regex_automata::{Anchored, Input, PatternID, meta::Regex, util::captures::Ca
 use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
-pub(in crate::dynamic) const ASCII: i64 = 256;
-pub(in crate::dynamic) const UNICODE: i64 = 32;
-pub(in crate::dynamic) const VERBOSE: i64 = 64;
+mod casefold;
+mod split;
+
+pub(super) use split::pattern_split;
+use split::split;
+
+const IGNORECASE: i64 = 2;
+const LOCALE: i64 = 4;
+const MULTILINE: i64 = 8;
+const DOTALL: i64 = 16;
+const UNICODE: i64 = 32;
+const VERBOSE: i64 = 64;
+const ASCII: i64 = 256;
+
+// Declaration order is also the order used by the module-qualified flag repr.
+const FLAGS: &[(&str, &str, i64)] = &[
+    ("NOFLAG", "", 0),
+    ("ASCII", "A", ASCII),
+    ("IGNORECASE", "I", IGNORECASE),
+    ("LOCALE", "L", LOCALE),
+    ("UNICODE", "U", UNICODE),
+    ("MULTILINE", "M", MULTILINE),
+    ("DOTALL", "S", DOTALL),
+    ("VERBOSE", "X", VERBOSE),
+    ("DEBUG", "", 128),
+];
+
+pub(super) fn is_flag_attribute(name: &str) -> bool {
+    name == "RegexFlag"
+        || FLAGS
+            .iter()
+            .any(|&(long, short, _)| name == long || !short.is_empty() && name == short)
+}
+
+pub(super) fn flag_attribute(ctx: &mut Context, name: &str) -> Result<Id> {
+    let class = if let Some(&class) = ctx.classes.get("re.RegexFlag") {
+        class
+    } else {
+        let scope = ctx.scope("re", None);
+        let module = ctx.text("re");
+        ctx.bind(scope, "__module__", module);
+        for &(long, short, bits) in FLAGS {
+            let value = ctx.int(bits);
+            ctx.bind(scope, long, value);
+            if !short.is_empty() {
+                ctx.bind(scope, short, value);
+            }
+        }
+        let base = ctx.builtin("enum.IntFlag");
+        let class = ctx.allocate_class("RegexFlag".into(), scope, vec![base])?;
+        ctx.populate_enum(class, Some(base))?;
+        ctx.classes.insert("re.RegexFlag".into(), class);
+        class
+    };
+    if name == "RegexFlag" {
+        Ok(class)
+    } else {
+        Ok(ctx.class_attr(class, name).expect("declared regex flag"))
+    }
+}
+
+pub(in crate::dynamic) fn flag_repr(bits: i64) -> String {
+    if bits == 0 {
+        return "re.NOFLAG".into();
+    }
+    let mut words = Vec::new();
+    let mut rest = bits;
+    for &(name, _, flag) in FLAGS {
+        if bits & flag != 0 {
+            words.push(format!("re.{name}"));
+            rest &= !flag;
+        }
+    }
+    if rest != 0 {
+        words.push(format!("{rest:#x}"));
+    }
+    words.join("|")
+}
 
 pub(in crate::dynamic) struct Pattern {
     pub(in crate::dynamic) source: Id,
@@ -19,9 +94,27 @@ pub(in crate::dynamic) struct Pattern {
     engine_source: String,
     regex: Regex,
     full: OnceCell<std::result::Result<Regex, String>>,
+    split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
 
 impl Pattern {
+    pub(in crate::dynamic) fn repr(&self, ctx: &Context) -> String {
+        let mut source = ctx.repr(self.source);
+        if let Some((end, _)) = source.char_indices().nth(200) {
+            source.truncate(end);
+        }
+        let flags = if self.bytes {
+            self.flags
+        } else {
+            self.flags & !UNICODE
+        };
+        if flags == 0 {
+            format!("re.compile({source})")
+        } else {
+            format!("re.compile({source}, {})", flag_repr(flags))
+        }
+    }
+
     pub(in crate::dynamic) fn group_count(&self) -> usize {
         let info = self.regex.group_info();
         info.to_index(PatternID::ZERO, "imre.eol")
@@ -41,20 +134,25 @@ impl Pattern {
                     .engine_source
                     .strip_suffix(imre_regex::FINAL_NEWLINE_ANCHOR)
                     .unwrap_or(&self.engine_source);
-                build_regex(&format!(r"(?:{source})\z"), self.bytes)
+                build_regex(&format!(r"(?:{source})\z"), self.bytes, self.flags)
             })
             .as_ref()
             .map_err(|message| Error::new("re.error", message.clone()))
     }
 }
 
-fn build_regex(source: &str, bytes: bool) -> std::result::Result<Regex, String> {
+fn syntax(bytes: bool, flags: i64) -> regex_automata::util::syntax::Config {
+    regex_automata::util::syntax::Config::new()
+        .case_insensitive(flags & IGNORECASE != 0 && (bytes || flags & ASCII == 0))
+        .multi_line(flags & MULTILINE != 0)
+        .dot_matches_new_line(flags & DOTALL != 0)
+        .unicode(!bytes)
+        .utf8(!bytes)
+}
+
+fn build_regex(source: &str, bytes: bool, flags: i64) -> std::result::Result<Regex, String> {
     Regex::builder()
-        .syntax(
-            regex_automata::util::syntax::Config::new()
-                .unicode(!bytes)
-                .utf8(!bytes),
-        )
+        .syntax(syntax(bytes, flags))
         .configure(Regex::config().utf8_empty(!bytes))
         .build(source)
         .map_err(|err| err.to_string())
@@ -142,10 +240,16 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             "cannot use UNICODE flag with a bytes pattern",
         ));
     }
-    if bytes && flags & VERBOSE != 0 {
+    if !bytes && flags & LOCALE != 0 {
         return Err(Error::new(
-            "NotImplementedError",
-            "verbose byte patterns are not supported",
+            "ValueError",
+            "cannot use LOCALE flag with a str pattern",
+        ));
+    }
+    if bytes && flags & (LOCALE | ASCII) == LOCALE | ASCII {
+        return Err(Error::new(
+            "ValueError",
+            "ASCII and LOCALE flags are incompatible",
         ));
     }
     if flags & ASCII != 0 && flags & UNICODE != 0 {
@@ -154,7 +258,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             "ASCII and UNICODE flags are incompatible",
         ));
     }
-    if flags & !(ASCII | UNICODE | VERBOSE) != 0 {
+    if flags & !(IGNORECASE | LOCALE | MULTILINE | DOTALL | ASCII | UNICODE | VERBOSE) != 0 {
         return Err(Error::new(
             "NotImplementedError",
             "unsupported native regular expression flags",
@@ -172,8 +276,14 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     } else {
         python_escapes(&source, ascii)
     };
-    let regex =
-        build_regex(&engine_source, bytes).map_err(|message| Error::new("re.error", message))?;
+    let engine_source = if flags & IGNORECASE != 0 && !bytes {
+        casefold::expand(&engine_source, ascii)
+            .map_err(|message| Error::new("re.error", message))?
+    } else {
+        engine_source
+    };
+    let regex = build_regex(&engine_source, bytes, flags)
+        .map_err(|message| Error::new("re.error", message))?;
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },
@@ -181,6 +291,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         engine_source,
         regex,
         full: OnceCell::new(),
+        split_retry: OnceCell::new(),
     }))))
 }
 
@@ -199,6 +310,21 @@ pub(super) fn module_call(
     if name == "re.compile" {
         let [pattern, flags] = bind(name, args, kwargs, ["pattern", "flags"])?;
         return compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags);
+    }
+    if name == "re.split" {
+        let [pattern, string, maxsplit, flags] = bind(
+            name,
+            args,
+            kwargs,
+            ["pattern", "string", "maxsplit", "flags"],
+        )?;
+        let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
+        return split(
+            ctx,
+            pattern,
+            string.ok_or_else(|| missing("string"))?,
+            maxsplit,
+        );
     }
     let [pattern, string, flags] = bind(name, args, kwargs, ["pattern", "string", "flags"])?;
     let string = string.ok_or_else(|| missing("string"))?;
