@@ -70,6 +70,18 @@ print(str(error))
 print(repr(error._Root__value))
 print(repr(error._Leaf__value))
 """,
+    "context_key_message": """
+from contextvars import Context, ContextVar
+
+default = [1]
+key = ContextVar("mutable", default=default)
+try:
+    Context()[key]
+except KeyError as error:
+    print(str(error) == repr(key))
+    default.append(2)
+    print(str(error) == repr(key))
+""",
     "upstream_support_payloads": upstream_support_payloads(),
     "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
