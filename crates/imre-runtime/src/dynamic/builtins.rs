@@ -196,6 +196,7 @@ pub(super) const STR_METHODS: &[&str] = &[
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",

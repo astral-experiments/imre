@@ -210,6 +210,7 @@ impl Context {
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
             Value::ThreadLocal(_) => super::thread_local::CLASS,
+            Value::PrimitiveLock(_) => super::thread_lock::CLASS,
             Value::FormatIterator { kind, .. } => match kind {
                 FormatKind::Markup => "formatteriterator",
                 FormatKind::Field => "fieldnameiterator",
@@ -410,6 +411,7 @@ pub(super) enum Value {
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
     ThreadLocal(super::thread_local::Dictionaries),
+    PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
     Traceback {
         frame: Id,
@@ -694,6 +696,7 @@ impl Value {
             | Self::Hash(_)
             | Self::LoggerHandle(_)
             | Self::HandlerLock(_)
+            | Self::PrimitiveLock(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
