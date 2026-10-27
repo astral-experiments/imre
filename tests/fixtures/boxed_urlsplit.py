@@ -52,3 +52,10 @@ def current():
     print(urlencode(pairs, doseq=True, quote_via=detach))
     print(urlencode([("suffix", "a b"), ("suffix", "Málaga/+")]))
     print(parse.urlencode({b"q": [b"a/", b"\xff"]}, doseq=True, safe="/", quote_via=quote))
+
+    class Text(str):
+        pass
+    class Data(bytes):
+        pass
+
+    print(quote(Text("a b")), urlencode([("q", Data(b"a b"))], doseq=True))
