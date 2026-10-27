@@ -833,6 +833,14 @@ pub(super) fn call(
             let scalar = ctx.scalar_value(value);
             match ctx.heap.get(scalar) {
                 Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
+                Value::Complex(number) => {
+                    let magnitude = number.real.hypot(number.imag);
+                    if magnitude.is_infinite() && number.real.is_finite() && number.imag.is_finite()
+                    {
+                        return Err(Error::new("OverflowError", "absolute value too large"));
+                    }
+                    Ok(ctx.alloc(Value::Float(magnitude)))
+                }
                 Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
                 Value::Int(number) => {
                     let zero = crate::Int::from(0);
