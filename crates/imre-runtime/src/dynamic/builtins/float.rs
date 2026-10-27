@@ -44,14 +44,19 @@ pub(in crate::dynamic) fn from_numeric(ctx: &mut Context, value: Id) -> Result<O
     }
     if let Some(method) = ctx.bound_slot(value, "__float__")? {
         let result = ctx.call(method, Vec::new(), Vec::new())?;
-        if matches!(ctx.heap.get(result), Value::Float(_)) {
-            return Ok(Some(result));
+        let scalar = ctx.scalar_value(result);
+        if matches!(ctx.heap.get(scalar), Value::Float(_)) {
+            return Ok(Some(scalar));
         }
         return Err(type_error(format!(
             "{}.__float__ returned non-float (type {})",
             ctx.type_name(value),
             ctx.type_name(result),
         )));
+    }
+    let scalar = ctx.scalar_value(value);
+    if matches!(ctx.heap.get(scalar), Value::Float(_)) {
+        return Ok(Some(scalar));
     }
     if let Some(integer) = ctx.index_value(value)? {
         let number = crate::floats::int_to_float(&integer)?;
