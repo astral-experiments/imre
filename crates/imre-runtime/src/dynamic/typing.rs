@@ -828,6 +828,35 @@ impl Context {
         }
     }
 
+    /// Freeze the declared field names or inherit the first named-tuple layout in the MRO.
+    fn namedtuple_layout(
+        &self,
+        bases: &[Id],
+        ancestors: &[Id],
+        scope: Id,
+    ) -> Option<std::rc::Rc<[String]>> {
+        if bases.iter().any(|&base| {
+            matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
+        }) {
+            let annotations = self.scope_data(scope).names.get("__annotations__")?;
+            let fields = self.dict_entries(*annotations)?;
+            return Some(
+                fields
+                    .iter()
+                    .filter_map(|&(key, _)| self.str_value(key).ok().map(str::to_owned))
+                    .collect(),
+            );
+        }
+        ancestors
+            .iter()
+            .find_map(|&base| match self.heap.get(base) {
+                Value::Class {
+                    namedtuple_fields, ..
+                } => namedtuple_fields.clone(),
+                _ => None,
+            })
+    }
+
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
     pub(super) fn allocate_class(
         &mut self,
@@ -859,7 +888,9 @@ impl Context {
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
+        let namedtuple_fields = self.namedtuple_layout(&bases, &ancestors, scope);
         let class = self.alloc(Value::Class {
+            namedtuple_fields,
             name,
             scope,
             ancestors,

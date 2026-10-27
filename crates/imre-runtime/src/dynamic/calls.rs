@@ -322,19 +322,12 @@ impl Context {
         }
     }
     pub(super) fn namedtuple_fields(&self, class: Id) -> Option<Vec<String>> {
-        if !self.has_base(class, "typing.NamedTuple") {
-            return None;
+        match self.heap.get(class) {
+            Value::Class {
+                namedtuple_fields, ..
+            } => namedtuple_fields.as_deref().map(<[String]>::to_vec),
+            _ => None,
         }
-        let id = self.class_attr(class, "__annotations__")?;
-        let Value::Dict(fields) = self.heap.get(id) else {
-            return None;
-        };
-        Some(
-            fields
-                .iter()
-                .filter_map(|&(k, _)| self.str_value(k).ok().map(str::to_owned))
-                .collect(),
-        )
     }
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
         Some(match self.heap.get(obj) {
@@ -1645,6 +1638,17 @@ impl Context {
         }))
     }
 
+    /// Count a generated NamedTuple repr frame like a runtime-loaded Python call.
+    pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
+        if self.call_depth + additional >= 1000 {
+            return Err(Error::new(
+                "RecursionError",
+                "maximum recursion depth exceeded",
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn call(
         &mut self,
         callable: Id,
@@ -1792,6 +1796,7 @@ impl Context {
                 name,
                 scope,
                 ancestors,
+                ..
             } => {
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
@@ -2039,12 +2044,7 @@ impl Context {
                 if sig["class_cell"] == true {
                     frame.class_cell = class_cell;
                 }
-                if self.call_depth >= 1000 {
-                    return Err(Error::new(
-                        "RecursionError",
-                        "maximum recursion depth exceeded",
-                    ));
-                }
+                self.check_call_depth(0)?;
                 self.call_depth += 1;
                 let result =
                     stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || self.execute(code, local));
