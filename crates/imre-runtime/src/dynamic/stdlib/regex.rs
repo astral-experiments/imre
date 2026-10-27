@@ -9,6 +9,7 @@ use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
 mod casefold;
+mod nullable;
 mod split;
 
 pub(super) use split::pattern_split;
@@ -283,6 +284,8 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     } else {
         engine_source
     };
+    let engine_source =
+        nullable::expand(&engine_source).map_err(|message| Error::new("re.error", message))?;
     let regex = build_regex(&engine_source, bytes, flags)
         .map_err(|message| Error::new("re.error", message))?;
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
