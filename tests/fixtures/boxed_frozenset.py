@@ -34,6 +34,29 @@ def current():
             print(str(exc))
         else:
             raise AssertionError("unhashable argument accepted")
+    class StoredHash:
+        blocked = False
+
+        def __hash__(self):
+            if self.blocked:
+                raise RuntimeError("rehashed stored key")
+            return 7
+
+        def __eq__(self, other):
+            return isinstance(other, StoredHash)
+
+    key = StoredHash()
+    source = {key: 1}
+    key.blocked = True
+    assert len(set(source)) == len(frozenset(source)) == 1
+    updated = set()
+    updated.update(source)
+    assert len(updated) == 1
+    a, b = StoredHash(), StoredHash()
+    left, right = {a}, {b}
+    a.blocked = b.blocked = True
+    assert left.issuperset(right)
+    assert frozenset(left).issuperset(frozenset(right))
     print("ok")
 
 
