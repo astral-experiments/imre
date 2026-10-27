@@ -7,6 +7,13 @@ pub(super) enum MappingOperation {
     Unpack,
 }
 
+#[derive(Default)]
+struct InstanceLayout {
+    dictionary: bool,
+    declared_slot: bool,
+    active_slot: bool,
+}
+
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
         if name == "__hash__" {
@@ -107,14 +114,14 @@ impl Context {
     }
 
     /// Instance attributes use raw dict storage even when __dict__ was set to a subclass.
-    fn exception_field(&mut self, dictionary: Option<Id>, name: &str) -> Result<Option<Id>> {
+    fn dictionary_field(&mut self, dictionary: Option<Id>, name: &str) -> Result<Option<Id>> {
         let Some(dictionary) = dictionary else {
             return Ok(None);
         };
-        let storage = self.dict_storage(dictionary).expect("exception dictionary");
+        let storage = self.dict_storage(dictionary).expect("instance dictionary");
         let key = self.text(name);
         let (_, index) = self.find_dictionary_key(storage, key, None)?;
-        Ok(index.map(|i| self.dict_entries(storage).expect("exception dictionary")[i].1))
+        Ok(index.map(|i| self.dict_entries(storage).expect("instance dictionary")[i].1))
     }
 
     fn update_exception_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<()> {
@@ -129,7 +136,17 @@ impl Context {
             };
             dictionary
         };
-        let storage = self.dict_storage(dictionary).expect("exception dictionary");
+        self.update_dictionary_field(obj, dictionary, name, value)
+    }
+
+    fn update_dictionary_field(
+        &mut self,
+        obj: Id,
+        dictionary: Id,
+        name: &str,
+        value: Option<Id>,
+    ) -> Result<()> {
+        let storage = self.dict_storage(dictionary).expect("instance dictionary");
         if let Some(value) = value {
             let key = self.text(name);
             self.put_item(storage, key, value)
@@ -1050,13 +1067,37 @@ impl Context {
                 _ => {}
             }
         }
-        if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
+        if let Value::Instance {
+            class,
+            fields,
+            namespace,
+            ..
+        } = self.heap.get(obj)
+        {
+            let (class, inline, namespace) = (*class, fields.get(name).copied(), *namespace);
             if matches!(name, "name" | "value")
                 && let Some((_, member_name, value)) = self.enum_member(obj)
             {
                 return Ok(if name == "name" { member_name } else { value });
             }
-            return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
+            let layout = self.instance_layout(class, name);
+            if layout.active_slot {
+                return inline.ok_or_else(|| self.missing_attribute(obj, name));
+            }
+            let member = self.class_attr(class, name);
+            if name == "__dict__" && member.is_none() && layout.dictionary {
+                return Ok(self.instance_dictionary(obj, class));
+            }
+            let inline = inline.filter(|_| !layout.declared_slot);
+            let field = if inline.is_some()
+                || namespace.is_none()
+                || member.is_some_and(|member| self.data_descriptor(member))
+            {
+                inline
+            } else {
+                self.dictionary_field(namespace, name)?
+            };
+            return self.instance_attribute(obj, class, field, name);
         }
         if let Value::Raised(error) = self.heap.get(obj) {
             let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
@@ -1066,7 +1107,7 @@ impl Context {
                 let field = if self.data_descriptor(member) {
                     None
                 } else {
-                    self.exception_field(dictionary, name)?
+                    self.dictionary_field(dictionary, name)?
                 };
                 return self.instance_attribute(obj, class, field, name);
             }
@@ -1786,7 +1827,7 @@ impl Context {
             && !self.native_exception_descriptor(error, name)
         {
             let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
-            if let Some(field) = self.exception_field(dictionary, name)? {
+            if let Some(field) = self.dictionary_field(dictionary, name)? {
                 return Ok(field);
             }
         }
@@ -1870,7 +1911,7 @@ impl Context {
             return self.update_base_local_attribute(obj, name, None);
         }
         let exception_member = self.exception_member(obj, name);
-        let member = self.slot(obj, name);
+        let member = self.writable_attribute_member(obj, name);
         if name == "__callback__"
             && member.is_none()
             && self.heap.get(obj).weak_reference().is_some()
@@ -2022,18 +2063,30 @@ impl Context {
                 {
                     return Err(Error::new("AttributeError", "can't delete attribute"));
                 }
+                let layout = self.instance_layout(class, name);
+                if name == "__dict__" && member.is_none() {
+                    if !layout.dictionary {
+                        return Err(self.missing_attribute(obj, name));
+                    }
+                    self.replace_instance_dictionary(obj, class, None);
+                    return Ok(());
+                }
+                if !layout.active_slot
+                    && let Value::Instance {
+                        namespace: Some(storage),
+                        ..
+                    } = *self.heap.get(obj)
+                {
+                    return self.update_dictionary_field(obj, storage, name, None);
+                }
+                if layout.declared_slot && !layout.active_slot {
+                    return Err(self.missing_attribute(obj, name));
+                }
                 let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
                     unreachable!()
                 };
-                if name == "__dict__" && member.is_none() {
-                    let previous = std::mem::take(fields);
-                    for value in previous.into_values() {
-                        self.heap.weak_edge_removed(value);
-                    }
-                    return Ok(());
-                }
                 let value = fields
-                    .remove(name)
+                    .shift_remove(name)
                     .ok_or_else(|| self.missing_attribute(obj, name))?;
                 self.heap.weak_edge_removed(value);
                 Ok(())
@@ -2054,47 +2107,153 @@ impl Context {
         }
     }
 
+    /// Whether instances have a dictionary and whether this particular name addresses a slot.
+    fn instance_layout(&self, class: Id, name: &str) -> InstanceLayout {
+        let mut layout = InstanceLayout::default();
+        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+            return layout;
+        };
+        let mut shadowed = false;
+        for &base in std::iter::once(&class).chain(ancestors) {
+            let Value::Class {
+                scope, name: owner, ..
+            } = self.heap.get(base)
+            else {
+                continue;
+            };
+            let frame = self.scope_data(*scope);
+            shadowed |= frame.names.contains_key(name);
+            let Some(slots) = frame
+                .class_namespace
+                .as_deref()
+                .and_then(|namespace| namespace.slot_names.as_deref())
+            else {
+                layout.dictionary = true;
+                continue;
+            };
+            for slot in slots {
+                match slot.as_str() {
+                    "__dict__" => layout.dictionary = true,
+                    "__weakref__" => {}
+                    slot => {
+                        let owner = owner.trim_start_matches('_');
+                        let matches = if slot.starts_with("__")
+                            && !slot.ends_with("__")
+                            && !owner.is_empty()
+                        {
+                            name.strip_prefix('_').and_then(|n| n.strip_prefix(owner)) == Some(slot)
+                        } else {
+                            name == slot
+                        };
+                        if matches {
+                            layout.declared_slot = true;
+                            layout.active_slot |= !shadowed;
+                        }
+                    }
+                }
+            }
+        }
+        layout
+    }
+
+    fn writable_attribute_member(&self, obj: Id, name: &str) -> Option<Id> {
+        let member = self.slot(obj, name)?;
+        if let Value::Instance { class, .. } = *self.heap.get(obj)
+            && self.instance_layout(class, name).active_slot
+        {
+            return None;
+        }
+        Some(member)
+    }
+
+    /// Move ordinary fields out of the inline storage while keeping declared slots in place.
+    fn take_instance_fields(&mut self, obj: Id, class: Id) -> Vec<(String, Id)> {
+        let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        let original = std::mem::take(fields);
+        let mut ordinary = Vec::new();
+        let mut retained = indexmap::IndexMap::new();
+        for (name, value) in original {
+            if self.instance_layout(class, &name).declared_slot
+                || self
+                    .namedtuple_fields(class)
+                    .is_some_and(|names| names.contains(&name))
+            {
+                retained.insert(name, value);
+            } else {
+                ordinary.push((name, value));
+            }
+        }
+        let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        *fields = retained;
+        ordinary
+    }
+
+    /// Look up native backing fields on either side of ordinary dictionary materialization.
+    pub(super) fn raw_instance_field(&self, obj: Id, name: &str) -> Option<Id> {
+        let Value::Instance {
+            fields, namespace, ..
+        } = self.heap.get(obj)
+        else {
+            return None;
+        };
+        fields
+            .get(name)
+            .copied()
+            .or_else(|| self.dict_named_item(self.dict_storage((*namespace)?)?, name))
+    }
+
+    /// Lazily expose the dictionary that subsequent ordinary attribute operations use.
+    fn instance_dictionary(&mut self, obj: Id, class: Id) -> Id {
+        if let Value::Instance {
+            namespace: Some(dictionary),
+            ..
+        } = *self.heap.get(obj)
+        {
+            return dictionary;
+        }
+        let entries = self
+            .take_instance_fields(obj, class)
+            .into_iter()
+            .map(|(name, value)| (self.text(name), value))
+            .collect();
+        let dictionary = self.dict(entries);
+        let Value::Instance { namespace, .. } = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        *namespace = Some(dictionary);
+        dictionary
+    }
+
+    fn replace_instance_dictionary(&mut self, obj: Id, class: Id, new: Option<Id>) {
+        let removed = self.take_instance_fields(obj, class);
+        let Value::Instance { namespace, .. } = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        let previous = std::mem::replace(namespace, new);
+        if previous != new
+            && let Some(old) = previous
+        {
+            self.heap.weak_edge_removed(old);
+        }
+        for (_, value) in removed {
+            self.heap.weak_edge_removed(value);
+        }
+    }
+
     /// A slot-only instance can retain fields declared by any of its Python bases.
     fn check_instance_field(&mut self, obj: Id, name: &str) -> Result<()> {
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return Ok(());
         };
-        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+        if !matches!(self.heap.get(class), Value::Class { .. }) {
             return Ok(());
-        };
-        let allowed = std::iter::once(&class).chain(ancestors).any(|&base| {
-            let Value::Class {
-                scope,
-                name: class_name,
-                ..
-            } = self.heap.get(base)
-            else {
-                return false;
-            };
-            self.scope_data(*scope)
-                .class_namespace
-                .as_deref()
-                .and_then(|namespace| namespace.slot_names.as_deref())
-                .is_none_or(|slots| {
-                    slots.iter().any(|slot| {
-                        if slot == "__dict__" {
-                            return true;
-                        }
-                        if slot == "__weakref__" {
-                            return false;
-                        }
-                        let owner = class_name.trim_start_matches('_');
-                        if slot.starts_with("__") && !slot.ends_with("__") && !owner.is_empty() {
-                            name.strip_prefix('_')
-                                .and_then(|tail| tail.strip_prefix(owner))
-                                == Some(slot.as_str())
-                        } else {
-                            name == slot
-                        }
-                    })
-                })
-        });
-        if allowed {
+        }
+        let layout = self.instance_layout(class, name);
+        if layout.dictionary || layout.active_slot {
             return Ok(());
         }
         let attribute = self.text(name);
@@ -2188,7 +2347,7 @@ impl Context {
             return self.set_function_attr(obj, name, value);
         }
         let exception_member = self.exception_member(obj, name);
-        let member = self.slot(obj, name);
+        let member = self.writable_attribute_member(obj, name);
         if let Some(descriptor) = member.or(exception_member)
             && self.data_descriptor(descriptor)
         {
@@ -2292,6 +2451,35 @@ impl Context {
             return self.update_exception_field(obj, name, Some(value));
         }
         self.check_instance_field(obj, name)?;
+        if let Value::Instance {
+            class, namespace, ..
+        } = *self.heap.get(obj)
+        {
+            let layout = self.instance_layout(class, name);
+            if layout.dictionary && name == "__dict__" && member.is_none() {
+                if self.dict_storage(value).is_none() {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "__dict__ must be set to a dictionary, not a '{}'",
+                            self.type_name(value)
+                        ),
+                    ));
+                }
+                self.replace_instance_dictionary(obj, class, Some(value));
+                return Ok(());
+            }
+            if !layout.active_slot {
+                let storage = namespace.or_else(|| {
+                    layout
+                        .declared_slot
+                        .then(|| self.instance_dictionary(obj, class))
+                });
+                if let Some(storage) = storage {
+                    return self.update_dictionary_field(obj, storage, name, Some(value));
+                }
+            }
+        }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
             Value::DefaultDict { factory, .. } if name == "default_factory" => {
@@ -2363,12 +2551,13 @@ impl Context {
     pub(super) fn instance(&mut self, class: Id, dictionary: Option<Id>) -> Id {
         let property = self.has_base(class, "property").then(Box::default);
         self.alloc(Value::Instance {
+            namespace: None,
             class,
             dictionary,
             property,
             weak_reference: None,
             memory_stream: None,
-            fields: HashMap::new(),
+            fields: Default::default(),
             scalar: None,
         })
     }
@@ -2399,8 +2588,9 @@ impl Context {
             return Ok(value);
         }
         Ok(self.alloc(Value::Instance {
+            namespace: None,
             class,
-            fields: HashMap::new(),
+            fields: Default::default(),
             scalar: Some(value),
             dictionary: None,
             property: None,
@@ -2439,8 +2629,9 @@ impl Context {
         }
         let text = self.scalar_value(text);
         Ok(self.alloc(Value::Instance {
+            namespace: None,
             class,
-            fields: HashMap::new(),
+            fields: Default::default(),
             dictionary: None,
             scalar: Some(text),
             property: None,
@@ -2646,13 +2837,13 @@ impl Context {
                         _ => None,
                     };
                     if let Some(value) = value {
-                        if let Value::Instance { class, fields, .. } = self.heap.get(*value)
+                        if let Value::Instance { class, .. } = self.heap.get(*value)
                             && self.direct_subclass(*class, decimal)
                         {
                             if *class == decimal && callable == decimal {
                                 return Ok(*value);
                             }
-                            if let Some(&text) = fields.get("_text") {
+                            if let Some(text) = self.raw_instance_field(*value, "_text") {
                                 *value = text;
                             }
                         }
@@ -2705,7 +2896,8 @@ impl Context {
                             format!("too many arguments to {name}"),
                         ));
                     }
-                    let mut fields: HashMap<_, _> = names.iter().cloned().zip(args).collect();
+                    let mut fields: indexmap::IndexMap<_, _> =
+                        names.iter().cloned().zip(args).collect();
                     for (k, v) in kwargs {
                         if !names.contains(&k) || fields.insert(k.clone(), v).is_some() {
                             return Err(Error::new(
@@ -2718,6 +2910,7 @@ impl Context {
                         return Err(Error::new("TypeError", format!("missing field for {name}")));
                     }
                     return Ok(self.alloc(Value::Instance {
+                        namespace: None,
                         class: callable,
                         fields,
                         dictionary: None,

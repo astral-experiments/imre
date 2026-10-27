@@ -4,6 +4,30 @@ from functools import update_wrapper
 
 
 def current():
+    class Namespace:
+        pass
+
+    obj = Namespace()
+    obj.flag = "old"
+    previous = obj.__dict__
+    replacement = {"flag": "new"}
+    obj.__dict__ = replacement
+    assert obj.__dict__ is replacement and obj.flag == "new"
+    obj.flag = "updated"
+    assert replacement["flag"] == "updated" and previous["flag"] == "old"
+    del obj.__dict__
+    assert obj.__dict__ == {} and "flag" in replacement
+
+    class Slotted:
+        __slots__ = ("field",)
+
+    class Mask(Slotted):
+        field = "class"
+
+    masked = Mask()
+    masked.field = "instance"
+    assert masked.__dict__["field"] == masked.field
+
     order = []
 
     class Forward:

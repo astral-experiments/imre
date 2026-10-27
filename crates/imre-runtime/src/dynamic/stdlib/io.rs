@@ -165,10 +165,12 @@ pub(in super::super) fn call(
             format!("invalid arguments to {name}"),
         ));
     }
-    let Value::Instance { fields, .. } = ctx.heap.get(receiver) else {
+    let Value::Instance { .. } = ctx.heap.get(receiver) else {
         return Err(Error::new("TypeError", "expected an IOBase instance"));
     };
-    let closed = fields.contains_key("__IOBase_closed");
+    let closed = ctx
+        .raw_instance_field(receiver, "__IOBase_closed")
+        .is_some();
     match name {
         "closed" => Ok(if closed { TRUE } else { FALSE }),
         "readable" | "writable" | "seekable" => Ok(FALSE),

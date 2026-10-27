@@ -192,6 +192,7 @@ fn record(ctx: &mut Context, fields: &[(&str, Id)]) -> Id {
 fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
     let class = ctx.alloc(Value::Native(type_name.to_owned()));
     ctx.alloc(Value::Instance {
+        namespace: None,
         class,
         dictionary: None,
         scalar: None,

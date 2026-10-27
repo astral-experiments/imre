@@ -558,7 +558,9 @@ pub(super) enum Value {
     Union(super::union::Union),
     Instance {
         class: Id,
-        fields: HashMap<String, Id>,
+        fields: indexmap::IndexMap<String, Id>,
+        /// Exact ordinary instance dictionary once exposed or replaced.
+        namespace: Option<Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
@@ -873,6 +875,7 @@ impl Value {
             Self::Instance {
                 class,
                 fields,
+                namespace,
                 dictionary,
                 scalar,
                 weak_reference,
@@ -891,6 +894,7 @@ impl Value {
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
+                visit.extend(namespace);
                 visit.extend(scalar);
             }
             Self::Method {
