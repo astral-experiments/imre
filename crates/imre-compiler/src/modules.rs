@@ -213,8 +213,8 @@ pub(crate) struct DefinitionId {
 pub(crate) enum Binding {
     Module(ModuleId),
     Definition(DefinitionId),
-    /// A module guard selects the function object when the module executes.
-    ConditionalFunction,
+    /// The module initializer establishes this binding when its guard executes.
+    ConditionalValue,
     Value(DefinitionId),
     TypeAlias(ModuleId, usize),
     IntrinsicModule(IntrinsicModule),
@@ -2221,7 +2221,7 @@ fn resolve_binding(
                     stdlib_attribute(modules, module, target, attribute)
                 }
                 Binding::Definition(_)
-                | Binding::ConditionalFunction
+                | Binding::ConditionalValue
                 | Binding::Value(_)
                 | Binding::TypeAlias(..)
                 | Binding::Intrinsic(_) => None,
@@ -2758,6 +2758,20 @@ impl<'a> Loader<'a> {
                 }
                 _ => {
                     if let ast::Stmt::If(guard) = statement
+                        && resolve_binding(&self.modules, id, &guard.test)
+                            == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
+                        && let [otherwise] = guard.elif_else_clauses.as_slice()
+                        && otherwise.test.is_none()
+                    {
+                        for runtime_statement in &otherwise.body {
+                            if let Some(name) = value_name(runtime_statement)
+                                && module_value(runtime_statement).is_some()
+                            {
+                                self.bind(id, name, Binding::ConditionalValue, runtime_statement)?;
+                            }
+                        }
+                    }
+                    if let ast::Stmt::If(guard) = statement
                         && guard
                             .elif_else_clauses
                             .last()
@@ -2776,7 +2790,7 @@ impl<'a> Loader<'a> {
                                     .filter_map(ast::Stmt::as_function_def_stmt)
                                     .any(|other| other.name.as_str() == name)
                             }) {
-                                self.bind(id, name, Binding::ConditionalFunction, function)?;
+                                self.bind(id, name, Binding::ConditionalValue, function)?;
                                 self.needs_object_imports = true;
                             }
                         }
@@ -2848,7 +2862,7 @@ impl<'a> Loader<'a> {
         binding: Binding,
         node: &impl Ranged,
     ) -> Result<(), String> {
-        if self.modules[module].bindings.get(name) == Some(&Binding::ConditionalFunction) {
+        if self.modules[module].bindings.get(name) == Some(&Binding::ConditionalValue) {
             self.modules[module].bindings.insert(name.into(), binding);
             return Ok(());
         }
@@ -3048,7 +3062,7 @@ impl<'a> Loader<'a> {
                                     ready
                                 }
                                 Binding::Value(def) => package && self.initialized(def),
-                                Binding::ConditionalFunction => false,
+                                Binding::ConditionalValue => false,
                                 _ => package,
                             };
                             if !available {
@@ -3083,6 +3097,7 @@ impl<'a> Loader<'a> {
                             alias.name.as_str()
                         ));
                     };
+                    self.needs_object_imports |= binding == Binding::ConditionalValue;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
                     self.bind(id, local.as_str(), binding, alias)?;
                 }

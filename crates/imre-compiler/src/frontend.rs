@@ -6256,7 +6256,13 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
-        if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
+        let binding = self.resolve(expression);
+        if binding == Some(Binding::ConditionalValue) {
+            return Err(
+                self.object_runtime_export("a value selected by a module guard", expression)
+            );
+        }
+        if let Some(Binding::Intrinsic(symbol)) = binding {
             if let Some((flags, executable)) = &self.graph.command_startup {
                 match symbol {
                     Intrinsic::SysExecutable => return Ok(unpacking::string(executable.clone())),
