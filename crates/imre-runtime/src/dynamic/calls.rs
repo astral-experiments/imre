@@ -1643,6 +1643,7 @@ impl Context {
         {
             return self.update_exception_field(obj, name, None);
         }
+        self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
             Value::Complex(_) if matches!(name, "real" | "imag") => {
@@ -1753,6 +1754,62 @@ impl Context {
                 ),
             )),
         }
+    }
+
+    /// A slot-only instance can retain fields declared by any of its Python bases.
+    fn check_instance_field(&mut self, obj: Id, name: &str) -> Result<()> {
+        let Value::Instance { class, .. } = *self.heap.get(obj) else {
+            return Ok(());
+        };
+        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+            return Ok(());
+        };
+        let allowed = std::iter::once(&class).chain(ancestors).any(|&base| {
+            let Value::Class {
+                scope,
+                name: class_name,
+                ..
+            } = self.heap.get(base)
+            else {
+                return false;
+            };
+            self.scope_data(*scope)
+                .class_namespace
+                .as_deref()
+                .and_then(|namespace| namespace.slot_names.as_deref())
+                .is_none_or(|slots| {
+                    slots.iter().any(|slot| {
+                        if slot == "__dict__" {
+                            return true;
+                        }
+                        if slot == "__weakref__" {
+                            return false;
+                        }
+                        let owner = class_name.trim_start_matches('_');
+                        if slot.starts_with("__") && !slot.ends_with("__") && !owner.is_empty() {
+                            name.strip_prefix('_')
+                                .and_then(|tail| tail.strip_prefix(owner))
+                                == Some(slot.as_str())
+                        } else {
+                            name == slot
+                        }
+                    })
+                })
+        });
+        if allowed {
+            return Ok(());
+        }
+        let attribute = self.text(name);
+        let quoted = self.repr(attribute);
+        let kind = self.type_name(obj);
+        let message = if self.class_attr(class, name).is_some() {
+            format!("'{kind}' object attribute {quoted} is read-only")
+        } else {
+            format!(
+                "'{kind}' object has no attribute {quoted} and no __dict__ for setting new attributes"
+            )
+        };
+        Err(Error::new("AttributeError", message))
     }
 
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
@@ -1906,6 +1963,7 @@ impl Context {
         {
             return self.update_exception_field(obj, name, Some(value));
         }
+        self.check_instance_field(obj, name)?;
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
