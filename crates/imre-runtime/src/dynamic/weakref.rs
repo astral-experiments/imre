@@ -91,6 +91,9 @@ impl Context {
     fn weakrefable(&self, value: Id) -> bool {
         match self.heap.get(value) {
             Value::Instance { class, .. } => self.class_instances_support_weakref(*class),
+            Value::Raised(error) => error
+                .class
+                .is_some_and(|class| self.class_instances_support_weakref(class)),
             Value::Class { .. }
             | Value::Function { .. }
             | Value::Module { .. }
