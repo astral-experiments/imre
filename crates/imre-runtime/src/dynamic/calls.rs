@@ -215,6 +215,11 @@ impl Context {
         if let Value::StaticMethod { callable, .. } = *self.heap.get(value) {
             return Ok(callable);
         }
+        if let Value::Native(symbol) = self.heap.get(value)
+            && let Some(slot) = super::thread_local::wrapper_name(symbol)
+        {
+            return super::thread_local::bind_wrapper(self, value, slot, receiver);
+        }
         if receiver != NONE {
             let method = match self.heap.get(value) {
                 Value::Property(property) => return property.read(self, receiver),
@@ -414,9 +419,15 @@ impl Context {
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
+                Value::Native(symbol) if super::thread_local::wrapper_name(symbol).is_some() => {
+                    "method-wrapper"
+                }
                 Value::Native(_) => "builtin_function_or_method",
                 _ => return None,
             },
+            Value::Native(name) if super::thread_local::wrapper_name(name).is_some() => {
+                "wrapper_descriptor"
+            }
             Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
                 if name == "typing.Any" {
                     return Some("typing._AnyMeta");
@@ -437,6 +448,8 @@ impl Context {
                             | "module"
                             | "method"
                             | "builtin_function_or_method"
+                            | "method-wrapper"
+                            | "wrapper_descriptor"
                             | "generator"
                             | "list_iterator"
                             | "tuple_iterator"
@@ -687,7 +700,8 @@ impl Context {
         original: Option<Id>,
     ) -> Result<Id> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.local_attribute(obj, name, original);
+            return self
+                .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
         }
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return self.default_get_attr(obj, name);
@@ -886,6 +900,33 @@ impl Context {
                 }
             }
             Value::Method {
+                callable, receiver, ..
+            } if let Value::Native(ref symbol) = *self.heap.get(callable)
+                && let Some(slot) = super::thread_local::wrapper_name(symbol) =>
+            {
+                if name == "__self__" {
+                    return Ok(receiver);
+                }
+                if let Some(value) = super::thread_local::wrapper_attribute(self, slot, name) {
+                    return Ok(value);
+                }
+            }
+            Value::Native(ref symbol)
+                if let Some(slot) = super::thread_local::wrapper_name(symbol) =>
+            {
+                if let Some(value) = super::thread_local::wrapper_attribute(self, slot, name) {
+                    return Ok(value);
+                }
+                if name == "__get__" {
+                    let callable = self.builtin("_thread._local.wrapper_get");
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: false,
+                    }));
+                }
+            }
+            Value::Method {
                 callable,
                 receiver,
                 explicit,
@@ -934,6 +975,9 @@ impl Context {
             Value::Native(class) if class == super::thread_local::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("_local")),
+                attr if super::thread_local::is_method(attr) => {
+                    return Ok(self.builtin(&format!("{class}.{attr}")));
+                }
                 _ => {}
             },
             Value::Native(class)
@@ -1286,7 +1330,11 @@ impl Context {
         original: Option<Id>,
     ) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, original, None);
+            return self.update_local_attribute(
+                obj,
+                super::thread_local::Name::from_lookup(name, original),
+                None,
+            );
         }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
@@ -1503,7 +1551,11 @@ impl Context {
         value: Id,
     ) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, original, Some(value));
+            return self.update_local_attribute(
+                obj,
+                super::thread_local::Name::from_lookup(name, original),
+                Some(value),
+            );
         }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")

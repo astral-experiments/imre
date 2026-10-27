@@ -231,6 +231,7 @@ pub(super) const STR_METHODS: &[&str] = &[
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
@@ -535,7 +536,7 @@ pub(super) fn boolean(value: bool) -> Id {
     if value { TRUE } else { FALSE }
 }
 
-fn attribute_name(ctx: &Context, value: Id) -> Result<String> {
+pub(super) fn attribute_name(ctx: &Context, value: Id) -> Result<String> {
     ctx.str_value(value).map(str::to_owned).map_err(|_| {
         type_error(format!(
             "attribute name must be string, not '{}'",
