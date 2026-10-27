@@ -1214,7 +1214,8 @@ pub(super) fn call(
         "open" => {
             arity(name, args, 0, 2)?;
             let [path, mode, encoding] = bind(name, args, kwargs, ["file", "mode", "encoding"])?;
-            let path = ctx.str_value(path.ok_or_else(|| type_error("open requires a file"))?)?;
+            let filename = path.ok_or_else(|| type_error("open requires a file"))?;
+            let path = ctx.str_value(filename)?;
             let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
             if let Some(encoding) = encoding.filter(|&value| value != NONE) {
                 if mode.contains('b') {
@@ -1239,12 +1240,17 @@ pub(super) fn call(
                 "w" | "wt" | "tw" => Some(1),
                 _ => None,
             };
-            if let Some(text_mode) = text_mode {
-                let file = crate::objects::TextFile::open(path, text_mode)?;
-                return Ok(ctx.alloc(Value::TextFile(file)));
+            let file = match text_mode {
+                Some(mode) => crate::objects::TextFile::open(path, mode)
+                    .map(Value::TextFile)
+                    .map_err(Error::from),
+                None => super::stdlib::BinaryFile::open(path, mode)
+                    .and_then(super::stdlib::BinaryFile::into_value),
+            };
+            match file {
+                Ok(file) => Ok(ctx.alloc(file)),
+                Err(error) => Err(ctx.with_open_filename(error, filename)?),
             }
-            let file = super::stdlib::BinaryFile::open(path, mode)?;
-            Ok(ctx.alloc(file.into_value()?))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(

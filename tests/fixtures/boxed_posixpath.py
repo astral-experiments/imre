@@ -2,8 +2,8 @@ import os
 import os.path
 import posix
 import posixpath
-from os import altsep, fspath, sep
-from os.path import altsep as path_altsep, sep as path_sep
+from os import altsep, fspath, pathsep, sep
+from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
 from posixpath import normpath
 
 
@@ -55,6 +55,9 @@ def current():
     assert os.path is posixpath and os.path.__name__ == "posixpath"
     assert sep is os.sep is path_sep is posixpath.sep and sep == "/"
     assert altsep is os.altsep is path_altsep is posixpath.altsep is None
+    assert pathsep is os.pathsep is path_list_sep is os.path.pathsep is posixpath.pathsep
+    assert pathsep == ":"
+    assert ":λ::some path:".split(pathsep) == ["", "λ", "", "some path", ""]
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
     assert fspath is os.fspath is posix.fspath
     assert fspath.__self__ is posix and fspath.__module__ == "posix"
@@ -100,3 +103,42 @@ def current():
 
     assert os.fsdecode(Path(b"caf\xc3\xa9")) == "café"
     assert not os.path.isfile(Path("missing\0file"))
+
+    from os import PathLike
+    from types import GenericAlias
+
+    assert PathLike is os.PathLike and PathLike.__module__ == "os"
+    assert PathLike.__abstractmethods__ == frozenset(("__fspath__",))
+    alias = PathLike[str]
+    assert type(alias) is GenericAlias and alias.__origin__ is PathLike
+    assert alias.__args__ == (str,)
+    assert (str | bytes | alias).__args__ == (str, bytes, alias)
+
+    class Slotted(PathLike):
+        __slots__ = ()
+
+        def __fspath__(self):
+            return b"native"
+
+    class RefusesSubclasses(Slotted):
+        @classmethod
+        def __subclasshook__(cls, child):
+            return False
+
+    assert isinstance(RefusesSubclasses(), RefusesSubclasses)
+    assert not issubclass(RefusesSubclasses, RefusesSubclasses)
+
+    class Disabled(Path):
+        __fspath__ = None
+
+    assert issubclass(Path, PathLike) and isinstance(Path("x"), PathLike)
+    assert PathLike.__subclasshook__(NoMethod) is True
+    assert PathLike.__subclasshook__(Disabled) is NotImplemented
+    assert not issubclass(Disabled, PathLike) and not issubclass(Path, Slotted)
+    assert not hasattr(Slotted(), "__dict__") and os.fspath(Slotted()) == b"native"
+
+    class Virtual:
+        pass
+
+    assert PathLike.register(Virtual) is Virtual
+    assert issubclass(Virtual, PathLike) and isinstance(Virtual(), PathLike)

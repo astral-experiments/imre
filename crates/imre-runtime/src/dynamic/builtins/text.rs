@@ -182,6 +182,9 @@ pub(super) fn construct(
                 }
                 return Ok(result);
             }
+            if let Some(text) = ctx.single_exception_str(value)? {
+                return Ok(text);
+            }
             let text = ctx.checked_format(value, false)?;
             Ok(ctx.text(text))
         }

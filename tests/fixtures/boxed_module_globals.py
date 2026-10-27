@@ -61,7 +61,24 @@ def mutate_from_class(remove):
         return "empty", had_member, C.token
 
 
+def captured_class_metadata():
+    __doc__ = "outer doc"
+    __module__ = "outer module"
+    __qualname__ = "outer name"
+
+    class Sample:
+        "class doc"
+        module_seen = __module__
+
+        def read(self):
+            return __doc__, __qualname__
+
+    print(__doc__, __module__, __qualname__ == Sample.__qualname__)
+    print(Sample.module_seen, Sample().read()[0])
+
+
 def current():
+    captured_class_metadata()
     print(mutate_from_class(False), mutate_from_class(True))
     for child in (False, True):
         try:
@@ -108,6 +125,15 @@ def current():
         globals(unexpected=True)
     except TypeError as error:
         print(str(error))
+
+    class Finished:
+        global marked_in_body
+        marked_in_body = 'module value'
+
+    Finished.marked_in_body = 'class value'
+    print(marked_in_body, Finished.marked_in_body)
+    del Finished.marked_in_body
+    print(marked_in_body, hasattr(Finished, 'marked_in_body'))
 
 
 if __name__ == '__main__':

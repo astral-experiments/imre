@@ -60,6 +60,22 @@ def current():
     except OSError as native:
         print(native.args is native.args, native.strerror is native.args[1], native.filename is native.filename)
 
+    events = []
+
+    class Filename(str):
+        def __repr__(self):
+            events.append('repr')
+            return '<original>'
+
+    filename = Filename(__file__ + '/child')
+    for mode in ('r', 'rb'):
+        events.clear()
+        try:
+            open(filename, mode)
+        except OSError as failure:
+            print(failure.filename is filename, failure.strerror is failure.args[1], len(events))
+            print(str(failure).endswith(': <original>'), events)
+
     description = 'tail'
     chain = []
     for i in range(300):

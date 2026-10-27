@@ -1,3 +1,5 @@
+mod class_metadata;
+
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextSize};
@@ -522,6 +524,7 @@ impl Function<'_, '_> {
             Body::Namespace(stmts) => {
                 let mut bindings = ClosureNames::default();
                 bindings.visit_body(stmts);
+                class_metadata::capture(&mut bindings, stmts, self.source.string_annotations);
                 closure_names.nonlocals = bindings.nonlocals;
                 // Methods and nested classes can still capture the enclosing frame.
                 closure_names.incomplete = true;

@@ -16,6 +16,11 @@ use crate::BytesOwner;
 pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> usize {
     // SAFETY: both inputs stay rooted and neither can change during the checksum.
     let (data, seed) = unsafe { (&*data, crate::Int::borrow(seed)) };
+    crate::Int::from_usize(adler32(data, &seed) as usize).into_raw()
+}
+
+/// Compute zlib's unsigned Adler-32 over a borrowed buffer and an arbitrary Python integer seed.
+pub(crate) fn adler32(data: &[u8], seed: &crate::Int) -> u32 {
     let seed = if let Some(small) = seed.as_small() {
         small as u32
     } else {
@@ -28,7 +33,7 @@ pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> u
         }
     };
     const BASE: u32 = 65_521;
-    let checksum = if data.len() == 1 {
+    if data.len() == 1 {
         // Match zlib's observable one-byte fast path, including its single
         // subtraction for each noncanonical seed half.
         let mut sum1 = (seed & 0xffff) + u32::from(data[0]);
@@ -44,8 +49,7 @@ pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> u
         // zlib normalizes both halves for empty and multi-byte inputs.
         let seed = (((seed >> 16) % BASE) << 16) | ((seed & 0xffff) % BASE);
         zlib_rs::adler32::adler32(seed, data)
-    };
-    crate::Int::from_usize(checksum as usize).into_raw()
+    }
 }
 
 fn owned(bytes: Bytes) -> *const Bytes {
