@@ -267,6 +267,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
@@ -659,6 +660,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);
+    }
+    if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
+        return ctx.auto_method(name, args, kwargs);
     }
     if name == "enum._simple_enum" {
         return ctx.enum_decorator(args, kwargs);

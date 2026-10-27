@@ -28,7 +28,8 @@ impl Context {
             }
             "assign" => {
                 let name = self.str_value(b)?.to_owned();
-                self.bind_source_name(a, &name, c)?;
+                let value = self.enum_assignment(a, &name, c)?;
+                self.bind_source_name(a, &name, value)?;
                 Ok(c)
             }
             "declare_global" => {

@@ -331,6 +331,7 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
+    pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
     pub class_cell: Option<Id>,
     pub class_lineage: Option<(Id, Id)>,
@@ -670,6 +671,10 @@ impl Value {
             Self::Scope(scope) => {
                 visit.extend(scope.closure.cells.values().copied());
                 visit.extend(scope.class_cell);
+                if let Some(state) = &scope.enum_namespace {
+                    visit.extend(state.generator);
+                    visit.extend(&state.history);
+                }
                 if let Some((bases, mro)) = scope.class_lineage {
                     visit.extend([bases, mro]);
                 }

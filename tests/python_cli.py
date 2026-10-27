@@ -472,6 +472,7 @@ def report(text):
             "boxed_posixpath.py",
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
+            "boxed_enum_auto.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
             "boxed_itertools_repeat.py",
