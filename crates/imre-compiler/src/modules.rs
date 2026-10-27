@@ -2540,6 +2540,10 @@ impl<'a> Loader<'a> {
         binding: Binding,
         node: &impl Ranged,
     ) -> Result<(), String> {
+        if self.modules[module].bindings.get(name) == Some(&Binding::ConditionalFunction) {
+            self.modules[module].bindings.insert(name.into(), binding);
+            return Ok(());
+        }
         if let Some(previous) = self.modules[module].bindings.get(name) {
             if *previous != binding {
                 return Err(self.modules[module]

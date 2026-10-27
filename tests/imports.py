@@ -117,6 +117,14 @@ ACCEPTED = {
             "else:\n    def other():\n        return 'unreachable'\n"
         ),
     },
+    "conditional_function_then_definition": {
+        "main.py": "from helper import selected\nprint(selected())\n",
+        "helper.py": (
+            "if True:\n    def selected():\n        return 'branch'\n"
+            "else:\n    def selected():\n        return 'other'\n"
+            "def selected():\n    return 'final'\n"
+        ),
+    },
     "ready_function_in_cycle": {
         "main.py": "from pkg.parent import observed\nprint(observed)\n",
         "pkg/__init__.py": "",
