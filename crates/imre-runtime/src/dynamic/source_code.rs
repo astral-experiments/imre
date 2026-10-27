@@ -251,7 +251,12 @@ impl Program {
                     e => Instruction::Eval(e.clone()),
                 },
                 Stmt::Assign(s) => match s.targets.as_slice() {
-                    [target @ (ast::Expr::Name(_) | ast::Expr::Tuple(_) | ast::Expr::List(_))] => {
+                    [
+                        target @ (ast::Expr::Name(_)
+                        | ast::Expr::Tuple(_)
+                        | ast::Expr::List(_)
+                        | ast::Expr::Starred(_)),
+                    ] => {
                         self.declare_target(target)?;
                         Instruction::Assign(target.clone(), (*s.value).clone())
                     }
@@ -356,16 +361,36 @@ impl Program {
         Ok(())
     }
 
-    /// Declare every local name in a loop or fixed unpacking target.
+    /// Declare every local name in a loop or unpacking target.
     fn declare_target(&mut self, target: &ast::Expr) -> Result<()> {
         match target {
             ast::Expr::Name(n) => {
                 self.locals.insert(n.id.to_string());
             }
+            ast::Expr::Starred(_) => {
+                return Err(Error::new(
+                    "SyntaxError",
+                    "starred assignment target must be in a list or tuple",
+                ));
+            }
             ast::Expr::Tuple(ast::ExprTuple { elts, .. })
             | ast::Expr::List(ast::ExprList { elts, .. }) => {
+                if elts
+                    .iter()
+                    .filter(|item| matches!(item, ast::Expr::Starred(_)))
+                    .count()
+                    > 1
+                {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        "multiple starred expressions in assignment",
+                    ));
+                }
                 for element in elts {
-                    self.declare_target(element)?;
+                    self.declare_target(match element {
+                        ast::Expr::Starred(star) => &star.value,
+                        _ => element,
+                    })?;
                 }
             }
             _ => return Err(unsupported("unpacking target")),
@@ -1309,20 +1334,31 @@ impl Context {
     fn bind_target(&mut self, scope: Id, target: &ast::Expr, value: Id) -> Result<()> {
         match target {
             ast::Expr::Name(n) => self.bind_source_name(scope, n.id.as_str(), value)?,
+            ast::Expr::Starred(star) => self.bind_target(scope, &star.value, value)?,
             ast::Expr::Tuple(ast::ExprTuple { elts, .. })
             | ast::Expr::List(ast::ExprList { elts, .. }) => {
                 let count = elts.len();
+                let star = elts
+                    .iter()
+                    .position(|item| matches!(item, ast::Expr::Starred(_)));
+                let required = count - usize::from(star.is_some());
                 let iter = self.iterator(value)?;
                 let mut unpacked = Vec::with_capacity(count);
-                for i in 0..count {
+                for i in 0..required {
                     unpacked.push(self.next_item(iter)?.ok_or_else(|| {
+                        let qualifier = if star.is_some() { "at least " } else { "" };
                         Error::new(
                             "ValueError",
-                            format!("not enough values to unpack (expected {count}, got {i})"),
+                            format!("not enough values to unpack (expected {qualifier}{required}, got {i})"),
                         )
                     })?);
                 }
-                if self.next_item(iter)?.is_some() {
+                if let Some(star) = star {
+                    while let Some(item) = self.next_item(iter)? {
+                        unpacked.push(item);
+                    }
+                    self.group_starred_items(&mut unpacked, star, required - star);
+                } else if self.next_item(iter)?.is_some() {
                     let size = match self.heap.get(value) {
                         Value::List(items) | Value::Tuple(items) => Some(items.len()),
                         Value::Dict(items) => Some(items.len()),

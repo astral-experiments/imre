@@ -763,6 +763,13 @@ impl Context {
         item
     }
 
+    /// Replace the middle of a checked unpacking result with a fresh list.
+    fn group_starred_items(&mut self, items: &mut Vec<Id>, star: usize, trailing: usize) {
+        let end = items.len() - trailing;
+        let middle = items.drain(star..end).collect();
+        items.insert(star, self.alloc(Value::List(middle)));
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
