@@ -12,6 +12,7 @@ pub(super) const METHODS: &[&str] = &[
     "copy",
     "__copy__",
     "extend",
+    "extendleft",
     "remove",
     "pop",
     "popleft",
@@ -119,7 +120,7 @@ fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]
     ring.maxlen = maxlen;
     clear(ctx, queue);
     if let Some(source) = iterable {
-        extend(ctx, queue, source)?;
+        extend(ctx, queue, source, false)?;
     }
     Ok(())
 }
@@ -135,7 +136,7 @@ fn clear(ctx: &mut Context, queue: Id) {
 }
 
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
-fn extend(ctx: &mut Context, queue: Id, source: Id) -> Result<()> {
+fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Result<()> {
     let source = if queue == source {
         let items = ctx.items(source)?;
         ctx.alloc(Value::Tuple(items))
@@ -147,7 +148,7 @@ fn extend(ctx: &mut Context, queue: Id, source: Id) -> Result<()> {
         let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
             unreachable!()
         };
-        if let Some(removed) = ring.push(false, true, || item)? {
+        if let Some(removed) = ring.push(left, true, || item)? {
             ctx.heap.weak_edge_removed(removed);
         }
     }
@@ -291,7 +292,10 @@ pub(super) fn method(
         }
         _ => {}
     }
-    if matches!(name, "append" | "appendleft" | "extend" | "remove") {
+    if matches!(
+        name,
+        "append" | "appendleft" | "extend" | "extendleft" | "remove"
+    ) {
         let [item] = rest else {
             return Err(Error::new(
                 "TypeError",
@@ -302,7 +306,7 @@ pub(super) fn method(
             ));
         };
         match name {
-            "extend" => extend(ctx, receiver, *item)?,
+            "extend" | "extendleft" => extend(ctx, receiver, *item, name == "extendleft")?,
             "remove" => remove(ctx, receiver, *item)?,
             _ => {
                 if let Some(removed) = ring.push(name == "appendleft", false, || *item)? {
