@@ -513,6 +513,61 @@ fn count_elements(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     Ok(NONE)
 }
 
+/// Invoke the text object's ASCII encoder, preserving user hooks and their exceptions.
+fn base64_ascii(ctx: &mut Context, text: Id) -> Result<Id> {
+    let result = ctx.lookup_attr(text, "encode").and_then(|encoder| {
+        let ascii = ctx.text("ascii");
+        ctx.call(encoder, vec![ascii], Vec::new())
+    });
+    result.map_err(|error| {
+        let class = ctx.builtin("UnicodeEncodeError");
+        if ctx.raised_error_matches(&error, class) {
+            Error::new(
+                "ValueError",
+                "string argument should contain only ASCII characters",
+            )
+        } else {
+            error
+        }
+    })
+}
+
+/// A nonstandard encoder may supply its own translation object before standard decoding.
+fn urlsafe_input(ctx: &mut Context, text: Id) -> Result<(Id, bool)> {
+    let encoded = base64_ascii(ctx, text)?;
+    if matches!(
+        ctx.heap.get(encoded),
+        Value::Bytes(_) | Value::ByteArray(_) | Value::Str(_)
+    ) {
+        return Ok((encoded, true));
+    }
+    // The inherited str.translate with this table only remaps the URL alphabet.
+    if let Some(text) = ctx.string_storage(encoded)
+        && let Value::Instance { class, fields, .. } = ctx.heap.get(encoded)
+        && !fields.contains_key("translate")
+        && ctx.class_attr(*class, "translate") == ctx.builtins.get("str.translate").copied()
+        && ctx.class_attr(*class, "__getattribute__").is_none()
+    {
+        return Ok((text, true));
+    }
+    let translate = ctx.lookup_attr(encoded, "translate")?;
+    let mut table = Vec::new();
+    table
+        .try_reserve_exact(256)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    table.extend(0..=u8::MAX);
+    table[b'-' as usize] = b'+';
+    table[b'_' as usize] = b'/';
+    let table = ctx.alloc(Value::Bytes(table));
+    let translated = ctx.call(translate, vec![table], Vec::new())?;
+    let data = if ctx.string_storage(translated).is_some() {
+        base64_ascii(ctx, translated)?
+    } else {
+        translated
+    };
+    Ok((data, false))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -790,6 +845,14 @@ pub(super) fn call(
         _ if urlsafe => {
             let id = single_argument(name.trim_start_matches("base64."), "s", args, kwargs)?;
             let decode = name == "base64.urlsafe_b64decode";
+            let (id, urlsafe) = if decode
+                && matches!(ctx.heap.get(id), Value::Instance { .. })
+                && ctx.string_storage(id).is_some()
+            {
+                urlsafe_input(ctx, id)?
+            } else {
+                (id, true)
+            };
             let bytes = match ctx.heap.get(id) {
                 Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
                 Value::Str(text) if decode && text.is_ascii() => text.as_bytes(),
@@ -812,7 +875,7 @@ pub(super) fn call(
                 }
             };
             let result = if decode {
-                crate::objects::urlsafe_decode(bytes)?
+                crate::objects::base64_decode(bytes, urlsafe)?
             } else {
                 crate::objects::urlsafe_encode(bytes)?
             };
