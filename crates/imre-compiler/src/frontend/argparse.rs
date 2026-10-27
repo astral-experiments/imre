@@ -13,7 +13,7 @@ mod registration;
 #[derive(Default)]
 pub(super) struct Parsers {
     declarations: HashSet<(ModuleId, TextSize)>,
-    calls: HashMap<(ModuleId, TextSize), Parser>,
+    calls: HashMap<(ModuleId, TextRange), Parser>,
     registration_errors: HashMap<(ModuleId, TextSize), Expr>,
     namespaces: HashSet<usize>,
     /// Child layouts share the complete parent prefix and add their own options.
@@ -870,7 +870,7 @@ fn assigned_method<'a>(
 /// other use, including passing the builder as an argument, would escape it.
 struct Uses<'a> {
     builder: &'a str,
-    operations: Vec<TextSize>,
+    operations: Vec<TextRange>,
     registration_errors: &'a HashMap<TextSize, Expr>,
     escaped: bool,
     allow_calls: bool,
@@ -892,7 +892,7 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
                     | "print_usage"
             )
         {
-            self.operations.push(call.start());
+            self.operations.push(call.range());
             self.visit_arguments(&call.arguments);
         } else if let ast::Expr::Call(call) = node
             && self.registration_errors.contains_key(&call.start())
@@ -1446,7 +1446,7 @@ impl Checker<'_> {
         {
             return registration::at_call(self, call, error.clone()).map(Some);
         }
-        let Some(parser) = self.classes.parsers.calls.get(&(self.module, call.start())) else {
+        let Some(parser) = self.classes.parsers.calls.get(&(self.module, call.range())) else {
             return Ok(None);
         };
         let description = match &parser.description {

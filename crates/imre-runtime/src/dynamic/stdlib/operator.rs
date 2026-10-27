@@ -214,6 +214,9 @@ impl Context {
             })?;
             return Ok(self.int(length));
         }
+        if let Value::DictIterator(iter) = self.heap.get(value) {
+            return Ok(self.int(iter.length_hint(self) as i64));
+        }
         if let Value::Repeat(repeat) = self.heap.get(value) {
             return Ok(self.int(repeat.remaining.map_or(default, |n| n as i64)));
         }

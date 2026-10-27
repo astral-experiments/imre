@@ -57,7 +57,7 @@ impl Context {
             fields: HashMap::new(),
             scalar: Some(value),
             dictionary: None,
-            text_memory: None,
+            memory_stream: None,
         }))
     }
 
@@ -193,7 +193,7 @@ impl Context {
         let member = if let Some(new) = new {
             self.call(new, args, Vec::new())?
         } else if matches!(self.heap.get(base), Value::Native(name) if name == "enum.StrEnum") {
-            self.new_str(class, &args[1..], &[])?
+            self.new_string("str", class, &args[1..], &[])?
         } else {
             self.new_int(&args, &[])?
         };

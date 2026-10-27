@@ -1135,25 +1135,34 @@ unsafe fn environment_entries<'a>(
     })
 }
 
+/// Inspect one POSIX environment value without allocating a temporary string.
+pub(super) fn with_environment_value<T>(key: &[u8], inspect: impl FnOnce(&[u8]) -> T) -> Option<T> {
+    // SAFETY: the language runtime keeps the environment immutable. The value
+    // is borrowed only for the duration of the callback.
+    unsafe { environment_entries(native_environ()) }
+        .find(|(name, _)| *name == key)
+        .map(|(_, bytes)| inspect(bytes))
+}
+
 /// Returns the first matching value, or the supplied nullable default.
 ///
 /// # Safety
 /// The key and any non-null default are rooted strings. A non-null result transfers one owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_environ_get(key: *const Str, default: *const Str) -> *const Str {
-    // SAFETY: environment entries live until the call returns and the caller owns the key.
-    let found = unsafe {
-        environment_entries(native_environ()).find(|(name, _)| *name == (*key).as_bytes())
-    };
-    if let Some((_, bytes)) = found {
-        let result = std::str::from_utf8(bytes)
+    // SAFETY: the compiler roots the key for this lookup.
+    let key = unsafe { &*key };
+    let result = with_environment_value(key.as_bytes(), |bytes| {
+        std::str::from_utf8(bytes)
             .map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text))))
             .map_err(|_| {
                 Error::new(
                     Kind::UnicodeDecodeError,
                     "environment contains non-UTF-8 text",
                 )
-            });
+            })
+    });
+    if let Some(result) = result {
         finish(result, std::ptr::null())
     } else {
         if !default.is_null() {

@@ -4,11 +4,12 @@ use crate::StrOwner;
 mod expandtabs;
 mod lowercase;
 mod normalization;
-mod translate;
+pub(crate) mod translate;
 pub(crate) mod urlquote;
 pub(crate) mod urlsplit;
 
 pub(crate) use expandtabs::expand_tabs;
+pub(crate) use lowercase::capitalize;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
@@ -112,26 +113,29 @@ pub(super) fn ascii_escape(text: &str) -> Result<String> {
     Ok(ascii)
 }
 
+/// Converts a Python character ordinal within the native string domain.
+pub(crate) fn chr_scalar(value: &Int) -> Result<char> {
+    match value.as_small() {
+        Some(0xd800..=0xdfff) => Err(Error::new(
+            Kind::ValueError,
+            "surrogates are outside the native string domain",
+        )),
+        Some(code @ 0..=0x10ffff) => Ok(char::from_u32(code as u32).expect("Unicode scalar")),
+        _ => Err(Error::new(
+            Kind::ValueError,
+            "chr() arg not in range(0x110000)",
+        )),
+    }
+}
+
 /// # Safety
 /// The integer is rooted. Success transfers an immutable one-character string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
     // SAFETY: the caller retains the integer through this conversion.
-    let value = unsafe { Int::borrow(value) }.as_small();
-    let result = match value {
-        Some(0xd800..=0xdfff) => Err(Error::new(
-            Kind::ValueError,
-            "surrogates are outside the native string domain",
-        )),
-        Some(code @ 0..=0x10ffff) => {
-            let c = char::from_u32(code as u32).expect("Unicode scalar");
-            Ok(StrOwner::into_raw(owned_string(c.encode_utf8(&mut [0; 4]))))
-        }
-        _ => Err(Error::new(
-            Kind::ValueError,
-            "chr() arg not in range(0x110000)",
-        )),
-    };
+    let value = unsafe { Int::borrow(value) };
+    let result =
+        chr_scalar(&value).map(|c| StrOwner::into_raw(owned_string(c.encode_utf8(&mut [0; 4]))));
     finish(result, std::ptr::null())
 }
 
@@ -247,6 +251,11 @@ pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
     u32::from(python_alnum(unsafe { &*value }))
 }
 
+/// Returns whether the string contains one or more Python whitespace characters and nothing else.
+pub(crate) fn python_isspace(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(python_whitespace)
+}
+
 /// Tests a nonempty Python string against the shared Unicode whitespace table.
 ///
 /// # Safety
@@ -255,7 +264,7 @@ pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive and no character reference escapes.
     let value = unsafe { &*value };
-    u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+    u32::from(python_isspace(value))
 }
 
 /// Return true when text contains a cased character and every cased character is uppercase.
@@ -870,19 +879,28 @@ pub unsafe extern "C" fn imre_str_find(
     let (source, needle) = unsafe { (&*value, &*needle) };
     // SAFETY: a nonzero start is an exact canonical integer handle.
     let start = (start != 0).then(|| unsafe { Int::borrow(start) });
-    find_text(source, needle, start.as_deref(), None).into_raw()
+    find_text(source, needle, start.as_deref(), None, false).into_raw()
 }
 
 /// Search a Python slice without converting its Unicode-scalar bounds to byte indices twice.
-pub(crate) fn find_text(source: &str, needle: &str, start: Option<&Int>, end: Option<&Int>) -> Int {
+pub(crate) fn find_text(
+    source: &str,
+    needle: &str,
+    start: Option<&Int>,
+    end: Option<&Int>,
+    reverse: bool,
+) -> Int {
     let found = search_start(source, start).and_then(|(begin, scalar)| {
         let end = end
             .and_then(|i| search_start(source, Some(i)))
             .map_or(source.len(), |(b, _)| b);
         let window = source.get(begin..end)?;
-        window
-            .find(needle)
-            .map(|offset| scalar + window[..offset].chars().count())
+        let offset = if reverse {
+            window.rfind(needle)
+        } else {
+            window.find(needle)
+        }?;
+        Some(scalar + window[..offset].chars().count())
     });
     found.map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)
 }

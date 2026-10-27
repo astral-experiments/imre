@@ -24,34 +24,12 @@ pub(super) fn repeat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
 }
 
 fn number(ctx: &Context, id: Id) -> Result<()> {
-    const SLOTS: &[&str] = &[
-        "__add__",
-        "__sub__",
-        "__mul__",
-        "__matmul__",
-        "__truediv__",
-        "__floordiv__",
-        "__mod__",
-        "__divmod__",
-        "__pow__",
-        "__neg__",
-        "__pos__",
-        "__abs__",
-        "__bool__",
-        "__invert__",
-        "__lshift__",
-        "__rshift__",
-        "__and__",
-        "__xor__",
-        "__or__",
-        "__int__",
-        "__float__",
-        "__index__",
-    ];
     if matches!(
-        ctx.heap.get(id),
-        Value::Int(_) | Value::Float(_) | Value::Bool(_)
-    ) || SLOTS.iter().any(|name| ctx.slot(id, name).is_some())
+        ctx.heap.get(ctx.scalar_value(id)),
+        Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Complex(_)
+    ) || ["__index__", "__int__", "__float__"]
+        .iter()
+        .any(|name| ctx.slot(id, name).is_some())
     {
         Ok(())
     } else {
