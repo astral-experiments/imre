@@ -172,6 +172,7 @@ impl Context {
             Value::Str(_) => "str",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
+            Value::Repeat(_) => "repeat",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::File(file) => match file.as_ref() {
@@ -445,6 +446,7 @@ pub(super) enum Value {
         current: Id,
         step: Id,
     },
+    Repeat(crate::objects::Repeat<Id>),
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -514,6 +516,7 @@ impl Value {
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
             Self::Count { current, step } => visit.extend([*current, *step]),
+            Self::Repeat(repeat) => visit.push(repeat.value),
             Self::Zip {
                 inputs, pending, ..
             } => {

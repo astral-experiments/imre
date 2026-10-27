@@ -48,7 +48,7 @@ pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
 mod itertools;
-pub(crate) use itertools::CountValue;
+pub(crate) use itertools::{CountValue, Repeat};
 mod join_buffer;
 mod joined_lines;
 mod json;
@@ -149,7 +149,7 @@ enum Storage {
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     RegexIterator(regexes::FindIter),
-    Repeat(itertools::Repeat),
+    Repeat(Repeat<OwnedWord>),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),

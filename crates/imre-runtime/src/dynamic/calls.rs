@@ -298,6 +298,7 @@ impl Context {
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
             Value::Count { .. } => "itertools.count",
+            Value::Repeat(_) => "itertools.repeat",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::GenericAlias(alias) => alias.kind.class(),
@@ -338,6 +339,7 @@ impl Context {
                             | "getset_descriptor"
                             | "operator.attrgetter"
                             | "itertools.count"
+                            | "itertools.repeat"
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -438,6 +440,7 @@ impl Context {
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | ("itertools.count", Value::Count { .. })
+            | ("itertools.repeat", Value::Repeat(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 "urllib.parse.SplitResult",
@@ -690,11 +693,17 @@ impl Context {
                 "__module__" => return Ok(self.text("datetime")),
                 _ => {}
             },
-            Value::Native(class) if class == "itertools.count" => match name {
-                "__name__" | "__qualname__" => return Ok(self.text("count")),
-                "__module__" => return Ok(self.text("itertools")),
-                _ => {}
-            },
+            Value::Native(class)
+                if matches!(class.as_str(), "itertools.count" | "itertools.repeat") =>
+            {
+                match name {
+                    "__name__" | "__qualname__" => {
+                        return Ok(self.text(class.trim_start_matches("itertools.").to_owned()));
+                    }
+                    "__module__" => return Ok(self.text("itertools")),
+                    _ => {}
+                }
+            }
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }
