@@ -442,6 +442,7 @@ def report(text):
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
             "boxed_random.py",
+            "boxed_secrets.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
@@ -519,6 +520,22 @@ def report(text):
         if os.name == "posix":
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        if sys.platform == "linux":
+            shim = root / "secrets_entropy.so"
+            subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
+            probe = root / "entropy.py"
+            probe.write_bytes((fixtures / "boxed_secrets.py").read_bytes() + b"\nentropy()\n")
+            injected = {"LD_PRELOAD": str(shim), "PYTHONHASHSEED": "1", "IMRE_SECRETS_TEST_SOURCE": "fail"}
+            oracle = run(sys.executable, "-B", probe, extra=injected)
+            assert oracle.returncode == 0 and oracle.stdout.startswith(b"OSError (5,") and not oracle.stderr, oracle
+            for opt in ("0", "3"):
+                binary = root / f"entropy-O{opt}"
+                build = run(imre, "build", probe, "--runtime-imports", "--opt-level", opt, "-o", binary)
+                assert build.returncode == 0, build.stderr
+                fault = run(binary, extra=injected)
+                assert (fault.returncode, fault.stdout, fault.stderr) == (0, oracle.stdout, b""), fault
+                retry = run(binary, extra=injected | {"IMRE_SECRETS_TEST_SOURCE": "reject"})
+                assert (retry.returncode, retry.stdout, retry.stderr) == (0, b"c\n", b"draw\ndraw\n"), retry
         plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
         compare("-IB", "-c", imports)
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())

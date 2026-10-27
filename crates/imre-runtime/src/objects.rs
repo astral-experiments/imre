@@ -71,7 +71,7 @@ pub(crate) use paths::is_file;
 pub(crate) mod posixpath;
 mod processes;
 mod random;
-pub(crate) use random::imre_random_float;
+pub(crate) use random::{imre_random_float, secrets_choice_index};
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;

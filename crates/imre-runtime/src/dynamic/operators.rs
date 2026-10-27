@@ -943,19 +943,31 @@ impl Context {
             }
             return Err(self.lookup_error("KeyError", key));
         }
-        if matches!(self.heap.get(obj), Value::Set { .. }) {
+        if matches!(
+            self.heap.get(obj),
+            Value::Set { .. } | Value::DictView { .. }
+        ) || matches!(self.heap.get(obj), Value::Instance { class, .. } if self.namedtuple_fields(*class).is_none())
+        {
             return Err(Error::new(
                 "TypeError",
                 format!("'{}' object is not subscriptable", self.type_name(obj)),
             ));
         }
-        if matches!(self.heap.get(obj), Value::DictView { .. }) {
-            return Err(Error::new("TypeError", "object is not subscriptable"));
-        }
         if let Value::Slice(parts) = *self.heap.get(key) {
             return self.slice(obj, parts);
         }
         let i = self.as_integer(key)?;
+        if let Value::Range { start, stop, step } = *self.heap.get(obj) {
+            let length = builtins::range_len(start, stop, step)? as i128;
+            let mut i = i128::from(i);
+            if i < 0 {
+                i += length;
+            }
+            if !(0..length).contains(&i) {
+                return Err(Error::new("IndexError", "range object index out of range"));
+            }
+            return Ok(self.int((i128::from(start) + i * i128::from(step)) as i64));
+        }
         let vals = self.items(obj)?;
         let i = if i < 0 { vals.len() as i64 + i } else { i };
         vals.get(i as usize)

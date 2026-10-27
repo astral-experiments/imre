@@ -34,6 +34,7 @@ mod pickle;
 mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
+mod secrets;
 mod socket;
 mod structure;
 mod traceback;
@@ -78,6 +79,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "tempfile"
             | "time"
             | "random"
+            | "secrets"
             | "hashlib"
             | "hmac"
             | "re"
@@ -269,6 +271,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
@@ -572,6 +575,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "secrets.choice" {
+        return secrets::choice(ctx, args, kwargs);
+    }
     if name == "random.random" {
         if !kwargs.is_empty() {
             return Err(Error::new(
