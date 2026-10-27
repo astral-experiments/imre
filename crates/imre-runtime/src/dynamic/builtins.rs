@@ -83,6 +83,7 @@ const FUNCTIONS: &[&str] = &[
     "ord",
     "chr",
     "callable",
+    "abs",
     "all",
     "any",
     "isinstance",
@@ -708,6 +709,32 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
             ctx.exec_source(args[0], args[1], args.get(2).copied())
+        }
+        "abs" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let value = args[0];
+            if let Some(method) = ctx.bound_slot(value, "__abs__")? {
+                return ctx.call(method, vec![], vec![]);
+            }
+            let scalar = ctx.scalar_value(value);
+            match ctx.heap.get(scalar) {
+                Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
+                Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
+                Value::Int(number) => {
+                    let zero = crate::Int::from(0);
+                    if number.cmp(&zero).is_lt() {
+                        let magnitude = crate::integer_binary(&zero, number, 1)?;
+                        Ok(ctx.alloc(Value::Int(magnitude)))
+                    } else {
+                        Ok(scalar)
+                    }
+                }
+                _ => Err(type_error(format!(
+                    "bad operand type for abs(): '{}'",
+                    ctx.type_name(value)
+                ))),
+            }
         }
         "callable" => {
             positional(name, kwargs)?;
