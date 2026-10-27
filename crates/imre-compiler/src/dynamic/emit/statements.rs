@@ -352,12 +352,17 @@ impl Function<'_, '_> {
                 ast::Stmt::For(v) => {
                     let source = self.expr(&v.iter);
                     let iter = self.op("iter", &[&source]);
-                    self.live.push(iter.clone());
                     self.loop_body(
                         &v.body,
                         &v.orelse,
+                        Some(&iter),
                         |f| {
-                            let more = f.op("more", &[&iter]);
+                            let op = if v.orelse.is_empty() {
+                                "more"
+                            } else {
+                                "more_else"
+                            };
+                            let more = f.op(op, &[&iter]);
                             f.value(&format!("icmp eq i64 {more}, 2"))
                         },
                         |f| {
@@ -365,12 +370,12 @@ impl Function<'_, '_> {
                             f.assign(&v.target, &item);
                         },
                     );
-                    self.live.pop();
                 }
                 ast::Stmt::While(v) => {
                     self.loop_body(
                         &v.body,
                         &v.orelse,
+                        None,
                         |f| {
                             let test = f.expr(&v.test);
                             f.truth(&test)
@@ -747,6 +752,7 @@ impl Function<'_, '_> {
         &mut self,
         body: &[ast::Stmt],
         otherwise: &[ast::Stmt],
+        iterator: Option<&str>,
         condition: impl FnOnce(&mut Self) -> String,
         bind: impl FnOnce(&mut Self),
     ) {
@@ -754,6 +760,9 @@ impl Function<'_, '_> {
         let body_label = self.name("b");
         let exhausted = self.name("b");
         let done = self.name("b");
+        if let Some(iterator) = iterator {
+            self.live.push(iterator.to_owned());
+        }
         self.jump(&step);
         self.label(&step);
         let condition = condition(self);
@@ -769,6 +778,9 @@ impl Function<'_, '_> {
         self.loops.pop();
         self.jump(&step);
         self.label(&exhausted);
+        if iterator.is_some() {
+            self.live.pop();
+        }
         self.statements(otherwise);
         self.jump(&done);
         self.label(&done);
