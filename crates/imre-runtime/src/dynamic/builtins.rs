@@ -396,6 +396,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
+        Value::Deque(_) if super::deque::METHODS.contains(&attr) => super::deque::CLASS,
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
         }
@@ -1087,6 +1088,7 @@ pub(super) fn call(
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
                     collections::entries(ctx, values)?.len()
                 }
+                Value::Deque(ring) => ring.items.len(),
                 Value::Str(v) => v.chars().count(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
                 Value::Range(range) => {

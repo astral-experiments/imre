@@ -242,6 +242,8 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::BufferedRandom(_) => "_io.BufferedRandom",
+            Value::Deque(_) => "deque",
+            Value::DequeIterator { .. } => "_deque_iterator",
             Value::List(_) => "list",
             Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
@@ -455,6 +457,12 @@ pub(super) enum Value {
     LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
+    Deque(Box<crate::objects::DequeRing<Id>>),
+    DequeIterator {
+        deque: Id,
+        state: usize,
+        remaining: usize,
+    },
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
@@ -678,6 +686,8 @@ impl Value {
 
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
+            Self::Deque(ring) => visit.extend(&ring.items),
+            Self::DequeIterator { deque, .. } => visit.push(*deque),
             Self::List(v) | Self::Tuple(v) => visit.extend(v),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
             Self::Iterator {

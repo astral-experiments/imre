@@ -154,6 +154,7 @@ impl Context {
             Value::Calendar { value, .. } => {
                 value.class() != "timedelta" || value.delta_parts() != (0, 0, 0)
             }
+            Value::Deque(ring) => !ring.items.is_empty(),
             Value::Str(s) => !s.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
