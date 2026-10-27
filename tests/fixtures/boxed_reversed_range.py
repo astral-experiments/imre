@@ -23,3 +23,20 @@ def current():
         length_hint(cursor)
     except OverflowError as error:
         print(str(error))
+
+    check_receivers(range)
+
+
+def check_receivers(native_range):
+    class range:
+        pass
+
+    class range_iterator:
+        pass
+
+    for method, obj in ((native_range.__reversed__, range()),
+                        (type(iter(native_range(2))).__length_hint__, range_iterator())):
+        try:
+            method(obj)
+        except TypeError:
+            print("rejected")
