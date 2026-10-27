@@ -161,7 +161,7 @@ impl Function<'_, '_> {
                         self.expr(&v.value);
                     }
                 }
-                ast::Stmt::Pass(_) | ast::Stmt::Global(_) => {}
+                ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     for t in &v.targets {

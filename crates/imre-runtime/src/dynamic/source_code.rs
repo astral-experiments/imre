@@ -12,6 +12,7 @@ use super::*;
 pub(super) struct Program {
     pub filename: Rc<str>,
     pub name: String,
+    doc: Option<String>,
     first_line: u32,
     generator: bool,
     locals: HashSet<String>,
@@ -46,6 +47,7 @@ impl Program {
         Self {
             filename,
             name: name.to_owned(),
+            doc: None,
             first_line: 1,
             generator: false,
             locals: HashSet::new(),
@@ -55,6 +57,12 @@ impl Program {
 
     fn lower(&mut self, body: &[ast::Stmt], lines: &[usize], function: bool) -> Result<()> {
         use ast::Stmt;
+        if function
+            && let Some(Stmt::Expr(statement)) = body.first()
+            && let ast::Expr::StringLiteral(value) = &*statement.value
+        {
+            self.doc = Some(value.value.to_string());
+        }
         for stmt in body {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
             let op = match stmt {
@@ -237,8 +245,15 @@ impl Context {
     fn box_source_code(&mut self, program: Rc<Program>, parameters: Option<Id>) -> Id {
         let name = self.text(&program.name);
         let filename = self.text(program.filename.as_ref());
+        let doc = program
+            .doc
+            .as_ref()
+            .map(|value| self.text(value))
+            .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
             name,
+            qualname: name,
+            doc,
             filename,
             first_line: program.first_line,
             body: Body::Source(program),
@@ -246,13 +261,16 @@ impl Context {
             coroutine: false,
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
+            freevars: Vec::new(),
+            closure_supported: false,
         }))
     }
 
     /// Define a function whose parameters and executable belong to the generated code object.
     fn source_function(&mut self, code: Id, scope: Id, defaults: Id) -> Id {
         let name = self.code_object(code).name;
-        self.define_function(code, scope, name, defaults, name, NONE, NONE, false)
+        let doc = self.code_object(code).doc;
+        self.define_function(code, scope, name, defaults, name, doc, NONE, false)
     }
 
     pub(super) fn dict_named_item(&self, dict: Id, name: &str) -> Option<Id> {
@@ -278,6 +296,170 @@ impl Context {
             "NameError",
             format!("name '{name}' is not defined"),
         ))
+    }
+
+    /// Construct a function whose globals are supplied by Python code.
+    pub(super) fn construct_function(
+        &mut self,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let [code, globals, name, defaults, closure, kwdefaults] = builtins::bind_method_arguments(
+            "function",
+            args,
+            kwargs,
+            [
+                "code",
+                "globals",
+                "name",
+                "argdefs",
+                "closure",
+                "kwdefaults",
+            ],
+            6,
+        )?;
+        let code = code.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "function() missing required argument 'code' (pos 1)",
+            )
+        })?;
+        let globals = globals.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "function() missing required argument 'globals' (pos 2)",
+            )
+        })?;
+        let Value::Code(data) = self.heap.get(code) else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "function() argument 'code' must be code, not {}",
+                    self.type_name(code)
+                ),
+            ));
+        };
+        if self.dict_storage(globals).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "function() argument 'globals' must be dict, not {}",
+                    self.type_name(globals)
+                ),
+            ));
+        }
+        if !data.module_definition && !data.closure_supported {
+            return Err(unsupported(
+                "function construction without closure metadata",
+            ));
+        }
+        let freevars = data.freevars.clone();
+        let code_name = data.name;
+        let code_qualname = data.qualname;
+        let code_doc = data.doc;
+        let name = name.filter(|&v| v != NONE).unwrap_or(code_name);
+        if self.string_storage(name).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                "arg 3 (name) must be None or string",
+            ));
+        }
+        let defaults = defaults.unwrap_or(NONE);
+        if defaults != NONE && !matches!(self.heap.get(defaults), Value::Tuple(_)) {
+            return Err(Error::new(
+                "TypeError",
+                "arg 4 (defaults) must be None or tuple",
+            ));
+        }
+        let closure = closure.unwrap_or(NONE);
+        let cells = match self.heap.get(closure) {
+            Value::Tuple(cells) => cells.as_slice(),
+            _ if closure == NONE && freevars.is_empty() => &[],
+            _ if closure == NONE => {
+                return Err(Error::new("TypeError", "arg 5 (closure) must be tuple"));
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    "arg 5 (closure) must be None or tuple",
+                ));
+            }
+        };
+        let kwdefaults = kwdefaults.unwrap_or(NONE);
+        if kwdefaults != NONE && self.dict_storage(kwdefaults).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                "arg 6 (kwdefaults) must be None or dict",
+            ));
+        }
+        if cells.len() != freevars.len() {
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "{} requires closure of length {}, not {}",
+                    self.str_value(code_name)?,
+                    freevars.len(),
+                    cells.len()
+                ),
+            ));
+        }
+        for &cell in cells {
+            if !matches!(self.heap.get(cell), Value::Cell { .. }) {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "arg 5 (closure) expected cell, found {}",
+                        self.type_name(cell)
+                    ),
+                ));
+            }
+        }
+        let cells = cells.to_vec();
+        let builtins = if let Some(v) = self.dict_named_item(globals, "__builtins__") {
+            if let Value::Module { scope, .. } = *self.heap.get(v) {
+                self.module_globals(scope)
+            } else {
+                v
+            }
+        } else {
+            self.default_source_builtins()?
+        };
+        let scope = self.scope("", None);
+        let Value::Scope(environment) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        environment.namespace = Some(globals);
+        environment.exec_globals = Some(ExecGlobals {
+            dict: globals,
+            builtins,
+        });
+        let scope = if freevars.is_empty() {
+            scope
+        } else {
+            let captured = self.scope("", Some(scope));
+            let Value::Scope(frame) = self.heap.get_mut(captured) else {
+                unreachable!()
+            };
+            frame.closure.cells.extend(freevars.into_iter().zip(cells));
+            captured
+        };
+        let fields = super::function_fields::FunctionFields::new(
+            self,
+            scope,
+            name,
+            code_qualname,
+            code_doc,
+            NONE,
+        );
+        Ok(self.alloc(Value::Function {
+            fields,
+            closure,
+            code,
+            scope,
+            class_cell: None,
+            defaults,
+            kwdefaults,
+        }))
     }
 
     fn default_source_builtins(&mut self) -> Result<Id> {
