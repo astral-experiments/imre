@@ -48,17 +48,10 @@ impl Context {
                 let name = self.str_value(b)?.to_owned();
                 self.module(&name)
             }
-            "from" | "attr" => {
+            "from" => self.import_from(a, b),
+            "attr" => {
                 let name = self.str_value(b)?.to_owned();
-                match self.lookup_attr(a, &name) {
-                    Err(error) if op == "from" && error.kind == "AttributeError" => {
-                        let Value::Module { name: module, .. } = self.heap.get(a) else {
-                            return Err(error);
-                        };
-                        self.module(&format!("{module}.{name}"))
-                    }
-                    value => value,
-                }
+                self.lookup_attr(a, &name)
             }
             "setattr" => {
                 let name = self.str_value(b)?.to_owned();
@@ -257,8 +250,8 @@ impl Context {
                 Ok(self.raised_instance(error))
             }
             "matches" => {
-                if let Value::Raised(Error { kind, .. }) = self.heap.get(a) {
-                    Ok(flag(self.error_matches(kind, b)))
+                if let Value::Raised(error) = self.heap.get(a) {
+                    Ok(flag(self.raised_error_matches(error, b)))
                 } else {
                     Ok(FALSE)
                 }
@@ -362,6 +355,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         argv: NONE,
         sys_path: NONE,
         contexts: Vec::new(),
+        bytearray_exports: Vec::new(),
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,
@@ -372,6 +366,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
+        call_depth: 0,
         pending: None,
     };
     // SAFETY: ABI main supplies argc pointers, valid to the end of the call.
@@ -764,6 +759,7 @@ impl Context {
                 .chain(self.codec_entries.roots())
                 .copied()
                 .chain(self.contexts.iter().copied())
+                .chain(self.bytearray_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
                 .chain([self.argv, self.sys_path, self.token_missing]),

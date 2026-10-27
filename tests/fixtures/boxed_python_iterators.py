@@ -68,6 +68,13 @@ def current():
     except ValueError as exc:
         print(str(exc))
     print(dict(Pairs()))
+    print(sum(Cursor(), start=1 << 90))
+    print(sum(value > 0 for value in Cursor()))
+    print(sum((), -3))
+    try:
+        sum(Broken())
+    except ValueError as exc:
+        print(str(exc))
     values = ["Content-Type"]
     rows = Rows(values)
     it = iter(rows)
@@ -105,3 +112,10 @@ def current():
                 function(*args, **kwargs)
             except TypeError as exc:
                 print(str(exc))
+
+    cursor = Cursor()
+    print(1 in cursor, cursor.calls, next(cursor, None))
+    try:
+        1 in Broken()
+    except ValueError as exc:
+        print(str(exc))

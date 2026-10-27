@@ -43,6 +43,7 @@ toml_parser = "=1.1.5"
 hashbrown = { version = "=0.17.1", default-features = false, features = ["inline-more"] }
 triomphe = { version = "=0.1.17", default-features = false }
 glidesort = "=0.1.2"
+stacker = "=0.1.25"
 smallvec = { version = "=1.16.3", features = ["union"] }
 sha1 = { version = "=0.11.0", default-features = false }
 sha2 = { version = "=0.11.1", default-features = false }

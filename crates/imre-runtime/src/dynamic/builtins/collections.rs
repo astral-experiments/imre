@@ -1,6 +1,89 @@
 use super::super::value::DictViewKind;
 use super::*;
 
+/// Materialize the iterable before parsing the forwarded list.sort keywords.
+pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [iterable] = args else {
+        return Err(type_error(format!(
+            "sorted expected 1 argument, got {}",
+            args.len()
+        )));
+    };
+    let values = ctx.items(*iterable)?;
+    let list = ctx.alloc(Value::List(values));
+    list_sort(ctx, list, &[], kwargs)?;
+    Ok(list)
+}
+
+/// Leave an empty list visible to callbacks and restore its original elements on every exit.
+fn list_sort(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [key, reverse] = bind_method_arguments("sort", args, kwargs, ["key", "reverse"], 0)?;
+    let reverse = ctx.optional_truth(reverse, false)?;
+    let Value::List(live) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    let mut values = std::mem::take(live);
+    for &value in &values {
+        ctx.heap.keep(value);
+    }
+    let result = sort_list_items(ctx, &mut values, key, reverse);
+    let Value::List(live) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    // An append allocates storage even if the callback subsequently pops the item.
+    let modified = live.capacity() != 0;
+    *live = values;
+    result?;
+    if modified {
+        return Err(Error::new("ValueError", "list modified during sort"));
+    }
+    Ok(NONE)
+}
+
+/// Evaluate each key in input order before changing the order of the items.
+fn sort_list_items(
+    ctx: &mut Context,
+    values: &mut [Id],
+    key: Option<Id>,
+    reverse: bool,
+) -> Result<()> {
+    if let Some(key) = key.filter(|&key| key != NONE) {
+        let mut keyed = Vec::new();
+        keyed
+            .try_reserve_exact(values.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for &value in values.iter() {
+            let sort_key = ctx.call(key, vec![value], vec![])?;
+            ctx.heap.keep(sort_key);
+            keyed.push((sort_key, value));
+        }
+        sort_values(ctx, &mut keyed, reverse, |(key, _)| key)?;
+        for (slot, (_, value)) in values.iter_mut().zip(keyed) {
+            *slot = value;
+        }
+    } else {
+        sort_values(ctx, values, reverse, |value| value)?;
+    }
+    Ok(())
+}
+
+fn sort_values<T: Copy>(
+    ctx: &mut Context,
+    values: &mut [T],
+    reverse: bool,
+    key: impl Fn(T) -> Id,
+) -> Result<()> {
+    crate::objects::sort_by_less(
+        values,
+        reverse,
+        |a, b| {
+            let result = ctx.binary("<", key(a), key(b))?;
+            ctx.truth(result)
+        },
+        || Error::new("MemoryError", ""),
+    )
+}
+
 pub(super) fn entries(ctx: &Context, dict: Id) -> Result<&[(Id, Id)]> {
     ctx.dict_entries(dict)
         .ok_or_else(|| type_error("expected a dictionary"))
@@ -18,7 +101,20 @@ fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)
             let Some(pair) = ctx.next_item(iterator)? else {
                 break;
             };
-            let pair = ctx.items(pair)?;
+            let pair = if matches!(ctx.heap.get(pair), Value::List(_) | Value::Tuple(_)) {
+                ctx.items(pair)?
+            } else {
+                // PySequence_Fast replaces TypeError only while obtaining the iterator.
+                let iterator = ctx.iterator(pair).map_err(|error| {
+                    let class = ctx.builtin("TypeError");
+                    if ctx.error_matches(&error.kind, class) {
+                        type_error("object is not iterable")
+                    } else {
+                        error
+                    }
+                })?;
+                ctx.items(iterator)?
+            };
             let [key, value] = pair.as_slice() else {
                 return Err(Error::new(
                     "ValueError",
@@ -213,8 +309,23 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "list.pop" {
-        return list_pop(ctx, args, kwargs);
+    if let Some(method @ ("pop" | "sort")) = name.strip_prefix("list.") {
+        let Some((&receiver, args)) = args.split_first() else {
+            return Err(type_error(format!(
+                "unbound method {name}() needs an argument"
+            )));
+        };
+        if !matches!(ctx.heap.get(receiver), Value::List(_)) {
+            return Err(type_error(format!(
+                "descriptor '{method}' for 'list' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            )));
+        }
+        return if method == "sort" {
+            list_sort(ctx, receiver, args, kwargs)
+        } else {
+            list_pop(ctx, receiver, args, kwargs)
+        };
     }
     let slot = matches!(
         name,
@@ -397,16 +508,7 @@ pub(super) fn method(
     }
 }
 
-fn list_pop(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let Some((&receiver, args)) = args.split_first() else {
-        return Err(type_error("unbound method list.pop() needs an argument"));
-    };
-    if !matches!(ctx.heap.get(receiver), Value::List(_)) {
-        return Err(type_error(format!(
-            "descriptor 'pop' for 'list' objects doesn't apply to a '{}' object",
-            ctx.type_name(receiver)
-        )));
-    }
+fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error("list.pop() takes no keyword arguments"));
     }

@@ -38,7 +38,15 @@ fn owned(value: &str, is_bytes: bool) -> Result<usize> {
     }
 }
 
-fn clean(value: &str, scheme: bool) -> Cow<'_, str> {
+fn copy_text(value: &str) -> Result<String> {
+    let mut text = String::new();
+    text.try_reserve_exact(value.len())
+        .map_err(|_| Error::allocation())?;
+    text.push_str(value);
+    Ok(text)
+}
+
+fn clean(value: &str, scheme: bool) -> Result<Cow<'_, str>> {
     let c0 = |c: char| c <= ' ';
     let value = if scheme {
         value.trim_matches(c0)
@@ -46,9 +54,11 @@ fn clean(value: &str, scheme: bool) -> Cow<'_, str> {
         value.trim_start_matches(c0)
     };
     if value.contains(['\t', '\n', '\r']) {
-        Cow::Owned(value.replace(['\t', '\n', '\r'], ""))
+        let mut cleaned = copy_text(value)?;
+        cleaned.retain(|ch| !matches!(ch, '\t' | '\n' | '\r'));
+        Ok(Cow::Owned(cleaned))
     } else {
-        Cow::Borrowed(value)
+        Ok(Cow::Borrowed(value))
     }
 }
 
@@ -142,7 +152,9 @@ fn split<'a>(mut url: &'a str, default_scheme: &'a str, fragments: bool) -> Resu
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'.' | b'-'))
     {
-        scheme = Cow::Owned(prefix.to_ascii_lowercase());
+        let mut lower = copy_text(prefix)?;
+        lower.make_ascii_lowercase();
+        scheme = Cow::Owned(lower);
         url = rest;
     }
     let netloc = if let Some(rest) = url.strip_prefix("//") {
@@ -179,8 +191,8 @@ pub(crate) fn with_split_fields<T>(
     fragments: bool,
     store: impl FnOnce([&str; 5]) -> Result<T>,
 ) -> Result<T> {
-    let url = clean(url, false);
-    let scheme = clean(scheme, true);
+    let url = clean(url, false)?;
+    let scheme = clean(scheme, true)?;
     let parts = split(&url, &scheme, fragments)?;
     store([
         parts.scheme.as_ref(),
@@ -314,13 +326,20 @@ pub(crate) fn netloc_property(
     }
     let (name, zone) = partition(hostname, b'%');
     let lower = if is_bytes {
-        let mut lower = hostname.to_vec();
+        let mut lower = Vec::new();
+        lower
+            .try_reserve_exact(hostname.len())
+            .map_err(|_| Error::allocation())?;
+        lower.extend_from_slice(hostname);
         lower[..name.len()].make_ascii_lowercase();
         lower
     } else {
         let mut lower = super::lowercase::lowercase(std::str::from_utf8(name).unwrap())
             .map_err(|_| Error::allocation())?;
         if let Some(zone) = zone {
+            lower
+                .try_reserve(1 + zone.len())
+                .map_err(|_| Error::allocation())?;
             lower.push('%');
             lower.push_str(std::str::from_utf8(zone).unwrap());
         }

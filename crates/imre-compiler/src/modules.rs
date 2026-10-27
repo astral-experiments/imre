@@ -31,13 +31,21 @@ pub(crate) type ModuleId = usize;
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
+        "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
+        "collections" => Some((
+            "collections/__init__.py",
+            include_str!("../stdlib/collections/__init__.py"),
+        )),
         "contextlib" => Some((
             "contextlib.py",
             concat!(
                 include_str!("../stdlib/contextlib.py"),
                 "\n",
-                include_str!("../stdlib/contextlib_exitstack.py")
+                include_str!("../stdlib/contextlib_exitstack.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_redirect.py")
             ),
         )),
         "_imre_socketserver_poll" => Some((
@@ -59,6 +67,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/logging/stream.py"),
                 "\n",
                 include_str!("../stdlib/logging/boxed.py"),
+            ),
+        )),
+        "mimetypes" if cfg!(unix) => Some((
+            "mimetypes.py",
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/mimetypes/upstream/Lib/mimetypes.py"
             ),
         )),
         "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
@@ -771,6 +785,12 @@ impl IntrinsicModule {
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
+            (Self::Contextlib, "redirect_stdout") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.redirect_stdout")
+            }
+            (Self::Contextlib, "redirect_stderr") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
+            }
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
@@ -947,6 +967,9 @@ impl IntrinsicModule {
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Threading, "Lock") | (Self::Thread, "LockType") => {
+                Intrinsic::ObjectRuntimeExport("_thread.lock")
+            }
             (Self::Threading, "local") | (Self::Thread, "_local") => {
                 Intrinsic::ObjectRuntimeExport("_thread._local")
             }

@@ -33,6 +33,13 @@ def current():
     print("☃ %% %02d/%04d %#06X %.4o" % (7, 42, 15, 7))
     print("%(n)+06i:%(n)-5u" % {"n": 19})
     print("%+060d" % (1 << 150))
+    print(str.translate("abc!", {97: None, 98: "xy", 99: 65}))
+    print("abc".translate({999: []}))
+    for replacement in ([], 0x110000):
+        try:
+            "a".translate({97: replacement})
+        except (TypeError, ValueError) as error:
+            print(type(error).__name__)
     number = FormatNumber()
     print("%04x %04i %04u" % (number, number, 2.75))
     for field in ("%02d", "%02x"):

@@ -84,17 +84,50 @@ impl Callback {
 type Indices = SmallVec<[usize; 32]>;
 type Runs = SmallVec<[(usize, usize); 8]>;
 
+/// Stably order values using Python's fallible less-than operation.
+pub(crate) fn sort_by_less<T: Copy, E>(
+    values: &mut [T],
+    reverse: bool,
+    less: impl FnMut(T, T) -> Result<bool, E>,
+    allocation_error: impl FnOnce() -> E,
+) -> Result<(), E> {
+    let n = values.len();
+    if n < 2 {
+        return Ok(());
+    }
+    let (mut min_run, mut extra) = (n, 0);
+    while min_run >= 64 {
+        extra |= min_run & 1;
+        min_run >>= 1;
+    }
+    min_run += extra;
+    let mut scratch = SmallVec::new();
+    let mut runs = Runs::new();
+    if scratch.try_reserve_exact(n).is_err() || runs.try_reserve_exact(n.div_ceil(min_run)).is_err()
+    {
+        return Err(allocation_error());
+    }
+    if reverse {
+        values.reverse();
+    }
+    let result = sort_runs(values, &mut runs, &mut scratch, min_run, less);
+    if reverse {
+        values.reverse();
+    }
+    result
+}
+
 /// Detect monotone runs, extend short runs with stable binary insertion, and
 /// merge using only the Python less-than operation. A failed comparison never
-/// leaves the index array with a duplicated or missing owner.
+/// leaves the array with a duplicated or missing owner.
 /// The comparison call sequence is specific to this sorting implementation.
-fn sort_indices(
-    order: &mut [usize],
+fn sort_runs<T: Copy, E>(
+    order: &mut [T],
     runs: &mut Runs,
-    scratch: &mut Indices,
+    scratch: &mut SmallVec<[T; 32]>,
     min_run: usize,
-    mut less: impl FnMut(usize, usize) -> Result<bool, ()>,
-) -> Result<(), ()> {
+    mut less: impl FnMut(T, T) -> Result<bool, E>,
+) -> Result<(), E> {
     let n = order.len();
     let mut start = 0;
     while start < n {
@@ -205,24 +238,12 @@ pub unsafe extern "C" fn imre_sort_by_comparator(
     if n < 2 {
         return;
     }
-    let (mut min_run, mut extra) = (n, 0);
-    while min_run >= 64 {
-        extra |= min_run & 1;
-        min_run >>= 1;
-    }
-    min_run += extra;
-    let (mut order, mut scratch, mut runs) = (Indices::new(), Indices::new(), Runs::new());
-    if order.try_reserve_exact(n).is_err()
-        || scratch.try_reserve_exact(n).is_err()
-        || runs.try_reserve_exact(n.div_ceil(min_run)).is_err()
-    {
+    let mut order = Indices::new();
+    if order.try_reserve_exact(n).is_err() {
         crate::objects::exceptions::sequence_allocation_failed();
         return;
     }
     order.extend(0..n);
-    if reverse != 0 {
-        order.reverse();
-    }
     let callback = Callback {
         target,
         context,
@@ -230,13 +251,15 @@ pub unsafe extern "C" fn imre_sort_by_comparator(
         transfer: (args & 256 != 0).then(|| WordKind::new(kind)),
         result,
     };
-    let _ = sort_indices(&mut order, &mut runs, &mut scratch, min_run, |a, b| {
-        // SAFETY: callback ABI and operand owners were validated above.
-        unsafe { callback.less(words[a], words[b]) }
-    });
-    if reverse != 0 {
-        order.reverse();
-    }
+    let _ = sort_by_less(
+        &mut order,
+        reverse != 0,
+        |a, b| {
+            // SAFETY: callback ABI and operand owners were validated above.
+            unsafe { callback.less(words[a], words[b]) }
+        },
+        crate::objects::exceptions::sequence_allocation_failed,
+    );
     // SAFETY: no storage borrow overlapped Python, including a failed comparison.
     unsafe { apply_order(list, kind, &mut order) }
 }
@@ -254,11 +277,9 @@ mod tests {
         for stop in [1, 2, 17, 65, 130, 315, usize::MAX] {
             let mut order = (0..n).collect::<Vec<_>>();
             let mut seen = 0;
-            let result = sort_indices(
+            let result = sort_by_less(
                 &mut order,
-                &mut Runs::new(),
-                &mut Indices::new(),
-                36,
+                false,
                 |a, b| {
                     seen += 1;
                     if seen == stop {
@@ -267,6 +288,7 @@ mod tests {
                         Ok(key(a) < key(b))
                     }
                 },
+                || (),
             );
             if result.is_ok() {
                 assert_eq!(order, expected);

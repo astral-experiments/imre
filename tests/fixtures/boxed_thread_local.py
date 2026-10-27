@@ -15,6 +15,10 @@ def current():
     state.stack.append("inner")
     print(state.stack.pop(), backing, unused.__dict__)
     del state.stack
+    backing["__class__"] = "shadow"
+    print(state.__class__, getattr(state, "__class__"), type(state) is local)
+    del backing["__class__"]
+    print(state.__class__ is local)
     for action in (
         lambda: state.stack,
         lambda: delattr(state, "missing"),

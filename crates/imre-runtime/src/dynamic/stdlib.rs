@@ -9,6 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
+mod binascii;
 pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
@@ -29,6 +30,7 @@ mod logging;
 mod marshal;
 mod operator;
 mod pickle;
+mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
 mod socket;
@@ -43,14 +45,18 @@ pub(super) fn is_module(name: &str) -> bool {
             | "threading"
             | "_thread"
             | "abc"
+            | "_collections"
             | "codecs"
             | "types"
+            | "_io"
             | "io"
             | "traceback"
             | "sysconfig"
             | "ast"
             | "os"
-            | "os.path"
+            | "posix"
+            | "posixpath"
+            | "_imre_posixpath"
             | "fnmatch"
             | "itertools"
             | "operator"
@@ -59,6 +65,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "selectors"
             | "struct"
             | "base64"
+            | "binascii"
             | "json"
             | "_imre_logging"
             | "marshal"
@@ -129,7 +136,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         class,
         dictionary: None,
         scalar: None,
-        text_memory: None,
+        memory_stream: None,
         fields: fields
             .iter()
             .map(|&(key, value)| (key.to_owned(), value))
@@ -223,6 +230,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", "ASCII") => ctx.int(regex::ASCII),
         ("re", "UNICODE") => ctx.int(regex::UNICODE),
@@ -247,9 +255,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
+        ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
-        ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
+        ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")
         }
@@ -291,6 +300,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
+        ("binascii", "Error" | "Incomplete" | "a2b_base64" | "b2a_base64") => {
+            ctx.builtin(&format!("binascii.{name}"))
+        }
         ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
@@ -352,8 +364,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
+        ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         ("os", "name") => ctx.text("posix"),
-        ("os" | "os.path", "sep") => ctx.text("/"),
+        ("os" | "posixpath", "sep") => ctx.text("/"),
         ("importlib.machinery", "EXTENSION_SUFFIXES") => {
             let suffix = ctx.text(
                 ctx.config["archive_suffix"]
@@ -382,8 +396,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_preferred_scheme",
         )
         | ("site", "getsitepackages")
-        | ("os", "confstr" | "fsdecode" | "uname")
-        | ("os.path", "join" | "abspath" | "dirname")
+        | ("os", "confstr" | "uname")
+        | ("_imre_posixpath", "extension_start" | "isfile")
         | (
             "platform",
             "system"
@@ -404,7 +418,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("pickle", "dumps")
         | (
             "urllib.parse",
-            "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes",
+            "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
+            | "quote_plus" | "quote_from_bytes",
         )
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
@@ -431,12 +446,57 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     Ok(id)
 }
 
+/// Count each key before pulling the next and preserve updates if a callback raises.
+fn count_elements(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_collections._count_elements() takes no keyword arguments",
+        ));
+    }
+    let &[mapping, iterable] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("_count_elements expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let iterator = ctx.iterator(iterable)?;
+    let dict_get = ctx.builtin("dict.get");
+    let dict_set = ctx.builtin("dict.__setitem__");
+    // The builtin dict operations bypass instance attributes when neither type method is overridden.
+    let receiver = ctx
+        .dict_storage(mapping)
+        .filter(|_| {
+            ctx.slot(mapping, "get").is_none_or(|get| get == dict_get)
+                && ctx
+                    .slot(mapping, "__setitem__")
+                    .is_none_or(|set| set == dict_set)
+        })
+        .unwrap_or(mapping);
+    let get = ctx.lookup_attr(receiver, "get")?;
+    let zero = ctx.int(0);
+    let one = ctx.int(1);
+    while let Some(key) = ctx.next_item(iterator)? {
+        ctx.heap.keep(key);
+        let previous = ctx.call(get, vec![key, zero], vec![])?;
+        let count = ctx.binary("+", previous, one)?;
+        ctx.put_item(receiver, key, count)?;
+    }
+    Ok(NONE)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == super::thread_lock::CLASS {
+        return super::thread_lock::construct(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_thread.lock.") {
+        return super::thread_lock::method(ctx, method, args, kwargs);
+    }
     if name == super::thread_local::CLASS {
         if !args.is_empty() || !kwargs.is_empty() {
             return Err(Error::new(
@@ -449,11 +509,20 @@ pub(super) fn call(
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
     }
+    if let Some(method) = name.strip_prefix("binascii.") {
+        return binascii::call(ctx, method, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
     }
+    if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
+        return posixpath::call(ctx, name, args, kwargs);
+    }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
+    }
+    if name == "_collections._count_elements" {
+        return count_elements(ctx, args, kwargs);
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
@@ -620,7 +689,6 @@ pub(super) fn call(
         | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
         | "os.confstr"
-        | "os.fsdecode"
         | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
@@ -806,23 +874,6 @@ pub(super) fn call(
                 }
             })?;
             value.map_or(NONE, |value| ctx.text(value))
-        }
-        "os.fsdecode" => {
-            let item = argument(args, 0)?;
-            match ctx.heap.get(item) {
-                Value::Str(_) => item,
-                Value::Bytes(bytes) => {
-                    let decoded: Option<String> =
-                        system::fsdecode(bytes).map(char::from_u32).collect();
-                    ctx.text(decoded.ok_or_else(|| {
-                        Error::new(
-                            "UnicodeError",
-                            "surrogate-escaped filenames are not representable as Imre strings",
-                        )
-                    })?)
-                }
-                _ => return Err(Error::new("TypeError", "expected a path string or bytes")),
-            }
         }
         "struct.calcsize" => {
             let size = system::struct_calcsize(ctx.str_value(argument(args, 0)?)?)

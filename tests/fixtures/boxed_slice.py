@@ -57,3 +57,8 @@ def current():
         slice(1, 2, 0).indices(4)
     except ValueError as error:
         print(str(error))
+    left = right = 0
+    for _ in range(4096):
+        left = slice(left)
+        right = slice(right)
+    print(left == right)

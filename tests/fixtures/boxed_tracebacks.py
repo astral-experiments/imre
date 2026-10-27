@@ -125,3 +125,49 @@ saved = keep_traceback()
 for i in range(5000):
     allocation = [i]
 print(type(saved.tb_next) is TracebackType, type(saved.tb_next.tb_frame) is FrameType)
+
+
+def make(base, marker):
+    class Reused(base):
+        pass
+    Reused.marker = marker
+    return Reused
+
+
+first = make(ValueError, 1)
+second = make(KeyError, 2)
+for error in (first("left"), second("right")):
+    print(type(error) is first, type(error) is second,
+          isinstance(error, (second, first)), isinstance(error, ValueError),
+          isinstance(error, KeyError), isinstance(error, BaseException))
+    try:
+        raise error
+    except (second, RuntimeError) as caught:
+        print("second", caught is error, str(caught))
+    except first as caught:
+        print("first", caught is error, str(caught))
+
+try:
+    raise first
+except second:
+    print("wrong")
+except first as caught:
+    print("class", type(caught) is first)
+
+held = make(Exception, 3)("earlier")
+replacement = make(Exception, 4)
+for n in range(12000):
+    garbage = [n]
+print("retained", type(held).marker, type(held) is replacement)
+
+builtin_value_error = ValueError
+class ValueError(Exception):
+    pass
+native = builtin_value_error("native")
+print("builtin", type(native) is builtin_value_error, isinstance(native, ValueError))
+try:
+    raise native
+except ValueError:
+    print("wrong builtin")
+except builtin_value_error:
+    print("native handler")

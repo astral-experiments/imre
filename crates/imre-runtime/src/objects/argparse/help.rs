@@ -31,9 +31,11 @@ fn positive_columns(value: &str) -> Option<usize> {
 }
 
 pub(super) fn width() -> usize {
-    let columns = std::env::var("COLUMNS")
-        .ok()
-        .and_then(|value| positive_columns(&value))
+    let configured = super::super::processes::with_environment_value(b"COLUMNS", |bytes| {
+        std::str::from_utf8(bytes).ok().and_then(positive_columns)
+    });
+    let columns = configured
+        .flatten()
         .or_else(|| {
             let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
             // SAFETY: ioctl writes a winsize to this buffer only on success.
@@ -424,15 +426,26 @@ impl Parser {
         let Some(commands) = &mut self.subcommands else {
             return Ok(());
         };
-        let mut parts = vec![(len(&self.prog), Cow::Borrowed(self.prog.as_str()))];
+        let count = self
+            .options
+            .iter()
+            .filter(|option| option.positional())
+            .count();
+        let mut parts = Vec::new();
+        if count != 0 {
+            parts
+                .try_reserve_exact(count + 1)
+                .map_err(|_| Error::allocation())?;
+            parts.push((len(&self.prog), Cow::Borrowed(self.prog.as_str())));
+        }
         parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
             let label = o.label(true, false);
             (len(&label), Cow::Owned(label))
         }));
-        let width = width();
-        let prog = if parts.len() == 1 {
+        let prog = if parts.is_empty() {
             Cow::Borrowed(self.prog.as_str())
         } else {
+            let width = width();
             let mut prefix = ProgramPrefix::default();
             let (parts, indent) = if parts.iter().map(|(length, _)| length + 1).sum::<usize>() - 1
                 > width

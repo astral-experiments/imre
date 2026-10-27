@@ -7022,6 +7022,7 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
+            Builtin::DictIsOrdered => self.call("imre_dict_is_ordered", returns, &[&args[0].value]),
             Builtin::DictFromKeysTarget => self.call(
                 "imre_dict_fromkeys_target",
                 returns,
@@ -9604,6 +9605,7 @@ declare ptr @imre_namespace_dict(ptr)
 declare i64 @imre_namespace_get(ptr, ptr)
 declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
+declare i1 @imre_dict_is_ordered(ptr)
 declare ptr @imre_dict_fromkeys_target(ptr, ptr)
 declare ptr @imre_ordered_dict(ptr)
 declare i64 @imre_deep_copy(i64, i32)

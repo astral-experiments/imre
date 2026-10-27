@@ -61,26 +61,56 @@ pub(super) struct Trace {
     cached: Option<(usize, Id)>,
 }
 
+#[derive(Debug)]
+pub(super) struct ImportFields {
+    pub name: Option<String>,
+    pub path: Option<String>,
+    pub name_from: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Error {
     pub kind: String,
+    pub class: Option<Id>,
     pub message: String,
     pub args: Option<Vec<Id>>,
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
+    pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
 impl Error {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
         Self {
             kind: kind.to_owned(),
+            class: None,
             message: message.into(),
             args: None,
             os_args: None,
             trace: None,
             exit_status: None,
+            import: None,
         }
+    }
+
+    /// Attach the module and member names exposed on a Python import exception.
+    pub fn with_import(
+        mut self,
+        name: Option<&str>,
+        path: Option<String>,
+        name_from: Option<&str>,
+    ) -> Self {
+        let fields = ImportFields {
+            name: name.map(str::to_owned),
+            path,
+            name_from: name_from.map(str::to_owned),
+        };
+        let Ok(fields) = crate::shared::Shared::try_new(fields) else {
+            return Self::new("MemoryError", "");
+        };
+        self.import = Some(fields);
+        self
     }
 
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
@@ -88,6 +118,7 @@ impl Error {
             .iter()
             .flatten()
             .copied()
+            .chain(self.class)
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
                     .frames
@@ -170,6 +201,7 @@ impl Context {
             Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
+            Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
@@ -211,6 +243,7 @@ impl Context {
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
             Value::ThreadLocal(_) => super::thread_local::CLASS,
+            Value::PrimitiveLock(_) => super::thread_lock::CLASS,
             Value::FormatIterator { kind, .. } => match kind {
                 FormatKind::Markup => "formatteriterator",
                 FormatKind::Field => "fieldnameiterator",
@@ -378,6 +411,8 @@ pub(super) enum Value {
     Module {
         name: String,
         scope: Id,
+        origin: Option<Id>,
+        initializing: bool,
     },
     Function {
         fields: super::function_fields::FunctionFields,
@@ -406,11 +441,12 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
-        text_memory: Option<crate::objects::TextFile>,
+        memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
     ThreadLocal(super::thread_local::Dictionaries),
+    PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
     Traceback {
         frame: Id,
@@ -460,10 +496,14 @@ pub(super) enum Value {
         step: Id,
     },
     Repeat(crate::objects::Repeat<Id>),
+    Map {
+        function: Id,
+        inputs: std::rc::Rc<[Id]>,
+        strict: bool,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
-        pending: Option<Id>,
     },
     CallableIterator(Option<[Id; 2]>),
     // Private to a compiled loop. Python-visible iterators keep their original identity.
@@ -533,12 +573,13 @@ impl Value {
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
-            Self::Zip {
-                inputs, pending, ..
+            Self::Map {
+                function, inputs, ..
             } => {
+                visit.push(*function);
                 visit.extend(inputs.iter());
-                visit.extend(pending);
             }
+            Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
             Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
             Self::LoopIterator { source, peeked } => {
                 visit.push(*source);
@@ -607,7 +648,10 @@ impl Value {
                 receiver,
                 owner,
             } => visit.extend([*start, *receiver, *owner]),
-            Self::Module { scope, .. } => visit.push(*scope),
+            Self::Module { scope, origin, .. } => {
+                visit.push(*scope);
+                visit.extend(origin);
+            }
             Self::Function {
                 scope,
                 class_cell,
@@ -646,8 +690,11 @@ impl Value {
                 fields,
                 dictionary,
                 scalar,
-                ..
+                memory_stream,
             } => {
+                if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
+                    visit.extend(stream.snapshot.get());
+                }
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
@@ -701,6 +748,7 @@ impl Value {
             | Self::Hash(_)
             | Self::LoggerHandle(_)
             | Self::HandlerLock(_)
+            | Self::PrimitiveLock(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
