@@ -673,6 +673,7 @@ def report(text):
             "boxed_selector_modify_data.py",
             "boxed_structural_hooks.py",
             "boxed_list_pop.py",
+            "boxed_deque.py",
             "boxed_zip.py",
             "boxed_map.py",
             "boxed_python_iterators.py",

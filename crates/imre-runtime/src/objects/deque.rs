@@ -6,11 +6,93 @@ use std::collections::VecDeque;
 use super::words::WordKind;
 use super::*;
 
-pub(super) struct Deque {
-    items: VecDeque<OwnedWord>,
-    kind: WordKind,
-    maxlen: Option<usize>,
-    state: usize,
+pub(super) type Deque = Ring<OwnedWord, WordKind>;
+
+/// Ring storage shared by compiler-owned words and traced runtime object IDs.
+#[derive(Clone)]
+pub(crate) struct Ring<T, K = ()> {
+    pub(crate) items: VecDeque<T>,
+    kind: K,
+    pub(crate) maxlen: Option<usize>,
+    pub(crate) state: usize,
+}
+
+impl<T, K> Ring<T, K> {
+    pub(crate) fn new(kind: K, maxlen: Option<usize>) -> Self {
+        Self {
+            items: VecDeque::new(),
+            kind,
+            maxlen,
+            state: 0,
+        }
+    }
+
+    /// Reserve before acquiring the item and return an evicted owner to the caller.
+    pub(crate) fn push(
+        &mut self,
+        left: bool,
+        extending: bool,
+        item: impl FnOnce() -> T,
+    ) -> Result<Option<T>, Error> {
+        if self.maxlen == Some(0) {
+            if !extending {
+                self.state = self.state.wrapping_add(1);
+            }
+            return Ok(None);
+        }
+        let removed = if self.maxlen == Some(self.items.len()) {
+            if left {
+                self.items.pop_back()
+            } else {
+                self.items.pop_front()
+            }
+        } else {
+            self.items
+                .try_reserve(1)
+                .map_err(|_| Error::new(Kind::MemoryError, ""))?;
+            None
+        };
+        if left {
+            self.items.push_front(item());
+        } else {
+            self.items.push_back(item());
+        }
+        self.state = self.state.wrapping_add(1);
+        Ok(removed)
+    }
+
+    pub(crate) fn pop(&mut self, left: bool) -> Result<T, Error> {
+        let item = if left {
+            self.items.pop_front()
+        } else {
+            self.items.pop_back()
+        };
+        let item = item.ok_or_else(|| Error::new(Kind::IndexError, "pop from an empty deque"))?;
+        self.state = self.state.wrapping_add(1);
+        Ok(item)
+    }
+
+    /// Check the cursor's saved mutation counter before returning the next borrowed item.
+    pub(crate) fn cursor_item(
+        &self,
+        state: usize,
+        remaining: usize,
+        reverse: bool,
+    ) -> Result<Option<&T>, Error> {
+        if (!reverse || remaining != 0) && state != self.state {
+            return Err(Error::new(
+                Kind::RuntimeError,
+                "deque mutated during iteration",
+            ));
+        }
+        Ok((remaining != 0).then(|| {
+            &self.items[if reverse {
+                remaining - 1
+            } else {
+                self.items.len() - remaining
+            }]
+        }))
+    }
 }
 
 const INDEX_OVERFLOW: &str = "cannot fit 'int' into an index-sized integer";
@@ -100,12 +182,7 @@ pub unsafe extern "C" fn imre_deque_new(kind: u32, limit: usize) -> *const Objec
         Ok(bound) => bound,
         Err(error) => return error.returning(std::ptr::null()),
     };
-    let deque = Deque {
-        items: VecDeque::new(),
-        kind: WordKind::new(kind),
-        maxlen,
-        state: 0,
-    };
+    let deque = Deque::new(WordKind::new(kind), maxlen);
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
         Storage::Deque(Box::new(deque)),
     ))))
@@ -125,33 +202,8 @@ pub unsafe extern "C" fn imre_deque_append(
     let result = unsafe {
         object(value).0.with_mut(|storage| {
             let deque = storage.deque_mut();
-            if deque.maxlen == Some(0) {
-                if extending == 0 {
-                    deque.state = deque.state.wrapping_add(1);
-                }
-                return Ok(None);
-            }
-            let removed = if deque.maxlen == Some(deque.items.len()) {
-                if left != 0 {
-                    deque.items.pop_back()
-                } else {
-                    deque.items.pop_front()
-                }
-            } else {
-                deque
-                    .items
-                    .try_reserve(1)
-                    .map_err(|_| Error::new(Kind::MemoryError, ""))?;
-                None
-            };
-            let item = deque.kind.acquire(word);
-            if left != 0 {
-                deque.items.push_front(item);
-            } else {
-                deque.items.push_back(item);
-            }
-            deque.state = deque.state.wrapping_add(1);
-            Ok(removed)
+            let kind = deque.kind;
+            deque.push(left != 0, extending != 0, || kind.acquire(word))
         })
     };
     drop(finish(result, None));
@@ -212,23 +264,11 @@ pub unsafe extern "C" fn imre_deque_extend_source(
 pub unsafe extern "C" fn imre_deque_pop(value: *const Object, left: u32) -> usize {
     // SAFETY: only the detached owner escapes mutation.
     let item = unsafe {
-        object(value).0.with_mut(|storage| {
-            let deque = storage.deque_mut();
-            let item = if left != 0 {
-                deque.items.pop_front()
-            } else {
-                deque.items.pop_back()
-            };
-            if item.is_some() {
-                deque.state = deque.state.wrapping_add(1);
-            }
-            item
-        })
+        object(value)
+            .0
+            .with_mut(|storage| storage.deque_mut().pop(left != 0))
     };
-    item.map_or_else(
-        || Error::new(Kind::IndexError, "pop from an empty deque").returning(0),
-        OwnedWord::into_word,
-    )
+    finish(item.map(OwnedWord::into_word), 0)
 }
 
 /// Explicit deque slot wrappers report integer conversion overflow before the bounds check.
@@ -389,26 +429,17 @@ impl DequeIterator {
         unsafe {
             self.owner.0.with(|storage| {
                 let deque = storage.deque();
-                if self.reverse && self.remaining == 0 {
-                    return Ok(None);
+                match deque.cursor_item(self.state, self.remaining, self.reverse) {
+                    Ok(Some(item)) => {
+                        self.remaining -= 1;
+                        Ok(Some((item.clone(), None)))
+                    }
+                    Ok(None) => Ok(None),
+                    Err(error) => {
+                        self.remaining = 0;
+                        Err(error)
+                    }
                 }
-                if self.state != deque.state {
-                    self.remaining = 0;
-                    return Err(Error::new(
-                        Kind::RuntimeError,
-                        "deque mutated during iteration",
-                    ));
-                }
-                if self.remaining == 0 {
-                    return Ok(None);
-                }
-                let index = if self.reverse {
-                    self.remaining - 1
-                } else {
-                    deque.items.len() - self.remaining
-                };
-                self.remaining -= 1;
-                Ok(Some((deque.items[index].clone(), None)))
             })
         }
     }

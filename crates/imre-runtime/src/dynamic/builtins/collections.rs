@@ -161,7 +161,8 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
         Value::Weak(wr) if wr.kind != super::super::weakref::Kind::Reference => Some(value),
         Value::Weak(wr) => wr.target.and_then(|target| unhashable_part(ctx, target)),
         Value::Union(union) => unhashable_part(ctx, union.args),
-        Value::List(_)
+        Value::Deque(_)
+        | Value::List(_)
         | Value::ByteArray(_)
         | Value::Context(_)
         | Value::ContextToken { .. }

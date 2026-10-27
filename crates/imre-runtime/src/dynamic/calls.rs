@@ -586,6 +586,8 @@ impl Context {
             Value::ClassMethod(_) => "classmethod",
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
+            Value::Deque(_) => super::deque::CLASS,
+            Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::StaticMethod { .. } => "staticmethod",
@@ -638,6 +640,8 @@ impl Context {
                             | "operator.itemgetter"
                             | "collections.defaultdict"
                             | "itertools.count"
+                            | super::deque::CLASS
+                            | super::deque::ITERATOR
                             | "itertools.repeat"
                             | "weakref.ReferenceType"
                             | "weakref.ProxyType"
@@ -785,6 +789,8 @@ impl Context {
             | ("operator.attrgetter", Value::AttrGetter(_))
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
+            | (super::deque::CLASS, Value::Deque(_))
+            | (super::deque::ITERATOR, Value::DequeIterator { .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
@@ -1061,6 +1067,12 @@ impl Context {
         if name == "__class__" {
             return self.exact_type(obj);
         }
+        if let Value::Deque(ring) = self.heap.get(obj) {
+            if name == "maxlen" {
+                return Ok(ring.maxlen.map_or(NONE, |n| self.int(n as i64)));
+            }
+            return self.builtin_attribute(obj, name);
+        }
         if name == "msg"
             && let Some(message) = self.import_error_message(obj, None)
         {
@@ -1309,6 +1321,20 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
+            Value::Native(class)
+                if matches!(class.as_str(), super::deque::CLASS | super::deque::ITERATOR) =>
+            {
+                match name {
+                    "__name__" | "__qualname__" => {
+                        return Ok(self.text(class.rsplit_once('.').unwrap().1));
+                    }
+                    "__module__" => return Ok(self.text("collections")),
+                    _ if class == super::deque::CLASS && super::deque::METHODS.contains(&name) => {
+                        return Ok(self.builtin(&format!("{class}.{name}")));
+                    }
+                    _ => {}
+                }
+            }
             Value::Native(class) if class == "map" => match name {
                 "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
                 "__name__" | "__qualname__" => return Ok(self.text("map")),
@@ -1438,6 +1464,10 @@ impl Context {
             }
             Value::Raised(error) if name == "args" => {
                 return Ok(self.exception_argument_tuple(obj, error));
+            }
+            Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
+            Value::Native(class) if class == "collections.defaultdict" && name == "__missing__" => {
+                return Ok(self.builtin("collections.defaultdict.__missing__"));
             }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),
@@ -2206,6 +2236,10 @@ impl Context {
         self.check_instance_field(obj, name)?;
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
+            Value::DefaultDict { factory, .. } if name == "default_factory" => {
+                let old = std::mem::replace(factory, value);
+                self.heap.weak_edge_removed(old);
+            }
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }

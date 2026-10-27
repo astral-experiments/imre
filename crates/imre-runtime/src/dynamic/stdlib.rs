@@ -758,6 +758,12 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
+    if name == super::deque::CLASS {
+        return super::deque::construct(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("collections.deque.") {
+        return super::deque::method(ctx, method, args, kwargs);
+    }
     if name == "itertools.repeat" {
         return itertools::repeat(ctx, args, kwargs);
     }
@@ -1016,6 +1022,7 @@ pub(super) fn call(
             (2, &[])
         }
         "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "traceback.print_exc" => return traceback::print_active(ctx, args, kwargs),
@@ -1299,6 +1306,9 @@ pub(super) fn call(
                 ));
             };
             ctx.alloc(source.clone())
+        }
+        "collections.defaultdict.__missing__" => {
+            ctx.defaultdict_missing(argument(args, 0)?, argument(args, 1)?)?
         }
         "contextlib.contextmanager" => {
             let callable = ctx.alloc(Value::Native("contextlib._manager".into()));
