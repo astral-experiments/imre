@@ -569,6 +569,13 @@ impl Context {
                     loop {
                         if repr {
                             output.push_str(error.kind.rsplit('.').next().unwrap_or(&error.kind));
+                        } else if let Some(message) =
+                            error.trace.as_ref().and_then(|trace| trace.import_message)
+                            && let Value::Str(text) = self.heap.get(message)
+                        {
+                            output.push_str(text);
+                            output.extend(std::iter::repeat_n(')', closing));
+                            break;
                         } else if error.os_args.is_some() {
                             output.push_str(&error.message);
                             output.extend(std::iter::repeat_n(')', closing));

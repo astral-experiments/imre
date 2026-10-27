@@ -230,3 +230,11 @@ for _ in range(1500):
     outer_error.args = ([deep_argument_error],)
     deep_argument_error = outer_error
 print(len(str(deep_argument_error)), len(repr(deep_argument_error)))
+
+
+# ImportError retains its original message separately from its replaceable args.
+for initial in ("before", ["marker"]):
+    imported = ImportError(initial)
+    replacement = ("after",)
+    imported.args = replacement
+    print(imported.msg is initial, imported.args is replacement, str(imported), repr(imported))
