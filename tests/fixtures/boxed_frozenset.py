@@ -66,6 +66,19 @@ def current():
     values = {1, 2}
     assert values.discard(1) is None and values == {2}
     assert values.discard(3) is None and values == {2}
+    left = {1, 2}
+    right = frozenset((2, 3))
+    assert left - right == {1} and right & left == frozenset((2,))
+    assert type(right - left) is frozenset
+    alias = left
+    left &= right
+    assert left is alias and alias == {2}
+    mapping = {2: None}
+    keys = mapping.keys()
+    mapping[3] = None
+    assert keys & [1, 3] == {3} and [1, 3] - keys == {1}
+    left -= keys
+    assert left == set() and alias == {2}
     print("ok")
 
 

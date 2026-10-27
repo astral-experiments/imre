@@ -2026,6 +2026,120 @@ impl Context {
         Ok(result)
     }
 
+    /// Visit an operand with cached hashes when its keys already belong to a set.
+    fn visit_set_operand(
+        &mut self,
+        source: Id,
+        mut visit: impl FnMut(&mut Self, Id, Option<i64>) -> Result<()>,
+    ) -> Result<()> {
+        let iterator = if matches!(self.heap.get(source), Value::Set { .. }) {
+            None
+        } else {
+            Some(self.iterator(source)?)
+        };
+        let mark = self.heap.temporary_mark();
+        let mut position = 0;
+        loop {
+            let (key, hash) = if let Some(iterator) = iterator {
+                let Some(key) = self.next_item(iterator)? else {
+                    break;
+                };
+                (key, None)
+            } else if let Some((at, key, _, hash)) = self.dictionary_pair(source, position) {
+                position = at + 1;
+                (key, hash)
+            } else {
+                break;
+            };
+            visit(self, key, hash)?;
+            self.heap.release_temporaries_since(mark);
+        }
+        Ok(())
+    }
+
+    /// Compute set difference or intersection, including reflected dictionary-view operands.
+    fn set_algebra(&mut self, op: &str, left: Id, right: Id, inplace: bool) -> Result<Id> {
+        let sets = matches!(
+            (self.heap.get(left), self.heap.get(right)),
+            (Value::Set { .. }, Value::Set { .. })
+        );
+        let frozen = sets && matches!(self.heap.get(left), Value::Set { frozen: true, .. });
+        let mutate = inplace && sets && !frozen;
+        let result = if mutate && op == "-" {
+            left
+        } else {
+            self.alloc(Value::Set {
+                entries: Default::default(),
+                frozen,
+            })
+        };
+        if op == "-" {
+            if result != left {
+                builtins::update_set(self, result, left)?;
+            }
+            self.visit_set_operand(right, |ctx, key, hash| {
+                if let Some(index) = ctx.find_dictionary_key(result, key, hash)?.1 {
+                    let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
+                        unreachable!()
+                    };
+                    let (removed, _) = entries.remove(index);
+                    ctx.heap.weak_edge_removed(removed);
+                }
+                Ok(())
+            })?;
+            return Ok(result);
+        }
+        let (container, source) = if sets {
+            if self.stored_entries(left).len() < self.stored_entries(right).len() {
+                (right, left)
+            } else {
+                (left, right)
+            }
+        } else if matches!(
+            self.heap.get(left),
+            Value::DictView {
+                kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                ..
+            }
+        ) {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        self.visit_set_operand(source, |ctx, key, hash| {
+            let present = match ctx.heap.get(container) {
+                Value::Set { .. } => ctx.find_dictionary_key(container, key, hash)?.1.is_some(),
+                Value::DictView {
+                    dict,
+                    kind: value::DictViewKind::Keys,
+                    ..
+                } => {
+                    let storage = ctx.dict_storage(*dict).expect("dictionary view backing");
+                    ctx.find_dictionary_key(storage, key, hash)?.1.is_some()
+                }
+                _ => ctx.contains(key, container)?,
+            };
+            if present {
+                ctx.set_dictionary_key(result, key, NONE, hash, false)?;
+            }
+            Ok(())
+        })?;
+        if mutate {
+            let Value::Set { entries, .. } = self.heap.get_mut(result) else {
+                unreachable!()
+            };
+            let selected = std::mem::take(entries);
+            let Value::Set { entries, .. } = self.heap.get_mut(left) else {
+                unreachable!()
+            };
+            for (key, _) in std::mem::replace(entries, selected) {
+                self.heap.weak_edge_removed(key);
+            }
+            return Ok(left);
+        }
+        Ok(result)
+    }
+
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         self.binary_operation(op, a, b, false)
     }
@@ -2054,16 +2168,20 @@ impl Context {
         }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
-            "|" if [a, b].into_iter().any(|id| {
-                matches!(
-                    self.heap.get(id),
-                    Value::DictView {
-                        kind: value::DictViewKind::Keys | value::DictViewKind::Items,
-                        ..
-                    }
-                )
-            }) =>
+            "|" | "&" | "-"
+                if [a, b].into_iter().any(|id| {
+                    matches!(
+                        self.heap.get(id),
+                        Value::DictView {
+                            kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                            ..
+                        }
+                    )
+                }) =>
             {
+                if op != "|" {
+                    return self.set_algebra(op, a, b, false);
+                }
                 // Dictionary keys and items implement reflected union, returning a fresh set.
                 let result = self.alloc(Value::Set {
                     entries: Default::default(),
@@ -2073,20 +2191,25 @@ impl Context {
                 builtins::update_set(self, result, b)?;
                 return Ok(result);
             }
-            "|" if matches!(self.heap.get(a), Value::Set { .. })
-                || matches!(self.heap.get(b), Value::Set { .. }) =>
+            "|" | "&" | "-"
+                if matches!(self.heap.get(a), Value::Set { .. })
+                    || matches!(self.heap.get(b), Value::Set { .. }) =>
             {
                 if matches!(
                     (self.heap.get(a), self.heap.get(b)),
                     (Value::Set { .. }, Value::Set { .. })
                 ) {
-                    return self.set_union(a, b, inplace);
+                    return if op == "|" {
+                        self.set_union(a, b, inplace)
+                    } else {
+                        self.set_algebra(op, a, b, inplace)
+                    };
                 }
                 return Err(Error::new(
                     "TypeError",
                     format!(
-                        "unsupported operand type(s) for {}: '{}' and '{}'",
-                        if inplace { "|=" } else { "|" },
+                        "unsupported operand type(s) for {op}{}: '{}' and '{}'",
+                        if inplace { "=" } else { "" },
                         self.type_name(a),
                         self.type_name(b)
                     ),
