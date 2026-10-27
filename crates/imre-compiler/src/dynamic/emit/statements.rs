@@ -372,16 +372,7 @@ impl Function<'_, '_> {
                     );
                 }
                 ast::Stmt::While(v) => {
-                    self.loop_body(
-                        &v.body,
-                        &v.orelse,
-                        None,
-                        |f| {
-                            let test = f.expr(&v.test);
-                            f.truth(&test)
-                        },
-                        |_| {},
-                    );
+                    self.loop_body(&v.body, &v.orelse, None, |f| f.truth_expr(&v.test), |_| {});
                 }
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
                     if let Some(target) = self.loops.last() {
@@ -456,8 +447,7 @@ impl Function<'_, '_> {
                     self.raise(&exc, cause.as_deref(), v.exc.is_none());
                 }
                 ast::Stmt::Assert(v) => {
-                    let test = self.expr(&v.test);
-                    let condition = self.truth(&test);
+                    let condition = self.truth_expr(&v.test);
                     let pass = self.name("b");
                     let fail = self.name("b");
                     self.branch(&condition, &pass, &fail);
@@ -739,8 +729,7 @@ impl Function<'_, '_> {
     fn if_arm(&mut self, test: &ast::Expr, body: &[ast::Stmt], done: &str) {
         let body_label = self.name("b");
         let next = self.name("b");
-        let test = self.expr(test);
-        let condition = self.truth(&test);
+        let condition = self.truth_expr(test);
         self.branch(&condition, &body_label, &next);
         self.label(&body_label);
         self.statements(body);

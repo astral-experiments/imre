@@ -1570,7 +1570,7 @@ impl Heap {
                 if scope.parent.is_some() && scope.class_body.is_none() {
                     let caller = &mut self.frames.last_mut().unwrap().live;
                     if let Some(index) = caller.iter().position(|&id| id == frame.scope) {
-                        caller.swap_remove(index);
+                        caller[index] = NONE;
                     }
                 }
                 self.collect_next_statement |= weak_released;
@@ -1596,6 +1596,24 @@ impl Heap {
     /// Mark temporary roots that must survive the next iteration of a native loop.
     pub fn temporary_mark(&self) -> usize {
         self.frames.last().unwrap().live.len()
+    }
+
+    /// Compiled calls root their fresh argument list before evaluating its operands.
+    pub(super) fn argument_mark(&self, arguments: Id) -> Option<usize> {
+        self.frames
+            .last()?
+            .live
+            .iter()
+            .position(|&id| id == arguments)
+    }
+
+    /// Discard the evaluated operand while preserving earlier arguments in the same statement.
+    pub(super) fn discard_truth(&mut self, mark: usize) -> bool {
+        if !self.has_unbound_writer(NONE) {
+            return false;
+        }
+        self.release_temporaries_since(mark);
+        true
     }
 
     pub fn release_temporaries_since(&mut self, mark: usize) {

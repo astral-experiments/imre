@@ -65,8 +65,9 @@ impl Function<'_, '_> {
                 self.op(v.op.as_str(), &[&left, &right])
             }
             ast::Expr::UnaryOp(v) => {
+                let mark = (v.op == ast::UnaryOp::Not).then(|| self.truth_mark());
                 let operand = self.expr(&v.operand);
-                self.op(
+                let result = self.op(
                     match v.op {
                         ast::UnaryOp::Invert => "~",
                         ast::UnaryOp::Not => "not",
@@ -74,7 +75,11 @@ impl Function<'_, '_> {
                         ast::UnaryOp::USub => "neg",
                     },
                     &[&operand],
-                )
+                );
+                if let Some(mark) = mark {
+                    self.discard_truth(&mark);
+                }
+                result
             }
             ast::Expr::BoolOp(v) => self.boolop(v.op, &v.values),
             ast::Expr::Compare(v) => {
@@ -82,8 +87,7 @@ impl Function<'_, '_> {
                 self.compare(&left, &v.ops, &v.operands[1..])
             }
             ast::Expr::If(v) => {
-                let test = self.expr(&v.test);
-                let cond = self.truth(&test);
+                let cond = self.truth_expr(&v.test);
                 self.select(&cond, |f| f.expr(&v.body), |f| f.expr(&v.orelse))
             }
             ast::Expr::Named(v) => {
@@ -150,14 +154,14 @@ impl Function<'_, '_> {
     }
 
     fn boolop(&mut self, op: ast::BoolOp, values: &[ast::Expr]) -> String {
-        self.short_circuit(values.len(), op == ast::BoolOp::Or, |f, i| {
+        self.short_circuit(values.len(), op == ast::BoolOp::Or, true, |f, i| {
             f.expr(&values[i])
         })
     }
 
     fn compare(&mut self, left: &str, ops: &[ast::CmpOp], operands: &[ast::Expr]) -> String {
         let mut previous = left.to_owned();
-        self.short_circuit(ops.len(), false, |f, i| {
+        self.short_circuit(ops.len(), false, false, |f, i| {
             let right = f.expr(&operands[i]);
             let compared = f.op(ops[i].as_str(), &[&previous, &right]);
             previous = right;
@@ -170,6 +174,7 @@ impl Function<'_, '_> {
         &mut self,
         count: usize,
         stop_if_true: bool,
+        discard_operand: bool,
         mut value: impl FnMut(&mut Self, usize) -> String,
     ) -> String {
         if count == 1 {
@@ -178,6 +183,7 @@ impl Function<'_, '_> {
         let done = self.name("b");
         let mut incoming = Vec::with_capacity(count);
         for i in 0..count {
+            let mark = (discard_operand && i + 1 < count).then(|| self.truth_mark());
             let v = value(self, i);
             if i + 1 == count {
                 incoming.push(format!("[ {v}, %{} ]", self.block));
@@ -192,6 +198,9 @@ impl Function<'_, '_> {
                     self.branch(&condition, &next, &done);
                 }
                 self.label(&next);
+                if let Some(mark) = mark {
+                    self.discard_truth(&mark);
+                }
             }
         }
         self.label(&done);
@@ -304,8 +313,7 @@ impl Function<'_, '_> {
             let item = self.op("next", &[&iter]);
             self.assign(&generator.target, &item);
             for filter in &generator.ifs {
-                let value = self.expr(filter);
-                let yes = self.truth(&value);
+                let yes = self.truth_expr(filter);
                 let keep = self.name("b");
                 self.branch(&yes, &keep, step);
                 self.label(&keep);
@@ -368,8 +376,7 @@ impl Function<'_, '_> {
         let item = self.op("next", &[&iter]);
         self.assign(&g.target, &item);
         for test in &g.ifs {
-            let value = self.expr(test);
-            let yes = self.truth(&value);
+            let yes = self.truth_expr(test);
             let keep = self.name("b");
             self.branch(&yes, &keep, &step);
             self.label(&keep);
