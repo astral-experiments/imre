@@ -8665,10 +8665,13 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 if let [target, value] = call.arguments.args.as_ref()
-                    && matches!(
+                    && (matches!(
                         self.resolve(target),
                         Some(Binding::Intrinsic(Intrinsic::BytesIo | Intrinsic::StringIo))
-                    )
+                    ) || target.as_name_expr().is_some_and(|name| {
+                        annotations::is_builtin_type(name.id.as_str())
+                            && self.unshadowed_builtin(target, name.id.as_str())
+                    }))
                 {
                     // Python cast() returns its operand, including on a wrong assertion.
                     return self.typed_expr(value);
