@@ -91,9 +91,9 @@ At present, Imre doesn't support any of the following:
 - Recursive calls and async generators
 - Most of the Python standard library (see [module coverage](docs/stdlib.md))
 
-At the same time, Imre is capable of running scripts like [uv's wheel checker](examples/uv_wheel_check/README.md)
-and ty's conformance reporter unchanged, with [Rust-competitive performance on
-the conformance suite](benchmarks/results/2026-10-23-original-conformance.md).
+At the same time, Imre is capable of running scripts like
+[ty’s conformance report](examples/conformance_report/README.md) unchanged,
+with Rust-competitive performance.
 
 ## Design
 
