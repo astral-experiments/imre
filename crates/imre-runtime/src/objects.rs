@@ -148,6 +148,11 @@ pub(crate) const OBJECT_METHODS: &[&str] = &[
 pub(crate) fn literal_string(text: &str) -> StrOwner {
     self::text::owned_string(text)
 }
+
+/// Make a native owner when a boxed cache can fall back to its original string.
+pub(crate) fn try_literal_string(text: &str) -> crate::Result<StrOwner> {
+    self::text::try_owned_string(text)
+}
 use words::{OwnedWord, Words};
 
 // All C ints fit in the immediate representation. Heap integers cannot fit.

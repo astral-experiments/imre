@@ -1308,7 +1308,15 @@ impl Heap {
             self.keep(entry.id);
             return entry.id;
         }
-        let owner = crate::sys::intern_owner(&crate::objects::literal_string(text));
+        let Ok(owner) = crate::objects::try_literal_string(text) else {
+            return id;
+        };
+        let Some(owner) = crate::sys::try_intern_owner(&owner) else {
+            return id;
+        };
+        if self.interned.try_reserve(1).is_err() {
+            return id;
+        }
         self.interned
             .insert(owner, InternedString { id, literal: false });
         id
