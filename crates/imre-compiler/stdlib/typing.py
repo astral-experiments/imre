@@ -102,7 +102,11 @@ def _type_check(arg, message, *, allow_special_forms=False):
     if isinstance(arg, _SpecialForm) or arg is _typing.Generic or (protocol is not None and arg is protocol):
         raise TypeError(f"Plain {repr(arg)} is not valid as type argument")
     origin = _typing.get_origin(arg)
-    if origin is _typing.Generic or (protocol is not None and origin is protocol) or (not allow_special_forms and origin is Final):
+    if (
+        origin is _typing.Generic
+        or (protocol is not None and origin is protocol)
+        or (not allow_special_forms and origin is Final)
+    ):
         raise TypeError(f"{repr(arg)} is not valid as type argument")
     if type(arg) is tuple:
         raise TypeError(f"{message} Got {repr(arg)[:100]}.")
