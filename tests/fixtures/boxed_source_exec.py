@@ -61,7 +61,32 @@ def decode_allocation():
     print(config["VALUE"])
 
 
+def syntax_members():
+    try:
+        compile(b"# coding: unknown-encoding\n", "dir/one.py", "exec")
+    except SyntaxError as error:
+        saved = error.args
+        fields = ("msg", "filename", "lineno", "offset", "text", "end_lineno", "end_offset")
+        values = ("revised", "other/two.py", 8, 3, "line", 9, 5)
+        for field, value in zip(fields, values):
+            setattr(error, field, value)
+        print(str(error), error.args is saved, tuple(getattr(error, field) for field in fields))
+        for field in fields:
+            delattr(error, field)
+        print(str(error), error.args is saved, all(getattr(error, field) is None for field in fields))
+
+    class Message:
+        def __str__(self):
+            error.filename = "new.py"
+            error.lineno = 11
+            return "changed while rendering"
+
+    error = SyntaxError(Message(), ("old.py", 7, 0, ""))
+    print(str(error), str(error))
+
+
 def current():
+    syntax_members()
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}
         exec(compile(data, "settings.py", "exec"), config)

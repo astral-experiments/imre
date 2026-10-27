@@ -1334,6 +1334,40 @@ pub(super) fn call(
             exceptions::initialize_import(&mut error, args, kwargs)?;
             Ok(ctx.alloc(Value::Raised(error)))
         }
+        name @ ("SyntaxError" | "IndentationError") => {
+            positional(name, kwargs)?;
+            let mut fields = ctx.syntax_fields(args);
+            if let [_, info] = args {
+                let members = ctx.items(*info)?;
+                match members.len() {
+                    n @ 0..=3 => {
+                        return Err(type_error(format!(
+                            "function takes at least 4 arguments ({n} given)"
+                        )));
+                    }
+                    5 => {
+                        return Err(type_error(
+                            "end_offset must be provided when end_lineno is provided",
+                        ));
+                    }
+                    n if n > 7 => {
+                        return Err(type_error(format!(
+                            "function takes at most 7 arguments ({n} given)"
+                        )));
+                    }
+                    _ => (),
+                }
+                if let Some(metadata) = members.get(6) {
+                    fields[8] = *metadata;
+                }
+                for (field, member) in fields[1..7].iter_mut().zip(members) {
+                    *field = member;
+                }
+            }
+            let mut error = ctx.exception(name, args);
+            ctx.retain_syntax_fields(&mut error, fields)?;
+            Ok(ctx.alloc(Value::Raised(error)))
+        }
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = if exception_subclass(name, "OSError") == Some(true) {
