@@ -79,6 +79,7 @@ pub(crate) mod socket;
 mod source_modules;
 pub(crate) mod stdio;
 mod stdlib;
+pub(crate) use stdlib::comparator::sort_by_less;
 mod string_enums;
 mod structs;
 mod tempdirs;
