@@ -1,4 +1,4 @@
-# Set and sequence ABC implementations from CPython 3.14.5, Lib/_collections_abc.py.
+# Set, iterator, and sequence ABC implementations from CPython 3.14.5, Lib/_collections_abc.py.
 # abstractmethod is from Lib/abc.py at the same revision. See stdlib/docstrings/LICENSE.
 import sys
 from _collections_abc import Collection, Iterable, MutableMapping, _check_methods
@@ -249,6 +249,25 @@ class MutableSet(Set):
 MutableSet.register(set)
 
 MutableMapping.register(dict)
+
+
+class Iterator(Iterable):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __next__(self):
+        'Return the next item from the iterator. When exhausted, raise StopIteration'
+        raise StopIteration
+
+    def __iter__(self):
+        return self
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Iterator:
+            return _check_methods(C, '__iter__', '__next__')
+        return NotImplemented
 
 
 class Reversible(Iterable):
