@@ -130,14 +130,22 @@ mod tests {
         let second = StrOwner::new((*first).clone());
         let weak = StrOwner::downgrade(&first);
         assert!(StrOwner::ptr_eq(&first, &table.try_intern(&first).unwrap()));
-        assert!(StrOwner::ptr_eq(&first, &table.try_intern(&second).unwrap()));
+        assert!(StrOwner::ptr_eq(
+            &first,
+            &table.try_intern(&second).unwrap()
+        ));
         assert!(table.contains(&first));
         assert!(!table.contains(&second));
         drop(first);
         assert!(weak.upgrade().is_none());
-        assert!(StrOwner::ptr_eq(&second, &table.try_intern(&second).unwrap()));
+        assert!(StrOwner::ptr_eq(
+            &second,
+            &table.try_intern(&second).unwrap()
+        ));
         for i in 0..2048 {
-            table.try_intern(&StrOwner::new(Str::new(i.to_string()))).unwrap();
+            table
+                .try_intern(&StrOwner::new(Str::new(i.to_string())))
+                .unwrap();
         }
         assert!(table.strings.len() < 70);
         assert!(table.contains(&second));
