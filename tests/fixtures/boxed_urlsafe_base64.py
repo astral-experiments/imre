@@ -20,6 +20,15 @@ def check():
         base64.urlsafe_b64encode("text")
     except TypeError as error:
         print(str(error))
+    for call in (
+        lambda: b"xy".rstrip(b"x", b"y"),
+        lambda: b"xy".rstrip(chars=b"y"),
+        lambda: b"xy".rstrip(b"x", b"y", extra=b""),
+    ):
+        try:
+            call()
+        except TypeError as error:
+            print(str(error))
     source = b"\xffa \t\n\v\f\r"
     print(list(source.rstrip()), list(source.rstrip(None)))
     print(source.rstrip(b"") is source, list(b"\xff=\xff".rstrip(b"=\xff")))
