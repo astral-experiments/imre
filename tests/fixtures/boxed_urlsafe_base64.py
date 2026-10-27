@@ -55,6 +55,14 @@ def check():
         base64.urlsafe_b64encode("text")
     except TypeError as error:
         print(str(error))
+    class Payload(bytes):
+        pass
+
+    payload = Payload(b"a ")
+    print(payload.rstrip(), payload.rstrip(Payload(b" ")))
+    unchanged = payload.rstrip(b"z")
+    print(type(unchanged).__name__, unchanged is payload)
+
     for call in (
         lambda: b"xy".rstrip(b"x", b"y"),
         lambda: b"xy".rstrip(chars=b"y"),
