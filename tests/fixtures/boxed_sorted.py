@@ -71,6 +71,8 @@ def current():
     print(sorted([], key=1), sorted("βaA", key=None, reverse=None))
 
     for call in (
+        lambda: [].sort(1),
+        lambda: [].sort(1, 2, 3),
         lambda: sorted(),
         lambda: sorted(iterable=[]),
         lambda: sorted([1], None),
