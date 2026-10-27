@@ -720,6 +720,29 @@ impl Context {
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
+    pub(super) fn decode_message(&self, state: &super::value::DecodeState) -> Result<String> {
+        let Value::Bytes(data) = self.heap.get(state.object) else {
+            return Err(Error::new(
+                "TypeError",
+                "UnicodeError 'object' attribute must be a bytes",
+            ));
+        };
+        let start = state.start;
+        let location = if let Ok(index) = usize::try_from(start)
+            && let Some(byte) = data.get(index)
+            && state.end.checked_sub(1) == Some(start)
+        {
+            format!("byte 0x{byte:02x} in position {start}")
+        } else {
+            format!("bytes in position {start}-{}", state.end.wrapping_sub(1))
+        };
+        Ok(format!(
+            "'{}' codec can't decode {location}: {}",
+            self.display(state.encoding),
+            self.display(state.reason)
+        ))
+    }
+
     pub(super) fn repr(&self, id: Id) -> String {
         Self::render_containers(self, RenderRoot::Object(id), true, false, |_, _, _, _| {
             Ok(None)
@@ -811,6 +834,10 @@ impl Context {
                 && let Value::Str(text) = self.heap.get(message)
             {
                 output.push_str(text);
+                output.extend(std::iter::repeat_n(')', closing));
+                break;
+            } else if let Some(state) = &error.decode {
+                output.push_str(&self.decode_message(state)?);
                 output.extend(std::iter::repeat_n(')', closing));
                 break;
             } else if let Some(super::os_error::Args::Python(fields)) = error.os_args.as_deref()
