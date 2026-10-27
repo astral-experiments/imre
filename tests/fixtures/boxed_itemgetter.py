@@ -30,7 +30,7 @@ def current():
     print(repr(itemgetter("right", -1)))
     for getter in (itemgetter((1, 2)), itemgetter(1, 2)):
         factory, keys = getter.__reduce__()
-        print(type(getter) is itemgetter, factory is itemgetter, keys)
+        print(type(getter) is itemgetter, factory is itemgetter, keys, keys is getter.__reduce__()[1])
 
     class AppendIndex:
         def __index__(self):

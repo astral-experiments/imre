@@ -741,7 +741,7 @@ impl Context {
             }
             Value::ItemGetter(keys) => format!(
                 "operator.itemgetter({})",
-                self.format_elements(keys, active)
+                self.format_elements(self.itemgetter_keys(*keys), active)
             ),
             _ => "<object>".to_owned(),
         };

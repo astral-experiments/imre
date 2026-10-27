@@ -447,7 +447,8 @@ pub(super) enum Value {
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
-    ItemGetter(std::rc::Rc<[Id]>),
+    /// The original keys are held in a Python tuple, shared by multi-key reductions.
+    ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
@@ -578,7 +579,7 @@ impl Value {
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
-            Self::ItemGetter(keys) => visit.extend_from_slice(keys),
+            Self::ItemGetter(keys) => visit.push(*keys),
             Self::Map {
                 function, inputs, ..
             } => {

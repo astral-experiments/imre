@@ -1522,7 +1522,7 @@ impl Context {
                 self.call(callable, all, kwargs)
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
-            Value::ItemGetter(keys) => self.apply_itemgetter(&keys, &args, &kwargs),
+            Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
             Value::Cached { function, entries } => {
                 if !args
                     .iter()
