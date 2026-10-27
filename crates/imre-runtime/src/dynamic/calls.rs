@@ -332,7 +332,20 @@ impl Context {
             || self.slot(descriptor, "__delete__").is_some()
     }
 
+    /// Bind the inherited dictionary constructor to the class used for the result.
+    fn bind_dict_fromkeys(&mut self, owner: Id) -> Id {
+        let callable = self.builtin("dict.fromkeys");
+        self.alloc(Value::Method {
+            callable,
+            receiver: owner,
+            explicit: false,
+        })
+    }
+
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
+        if matches!(self.heap.get(value), Value::Native(name) if name == "dict.fromkeys") {
+            return Ok(self.bind_dict_fromkeys(owner));
+        }
         if let Value::ClassMethod(callable) = *self.heap.get(value) {
             return Ok(self.alloc(Value::Method {
                 callable,
@@ -1578,6 +1591,16 @@ impl Context {
             }
             Value::Native(class) if class == "collections.defaultdict" && name == "copy" => {
                 return Ok(self.builtin("collections.defaultdict.copy"));
+            }
+            Value::Native(class)
+                if name == "fromkeys"
+                    && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
+            {
+                return Ok(self.bind_dict_fromkeys(obj));
+            }
+            Value::Dict(_) | Value::DefaultDict { .. } if name == "fromkeys" => {
+                let owner = self.exact_type(obj)?;
+                return Ok(self.bind_dict_fromkeys(owner));
             }
             Value::Native(class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
