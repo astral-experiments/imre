@@ -431,7 +431,9 @@ pub(super) fn bind_method_arguments<const N: usize>(
     }
     if args.len() > max_positional {
         if max_positional == 0 {
-            return Err(type_error(format!("{name}() takes no positional arguments")));
+            return Err(type_error(format!(
+                "{name}() takes no positional arguments"
+            )));
         }
         return Err(type_error(format!(
             "{name}() takes at most {max_positional} positional {} ({} given)",
