@@ -2,6 +2,17 @@
 
 
 def current():
+    from collections import Counter
+
+    counts = Counter(a=10, b=5, c=0)
+    print(counts.total(), counts["absent"], len(counts))
+    counts.update("ba", a=1 << 100)
+    counts.subtract({"a": 1 << 100, "b": 9}, c=1)
+    copied = counts.copy()
+    del counts["c"]
+    del counts["absent"]
+    print(list(counts.items()), copied.total(), copied["absent"])
+
     class Data(dict):
         pass
 
