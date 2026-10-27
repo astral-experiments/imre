@@ -202,7 +202,7 @@ impl Context {
     fn native_data_descriptor(&self, descriptor: Id) -> bool {
         matches!(
             self.heap.get(descriptor),
-            Value::Property(_) | Value::ReadOnlyDescriptor { .. }
+            Value::Property(_) | Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_)
         )
     }
 
@@ -234,6 +234,7 @@ impl Context {
         if receiver != NONE {
             let method = match self.heap.get(value) {
                 Value::Property(property) => return property.read(self, receiver),
+                Value::WeakrefDescriptor(owner) => return self.weakref_list(*owner, receiver),
                 Value::ReadOnlyDescriptor { get, .. } => {
                     return self.call(*get, vec![receiver], Vec::new());
                 }
@@ -438,7 +439,7 @@ impl Context {
             Value::Socket(_) => "socket.socket",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
-            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
+            Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
@@ -872,6 +873,24 @@ impl Context {
                     _ => 2,
                 }]);
             }
+            Value::WeakrefDescriptor(owner) => match name {
+                "__objclass__" => return Ok(owner),
+                "__name__" => return Ok(self.text("__weakref__")),
+                "__doc__" => return Ok(self.text("list of weak references to the object")),
+                "__qualname__" => {
+                    let name = self.lookup_attr(owner, "__qualname__")?;
+                    return Ok(self.text(format!("{}.__weakref__", self.str_value(name)?)));
+                }
+                "__get__" | "__set__" | "__delete__" => {
+                    let callable = self.builtin(&format!("weakref.descriptor.{name}"));
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: true,
+                    }));
+                }
+                _ => {}
+            },
             Value::Property(property) => {
                 if let Some(attribute) = property.attribute(self, name)? {
                     return Ok(attribute);
@@ -1469,6 +1488,7 @@ impl Context {
         {
             match *self.heap.get(descriptor) {
                 Value::Property(property) => return property.remove(self, obj),
+                Value::WeakrefDescriptor(owner) => return Err(self.readonly_weakref(owner)),
                 Value::ReadOnlyDescriptor { owner, name, .. } => {
                     return Err(Error::new(
                         "AttributeError",
@@ -1710,6 +1730,9 @@ impl Context {
         {
             if let Value::Property(property) = *self.heap.get(descriptor) {
                 return property.write(self, obj, value);
+            }
+            if let Value::WeakrefDescriptor(owner) = *self.heap.get(descriptor) {
+                return Err(self.readonly_weakref(owner));
             }
             if let Value::ReadOnlyDescriptor { owner, name, .. } = *self.heap.get(descriptor) {
                 return Err(Error::new(
@@ -2470,6 +2493,7 @@ impl Context {
         }
         super::typing::class_parameters(self, scope, original, &bases)?;
         let class = self.allocate_class(name.clone(), scope, bases)?;
+        self.install_weakref_descriptor(class, scope);
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()

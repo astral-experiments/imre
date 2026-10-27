@@ -278,7 +278,7 @@ impl Context {
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
-            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
+            Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::Raised(error) => &error.kind,
             Value::Traceback { .. } => "traceback",
             Value::PythonFrame { .. } => "frame",
@@ -531,6 +531,7 @@ pub(super) enum Value {
         dictionary: Id,
     },
     Property(super::property::Property),
+    WeakrefDescriptor(Id),
     ReadOnlyDescriptor {
         get: Id,
         owner: &'static str,
@@ -805,6 +806,7 @@ impl Value {
             } => visit.extend([*callable, *dictionary]),
             Self::Property(property) => property.children(visit),
             Self::Weak(wr) => visit.push(wr.callback),
+            Self::WeakrefDescriptor(owner) => visit.push(*owner),
             Self::ReadOnlyDescriptor { get, .. } => visit.push(*get),
             Self::Partial {
                 function,

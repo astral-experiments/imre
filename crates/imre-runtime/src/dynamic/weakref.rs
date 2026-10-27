@@ -88,6 +88,60 @@ impl Context {
             })
     }
 
+    /// A Python class introduces a descriptor only when it adds weak-reference storage.
+    pub(super) fn install_weakref_descriptor(&mut self, class: Id, scope: Id) {
+        if self.scope_name(scope, "__weakref__").is_some()
+            || !self.class_instances_support_weakref(class)
+        {
+            return;
+        }
+        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+            return;
+        };
+        if ancestors.iter().any(|&base| self.class_instances_support_weakref(base) ||
+            matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "set" | "frozenset"))) {
+            return;
+        }
+        let descriptor = self.alloc(Value::WeakrefDescriptor(class));
+        self.bind(scope, "__weakref__", descriptor);
+    }
+
+    pub(super) fn weakref_descriptor_owner(&self, owner: Id) -> &str {
+        let Value::Class { name, .. } = self.heap.get(owner) else {
+            unreachable!()
+        };
+        name
+    }
+
+    pub(super) fn readonly_weakref(&self, owner: Id) -> Error {
+        Error::new(
+            "AttributeError",
+            format!(
+                "attribute '__weakref__' of '{}' objects is not writable",
+                self.weakref_descriptor_owner(owner)
+            ),
+        )
+    }
+
+    pub(super) fn weakref_list(&self, owner: Id, receiver: Id) -> Result<Id> {
+        if !self.instance_of(receiver, owner) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__weakref__' for '{}' objects doesn't apply to a '{}' object",
+                    self.weakref_descriptor_owner(owner),
+                    self.type_name(receiver)
+                ),
+            ));
+        }
+        Ok(self
+            .heap
+            .weak_references(receiver)
+            .first()
+            .copied()
+            .unwrap_or(NONE))
+    }
+
     fn weakrefable(&self, value: Id) -> bool {
         match self.heap.get(value) {
             Value::Instance { class, .. } => self.class_instances_support_weakref(*class),
@@ -164,6 +218,53 @@ pub(super) fn call(
     let error = |s| Error::new("TypeError", s);
     match function {
         REFERENCE_HASH => ctx.reference_hash(args, kwargs),
+        "weakref.descriptor.__get__"
+        | "weakref.descriptor.__set__"
+        | "weakref.descriptor.__delete__" => {
+            let Some((&descriptor, rest)) = args.split_first() else {
+                unreachable!()
+            };
+            let Value::WeakrefDescriptor(owner) = *ctx.heap.get(descriptor) else {
+                unreachable!()
+            };
+            let name = function.rsplit('.').next().unwrap();
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("wrapper {name}() takes no keyword arguments"),
+                ));
+            }
+            match (name, rest) {
+                ("__get__", [NONE] | [NONE, NONE]) => Err(error("__get__(None, None) is invalid")),
+                ("__get__", [NONE, _]) => Ok(descriptor),
+                ("__get__", [receiver] | [receiver, _]) => ctx.weakref_list(owner, *receiver),
+                ("__set__", [receiver, _]) | ("__delete__", [receiver]) => {
+                    ctx.weakref_list(owner, *receiver)?;
+                    Err(ctx.readonly_weakref(owner))
+                }
+                _ => {
+                    let expected = match name {
+                        "__get__" if rest.is_empty() => "at least 1",
+                        "__get__" => "at most 2",
+                        "__set__" => "2",
+                        _ => "1",
+                    };
+                    Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{}expected {expected} argument{}, got {}",
+                            match name {
+                                "__get__" => "__get__ ",
+                                "__set__" => "__set__ ",
+                                _ => "",
+                            },
+                            if expected.ends_with('1') { "" } else { "s" },
+                            rest.len()
+                        ),
+                    ))
+                }
+            }
+        }
         "weakref.ReferenceType" | "_weakref.proxy" => {
             let proxy = function == "_weakref.proxy";
             let name = if proxy { "proxy" } else { "__new__" };

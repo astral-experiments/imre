@@ -937,6 +937,10 @@ impl Context {
                 };
                 format!("{variance}{}", self.display(var.name))
             }
+            Value::WeakrefDescriptor(owner) => format!(
+                "<attribute '__weakref__' of '{}' objects>",
+                self.weakref_descriptor_owner(*owner)
+            ),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {
