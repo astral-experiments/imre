@@ -235,6 +235,7 @@ impl Context {
             Value::MappingProxy(_) => "mappingproxy",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
+            Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",

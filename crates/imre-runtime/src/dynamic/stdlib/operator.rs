@@ -41,6 +41,47 @@ pub(super) fn itemgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(ctx.alloc(Value::ItemGetter(args.into())))
 }
 
+/// Reconstruct the getter with the original positional key objects, including a single tuple key.
+pub(super) fn reduce_itemgetter(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&getter, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "unbound method itemgetter.__reduce__() needs an argument",
+        ));
+    };
+    let Value::ItemGetter(keys) = ctx.heap.get(getter) else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '__reduce__' for 'operator.itemgetter' objects doesn't apply to a '{}' object",
+                ctx.type_name(getter)
+            ),
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "itemgetter.__reduce__() takes no keyword arguments",
+        ));
+    }
+    if !rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "itemgetter.__reduce__() takes no arguments ({} given)",
+                rest.len()
+            ),
+        ));
+    }
+    let args = ctx.alloc(Value::Tuple(keys.to_vec()));
+    let class = ctx.builtin("operator.itemgetter");
+    Ok(ctx.alloc(Value::Tuple(vec![class, args])))
+}
+
 impl Context {
     pub(in super::super) fn apply_attrgetter(
         &mut self,

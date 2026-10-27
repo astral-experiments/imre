@@ -381,7 +381,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             if matches!(name, "attrgetter" | "itemgetter")
                 || operator::Operation::named(name).is_some() =>
         {
-            ctx.alloc(Value::Native(format!("operator.{name}")))
+            ctx.builtin(&format!("operator.{name}"))
         }
         ("subprocess", "PIPE") => ctx.int(-1),
         ("sys", "exit" | "exc_info" | "exception")
@@ -573,6 +573,9 @@ pub(super) fn call(
         }
         if name == "itemgetter" {
             return operator::itemgetter(ctx, args, kwargs);
+        }
+        if name == "itemgetter.__reduce__" {
+            return operator::reduce_itemgetter(ctx, args, kwargs);
         }
         if let Some(op) = operator::Operation::named(name) {
             return op.call(ctx, name, args, kwargs);

@@ -1016,6 +1016,9 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("slice.{name}")));
             }
+            Value::Native(class) if class == "operator.itemgetter" && name == "__reduce__" => {
+                return Ok(self.builtin("operator.itemgetter.__reduce__"));
+            }
             Value::Native(class)
                 if class == "enumerate" && matches!(name, "__iter__" | "__next__") =>
             {

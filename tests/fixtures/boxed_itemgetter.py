@@ -28,6 +28,9 @@ def current():
     print(itemgetter(-1, 0)("aé"), itemgetter(slice(1, 3))((1, 2, 3)))
     print(itemgetter("right", "left")({"left": 1, "right": 2}))
     print(repr(itemgetter("right", -1)))
+    for getter in (itemgetter((1, 2)), itemgetter(1, 2)):
+        factory, keys = getter.__reduce__()
+        print(type(getter) is itemgetter, factory is itemgetter, keys)
 
     class AppendIndex:
         def __index__(self):
