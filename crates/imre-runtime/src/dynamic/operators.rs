@@ -16,6 +16,8 @@ enum FormatPart {
     Closing(usize),
     Sequence(Id, usize),
     Entries(Id, usize, bool),
+    DefaultDictFactory(Id, usize),
+    DefaultDictEnd(String),
     SetMembers(Vec<Id>, usize),
     Fields(Id, usize),
     Leave(Id, &'static str),
@@ -31,6 +33,7 @@ impl FormatPart {
             Self::Value(id, _)
             | Self::Sequence(id, _)
             | Self::Entries(id, _, _)
+            | Self::DefaultDictFactory(id, _)
             | Self::Fields(id, _)
             | Self::Leave(id, _)
             | Self::ContextEnd(id) => heap.keep(*id),
@@ -39,7 +42,11 @@ impl FormatPart {
                 let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
                 *self = Self::Sequence(tuple, *index);
             }
-            Self::Text(_) | Self::Closing(_) | Self::SliceEnd | Self::NamedTupleEnd => {}
+            Self::Text(_)
+            | Self::Closing(_)
+            | Self::SliceEnd
+            | Self::NamedTupleEnd
+            | Self::DefaultDictEnd(_) => {}
         }
     }
 }
@@ -994,6 +1001,27 @@ impl Context {
                         work.push(Part::Value(member, true));
                     }
                 }
+                Part::DefaultDictFactory(id, start) => {
+                    // A key or value repr may have replaced the factory while rendering the table.
+                    let Value::DefaultDict { factory, .. } = *ctx.heap.get(id) else {
+                        unreachable!()
+                    };
+                    let contents = output.split_off(start);
+                    output.push_str("defaultdict(");
+                    work.push(Part::DefaultDictEnd(contents));
+                    if ancestors.insert(factory) {
+                        active.push(factory);
+                        work.push(Part::Leave(factory, ""));
+                        work.push(Part::Value(factory, true));
+                    } else {
+                        output.push_str("...");
+                    }
+                }
+                Part::DefaultDictEnd(contents) => {
+                    output.push_str(", ");
+                    output.push_str(&contents);
+                    output.push(')');
+                }
                 Part::Entries(id, index, include_values) => {
                     let entry = match ctx.heap.get(id) {
                         Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
@@ -1162,6 +1190,10 @@ impl Context {
                             )
                         }
                         Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
+                        Value::DefaultDict { .. } => {
+                            work.push(Part::DefaultDictFactory(id, output.len()));
+                            ("{", "}", "{...}", Part::Entries(id, 0, true))
+                        }
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });

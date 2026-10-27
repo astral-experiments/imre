@@ -455,6 +455,10 @@ def current():
 
     groups = defaultdict(list)
     existing = groups["key"]
+    assert repr(groups) == "defaultdict(<class 'list'>, {'key': []})"
+    groups["cycle"] = groups
+    assert repr(groups).endswith("'cycle': defaultdict(<class 'list'>, {...})})")
+    del groups["cycle"]
     print(groups.default_factory is list, groups.__missing__("key") is existing)
     groups.default_factory = None
     try:
