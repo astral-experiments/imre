@@ -67,6 +67,12 @@ def boolean_values(items, trace):
 
 
 def current():
+    pulls = []
+    values = (x + y for x in visited(pulls, "outer", [1, 2])
+              for y in visited(pulls, x, range(x)) if y == 0)
+    assert pulls == ["outer"]
+    assert next(values) == 1 and pulls == ["outer", 1]
+    assert list(values) == [2] and pulls == ["outer", 1, 2]
     comparisons = []
     class Item:
         def __lt__(self, other):

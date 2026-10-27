@@ -962,9 +962,14 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     match body {
         Body::Statements(stmts) | Body::GeneratorFunction(stmts) => captures.visit_body(stmts),
         Body::Expression(expr) => captures.visit_expr(expr),
-        Body::Generator(generator, element) => {
-            for filter in &generator.ifs {
-                captures.visit_expr(filter);
+        Body::Generator(generators, element) => {
+            for (index, generator) in generators.iter().enumerate() {
+                if index != 0 {
+                    captures.visit_expr(&generator.iter);
+                }
+                for filter in &generator.ifs {
+                    captures.visit_expr(filter);
+                }
             }
             captures.visit_expr(element);
         }
