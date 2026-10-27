@@ -487,7 +487,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
         | ("random", "random")
-        | ("codecs", "lookup")
+        | ("codecs", "lookup" | "register_error" | "lookup_error")
         | ("marshal", "loads")
         | ("pickle", "dumps")
         | (
@@ -509,6 +509,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("warnings", "warn")
         | ("fnmatch", "filter")
         | ("subprocess", "run") => ctx.alloc(Value::Native(format!("{module}.{name}"))),
+        (
+            "codecs",
+            "strict_errors"
+            | "ignore_errors"
+            | "replace_errors"
+            | "xmlcharrefreplace_errors"
+            | "backslashreplace_errors"
+            | "namereplace_errors",
+        ) => ctx.builtin(&format!("codecs.{name}")),
         _ => {
             return Err(Error::new(
                 "AttributeError",
@@ -926,8 +935,14 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("time.") {
         return time::call(ctx, method, args, kwargs);
     }
-    if name == "codecs.lookup" {
-        return codecs::lookup(ctx, args, kwargs);
+    if let Some(function) = name.strip_prefix("codecs.") {
+        return match function {
+            "lookup" => codecs::lookup(ctx, args, kwargs),
+            "register_error" | "lookup_error" => {
+                codecs::error_registry(ctx, function, args, kwargs)
+            }
+            _ => codecs::builtin_handler(ctx, function, args, kwargs),
+        };
     }
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);

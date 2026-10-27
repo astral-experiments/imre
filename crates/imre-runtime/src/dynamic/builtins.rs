@@ -283,7 +283,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "bytes"
         }
-        Value::ByteArray(_) if matches!(attr, "extend" | "translate") => "bytearray",
+        Value::ByteArray(_) if matches!(attr, "decode" | "extend" | "translate") => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
@@ -753,6 +753,7 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
+            "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;

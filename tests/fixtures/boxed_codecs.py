@@ -41,7 +41,6 @@ def current():
                        ("cp424", b"\x4a")):
         print(codecs.lookup(name).decode(data))
     print(codecs.lookup("utf-8").decode(input=b"\xff", errors="replace"))
-
     for decode_invalid in (lambda: b"ab\xffcd".decode("utf-8"),
                            lambda: codecs.lookup("ascii").decode(b"ab\xffcd")):
         try:
@@ -49,6 +48,23 @@ def current():
         except UnicodeDecodeError as exc:
             print(exc.encoding, exc.object, exc.start, exc.end, exc.reason)
             print(str(exc), repr(exc), exc.args, exc.object is exc.args[1])
+
+    seen = []
+    def retry(exc):
+        resume = exc.end
+        if seen:
+            previous, args = seen[0]
+            print(exc is previous, exc.args is args, exc.object, exc.start, exc.end, str(exc))
+        else:
+            seen.append((exc, exc.args))
+            exc.object = b"\xffB\xfe"
+            exc.encoding = "changed"
+            exc.reason = "retry"
+            exc.start = 0
+            exc.end = 1
+        return "!", resume
+    codecs.register_error("boxed_codec_retry", retry)
+    print(b"\xffA\xff".decode("utf-8", "boxed_codec_retry"), seen[0][0].args)
 
     wire = bytes(range(256))
     text = entry.decode(wire)[0]
@@ -65,3 +81,54 @@ def current():
             value.encode("latin-1", "strict")
         except UnicodeEncodeError as exc:
             print(str(exc))
+
+    source = bytearray(b"x\xe2(\xa1")
+    spans = []
+
+    def escape(exc):
+        spans.append((exc.start, exc.end, exc.reason))
+        try:
+            source.extend(b"!")
+        except BufferError as e:
+            print(type(e).__name__, str(e))
+        return "[" + str(exc.start) + "]", exc.end
+
+    codecs.register_error("test.native_decode", escape)
+    print(codecs.lookup_error("test.native_decode") is escape)
+    print(source.decode("utf-8", "test.native_decode"), spans)
+    source.extend(b"!")
+    print(codecs.lookup("utf8").decode(b"", "missing.handler"))
+    codecs.register_error("test.native_decode", codecs.backslashreplace_errors)
+    print(codecs.lookup("utf8").decode(b"\xf0\x9f", "test.native_decode"))
+    codecs.register_error("test.native_decode", lambda e: ("?", -1))
+    print(str(b"\xffZ", "utf8", "test.native_decode"))
+    for invalid in ((b"?", 1), ("?", 3)):
+        codecs.register_error("test.native_decode", lambda e: invalid)
+        try:
+            b"\xffZ".decode("utf8", "test.native_decode")
+        except (TypeError, IndexError) as e:
+            print(type(e).__name__, str(e))
+
+    class PolicyName(str):
+        pass
+
+    named = PolicyName("test.native_decode")
+    print(codecs.lookup_error(named) is codecs.lookup_error(str(named)))
+    try:
+        b"".decode("utf-8", "bad\x00name")
+    except ValueError as e:
+        print(type(e).__name__, str(e))
+
+    from urllib.parse import unquote
+    codecs.register_error("test.url", lambda e: ("?", e.end))
+    print(unquote("a%E2%28%A1é", "utf8", "test.url"))
+
+    seen = []
+    def strict_alias(exc):
+        seen.append(exc)
+        return codecs.strict_errors(exc)
+    codecs.register_error("test.strict_alias", strict_alias)
+    try:
+        b"\xff".decode("utf8", "test.strict_alias")
+    except UnicodeDecodeError as e:
+        print(e is seen[0], str(e))
