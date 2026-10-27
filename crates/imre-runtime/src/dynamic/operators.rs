@@ -2035,7 +2035,9 @@ impl Context {
         let iterator = if matches!(self.heap.get(source), Value::Set { .. }) {
             None
         } else {
-            Some(self.iterator(source)?)
+            let iterator = self.iterator(source)?;
+            self.heap.keep(iterator);
+            Some(iterator)
         };
         let mark = self.heap.temporary_mark();
         let mut position = 0;
@@ -2074,7 +2076,19 @@ impl Context {
             })
         };
         if op == "-" {
-            if result != left {
+            if let Value::DictView {
+                dict,
+                kind: value::DictViewKind::Keys,
+                ..
+            } = *self.heap.get(left)
+                && matches!(self.heap.get(dict), Value::Dict(_))
+            {
+                let mut position = 0;
+                while let Some((at, key, _, hash)) = self.dictionary_pair(dict, position) {
+                    self.set_dictionary_key(result, key, NONE, hash, false)?;
+                    position = at + 1;
+                }
+            } else if result != left {
                 builtins::update_set(self, result, left)?;
             }
             self.visit_set_operand(right, |ctx, key, hash| {
@@ -2095,16 +2109,40 @@ impl Context {
             } else {
                 (left, right)
             }
-        } else if matches!(
-            self.heap.get(left),
-            Value::DictView {
-                kind: value::DictViewKind::Keys | value::DictViewKind::Items,
-                ..
-            }
-        ) {
-            (left, right)
         } else {
-            (right, left)
+            let view_len = |id| match self.heap.get(id) {
+                Value::DictView {
+                    dict,
+                    kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                    ..
+                } => Some(
+                    self.dict_entries(*dict)
+                        .expect("dictionary view backing")
+                        .len(),
+                ),
+                _ => None,
+            };
+            let (view, size, other) = if let Some(size) = view_len(left) {
+                (left, size, right)
+            } else {
+                (
+                    right,
+                    view_len(right).expect("set-like dictionary view"),
+                    left,
+                )
+            };
+            let scan_view = match self.heap.get(other) {
+                Value::Set {
+                    entries,
+                    frozen: false,
+                } => size <= entries.len(),
+                _ => view_len(other).is_some_and(|n| size < n),
+            };
+            if scan_view {
+                (other, view)
+            } else {
+                (view, other)
+            }
         };
         self.visit_set_operand(source, |ctx, key, hash| {
             let present = match ctx.heap.get(container) {
@@ -2117,7 +2155,25 @@ impl Context {
                     let storage = ctx.dict_storage(*dict).expect("dictionary view backing");
                     ctx.find_dictionary_key(storage, key, hash)?.1.is_some()
                 }
-                _ => ctx.contains(key, container)?,
+                Value::DictView {
+                    dict,
+                    kind: value::DictViewKind::Items,
+                    ..
+                } => {
+                    let storage = ctx.dict_storage(*dict).expect("dictionary view backing");
+                    let Value::Tuple(parts) = ctx.heap.get(key) else {
+                        return Ok(());
+                    };
+                    let &[lookup, expected] = parts.as_slice() else {
+                        return Ok(());
+                    };
+                    let Some(index) = ctx.find_dictionary_key(storage, lookup, None)?.1 else {
+                        return Ok(());
+                    };
+                    let actual = ctx.stored_entries(storage)[index].1;
+                    actual == expected || ctx.checked_equal(actual, expected)?
+                }
+                _ => unreachable!("intersection with a set or dictionary view"),
             };
             if present {
                 ctx.set_dictionary_key(result, key, NONE, hash, false)?;
