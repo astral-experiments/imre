@@ -1034,6 +1034,9 @@ pub(crate) fn lower_with_caller_cache(
             });
         }
     }
+    if let Some(error) = graph.deferred_object_error.take() {
+        return Err(error);
+    }
     for initialization in &initializations {
         let module = &graph.modules[initialization.module];
         let mut body = initialization.function.body.clone();
@@ -2369,7 +2372,15 @@ enum Iteration {
     Prepared(pipelines::Prepared),
 }
 
+/// Errors that distinguish a runtime operation from a proven type mismatch.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FailureKind {
+    ObjectOperation,
+    ExactType,
+}
+
 struct Checker<'a> {
+    classified_error: std::cell::RefCell<Option<(String, FailureKind)>>,
     /// Doctest prompts share an exec-style namespace until the case ends.
     interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
@@ -2445,6 +2456,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            classified_error: Default::default(),
             interactive_names: false,
             local_iter: false,
             positional_pack: None,
@@ -2545,12 +2557,19 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn classified_error(&self, kind: FailureKind, node: &impl Ranged, message: &str) -> String {
+        let diagnostic = error(self.source, node, message);
+        self.classified_error
+            .replace(Some((diagnostic.clone(), kind)));
+        diagnostic
+    }
+
     fn expect(&self, expected: Type, actual: Type, node: &impl Ranged) -> Result<(), String> {
         if expected == actual {
             Ok(())
         } else {
-            Err(error(
-                self.source,
+            Err(self.classified_error(
+                FailureKind::ExactType,
                 node,
                 &format!(
                     "expected {}, got {}; annotations are enforced contracts",
@@ -2949,6 +2968,23 @@ impl<'a> Checker<'a> {
         unreachable!("mismatched exact types return an error")
     }
 
+    /// Keep an exact return mismatch separate from a TypeError in one of its operands.
+    fn coerce_return(
+        &self,
+        value: Expr,
+        expected: Type,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        self.coerce(value, expected, node).inspect_err(|error| {
+            if self.failure_kind(error) == Some(FailureKind::ExactType) {
+                self.graph.return_errors.borrow_mut().insert(format!(
+                    "{}:{error}",
+                    self.graph.modules[self.module].path.display()
+                ));
+            }
+        })
+    }
+
     /// Adapt an evaluated argument to the target's concrete or private representation.
     fn coerce_argument_value(
         &mut self,
@@ -2988,6 +3024,17 @@ impl<'a> Checker<'a> {
         expected: Type,
         alternative: impl Fn(&Self, Type) -> bool,
     ) -> Result<Expr, String> {
+        self.expr_in_context(expression, expected, alternative, Self::coerce)
+    }
+
+    /// Lower operands normally and let the destination check the resulting value.
+    fn expr_in_context(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Type,
+        alternative: impl Fn(&Self, Type) -> bool,
+        coerce: impl Fn(&Self, Expr, Type, &ast::Expr) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
         if matches!(expected, Type::ContextVar(_))
             && let ast::Expr::Call(call) = expression
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ContextVar))
@@ -3005,7 +3052,7 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Unwrap(Box::new(value)),
                 });
             }
-            return self.coerce(value, expected, expression);
+            return coerce(self, value, expected, expression);
         }
         if self.types.is_len_argument(expected) || self.types.is_callback_argument(expected) {
             let value = self.expr(expression)?;
@@ -3078,7 +3125,7 @@ impl<'a> Checker<'a> {
             && let Some(shape) = self.types.mapping(concrete)
             && let Some(result) = self.fromkeys_call(call, Some(shape))?
         {
-            return self.coerce(result, expected, expression);
+            return coerce(self, result, expected, expression);
         }
         if concrete == Type::StringIterable && matches!(expression, ast::Expr::List(_)) {
             concrete = self.types.list(Type::Str);
@@ -3107,11 +3154,11 @@ impl<'a> Checker<'a> {
                         "expected a compatible record class constructor",
                     ));
                 }
-                return self.coerce(value, expected, expression);
+                return coerce(self, value, expected, expression);
             }
             if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::JsonLoads)) {
                 let value = self.json_load_callable(None, Some(concrete), expression)?;
-                return self.coerce(value, expected, expression);
+                return coerce(self, value, expected, expression);
             }
             if let Some(Binding::Intrinsic(
                 op @ (Intrinsic::Copy(_)
@@ -3121,20 +3168,20 @@ impl<'a> Checker<'a> {
             )) = self.resolve(expression)
             {
                 let value = self.shutil_function_value(op, Some(concrete), expression)?;
-                return self.coerce(value, expected, expression);
+                return coerce(self, value, expected, expression);
             }
             if let Some(Binding::Definition(definition)) = self.resolve(expression)
                 && let Some(signature) = self.functions.get(&definition).cloned()
             {
                 let value = self.callable_value(&signature, None, Some(concrete), expression)?;
-                return self.coerce(value, expected, expression);
+                return coerce(self, value, expected, expression);
             }
             if let ast::Expr::Attribute(attribute) = expression
                 && self.resolve(expression).is_none()
             {
                 if let Some(class) = self.class_reference(&attribute.value) {
                     let value = self.class_attribute(attribute, class, None, Some(concrete))?;
-                    return self.coerce(value, expected, expression);
+                    return coerce(self, value, expected, expression);
                 }
                 let receiver = Self::weak_target(self.expr(&attribute.value)?);
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
@@ -3143,11 +3190,11 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                     let value =
                         self.json_load_callable(Some(receiver), Some(concrete), expression)?;
-                    return self.coerce(value, expected, expression);
+                    return coerce(self, value, expected, expression);
                 }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     let value = self.deque_attribute(attribute, receiver, element)?;
-                    return self.coerce(value, expected, expression);
+                    return coerce(self, value, expected, expression);
                 }
                 if let Some(field) = self.partial_attribute(&receiver, attribute.attr.as_str()) {
                     return self.coerce(field, expected, expression);
@@ -3159,7 +3206,7 @@ impl<'a> Checker<'a> {
                 {
                     let value =
                         self.class_attribute(attribute, class, Some(receiver), Some(concrete))?;
-                    return self.coerce(value, expected, expression);
+                    return coerce(self, value, expected, expression);
                 }
                 return Err(error(
                     self.source,
@@ -3319,7 +3366,7 @@ impl<'a> Checker<'a> {
                 {
                     return self
                         .expanded_sequence(&list.elts, Some(element), false, list)
-                        .and_then(|value| self.coerce(value, expected, expression));
+                        .and_then(|value| coerce(self, value, expected, expression));
                 }
                 let values = list
                     .elts
@@ -3339,7 +3386,7 @@ impl<'a> Checker<'a> {
                     .any(|v| matches!(v, ast::Expr::Starred(_)))
                 {
                     let value = self.expanded_tuple(tuple, Some(&fields))?;
-                    return self.coerce(value, expected, expression);
+                    return coerce(self, value, expected, expression);
                 }
                 if tuple.elts.len() != fields.len() {
                     return Err(error(
@@ -3386,7 +3433,7 @@ impl<'a> Checker<'a> {
         if alternative(self, value.ty) {
             return Ok(value);
         }
-        self.coerce(value, expected, expression)
+        coerce(self, value, expected, expression)
     }
 
     /// Checks both arms under their own narrowing facts, while contextual types
@@ -4449,7 +4496,7 @@ impl<'a> Checker<'a> {
             previous_sum = sum.is_some();
             let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
             let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
-            let (mut lowered, continues) = self.statement(statement)?;
+            let (mut lowered, continues) = self.statement(statement, &statements[index + 1..])?;
             self.fixed_tuple = enclosing_tuple;
             length_guard = self
                 .list_length_guard(statement)
@@ -4475,7 +4522,57 @@ impl<'a> Checker<'a> {
         Ok((body, falls_through))
     }
 
-    fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
+    /// Defer an opaque operation only when its result need not enter typed storage.
+    fn defer_object_error(&self, error: &str) -> bool {
+        if self.failure_kind(error) != Some(FailureKind::ObjectOperation) {
+            return false;
+        }
+        if self.inference.is_none() {
+            self.graph
+                .deferred_object_error
+                .borrow_mut()
+                .get_or_insert_with(|| {
+                    format!("{}:{error}", self.graph.modules[self.module].path.display())
+                });
+        }
+        true
+    }
+
+    fn failure_kind(&self, error: &str) -> Option<FailureKind> {
+        self.classified_error
+            .borrow()
+            .as_ref()
+            .filter(|(diagnostic, _)| diagnostic == error)
+            .map(|(_, kind)| *kind)
+    }
+
+    fn statement(
+        &mut self,
+        statement: &ast::Stmt,
+        later: &[ast::Stmt],
+    ) -> Result<(Vec<Statement>, bool), String> {
+        let result = self.lower_statement(statement);
+        if let Err(error) = &result {
+            let discarded = match statement {
+                ast::Stmt::Expr(expr) => narrowing::expression_assignments(&expr.value).is_empty(),
+                // At function scope this suffix includes every later use of the binding.
+                ast::Stmt::Assign(assign) if self.block_depth == 1 && !self.module_scope => {
+                    matches!(assign.targets.as_slice(), [ast::Expr::Name(target)]
+                    if narrowing::expression_assignments(&assign.value).is_empty()
+                    && !ast::helpers::any_over_body(later, |expr| matches!(
+                        expr, ast::Expr::Name(name) if name.id == target.id
+                    )))
+                }
+                _ => false,
+            };
+            if discarded && self.defer_object_error(error) {
+                return Ok((Vec::new(), true));
+            }
+        }
+        result
+    }
+
+    fn lower_statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
         if self.graph.local_metadata_import(self.module, statement) {
             return Ok((Vec::new(), true));
         }
@@ -4857,7 +4954,12 @@ impl<'a> Checker<'a> {
                     } else if self.inferred_returns.is_some() {
                         self.expr(value)?
                     } else {
-                        self.expr_expected(value, self.returns)?
+                        self.expr_in_context(
+                            value,
+                            self.returns,
+                            |_, _| false,
+                            Self::coerce_return,
+                        )?
                     }
                 } else {
                     Expr {
@@ -4869,7 +4971,7 @@ impl<'a> Checker<'a> {
                     types.push(value.ty);
                     value
                 } else {
-                    self.coerce(value, self.returns, statement)?
+                    self.coerce_return(value, self.returns, statement)?
                 };
                 return Ok((vec![Statement::Return(value)], false));
             }
@@ -5933,8 +6035,8 @@ impl<'a> Checker<'a> {
 
     fn object_runtime_export(&self, name: &str, node: &impl Ranged) -> String {
         self.graph.needs_object_runtime.set(true);
-        error(
-            self.source,
+        self.classified_error(
+            FailureKind::ObjectOperation,
             node,
             &format!("{name} requires native Python object operations"),
         )

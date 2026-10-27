@@ -292,6 +292,7 @@ pub(crate) fn compile(
     options: &CompileOptions,
     runtime_imports: bool,
     registered_imports: RegisteredImports,
+    check_returns: impl FnOnce() -> Result<(), String>,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -485,6 +486,7 @@ pub(crate) fn compile(
         "command":command.is_some(),"paths":paths,
     });
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    check_returns()?;
     let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
     Ok(Some(Compilation {
         llvm_ir,
