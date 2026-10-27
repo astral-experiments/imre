@@ -927,6 +927,9 @@ impl Value {
                     code.parameters,
                 ]);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
+                if let Body::Source(program) = &code.body {
+                    visit.push(program.string_roots);
+                }
             }
             Self::Generator {
                 owner,
@@ -1374,6 +1377,25 @@ impl Heap {
             return self.code_name(text);
         }
         self.alloc(Value::Str(text.to_owned()))
+    }
+
+    /// Runtime-compiled ASCII constants are interned for the lifetime of their code.
+    pub fn source_string_constant(&mut self, text: &str) -> Option<Id> {
+        let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if intern && let Some(entry) = self.interned.get(text) {
+            let id = entry.id;
+            self.keep(id);
+            return Some(id);
+        }
+        let mut value = String::new();
+        value.try_reserve_exact(text.len()).ok()?;
+        value.push_str(text);
+        let id = self.alloc(Value::Str(value));
+        Some(if intern {
+            self.intern(id, std::iter::empty())
+        } else {
+            id
+        })
     }
 
     pub fn is_interned(&self, id: Id) -> bool {

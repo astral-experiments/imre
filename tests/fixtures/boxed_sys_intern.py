@@ -1,4 +1,5 @@
 def current():
+    compiled_source_pool()
     import sys
     from sys import intern
 
@@ -56,3 +57,21 @@ def current():
         else:
             raise AssertionError("accepted invalid sys.intern arguments")
     print("released canonical string and adopted a live equal string")
+
+
+def compiled_source_pool():
+    import sys
+
+    name = ''.join(('runtime_ξ_', '1123'))
+    word = ''.join(('runtime_pool_', '1137'))
+    code = compile(name + " = '" + word + "'", '<pool>', 'exec')
+    print(sys.intern(name) is name, sys.intern(word) is word)
+    scope = {}
+    exec(code, scope)
+    print(sys._is_interned(scope[name]), sys.intern(word) is scope[name])
+    del scope, code
+    print(sys.intern(name) is name, sys.intern(word) is word)
+
+    keyword = ''.join(('runtime_λ_', '1171'))
+    code = compile('target(' + keyword + '=1)', '<keyword>', 'exec')
+    print(sys.intern(keyword) is keyword)
