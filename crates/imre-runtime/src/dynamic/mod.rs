@@ -182,6 +182,7 @@ impl Context {
             Value::Iterator { .. }
                 | Value::DictIterator(_)
                 | Value::AstWalk(_)
+                | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
@@ -261,6 +262,7 @@ impl Context {
             Value::Instance { .. }
                 | Value::DictIterator(_)
                 | Value::CallableIterator(_)
+                | Value::Map { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -393,6 +395,13 @@ impl Context {
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
+            Value::Map { function, input } => {
+                let (function, input) = (*function, *input);
+                let Some(item) = self.next_result(input)? else {
+                    return Ok(None);
+                };
+                return self.call(function, vec![item], Vec::new()).map(Some);
+            }
             Value::Generator { code, .. } => {
                 let code = *code;
                 return match self.code_object(code).body {
@@ -457,6 +466,7 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
+                | Value::Map { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)

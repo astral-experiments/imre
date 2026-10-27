@@ -298,6 +298,7 @@ impl Context {
             | Value::Module { .. }
             | Value::ThreadLocal(_) => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
+            Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
             Value::Count { .. } => "itertools.count",

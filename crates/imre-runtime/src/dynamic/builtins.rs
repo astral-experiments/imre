@@ -108,6 +108,7 @@ const TYPES: &[&str] = &[
     "frozenset",
     "int",
     "list",
+    "map",
     "object",
     "property",
     "classmethod",
@@ -174,6 +175,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "capitalize",
     "encode",
     "endswith",
     "expandtabs",
@@ -831,6 +833,15 @@ pub(super) fn call(
                 Error::new("OverflowError", "length does not fit in a Python index")
             })?;
             Ok(ctx.int(size))
+        }
+        "map" => {
+            positional(name, kwargs)?;
+            arity(name, args, 2, 2)?;
+            let input = ctx.iterator(args[1])?;
+            Ok(ctx.alloc(Value::Map {
+                function: args[0],
+                input,
+            }))
         }
         "zip" => {
             let [strict] = bind(name, &[], kwargs, ["strict"])?;
