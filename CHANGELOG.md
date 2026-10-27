@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.3
+
+Released on 2026-10-27.
+
+- Relar is now Imre. The compiler executable is `imre`, and compiled programs
+  report `imre` as their Python implementation.
+  ([#397](https://github.com/astral-experiments/imre/pull/397))
+- Run a script with `imre hello.py` or select Imre from uv with
+  `uv run --python imre hello.py`. Both compile the script to native code.
+  ([#302](https://github.com/astral-experiments/imre/pull/302))
+- Export the native extension SDK with `imre build-target --output-dir sdk`.
+  The SDK includes the header, wheel tag, and build adapters that setuptools
+  and scikit-build-core need to build extensions for Imre.
+  ([#274](https://github.com/astral-experiments/imre/pull/274))
+- Use `collections.ChainMap` and `Counter.most_common()` in runtime-loaded
+  modules. Look up an installed distribution’s version with
+  `importlib.metadata.version()`.
+  ([#2365](https://github.com/astral-experiments/imre/pull/2365),
+  [#2364](https://github.com/astral-experiments/imre/pull/2364),
+  [#2107](https://github.com/astral-experiments/imre/pull/2107))
+
+[Full history for 0.1.3](https://github.com/astral-experiments/imre/compare/0.1.2...0.1.3)
+
 ## 0.1.2
 
 Released on 2026-10-23.
