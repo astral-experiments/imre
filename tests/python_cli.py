@@ -418,6 +418,7 @@ def report(text):
             "boxed_reversed_list.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
+            "boxed_string_expandtabs.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

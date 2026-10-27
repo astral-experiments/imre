@@ -665,6 +665,34 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::Bytes(b)))
         };
     }
+    if name == "expandtabs" {
+        let [tabsize] = bind_method_arguments(name, args, kwargs, ["tabsize"], 1)?;
+        let width = match tabsize {
+            None => 8,
+            Some(id) => {
+                let index = ctx
+                    .index_value_with_bool_result(id, false)?
+                    .ok_or_else(|| {
+                        type_error(format!(
+                            "'{}' object cannot be interpreted as an integer",
+                            ctx.type_name(id)
+                        ))
+                    })?;
+                index
+                    .to_i64()
+                    .and_then(|n| i32::try_from(n).ok())
+                    .ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C int")
+                    })?
+            }
+        };
+        return Ok(
+            match crate::objects::expand_tabs(ctx.str_value(receiver)?, width)? {
+                Some(text) => ctx.text(text.into_string()),
+                None => ctx.string_storage(receiver).unwrap(),
+            },
+        );
+    }
     if name == "find" {
         if !kwargs.is_empty() {
             return Err(type_error("str.find() takes no keyword arguments"));
