@@ -3,6 +3,16 @@ import typing
 
 
 def current():
+    from typing import assert_never
+
+    assert assert_never is typing.assert_never
+    try:
+        assert_never("x" * 100)
+    except AssertionError as error:
+        assert str(error) == "Expected code to be unreachable, but got: '" + "x" * 99 + "..."
+    else:
+        raise AssertionError("assert_never returned")
+
     optional = typing.Optional[str]
     print(type(optional) is typing.Union is types.UnionType)
     print(typing.get_args(optional) == (str, type(None)), optional is typing.Optional[str])
