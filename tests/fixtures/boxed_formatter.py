@@ -62,3 +62,19 @@ def current():
             print(len(render()))
         except ValueError as error:
             print(str(error))
+
+    print("[%5.2s][%-6.3r][%.2a][%4c]" % ("éπx", "abc", "a", "x"))
+    print("[%*.*s][%.*s]" % (-6, 2, "abc", -1, "hidden"))
+    print("%(name)6.2s/%(name)-4.1s" % {"name": "abcd"})
+    print("[%*d][%0*X][%#*.*x]" % (5, 23, 6, -42, -9, 4, 31))
+    print("[%.*o][%*.*i]" % (4, 9, 6, -1, -3))
+    for args in (("bad",), (1 << 90, 1), (2**31, 1), (2**31 - 1, 1)):
+        try:
+            print("%.*x" % args)
+        except (TypeError, OverflowError) as error:
+            print(type(error).__name__)
+    for args in (("bad", "value"), (2,), (2**80, "value")):
+        try:
+            print("%*s" % args)
+        except (TypeError, OverflowError) as error:
+            print(type(error).__name__)

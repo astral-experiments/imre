@@ -171,12 +171,16 @@ impl Context {
         result
     }
 
+    fn exported_bytearray_error() -> Error {
+        Error::new(
+            "BufferError",
+            "Existing exports of data: object cannot be re-sized",
+        )
+    }
+
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
         if self.bytearray_exports.contains(&id) {
-            Err(Error::new(
-                "BufferError",
-                "Existing exports of data: object cannot be re-sized",
-            ))
+            Err(Self::exported_bytearray_error())
         } else {
             Ok(())
         }

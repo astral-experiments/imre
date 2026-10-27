@@ -552,14 +552,17 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
     percent_value_in(fmt, &mut std::iter::once(value.clone()), None)
 }
 
-/// Render a statically sized integer conversion from the original percent field.
-/// The dynamic caller has already looked up any mapping key.
-pub(crate) fn percent_integer_field(field: &str, value: Int) -> Result<String> {
+/// Render the original integer field with its positional width and precision operands.
+pub(crate) fn percent_integer_field(
+    field: &str,
+    operands: impl IntoIterator<Item = Int>,
+) -> Result<String> {
     let field = match field.strip_prefix('(') {
         Some(mapping) => mapping_key(mapping)?.1,
         None => field,
     };
-    percent_value(field, &owned(value.into_raw(), 2)).map(|(text, _)| text)
+    let mut args = operands.into_iter().map(|n| owned(n.into_raw(), 2));
+    percent_value_in(field, &mut args, None).map(|(text, _)| text)
 }
 
 /// Apply a brace-format field to a rooted native integer.

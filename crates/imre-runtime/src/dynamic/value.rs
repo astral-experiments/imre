@@ -63,6 +63,7 @@ pub(super) struct Trace {
     pub context: Option<Id>,
     pub cause: Option<Id>,
     pub fields: HashMap<String, Id>,
+    stop_value: Id,
     cached: Option<(usize, Id)>,
 }
 
@@ -118,6 +119,20 @@ impl Error {
         self
     }
 
+    /// Read the independent StopIteration value without allocating exception metadata.
+    pub(super) fn stop_value(&self) -> Id {
+        self.trace.as_ref().map_or(NONE, |trace| trace.stop_value)
+    }
+
+    /// Store the value in the cold payload, which owns its reference during collection.
+    pub(super) fn set_stop_value(&mut self, value: Id) {
+        if value != NONE {
+            self.tracing().stop_value = value;
+        } else if let Some(trace) = self.trace.as_mut() {
+            trace.stop_value = NONE;
+        }
+    }
+
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
             .iter()
@@ -129,6 +144,7 @@ impl Error {
                     .frames
                     .iter()
                     .map(|&(_, frame)| frame)
+                    .chain((trace.stop_value != NONE).then_some(trace.stop_value))
                     .chain(trace.instance)
                     .chain(trace.context)
                     .chain(trace.cause)
@@ -214,7 +230,7 @@ impl Context {
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::File(file) => match file.as_ref() {
-                super::stdlib::BinaryFile::Reader(_) => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
             },
             Value::TextFile(_) => "_io.TextIOWrapper",
@@ -282,6 +298,9 @@ impl Context {
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let mut error = Error::new(kind, "");
         error.args = Some(args.to_vec());
+        if kind == "StopIteration" {
+            error.set_stop_value(args.first().copied().unwrap_or(NONE));
+        }
         error.message = self.exception_message(&error, &mut Vec::new());
         if kind == "SystemExit" {
             error.exit_status = match args {
@@ -457,6 +476,7 @@ pub(super) enum Value {
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
+        namedtuple_fields: Option<std::rc::Rc<[String]>>,
     },
     TypeVar(super::typing::TypeVariable),
     GenericAlias(super::typing::Alias),

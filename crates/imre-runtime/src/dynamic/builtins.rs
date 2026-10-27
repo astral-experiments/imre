@@ -329,7 +329,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::File(file)
             if matches!(attr, "seek" | "tell")
-                && matches!(file.as_ref(), super::stdlib::BinaryFile::Reader(_)) =>
+                && matches!(file.as_ref(), super::stdlib::BinaryFile::Reader { .. }) =>
         {
             "file"
         }
