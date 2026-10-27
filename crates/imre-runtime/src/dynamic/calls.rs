@@ -1456,6 +1456,9 @@ impl Context {
             Value::Native(class) if class == "bool" && name == "to_bytes" => {
                 return Ok(self.builtin("int.to_bytes"));
             }
+            Value::Native(class) if class == "set" && name == "copy" => {
+                return Ok(self.builtin("set.copy"));
+            }
             Value::Native(class)
                 if class == "list"
                     && matches!(name, "clear" | "index" | "pop" | "reverse" | "sort") =>
