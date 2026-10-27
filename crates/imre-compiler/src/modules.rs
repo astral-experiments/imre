@@ -197,6 +197,7 @@ pub(crate) enum IntrinsicModule {
     Ast,
     Marshal,
     Pickle,
+    Struct,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -633,6 +634,7 @@ impl IntrinsicModule {
             "ast" => Some(Self::Ast),
             "marshal" => Some(Self::Marshal),
             "pickle" => Some(Self::Pickle),
+            "struct" => Some(Self::Struct),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
@@ -787,6 +789,10 @@ impl IntrinsicModule {
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
+            (Self::Struct, "Struct") => Intrinsic::ObjectRuntimeExport("struct.Struct"),
+            (Self::Struct, "calcsize") => Intrinsic::ObjectRuntimeExport("struct.calcsize"),
+            (Self::Struct, "unpack") => Intrinsic::ObjectRuntimeExport("struct.unpack"),
+            (Self::Struct, "error") => Intrinsic::ObjectRuntimeExport("struct.error"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }
@@ -2915,12 +2921,15 @@ impl<'a> Loader<'a> {
                         };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
-                        self.needs_object_imports |=
-                            !matches!(module, IntrinsicModule::Marshal | IntrinsicModule::Pickle)
-                                && matches!(
-                                    binding,
-                                    Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_))
-                                );
+                        self.needs_object_imports |= !matches!(
+                            module,
+                            IntrinsicModule::Marshal
+                                | IntrinsicModule::Pickle
+                                | IntrinsicModule::Struct
+                        ) && matches!(
+                            binding,
+                            Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_))
+                        );
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)
                         {

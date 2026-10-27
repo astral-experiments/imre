@@ -101,13 +101,7 @@ impl Imports {
         if level == 0
             && matches!(
                 name,
-                "sysconfig"
-                    | "platform"
-                    | "keyword"
-                    | "site"
-                    | "importlib.machinery"
-                    | "struct"
-                    | "traceback"
+                "sysconfig" | "platform" | "keyword" | "site" | "importlib.machinery" | "traceback"
             )
         {
             self.runtime_imports = true;
