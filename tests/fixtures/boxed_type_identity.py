@@ -19,6 +19,19 @@ def current():
     from collections import defaultdict
     from copy import deepcopy
 
+    for call, message in (
+        (lambda: id(), "id() takes exactly one argument (0 given)"),
+        (lambda: id(1, 2), "id() takes exactly one argument (2 given)"),
+        (lambda: id(obj=1), "id() takes no keyword arguments"),
+        (lambda: id(1, extra=2), "id() takes no keyword arguments"),
+    ):
+        try:
+            call()
+        except TypeError as error:
+            assert error.args == (message,)
+        else:
+            raise AssertionError("id() accepted invalid arguments")
+
     shared = []
     graph = [shared, shared]
     assert id(graph[0]) == id(shared) and id(graph) != id(shared)
