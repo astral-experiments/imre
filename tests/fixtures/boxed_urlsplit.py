@@ -4,6 +4,12 @@ from urllib.parse import SplitResult, SplitResultBytes, unquote, urlsplit, urlun
 
 
 def current():
+    values = ["first", "old"]
+    def change_next(value, safe, encoding=None, errors=None):
+        if value == "first":
+            values[1] = "changed"
+        return value
+    print(parse.urlencode([("key", values)], doseq=True, quote_via=change_next))
     print(urllib.parse is parse, parse.urlsplit is urlsplit)
     from urllib.parse import uses_netloc
     print(uses_netloc is parse.uses_netloc, uses_netloc)

@@ -103,21 +103,29 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         let expanded = if doseq && !matches!(ctx.heap.get(*v), Value::Bytes(_) | Value::Str(_)) {
             let len = ctx.builtin("len");
             match ctx.call(len, vec![*v], Vec::new()) {
-                Ok(_) => Some(ctx.items(*v)?),
+                Ok(_) => Some(ctx.iterator(*v)?),
                 Err(e) if e.kind == "TypeError" => None,
                 Err(e) => return Err(e),
             }
         } else {
             None
         };
-        for value in expanded.as_deref().unwrap_or(std::slice::from_ref(v)) {
-            let value = encoded(ctx, *value, safe, encoding, errors, via)?;
+        let mut append = |ctx: &mut Context, value: Id| -> Result<()> {
+            let value = encoded(ctx, value, safe, encoding, errors, via)?;
             if !joined.is_empty() {
                 joined.push('&')
             }
             joined.push_str(&key);
             joined.push('=');
             joined.push_str(&value);
+            Ok(())
+        };
+        if let Some(iter) = expanded {
+            while let Some(value) = ctx.next_result(iter)? {
+                append(ctx, value)?;
+            }
+        } else {
+            append(ctx, *v)?;
         }
     }
     Ok(ctx.text(joined))
