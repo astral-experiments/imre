@@ -24,6 +24,24 @@ impl Context {
             _ => None,
         }
     }
+    /// Find the exception storage only when the object inherits StopIteration.
+    fn stop_iteration_error(&mut self, object: Id) -> Option<&mut Error> {
+        let Value::Raised(error) = self.heap.get(object) else {
+            return None;
+        };
+        let stop = error.class.map_or_else(
+            || error.kind == "StopIteration",
+            |class| self.has_base(class, "StopIteration"),
+        );
+        if !stop {
+            return None;
+        }
+        let Value::Raised(error) = self.heap.get_mut(object) else {
+            unreachable!()
+        };
+        Some(error)
+    }
+
     /// Find a Python-declared member on an exception that retains its original class.
     fn exception_member(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Raised(error) = self.heap.get(object) else {
@@ -322,19 +340,12 @@ impl Context {
         }
     }
     pub(super) fn namedtuple_fields(&self, class: Id) -> Option<Vec<String>> {
-        if !self.has_base(class, "typing.NamedTuple") {
-            return None;
+        match self.heap.get(class) {
+            Value::Class {
+                namedtuple_fields, ..
+            } => namedtuple_fields.as_deref().map(<[String]>::to_vec),
+            _ => None,
         }
-        let id = self.class_attr(class, "__annotations__")?;
-        let Value::Dict(fields) = self.heap.get(id) else {
-            return None;
-        };
-        Some(
-            fields
-                .iter()
-                .filter_map(|&(k, _)| self.str_value(k).ok().map(str::to_owned))
-                .collect(),
-        )
     }
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
         Some(match self.heap.get(obj) {
@@ -698,6 +709,11 @@ impl Context {
             if field.is_some() || self.class_attr(class, name).is_some() {
                 return self.instance_attribute(obj, class, field, name);
             }
+        }
+        if name == "value"
+            && let Some(error) = self.stop_iteration_error(obj)
+        {
+            return Ok(error.stop_value());
         }
         if name == "__class__" {
             return self.exact_type(obj);
@@ -1292,6 +1308,12 @@ impl Context {
                 return Err(self.missing_attribute(obj, name));
             }
         }
+        if name == "value"
+            && let Some(error) = self.stop_iteration_error(obj)
+        {
+            error.set_stop_value(NONE);
+            return Ok(());
+        }
         if name == "__class__" && member.is_none() {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
         }
@@ -1509,6 +1531,12 @@ impl Context {
             error.tracing().fields.insert(name.to_owned(), value);
             return Ok(());
         }
+        if name == "value"
+            && let Some(error) = self.stop_iteration_error(obj)
+        {
+            error.set_stop_value(value);
+            return Ok(());
+        }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
@@ -1643,6 +1671,17 @@ impl Context {
             scalar: Some(text),
             memory_stream: None,
         }))
+    }
+
+    /// Count a generated NamedTuple repr frame like a runtime-loaded Python call.
+    pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
+        if self.call_depth + additional >= 1000 {
+            return Err(Error::new(
+                "RecursionError",
+                "maximum recursion depth exceeded",
+            ));
+        }
+        Ok(())
     }
 
     pub(super) fn call(
@@ -1792,6 +1831,7 @@ impl Context {
                 name,
                 scope,
                 ancestors,
+                ..
             } => {
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
@@ -1821,6 +1861,9 @@ impl Context {
                 }) {
                     let mut error = self.exception(&name, &args);
                     error.class = Some(callable);
+                    if self.has_base(callable, "StopIteration") {
+                        error.set_stop_value(args.first().copied().unwrap_or(NONE));
+                    }
                     return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
@@ -2039,12 +2082,7 @@ impl Context {
                 if sig["class_cell"] == true {
                     frame.class_cell = class_cell;
                 }
-                if self.call_depth >= 1000 {
-                    return Err(Error::new(
-                        "RecursionError",
-                        "maximum recursion depth exceeded",
-                    ));
-                }
+                self.check_call_depth(0)?;
                 self.call_depth += 1;
                 let result =
                     stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || self.execute(code, local));

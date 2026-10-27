@@ -449,9 +449,15 @@ impl Context {
             Text(&'a str),
             Sequence(&'a [Id], usize),
             Mapping(&'a [(Id, Id)], usize),
+            Fields(
+                &'a [String],
+                &'a std::collections::HashMap<String, Id>,
+                usize,
+            ),
             Leave(Id, &'static str),
             ContextEnd(Id),
             SliceEnd,
+            NamedTupleEnd,
         }
         let mut output = String::new();
         let mut work = vec![Part::Value(root, quoted)];
@@ -471,10 +477,15 @@ impl Context {
             None
         };
         let mut slice_depth = 0usize;
+        let mut namedtuple_depth = 0usize;
         while let Some(part) = work.pop() {
             match part {
                 Part::Text(text) => output.push_str(text),
                 Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::NamedTupleEnd => {
+                    namedtuple_depth -= 1;
+                    output.push(')');
+                }
                 Part::SliceEnd => {
                     slice_depth -= 1;
                     output.push(')');
@@ -492,6 +503,17 @@ impl Context {
                         }
                         work.push(Part::Sequence(items, index + 1));
                         work.push(Part::Value(item, true));
+                    }
+                }
+                Part::Fields(names, fields, index) => {
+                    if let Some(name) = names.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        output.push_str(name);
+                        output.push('=');
+                        work.push(Part::Fields(names, fields, index + 1));
+                        work.push(Part::Value(fields[name], true));
                     }
                 }
                 Part::Mapping(items, index) => {
@@ -526,6 +548,24 @@ impl Context {
                             ..
                         } if self.enum_member(id).is_none() => {
                             work.push(Part::Value(*backing, repr));
+                            continue;
+                        }
+                        Value::Instance { class, fields, .. }
+                            if let Value::Class {
+                                name,
+                                namedtuple_fields: Some(names),
+                                ..
+                            } = self.heap.get(*class)
+                                && names.iter().all(|field| fields.contains_key(field)) =>
+                        {
+                            if checked {
+                                self.check_call_depth(namedtuple_depth)?;
+                            }
+                            namedtuple_depth += 1;
+                            output.push_str(name);
+                            output.push('(');
+                            work.push(Part::NamedTupleEnd);
+                            work.push(Part::Fields(names, fields, 0));
                             continue;
                         }
                         Value::ContextVar { name, default, .. } => {
@@ -1216,6 +1256,16 @@ impl Context {
                         format!("can't concat {} to bytes", self.type_name(b)),
                     ));
                 }
+                (Value::ByteArray(x), Value::Bytes(y) | Value::ByteArray(y)) => {
+                    let bytes = crate::objects::concat_bytes(x, y)?;
+                    return Ok(self.alloc(Value::ByteArray(bytes)));
+                }
+                (Value::ByteArray(_), _) => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("can't concat {} to bytearray", self.type_name(b)),
+                    ));
+                }
                 (Value::List(x), Value::List(y)) => {
                     return Ok(self.alloc(Value::List([x.as_slice(), y.as_slice()].concat())));
                 }
@@ -1490,12 +1540,27 @@ impl Context {
         {
             return Ok(result);
         }
-        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
-            let extra = self.items(b)?;
-            let Value::List(values) = self.heap.get_mut(a) else {
+        if op == "+"
+            && let Value::ByteArray(left) = self.heap.get(a)
+            && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
+        {
+            if right.is_empty() {
+                return Ok(a);
+            }
+            // Reading the right-hand buffer exports it during the resize.
+            if a == b {
+                return Err(Self::exported_bytearray_error());
+            }
+            self.check_bytearray_resize(a)?;
+            let bytes = crate::objects::concat_bytes(left, right)?;
+            let Value::ByteArray(left) = self.heap.get_mut(a) else {
                 unreachable!()
             };
-            values.extend(extra);
+            *left = bytes;
+            return Ok(a);
+        }
+        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
+            builtins::call(self, "list.extend", &[a, b], &[])?;
             return Ok(a);
         }
         if op == "*"

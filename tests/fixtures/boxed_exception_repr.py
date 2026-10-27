@@ -49,3 +49,25 @@ def current():
     print(error.label is saved, error.token is saved)
     del error.label
     print(error.label, error.token)
+
+    class Done(StopIteration):
+        pass
+
+    payload = ["original"]
+    stopped = Done(payload, 42)
+    print(stopped.value is payload, stopped.args[0] is payload)
+    replacement = ["replacement"]
+    stopped.value = replacement
+    print(stopped.value is replacement, stopped.args[0] is payload)
+    del stopped.value
+    print(stopped.value is None, stopped.args[0] is payload)
+
+    class Masked(Done):
+        value = "class value"
+
+    masked = Masked(payload)
+    print(masked.value)
+    masked.value = replacement
+    print(masked.value is replacement)
+    del masked.value
+    print(masked.value)
