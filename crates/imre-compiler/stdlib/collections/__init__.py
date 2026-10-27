@@ -1,7 +1,7 @@
-"""Integer counters for the runtime collections module."""
+"""Dictionary subclasses for the runtime collections module."""
 
 import operator as _operator
-from _collections import _count_elements
+from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_repr, _ordered_dict_view
 from itertools import repeat as _repeat
 
 
@@ -18,6 +18,40 @@ def _compare_counts(left, right, compare):
             if not compare(left[key], right[key]):
                 return False
     return True
+
+
+class OrderedDict(dict):
+    def __iter__(self):
+        return iter(_ordered_dict_view(self, "keys"))
+
+    def keys(self):
+        return _ordered_dict_view(self, "keys")
+
+    def items(self):
+        return _ordered_dict_view(self, "items")
+
+    def values(self):
+        return _ordered_dict_view(self, "values")
+
+    def __repr__(self):
+        return _ordered_dict_repr(self)
+
+    def __eq__(self, other):
+        return _ordered_dict_equal(self, other, isinstance(other, OrderedDict))
+
+    def __ne__(self, other):
+        equal = self.__eq__(other)
+        return NotImplemented if equal is NotImplemented else not equal
+
+    def copy(self):
+        return type(self)(self)
+
+    @classmethod
+    def fromkeys(cls, iterable, value=None):
+        result = cls()
+        for key in iterable:
+            result[key] = value
+        return result
 
 
 class Counter(dict):

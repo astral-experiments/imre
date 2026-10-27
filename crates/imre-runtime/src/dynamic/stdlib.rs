@@ -31,6 +31,7 @@ mod logging;
 mod marshal;
 mod math;
 mod operator;
+mod ordered_dict;
 mod pickle;
 mod pkgutil;
 mod posixpath;
@@ -316,7 +317,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
-        ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
+        (
+            "_collections",
+            "_count_elements" | "_ordered_dict_equal" | "_ordered_dict_repr" | "_ordered_dict_view",
+        ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
@@ -754,6 +758,9 @@ pub(super) fn call(
     }
     if name == "_collections._count_elements" {
         return count_elements(ctx, args, kwargs);
+    }
+    if let Some(operation) = name.strip_prefix("_collections._ordered_dict_") {
+        return ordered_dict::call(ctx, operation, args, kwargs);
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);

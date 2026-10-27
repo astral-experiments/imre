@@ -281,9 +281,13 @@ impl Context {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
             }
             Value::Dict(_) | Value::DefaultDict { .. } => {
-                return Ok(self.dict_iterator(id, DictViewKind::Keys));
+                return Ok(self.dict_iterator(id, DictViewKind::Keys, false));
             }
-            Value::DictView { dict, kind } => return Ok(self.dict_iterator(dict, kind)),
+            Value::DictView {
+                dict,
+                kind,
+                ordered,
+            } => return Ok(self.dict_iterator(dict, kind, ordered)),
             Value::MappingView { mapping, kind } => {
                 return Ok(self.alloc(Value::MappingViewIterator {
                     mapping: Some(mapping),
@@ -292,7 +296,6 @@ impl Context {
                     running: false,
                 }));
             }
-
             Value::Instance { class, .. }
                 if let Some(slot) = self.class_attr(class, "__iter__") =>
             {
@@ -330,12 +333,16 @@ impl Context {
     }
 
     /// Start a cursor at the first entry without copying keys or values.
-    fn dict_iterator(&mut self, dict: Id, kind: DictViewKind) -> Id {
-        let size = self
-            .dict_entries(dict)
-            .expect("dictionary iterator source")
-            .len();
-        self.alloc(Value::DictIterator(DictIterator::new(dict, kind, size)))
+    fn dict_iterator(&mut self, dict: Id, kind: DictViewKind, ordered: bool) -> Id {
+        let storage = self.dict_storage(dict).expect("dictionary iterator source");
+        let entries = self.stored_entries(storage);
+        let iter = DictIterator::new(
+            dict,
+            kind,
+            entries.len(),
+            ordered.then(|| entries.order_state()),
+        );
+        self.alloc(Value::DictIterator(iter))
     }
 
     /// Compiled loops test for an item before consuming it. User code must advance only once.

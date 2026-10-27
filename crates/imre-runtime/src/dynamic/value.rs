@@ -506,6 +506,7 @@ pub(super) enum Value {
     DictView {
         dict: Id,
         kind: DictViewKind,
+        ordered: bool,
     },
     DictIterator(DictIterator),
     DefaultDict {
@@ -969,17 +970,24 @@ pub(super) struct DictIterator {
     expected_len: Option<usize>,
     position: usize,
     remaining: usize,
+    order_state: Option<(usize, usize)>,
 }
 
 impl DictIterator {
     /// Capture the original size while keeping the entries live.
-    pub(super) fn new(dict: Id, kind: DictViewKind, size: usize) -> Self {
+    pub(super) fn new(
+        dict: Id,
+        kind: DictViewKind,
+        size: usize,
+        order_state: Option<(usize, usize)>,
+    ) -> Self {
         Self {
             dict: Some(dict),
             kind,
             expected_len: Some(size),
             position: 0,
             remaining: size,
+            order_state,
         }
     }
 
@@ -1001,6 +1009,19 @@ impl DictIterator {
         else {
             unreachable!("dictionary storage");
         };
+        if let Some(order) = self.order_state {
+            if self.remaining == 0 {
+                self.dict = None;
+                return Ok(None);
+            }
+            if order != entries.order_state() || self.expected_len != Some(entries.len()) {
+                self.dict = None;
+                return Err(Error::new(
+                    "RuntimeError",
+                    "OrderedDict mutated during iteration",
+                ));
+            }
+        }
         if self.expected_len != Some(entries.len()) {
             self.expected_len = None;
             return Err(Error::new(
