@@ -9,6 +9,7 @@ use crate::StrOwner;
 mod arguments;
 mod imports;
 pub(super) use imports::imre_exception_field_repr;
+pub(crate) use imports::keyword_suggestion;
 mod tree;
 pub(super) use tree::append_tree_entries;
 

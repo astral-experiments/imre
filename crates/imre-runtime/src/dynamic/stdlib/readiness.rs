@@ -225,7 +225,7 @@ pub(super) fn call(
             let fd = reg_fd(ctx, &handle, obj)?;
             let (fd, fileobj) = if name == "modify" {
                 let (fd, key) = registered(ctx, &handle.borrow(), obj, fd)?;
-                if key.interests == bits && ctx.equal(key.data, data) {
+                if key.interests == bits && ctx.checked_equal(key.data, data)? {
                     return Ok(key.key);
                 }
                 (fd, key.fileobj)

@@ -82,6 +82,7 @@ const FUNCTIONS: &[&str] = &[
     "sorted",
     "ord",
     "chr",
+    "divmod",
     "callable",
     "all",
     "any",
@@ -154,6 +155,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
     match name {
+        "float.__new__" => Some("float"),
         "int.__new__" => Some("int"),
         "str.__new__" => Some("str"),
         _ => None,
@@ -270,7 +272,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
-        Value::List(_) if matches!(attr, "append" | "extend" | "insert" | "pop" | "sort") => "list",
+        Value::List(_)
+            if matches!(
+                attr,
+                "append" | "clear" | "extend" | "insert" | "pop" | "reverse" | "sort"
+            ) =>
+        {
+            "list"
+        }
         Value::Set { frozen: false, .. }
             if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
         {
@@ -324,6 +333,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
+        Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
@@ -626,7 +636,7 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
-            "map" => ctx.map_method(method, args, kwargs),
+            "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -748,6 +758,27 @@ pub(super) fn call(
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
         }
+        "divmod" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("divmod() takes no keyword arguments"));
+            }
+            let [a, b] = args else {
+                return Err(type_error(format!(
+                    "divmod expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            let (Ok(left), Ok(right)) = (ctx.as_int(*a), ctx.as_int(*b)) else {
+                return Err(type_error(format!(
+                    "unsupported operand type(s) for divmod(): '{}' and '{}'",
+                    ctx.type_name(*a),
+                    ctx.type_name(*b)
+                )));
+            };
+            let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
+            let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
+            Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
+        }
         "chr" | "ord" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!("{name}() takes no keyword arguments")));
@@ -833,7 +864,7 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let object = args[0];
-            if let Value::List(items) = ctx.heap.get(object) {
+            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::Iterator {
                     sequence: Some(object),
                     offset: items.len(),

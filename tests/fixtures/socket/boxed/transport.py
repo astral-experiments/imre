@@ -25,6 +25,7 @@ def run():
     assert (family, kind, protocol) == (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     assert canonical == "" and addr == ("127.0.0.1", 0)
     with socket.socket(family, kind, protocol) as listener, socket.socket() as client:
+        assert type(listener) is type(client) is socket.socket
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind(addr)
         listener.listen(128)

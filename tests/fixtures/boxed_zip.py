@@ -21,3 +21,11 @@ def current():
         except ValueError as error:
             print(str(error))
         print(seen)
+
+    nested = [42]
+    for _ in range(6000):
+        nested = zip(nested)
+    for row in nested:
+        print("nested row")
+        break
+    print(list(nested))

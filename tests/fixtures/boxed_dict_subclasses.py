@@ -161,6 +161,33 @@ def current():
     except ValueError:
         print(copied, list(pairs))
 
+    class Probed:
+        def __init__(self, fail=False):
+            self.lookups = 0
+            self.fail = fail
+
+        @property
+        def keys(self):
+            self.lookups += 1
+            if self.lookups == 1:
+                return lambda: ["first"]
+            if self.fail:
+                raise ValueError("second lookup")
+            return lambda: ["second"]
+
+        def __getitem__(self, key):
+            return key
+
+    probed = Probed()
+    print(dict(probed), probed.lookups)
+    probed = Probed()
+    print({**probed}, probed.lookups)
+    try:
+        received = {"kept": 1}
+        received.update(Probed(True))
+    except ValueError as error:
+        print(error.args, received)
+
     class FailsLater(Filtered):
         def keys(self):
             return ("visits", "absent")
@@ -170,6 +197,25 @@ def current():
         received.update(FailsLater(data))
     except KeyError as error:
         print(received, error.args)
+
+    class MutableKeys:
+        def __init__(self, as_view):
+            self.names = [("first", 1), ("before", 2)]
+            self.by_index = {0: self.names[0], 1: self.names[1]}
+            self.as_view = as_view
+
+        def keys(self):
+            return self.by_index.values() if self.as_view else self.names
+
+        def __getitem__(self, key):
+            if key[0] == "first":
+                self.names[1] = ("after", 3)
+                self.by_index[1] = self.names[1]
+                for _ in range(6000):
+                    []
+            return key[1]
+
+    print(dict(MutableKeys(False)), dict(MutableKeys(True)))
 
     def only_view():
         owner = Data(held=["live"])

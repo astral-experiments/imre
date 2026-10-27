@@ -100,9 +100,10 @@ impl Context {
         }
     }
 
-    /// Apply the map iterator slots to their validated receiver.
-    pub(super) fn map_method(
+    /// Apply the shared iterator slots to a receiver of the defining builtin type.
+    pub(super) fn iterator_method(
         &mut self,
+        owner: &str,
         name: &str,
         args: &[Id],
         kwargs: &[(String, Id)],
@@ -110,14 +111,17 @@ impl Context {
         let Some((&cursor, rest)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
-                format!("descriptor '{name}' of 'map' object needs an argument"),
+                format!("descriptor '{name}' of '{owner}' object needs an argument"),
             ));
         };
-        if !matches!(self.heap.get(cursor), Value::Map { .. }) {
+        if !matches!(
+            (owner, self.heap.get(cursor)),
+            ("map", Value::Map { .. }) | ("enumerate", Value::Enumerate { .. })
+        ) {
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '{name}' requires a 'map' object but received a '{}'",
+                    "descriptor '{name}' requires a '{owner}' object but received a '{}'",
                     self.type_name(cursor)
                 ),
             ));
@@ -139,7 +143,7 @@ impl Context {
             "__next__" => self
                 .next_result(cursor)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
-            _ => unreachable!("map iterator slot"),
+            _ => unreachable!("iterator slot"),
         }
     }
 }
