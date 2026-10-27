@@ -1014,12 +1014,12 @@ mod tests {
             context: Some(std::rc::Rc::new(HashMap::from([(key, value)]))),
         });
         let location = Location {
-            file: "test",
+            file: "test".into(),
             line: 1,
             span: None,
         };
         heap.next_collection = 0;
-        heap.statement(std::iter::empty(), &[view], location, NONE);
+        heap.statement(std::iter::empty(), &[view], location.clone(), NONE);
         assert!(matches!(heap.get(key), Value::ContextVar { .. }));
         assert!(matches!(heap.get(value), Value::List(_)));
 
