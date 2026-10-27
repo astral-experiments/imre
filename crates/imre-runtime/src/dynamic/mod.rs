@@ -101,6 +101,7 @@ pub(crate) struct Context {
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
+    deque_comparison_repeats: usize,
     pending: Option<Error>,
     // Fallback for targets whose native stack bounds cannot be queried.
     slot_depth: usize,

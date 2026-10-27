@@ -444,6 +444,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         builtins: HashMap::new(),
         sources: HashMap::new(),
         call_depth: 0,
+        deque_comparison_repeats: 0,
         pending: None,
         slot_depth: 0,
     };
