@@ -83,7 +83,7 @@ pub(super) struct Error {
     pub class: Option<Id>,
     pub message: String,
     pub args: Option<Id>,
-    pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
+    pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
     pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
     pub import: Option<crate::shared::Shared<ImportFields>>,
@@ -140,6 +140,7 @@ impl Error {
         self.args
             .into_iter()
             .chain(self.class)
+            .chain(self.os_args.iter().flat_map(|args| args.roots()))
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
                     .frames
@@ -348,11 +349,23 @@ impl Context {
 
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
-        let os_args = error.os_args();
+        let os_args = match error
+            .os_args()
+            .map(|args| {
+                super::os_error::Args::new(super::os_error::Args::Native {
+                    source: args,
+                    fields: std::cell::Cell::new(None),
+                })
+            })
+            .transpose()
+        {
+            Ok(args) => args,
+            Err(error) => return error,
+        };
         let (kind, message) = error.into_parts();
         match message {
             Ok(message) => Self {
-                os_args: os_args.map(Box::new),
+                os_args,
                 ..Self::new(kind, message.to_string())
             },
             Err(_) => Self::new("MemoryError", String::new()),
@@ -1301,6 +1314,16 @@ impl Heap {
         }
         self.keep(value);
     }
+    /// Reserve temporary roots before taking a snapshot that may outlive a Python callback.
+    pub(super) fn reserve_temporaries(&mut self, additional: usize) -> Result<()> {
+        self.frames
+            .last_mut()
+            .unwrap()
+            .live
+            .try_reserve(additional)
+            .map_err(|_| Error::new("MemoryError", ""))
+    }
+
     pub fn keep(&mut self, value: Id) {
         self.frames.last_mut().unwrap().live.push(value);
     }

@@ -367,6 +367,7 @@ impl Context {
                             | "object.__init__"
                             | "BaseException.__init__"
                             | "ImportError.__init__"
+                            | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "module.__init__"
                             | "int.to_bytes"
@@ -888,9 +889,7 @@ impl Context {
         if let Some(args) = error.args {
             return args;
         }
-        let fields = if let Some(os) = error.os_args {
-            vec![self.int(os.errno), self.text(os.description)]
-        } else if error.message.is_empty() {
+        let fields = if error.message.is_empty() {
             Vec::new()
         } else {
             vec![
@@ -1069,6 +1068,9 @@ impl Context {
         }
         if let Some(value) = super::typing::attribute(self, obj, name) {
             return value;
+        }
+        if let Some(value) = self.os_attribute(obj, name)? {
+            return Ok(value);
         }
         match self.heap.get(obj).clone() {
             Value::Complex(z) if matches!(name, "real" | "imag") => {
@@ -1417,20 +1419,6 @@ impl Context {
             Value::TextFile(file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
             }
-            Value::Raised(Error {
-                os_args: Some(args),
-                ..
-            }) if name != "args" => match name {
-                "errno" => return Ok(self.int(args.errno)),
-                "strerror" => return Ok(self.text(args.description)),
-                "filename" | "filename2" => {
-                    if let Some([first, second]) = args.text_paths {
-                        let path = if name == "filename" { first } else { second };
-                        return Ok(path.map_or(NONE, |path| self.text(path)));
-                    }
-                }
-                _ => {}
-            },
             Value::Raised(error)
                 if let Some(index) = builtins::IMPORT_KEYWORDS
                     .iter()
@@ -1837,6 +1825,9 @@ impl Context {
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, None);
         }
+        if self.update_os_field(obj, name, None)? {
+            return Ok(());
+        }
         if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
             return Err(Error::new("TypeError", "cannot delete __dict__"));
         }
@@ -2157,6 +2148,9 @@ impl Context {
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, Some(value));
         }
+        if self.update_os_field(obj, name, Some(value))? {
+            return Ok(());
+        }
         if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
             if self.dict_storage(value).is_none() {
                 return Err(Error::new(
@@ -2429,6 +2423,7 @@ impl Context {
                         name.as_str(),
                         "BaseException.__init__"
                             | "ImportError.__init__"
+                            | "OSError.__init__"
                             | "StopIteration.__init__"
                     )
                     || !name.contains('.')

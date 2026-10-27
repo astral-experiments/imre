@@ -15,6 +15,7 @@ mod iterators;
 mod mapping_abc;
 mod module_type;
 mod operators;
+mod os_error;
 mod property;
 mod range;
 mod slice;
