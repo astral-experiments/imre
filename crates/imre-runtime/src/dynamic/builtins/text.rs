@@ -89,7 +89,7 @@ pub(super) fn construct(
             {
                 return ctx.call(repr, Vec::new(), Vec::new());
             }
-            Ok(ctx.text(ctx.repr(args[0])))
+            Ok(ctx.text(ctx.checked_format(args[0], true)?))
         }
         "int" => {
             if kwargs.iter().any(|(k, _)| k != "base") {
@@ -165,7 +165,7 @@ pub(super) fn construct(
                 }
                 return Ok(result);
             }
-            Ok(ctx.text(ctx.display(value)))
+            Ok(ctx.text(ctx.checked_format(value, false)?))
         }
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
@@ -1055,7 +1055,7 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::List(values)))
         }
         "splitlines" => {
-            let [keep] = bind(name, args, kwargs, ["keepends"])?;
+            let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
             let keep = ctx.optional_truth(keep, false)?;
             let mut values = Vec::new();
             split_lines(&source, keep, |field| values.push(ctx.text(field)));
