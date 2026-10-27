@@ -1,3 +1,4 @@
+use super::wrapper_descriptor::Wrapper;
 use super::*;
 
 pub(super) enum MappingOperation {
@@ -242,7 +243,7 @@ impl Context {
                 | Value::Set { .. }
                 | Value::Str(_)
                 | Value::Bytes(_)
-                | Value::Range { .. }
+                | Value::Range(_)
                 | Value::Iterator { .. }
                 | Value::DictIterator(_)
         ) {
@@ -339,9 +340,9 @@ impl Context {
             return Ok(callable);
         }
         if let Value::Native(symbol) = self.heap.get(value)
-            && let Some(slot) = super::thread_local::wrapper_name(symbol)
+            && let Some(slot) = Wrapper::lookup(symbol)
         {
-            return super::thread_local::bind_wrapper(self, value, slot, receiver);
+            return slot.bind(self, value, receiver);
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
@@ -551,7 +552,8 @@ impl Context {
             | Value::List(_)
             | Value::Dict(_)
             | Value::Set { .. }
-            | Value::Range { .. }
+            | Value::Range(_)
+            | Value::RangeIterator(_)
             | Value::Slice(_)
             | Value::Enumerate { .. }
             | Value::Iterator { .. }
@@ -588,15 +590,11 @@ impl Context {
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
-                Value::Native(symbol) if super::thread_local::wrapper_name(symbol).is_some() => {
-                    "method-wrapper"
-                }
+                Value::Native(symbol) if Wrapper::lookup(symbol).is_some() => "method-wrapper",
                 Value::Native(_) => "builtin_function_or_method",
                 _ => return None,
             },
-            Value::Native(name) if super::thread_local::wrapper_name(name).is_some() => {
-                "wrapper_descriptor"
-            }
+            Value::Native(name) if Wrapper::lookup(name).is_some() => "wrapper_descriptor",
             Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
                 if name == "typing.Any" {
                     return Some("typing._AnyMeta");
@@ -766,7 +764,7 @@ impl Context {
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | ("slice", Value::Slice(_))
-            | ("range", Value::Range { .. })
+            | ("range", Value::Range(_))
             | ("map", Value::Map { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
@@ -1235,23 +1233,21 @@ impl Context {
             Value::Method {
                 callable, receiver, ..
             } if let Value::Native(ref symbol) = *self.heap.get(callable)
-                && let Some(slot) = super::thread_local::wrapper_name(symbol) =>
+                && let Some(slot) = Wrapper::lookup(symbol) =>
             {
                 if name == "__self__" {
                     return Ok(receiver);
                 }
-                if let Some(value) = super::thread_local::wrapper_attribute(self, slot, name) {
+                if let Some(value) = slot.attribute(self, name) {
                     return Ok(value);
                 }
             }
-            Value::Native(ref symbol)
-                if let Some(slot) = super::thread_local::wrapper_name(symbol) =>
-            {
-                if let Some(value) = super::thread_local::wrapper_attribute(self, slot, name) {
+            Value::Native(ref symbol) if let Some(slot) = Wrapper::lookup(symbol) => {
+                if let Some(value) = slot.attribute(self, name) {
                     return Ok(value);
                 }
                 if name == "__get__" {
-                    let callable = self.builtin("_thread._local.wrapper_get");
+                    let callable = self.builtin("wrapper_descriptor.__get__");
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
@@ -1575,6 +1571,13 @@ impl Context {
                 return Ok(self.builtin("operator.itemgetter.__reduce__"));
             }
             Value::Native(class)
+                if (class == "range" && matches!(name, "__iter__" | "__reversed__"))
+                    || (matches!(class.as_str(), "range_iterator" | "longrange_iterator")
+                        && matches!(name, "__iter__" | "__next__" | "__length_hint__")) =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
+            Value::Native(class)
                 if class == "enumerate" && matches!(name, "__iter__" | "__next__") =>
             {
                 return Ok(self.builtin(&format!("enumerate.{name}")));
@@ -1760,10 +1763,8 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
-        if name == "cell_contents"
-            && let Value::Cell(contents) = self.heap.get_mut(obj)
-        {
-            *contents = None;
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
+            self.heap.replace_cell(obj, None);
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
@@ -2077,10 +2078,8 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents"
-            && let Value::Cell(contents) = self.heap.get_mut(obj)
-        {
-            *contents = Some(value);
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
+            self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
@@ -2378,6 +2377,9 @@ impl Context {
                 }
                 Ok(result)
             }
+            Value::Native(name) if name == "wrapper_descriptor.__get__" => {
+                wrapper_descriptor::descriptor_get(self, &args, &kwargs)
+            }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
@@ -2405,6 +2407,8 @@ impl Context {
                                 | "bytes"
                                 | "bytearray"
                                 | "range"
+                                | "range_iterator"
+                                | "longrange_iterator"
                                 | "module"
                                 | "slice"
                                 | "function"
@@ -2512,18 +2516,35 @@ impl Context {
                 });
                 Ok(result)
             }
-            Value::Class { name, scope, .. } => {
+            Value::Class {
+                name,
+                scope,
+                ancestors,
+                ..
+            } => {
                 let (mut args, mut kwargs) = (args, kwargs);
-                if name == "Decimal" && self.classes.get("decimal.Decimal") == Some(&callable) {
+                if let Some(&decimal) = self.classes.get("decimal.Decimal")
+                    && (callable == decimal
+                        || (ancestors.contains(&decimal)
+                            && self.class_attr(callable, "__new__").is_none()
+                            && self.class_attr(callable, "__init__")
+                                == self.class_attr(decimal, "__init__")))
+                {
                     let value = match (&mut args[..], &mut kwargs[..]) {
                         ([value], []) => Some(value),
                         ([], [(key, value)]) if key == "value" => Some(value),
                         _ => None,
                     };
                     if let Some(value) = value {
-                        if matches!(self.heap.get(*value), Value::Instance { class, .. } if *class == callable)
+                        if let Value::Instance { class, fields, .. } = self.heap.get(*value)
+                            && self.direct_subclass(*class, decimal)
                         {
-                            return Ok(*value);
+                            if *class == decimal && callable == decimal {
+                                return Ok(*value);
+                            }
+                            if let Some(&text) = fields.get("_text") {
+                                *value = text;
+                            }
                         }
                         if let Some(text) = self.string_storage(*value) {
                             *value = text;

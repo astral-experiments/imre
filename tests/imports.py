@@ -16,6 +16,10 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "type_checking_only_export": ({
+        "main.py": "from helper import token\n",
+        "helper.py": "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    token = 3\n",
+    }, 'has no static binding "token"'),
     "weakref_of_imported_value_struct": ({
         "records.py": "from imre import struct as layout\n@layout\nclass Point:\n    x: float\n",
         "main.py": "from records import Point\nfrom weakref import ref\nref(Point(1.0))\n",
@@ -134,6 +138,18 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "type_checking_runtime_export": {
+        "main.py": (
+            "import helper\nfrom helper import token as selected\n"
+            "print(selected is helper.token, selected[0])\n"
+        ),
+        "helper.py": (
+            "import typing as t\n"
+            "def initialize():\n    print('initialized')\n    return [41]\n"
+            "if t.TYPE_CHECKING:\n    from unavailable_at_runtime import token\n"
+            "else:\n    token = initialize()\n"
+        ),
+    },
     "weak_method_export": {
         "main.py": (
             "from weakref import WeakMethod\n"

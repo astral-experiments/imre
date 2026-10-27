@@ -44,6 +44,23 @@ class Comparable:
         return comparison_result
 
 
+def decode_allocation():
+    # Match the boxed-call allocator fixture's 113-word request.
+    padding = 113 * 8 - len(b"#\nVALUE = 7\n")
+    source = bytearray(b"#" + b"x" * padding + b"\nVALUE = 7\n")
+    marker = {}
+    marker[0] = 1
+    try:
+        compile(source, "settings.py", "exec")
+    except MemoryError as error:
+        print("caught", error.args)
+    else:
+        print("compiled")
+    config = {}
+    exec(compile(source, "settings.py", "exec"), config)
+    print(config["VALUE"])
+
+
 def current():
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}

@@ -249,7 +249,8 @@ impl Context {
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Slice(_) => "slice",
-            Value::Range { .. } => "range",
+            Value::Range(_) => "range",
+            Value::RangeIterator(iter) => iter.kind,
             Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
             Value::DictIterator(iter) => match iter.kind {
@@ -435,11 +436,8 @@ pub(super) enum Value {
     },
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
-    Range {
-        start: i64,
-        stop: i64,
-        step: i64,
-    },
+    Range(super::range::Range),
+    RangeIterator(super::range::Cursor),
     Str(String),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
@@ -739,7 +737,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
-            Self::Range { .. } => {}
+            Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
@@ -1145,12 +1143,29 @@ impl Heap {
         })
     }
 
+    pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
+        let Value::Cell(contents) = self.get_mut(cell) else {
+            unreachable!("compiled closure cell")
+        };
+        let previous = std::mem::replace(contents, value);
+        if let Some(old) = previous
+            && Some(old) != value
+        {
+            self.weak_edge_removed(old);
+        }
+        previous
+    }
+
     pub fn weak_edge_removed(&mut self, value: Id) {
         if self.has_weak_values
-            && (self.weak_edge(value) || matches!(self.get(value), Value::Function { .. }))
+            && (self.weak_edge(value)
+                || matches!(
+                    self.get(value),
+                    Value::Function { .. } | Value::Cell(Some(_))
+                ))
             && !self.bound_in_active_frame(value)
         {
-            // A dropped function may have held the last strong path through its captured scope.
+            // A function or a cell may own the last strong path to a captured value.
             self.weak_edge_removed = true;
         }
     }

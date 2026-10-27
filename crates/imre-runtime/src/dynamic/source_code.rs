@@ -271,6 +271,7 @@ impl Context {
         use crate::objects::SourceDecodeError::*;
         let null = matches!(error, Null);
         let (message, range) = match error {
+            Allocation => return Error::new("MemoryError", ""),
             Null => (
                 "source code string cannot contain null bytes".to_owned(),
                 None,
@@ -582,7 +583,7 @@ impl Context {
                     | Value::NamedTuple { .. }
                     | Value::Str(_)
                     | Value::Bytes(_)
-                    | Value::Range { .. }
+                    | Value::Range(_)
             )
             && self.slot(locals, "__getitem__").is_none()
         {
@@ -850,7 +851,7 @@ impl Context {
             }
             Value::Str(_) => "string indices must be integers, not 'str'",
             Value::Bytes(_) => "byte indices must be integers or slices, not str",
-            Value::Range { .. } => "range indices must be integers or slices, not str",
+            Value::Range(_) => "range indices must be integers or slices, not str",
             _ => return self.get_item(locals, key),
         };
         Err(Error::new("TypeError", indices))
