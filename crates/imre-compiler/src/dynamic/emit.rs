@@ -22,6 +22,7 @@ declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr)
 declare void @imre_dyn_discard_truth(ptr, i64)
+declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
@@ -410,8 +411,8 @@ impl Function<'_, '_> {
         self.value(&format!("icmp eq i64 {boolean}, 2"))
     }
 
-    /// Save the caller's earlier operands before evaluating a consumed truth test.
-    fn truth_mark(&mut self) -> String {
+    /// Save the caller's earlier operands before an expression can release a writer.
+    fn temporary_mark(&mut self) -> String {
         self.value("call i64 @imre_dyn_truth_mark(ptr %ctx)")
     }
 
@@ -424,7 +425,7 @@ impl Function<'_, '_> {
 
     /// A condition leaves only its truth value live in the selected branch.
     fn truth_expr(&mut self, expr: &ast::Expr) -> String {
-        let mark = self.truth_mark();
+        let mark = self.temporary_mark();
         let value = self.expr(expr);
         let condition = self.truth(&value);
         self.discard_truth(&mark);
