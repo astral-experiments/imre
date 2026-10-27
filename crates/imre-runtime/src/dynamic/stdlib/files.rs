@@ -304,7 +304,8 @@ pub(super) fn call(
             "file.readline" => "readline of closed file",
             "file.readinto" => "readinto of closed file",
             "file.seek" => "seek of closed file",
-            "file.__enter__" | "file.flush" => "I/O operation on closed file.",
+            "file.__enter__" => "I/O operation on closed file.",
+            "file.flush" => "flush of closed file",
             _ => "I/O operation on closed file",
         };
         Error::new("ValueError", message)
