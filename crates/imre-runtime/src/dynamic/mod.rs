@@ -1014,6 +1014,7 @@ impl Context {
                 self.modules.insert("os.path".to_owned(), path);
             }
             "io" => stdlib::io::install(self, scope),
+            "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => {
                 self.module("io")?;
                 for name in ["BytesIO", "StringIO"] {
