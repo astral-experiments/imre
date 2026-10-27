@@ -190,7 +190,13 @@ impl Context {
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Slice(_) => "slice",
             Value::Range { .. } => "range",
+            Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
+            Value::DictIterator(iter) => match iter.kind {
+                DictViewKind::Keys => "dict_keyiterator",
+                DictViewKind::Values => "dict_valueiterator",
+                DictViewKind::Items => "dict_itemiterator",
+            },
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
@@ -204,6 +210,7 @@ impl Context {
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
+            Value::ThreadLocal(_) => super::thread_local::CLASS,
             Value::FormatIterator { kind, .. } => match kind {
                 FormatKind::Markup => "formatteriterator",
                 FormatKind::Field => "fieldnameiterator",
@@ -351,12 +358,12 @@ pub(super) enum Value {
         frozen: bool,
     },
     Dict(super::dictionary::Entries),
-    DictionaryIterator(super::dictionary::Cursor),
     MappingProxy(Id),
     DictView {
         dict: Id,
         kind: DictViewKind,
     },
+    DictIterator(DictIterator),
     DefaultDict {
         factory: Id,
         entries: super::dictionary::Entries,
@@ -403,6 +410,7 @@ pub(super) enum Value {
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
+    ThreadLocal(super::thread_local::Dictionaries),
     Raised(Error),
     Traceback {
         frame: Id,
@@ -443,6 +451,10 @@ pub(super) enum Value {
     },
     Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
+    Enumerate {
+        input: Id,
+        next_index: crate::Int,
+    },
     Count {
         current: Id,
         step: Id,
@@ -514,8 +526,10 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
+            Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::Zip {
@@ -529,7 +543,6 @@ impl Value {
                 visit.push(*source);
                 visit.extend(peeked);
             }
-            Self::DictionaryIterator(cursor) => visit.extend(cursor.owner),
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
@@ -565,6 +578,7 @@ impl Value {
             Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
+            Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
@@ -701,6 +715,73 @@ pub(super) enum DictViewKind {
     Keys,
     Values,
     Items,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DictIterator {
+    dict: Option<Id>,
+    kind: DictViewKind,
+    expected_len: Option<usize>,
+    position: usize,
+    remaining: usize,
+}
+
+impl DictIterator {
+    /// Capture the original size while keeping the entries live.
+    pub(super) fn new(dict: Id, kind: DictViewKind, size: usize) -> Self {
+        Self {
+            dict: Some(dict),
+            kind,
+            expected_len: Some(size),
+            position: 0,
+            remaining: size,
+        }
+    }
+
+    /// An invalid or exhausted iterator has no remaining length hint.
+    pub(super) fn length_hint(&self, ctx: &Context) -> usize {
+        self.dict
+            .and_then(|dict| ctx.dict_entries(dict))
+            .filter(|entries| Some(entries.len()) == self.expected_len)
+            .map_or(0, |_| self.remaining)
+    }
+
+    /// Check the live size before each pull, including the one that reaches exhaustion.
+    pub(super) fn next(&mut self, ctx: &mut Context) -> Result<Option<Id>> {
+        let Some(dict) = self.dict else {
+            return Ok(None);
+        };
+        let storage = ctx.dict_storage(dict).expect("dictionary iterator source");
+        let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get(storage)
+        else {
+            unreachable!("dictionary storage");
+        };
+        if self.expected_len != Some(entries.len()) {
+            self.expected_len = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "dictionary changed size during iteration",
+            ));
+        }
+        let Some((position, key, value)) = entries.at(self.position) else {
+            self.dict = None;
+            return Ok(None);
+        };
+        if self.remaining == 0 {
+            self.dict = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "dictionary keys changed during iteration",
+            ));
+        }
+        self.position = position + 1;
+        self.remaining -= 1;
+        Ok(Some(match self.kind {
+            DictViewKind::Keys => key,
+            DictViewKind::Values => value,
+            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
+        }))
+    }
 }
 
 /// Native frames hold temporaries until the next Python statement. A caller's

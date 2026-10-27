@@ -52,6 +52,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
+        "inspect" => Some(("inspect.py", include_str!("../stdlib/inspect.py"))),
         "logging" => Some((
             "logging/__init__.py",
             concat!(
@@ -185,6 +186,8 @@ pub(crate) enum IntrinsicModule {
     Gzip,
     UnicodeData,
     WeakRef,
+    Threading,
+    Thread,
     Codecs,
     Socket,
     Hashlib,
@@ -394,6 +397,7 @@ pub(crate) enum Intrinsic {
     Sha256,
     CodecInfoClass,
     UnicodeNormalize { check: bool },
+    ObjectRuntimeExport(&'static str),
     WeakProxy,
     WeakProxyClass { callable: bool },
     CodecLookup,
@@ -610,6 +614,8 @@ impl IntrinsicModule {
             "types" => Some(Self::Types),
             "unicodedata" => Some(Self::UnicodeData),
             "weakref" => Some(Self::WeakRef),
+            "threading" => Some(Self::Threading),
+            "_thread" => Some(Self::Thread),
             "codecs" => Some(Self::Codecs),
             "socket" => Some(Self::Socket),
             "hashlib" => Some(Self::Hashlib),
@@ -941,6 +947,9 @@ impl IntrinsicModule {
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Threading, "local") | (Self::Thread, "_local") => {
+                Intrinsic::ObjectRuntimeExport("_thread._local")
+            }
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
@@ -2652,6 +2661,10 @@ impl<'a> Loader<'a> {
                         };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        self.needs_object_imports |= matches!(
+                            binding,
+                            Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_))
+                        );
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)
                         {

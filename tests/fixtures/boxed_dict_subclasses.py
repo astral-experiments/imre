@@ -62,6 +62,19 @@ def current():
         break
     print(length_hint(pairs), list(pairs), length_hint(pairs))
 
+    live = {"first": 1, "second": 2}
+    live_items = iter(live.items())
+    live_values = iter(live.values())
+    print(next(live_items), next(live_values))
+    live["second"] = 99
+    print(next(live_items), next(live_values))
+    live["third"] = 3
+    for cursor in (live_items, live_values):
+        try:
+            next(cursor)
+        except RuntimeError as error:
+            print(error, length_hint(cursor))
+
     def replace_and_append(value):
         if value == 1:
             sequence[1] = 3
@@ -143,6 +156,16 @@ def current():
         print(copied)
 
     from operator import delitem
+
+    source = {"first": 1}
+    cursor = iter(source)
+    key = next(cursor)
+    delitem(source, key)
+    source[key] = 2
+    try:
+        next(cursor)
+    except RuntimeError as error:
+        print(error, length_hint(cursor))
 
     source = {"a": 1, "b": 2, "c": 3}
     cursor = dict.__iter__(source)

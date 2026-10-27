@@ -4,8 +4,7 @@ mod keys;
 
 use std::ops::{Deref, DerefMut};
 
-use super::value::DictViewKind;
-use super::{Context, Error, Id, Result, Value};
+use super::Id;
 
 #[derive(Clone)]
 pub(super) struct Entries {
@@ -107,7 +106,8 @@ impl Entries {
         self.values.remove(index)
     }
 
-    fn at(&self, position: usize) -> Option<(usize, Id, Id)> {
+    /// Return the next live entry at or beyond the iterator's insertion position.
+    pub(super) fn at(&self, position: usize) -> Option<(usize, Id, Id)> {
         let (index, position) = if let Some(positions) = &self.positions {
             let index = positions.partition_point(|&p| p < position);
             (index, *positions.get(index)?)
@@ -117,92 +117,5 @@ impl Entries {
         self.values
             .get(index)
             .map(|&(key, value)| (position, key, value))
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct Cursor {
-    pub(super) owner: Option<Id>,
-    kind: DictViewKind,
-    size: Option<usize>,
-    position: usize,
-    remaining: usize,
-}
-
-impl Context {
-    pub(super) fn dictionary_iterator(&mut self, owner: Id, kind: DictViewKind) -> Id {
-        let size = self.dict_entries(owner).expect("dictionary owner").len();
-        self.alloc(Value::DictionaryIterator(Cursor {
-            owner: Some(owner),
-            kind,
-            size: Some(size),
-            position: 0,
-            remaining: size,
-        }))
-    }
-
-    pub(super) fn dictionary_entry(&mut self, id: Id) -> Result<Option<(usize, Id, Id)>> {
-        let Value::DictionaryIterator(cursor) = *self.heap.get(id) else {
-            unreachable!("dictionary iterator")
-        };
-        let Some(owner) = cursor.owner else {
-            return Ok(None);
-        };
-        let storage = self.dict_storage(owner).expect("dictionary owner");
-        let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = self.heap.get(storage)
-        else {
-            unreachable!("dictionary storage")
-        };
-        if cursor.size != Some(entries.len()) {
-            let Value::DictionaryIterator(cursor) = self.heap.get_mut(id) else {
-                unreachable!()
-            };
-            cursor.size = None;
-            return Err(Error::new(
-                "RuntimeError",
-                "dictionary changed size during iteration",
-            ));
-        }
-        let entry = entries.at(cursor.position);
-        if entry.is_some() && cursor.remaining != 0 {
-            return Ok(entry);
-        }
-        let Value::DictionaryIterator(cursor) = self.heap.get_mut(id) else {
-            unreachable!()
-        };
-        cursor.owner = None;
-        if entry.is_some() {
-            return Err(Error::new(
-                "RuntimeError",
-                "dictionary keys changed during iteration",
-            ));
-        }
-        Ok(None)
-    }
-
-    pub(super) fn next_dictionary_item(&mut self, id: Id) -> Result<Option<Id>> {
-        let Some((position, key, value)) = self.dictionary_entry(id)? else {
-            return Ok(None);
-        };
-        let Value::DictionaryIterator(cursor) = self.heap.get_mut(id) else {
-            unreachable!()
-        };
-        cursor.position = position + 1;
-        cursor.remaining -= 1;
-        Ok(Some(match cursor.kind {
-            DictViewKind::Keys => key,
-            DictViewKind::Values => value,
-            DictViewKind::Items => self.alloc(Value::Tuple(vec![key, value])),
-        }))
-    }
-
-    pub(super) fn dictionary_hint(&self, cursor: &Cursor) -> usize {
-        if let Some(owner) = cursor.owner
-            && cursor.size == self.dict_entries(owner).map(<[_]>::len)
-        {
-            cursor.remaining
-        } else {
-            0
-        }
     }
 }

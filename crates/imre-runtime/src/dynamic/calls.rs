@@ -72,7 +72,7 @@ impl Context {
                 | Value::Bytes(_)
                 | Value::Range { .. }
                 | Value::Iterator { .. }
-                | Value::DictionaryIterator(_)
+                | Value::DictIterator(_)
         ) {
             return Ok(false);
         }
@@ -306,15 +306,18 @@ impl Context {
             | Value::Set { .. }
             | Value::Range { .. }
             | Value::Slice(_)
+            | Value::Enumerate { .. }
             | Value::Iterator { .. }
             | Value::Tuple(_)
+            | Value::DictIterator(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
             | Value::Generator { .. }
-            | Value::Module { .. } => self.type_name(obj),
+            | Value::Module { .. }
+            | Value::ThreadLocal(_) => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
@@ -361,6 +364,7 @@ impl Context {
                             | "operator.attrgetter"
                             | "itertools.count"
                             | "itertools.repeat"
+                            | super::thread_local::CLASS
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -462,6 +466,7 @@ impl Context {
             | ("operator.attrgetter", Value::AttrGetter(_))
             | ("itertools.count", Value::Count { .. })
             | ("itertools.repeat", Value::Repeat(_))
+            | (super::thread_local::CLASS, Value::ThreadLocal(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 "urllib.parse.SplitResult",
@@ -520,7 +525,7 @@ impl Context {
             _ => false,
         }
     }
-    fn missing_attribute(&self, obj: Id, name: &str) -> Error {
+    pub(super) fn missing_attribute(&self, obj: Id, name: &str) -> Error {
         Error::new(
             "AttributeError",
             format!("'{}' object has no attribute '{name}'", self.type_name(obj)),
@@ -569,6 +574,9 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.local_attribute(obj, name);
+        }
         if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
             if matches!(name, "name" | "value")
                 && let Some((_, member_name, value)) = self.enum_member(obj)
@@ -712,6 +720,11 @@ impl Context {
             Value::Native(class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
+            Value::Native(class) if class == super::thread_local::CLASS => match name {
+                "__module__" => return Ok(self.text("_thread")),
+                "__name__" | "__qualname__" => return Ok(self.text("_local")),
                 _ => {}
             },
             Value::Native(class)
@@ -976,6 +989,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, None);
+        }
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
@@ -1121,6 +1137,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, Some(value));
+        }
         if name == "__abstractmethods__"
             && let Value::Class { scope, .. } = *self.heap.get(obj)
         {

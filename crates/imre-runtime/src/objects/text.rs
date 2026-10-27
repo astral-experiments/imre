@@ -112,26 +112,29 @@ pub(super) fn ascii_escape(text: &str) -> Result<String> {
     Ok(ascii)
 }
 
+/// Converts a Python character ordinal within the native string domain.
+pub(crate) fn chr_scalar(value: &Int) -> Result<char> {
+    match value.as_small() {
+        Some(0xd800..=0xdfff) => Err(Error::new(
+            Kind::ValueError,
+            "surrogates are outside the native string domain",
+        )),
+        Some(code @ 0..=0x10ffff) => Ok(char::from_u32(code as u32).expect("Unicode scalar")),
+        _ => Err(Error::new(
+            Kind::ValueError,
+            "chr() arg not in range(0x110000)",
+        )),
+    }
+}
+
 /// # Safety
 /// The integer is rooted. Success transfers an immutable one-character string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
     // SAFETY: the caller retains the integer through this conversion.
-    let value = unsafe { Int::borrow(value) }.as_small();
-    let result = match value {
-        Some(0xd800..=0xdfff) => Err(Error::new(
-            Kind::ValueError,
-            "surrogates are outside the native string domain",
-        )),
-        Some(code @ 0..=0x10ffff) => {
-            let c = char::from_u32(code as u32).expect("Unicode scalar");
-            Ok(StrOwner::into_raw(owned_string(c.encode_utf8(&mut [0; 4]))))
-        }
-        _ => Err(Error::new(
-            Kind::ValueError,
-            "chr() arg not in range(0x110000)",
-        )),
-    };
+    let value = unsafe { Int::borrow(value) };
+    let result =
+        chr_scalar(&value).map(|c| StrOwner::into_raw(owned_string(c.encode_utf8(&mut [0; 4]))));
     finish(result, std::ptr::null())
 }
 
@@ -247,6 +250,11 @@ pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
     u32::from(python_alnum(unsafe { &*value }))
 }
 
+/// Returns whether the string contains one or more Python whitespace characters and nothing else.
+pub(crate) fn python_isspace(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(python_whitespace)
+}
+
 /// Tests a nonempty Python string against the shared Unicode whitespace table.
 ///
 /// # Safety
@@ -255,7 +263,7 @@ pub unsafe extern "C" fn imre_str_isalnum(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive and no character reference escapes.
     let value = unsafe { &*value };
-    u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+    u32::from(python_isspace(value))
 }
 
 /// Return true when text contains a cased character and every cased character is uppercase.
