@@ -826,7 +826,7 @@ impl<T: ReleaseEntries + 'static> TableOwner<T> {
         Self(Some(Box::new(table)))
     }
 
-    fn try_new(table: T) -> Result<Self, Error> {
+    pub(super) fn try_new(table: T) -> Result<Self, Error> {
         let table = allocator_api2::boxed::Box::try_new(table).map_err(|_| Error::allocation())?;
         let table = allocator_api2::boxed::Box::into_raw(table);
         // SAFETY: both box types use the global allocator and the same layout for T.

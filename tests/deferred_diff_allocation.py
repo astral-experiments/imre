@@ -23,6 +23,7 @@ def check(args, directory):
     )
     modes = ("len", "copy", "copy-during", "index", "tee-first", "tee-second", "reverse", "project", "repr", "boxed", "union", "frozen")
     cases = [(m, "short", "A", other) for other in ("A", "B") for m in modes]
+    cases.append(("deepcopy-graph", "short", "A", "B"))
     cases.append(("join-owner", "short", "A", "B"))
     cases += [(m, "sparse", "A", "B") for m in ("tee-boundary", "tee-cached", "pack-project", "restore")]
     cases.append(("slice-owner", "short", "A", "B"))
@@ -55,7 +56,8 @@ def check(args, directory):
                 indices = {1, count // 2, count}
             else:
                 indices = range(1, count + 1)
-            retry = expected.replace(b"armed\n", b"armed\nrefused\nMemoryError()\n", 1)
+            refusal = b"refused\n" if argv[0] == "deepcopy-graph" else b"refused\nMemoryError()\n"
+            retry = expected.replace(b"armed\n", b"armed\n" + refusal, 1)
             for at in indices:
                 env["IMRE_DIFF_FAIL_N"] = str(at)
                 got = subprocess.run([exe, *argv], env=env, capture_output=True)
