@@ -55,8 +55,9 @@ impl Context {
             return Ok(value);
         }
         Ok(self.alloc(Value::Instance {
+            namespace: None,
             class,
-            fields: HashMap::new(),
+            fields: Default::default(),
             scalar: Some(value),
             dictionary: None,
             property: None,
@@ -333,7 +334,6 @@ impl Context {
             self.new_int(&args, &[])?
         };
         let Value::Instance {
-            fields,
             scalar: Some(scalar),
             ..
         } = self.heap.get(member)
@@ -343,17 +343,25 @@ impl Context {
                 "enum constructor must return a scalar member",
             ));
         };
-        Ok((member, fields.get("_value_").copied().unwrap_or(*scalar)))
+        Ok((
+            member,
+            self.raw_instance_field(member, "_value_")
+                .unwrap_or(*scalar),
+        ))
     }
 
     pub(super) fn enum_member(&self, member: Id) -> Option<(&str, Id, Id)> {
-        let Value::Instance { class, fields, .. } = self.heap.get(member) else {
+        let Value::Instance { class, .. } = self.heap.get(member) else {
             return None;
         };
         self.enum_values(*class)?;
         let Value::Class { name, .. } = self.heap.get(*class) else {
             unreachable!()
         };
-        Some((name, *fields.get("_name_")?, *fields.get("_value_")?))
+        Some((
+            name,
+            self.raw_instance_field(member, "_name_")?,
+            self.raw_instance_field(member, "_value_")?,
+        ))
     }
 }
