@@ -173,9 +173,32 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
-            "annotate" => {
+            "annotate" | "annotate_deferred" => {
                 if let Some(mapping) = self.scope_name(a, "__annotations__") {
-                    self.put_item(mapping, b, c)?;
+                    if op == "annotate_deferred" {
+                        let thunks = if let Some(dict) = self
+                            .scope_data(a)
+                            .class_namespace
+                            .as_ref()
+                            .and_then(|c| c.annotation_thunks)
+                        {
+                            dict
+                        } else {
+                            let dict = self.dict(Vec::new());
+                            let Value::Scope(scope) = self.heap.get_mut(a) else {
+                                unreachable!()
+                            };
+                            scope
+                                .class_namespace
+                                .get_or_insert_with(Default::default)
+                                .annotation_thunks = Some(dict);
+                            dict
+                        };
+                        self.put_item(thunks, b, c)?;
+                        self.put_item(mapping, b, NONE)?;
+                    } else {
+                        self.put_item(mapping, b, c)?;
+                    }
                 }
                 Ok(NONE)
             }

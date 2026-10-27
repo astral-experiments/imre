@@ -85,11 +85,15 @@ pub(super) fn construct(
         "repr" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            if let Value::Instance { class, .. } = *ctx.heap.get(args[0])
-                && ctx.enum_values(class).is_some()
-                && let Some(repr) = ctx.bound_slot(args[0], "__repr__")?
-            {
-                return ctx.call(repr, Vec::new(), Vec::new());
+            if let Some(repr) = ctx.bound_slot(args[0], "__repr__")? {
+                let result = ctx.call(repr, Vec::new(), Vec::new())?;
+                if ctx.str_value(result).is_err() {
+                    return Err(type_error(format!(
+                        "__repr__ returned non-string (type {})",
+                        ctx.type_name(result)
+                    )));
+                }
+                return Ok(result);
             }
             Ok(ctx.text(ctx.checked_format(args[0], true)?))
         }

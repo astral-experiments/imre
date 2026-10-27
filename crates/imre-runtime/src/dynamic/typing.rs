@@ -601,8 +601,12 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             _ => return None,
         },
         Value::Class { scope, .. } if name == "__bases__" || name == "__mro__" => {
-            let (bases, mro) = ctx.scope_data(*scope).class_lineage?;
-            if name == "__mro__" { mro } else { bases }
+            let class = ctx.scope_data(*scope).class_namespace.as_ref()?;
+            if name == "__mro__" {
+                class.mro
+            } else {
+                class.bases
+            }
         }
         _ => return None,
     };
@@ -901,7 +905,9 @@ impl Context {
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        fields.class_lineage = Some((bases, mro));
+        let namespace = fields.class_namespace.get_or_insert_with(Default::default);
+        namespace.bases = bases;
+        namespace.mro = mro;
         Ok(class)
     }
 

@@ -448,6 +448,7 @@ def report(text):
             "boxed_re_verbose.py",
             "boxed_re_split.py",
             "boxed_datetime.py",
+            "boxed_dataclasses.py",
             "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",

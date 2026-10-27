@@ -35,7 +35,12 @@ impl Context {
             return Ok(());
         }
         let mut names: BTreeSet<String> = self.scope_data(scope).names.keys().cloned().collect();
-        let (bases, _) = self.scope_data(scope).class_lineage.expect("class bases");
+        let bases = self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .expect("class bases")
+            .bases;
         let Value::Tuple(bases) = self.heap.get(bases) else {
             unreachable!()
         };

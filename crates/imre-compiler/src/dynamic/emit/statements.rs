@@ -191,9 +191,31 @@ impl Function<'_, '_> {
                         let value = self.expr(value);
                         self.assign(&v.target, &value);
                     }
-                    if let ast::Expr::Name(name) = &*v.target {
+                    if let ast::Expr::Name(name) = &*v.target
+                        && (!self.class_body || v.simple)
+                    {
                         let key = self.text(name.id.as_str());
-                        self.op("annotate", &[&self.scope.clone(), &key]);
+                        if self.class_body && !self.source.string_annotations {
+                            // Class annotations may refer to a name bound after the class body.
+                            let code = self.output.definition(
+                                self.source,
+                                String::new(),
+                                Body::Expression(&v.annotation),
+                                v.annotation.start(),
+                            );
+                            let name = self.text("__annotate__");
+                            let sig = self.text("{}");
+                            let defaults = self.op("dict", &[]);
+                            let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+                            self.op("annotate_deferred", &[&self.scope.clone(), &key, &thunk]);
+                        } else {
+                            let value = if self.class_body && self.source.string_annotations {
+                                self.text(&crate::frontend::annotation_spelling(&v.annotation))
+                            } else {
+                                "0".into()
+                            };
+                            self.op("annotate", &[&self.scope.clone(), &key, &value]);
+                        }
                     }
                 }
                 ast::Stmt::AugAssign(v) => {
