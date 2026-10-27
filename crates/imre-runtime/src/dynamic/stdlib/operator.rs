@@ -188,7 +188,7 @@ impl Operation {
 }
 
 impl Context {
-    fn length_hint(&mut self, value: Id, default: Option<Id>) -> Result<Id> {
+    pub(in crate::dynamic) fn length_hint(&mut self, value: Id, default: Option<Id>) -> Result<Id> {
         // PyObject_LengthHint parses the default before consulting either protocol.
         let default = if let Some(id) = default {
             self.index_integer(id)?.to_i64().ok_or_else(|| {

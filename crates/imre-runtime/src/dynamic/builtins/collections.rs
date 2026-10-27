@@ -85,6 +85,14 @@ fn sort_values<T: Copy>(
     )
 }
 
+/// Borrows the current list storage between iterator callbacks.
+fn list_items_mut(ctx: &mut Context, receiver: Id) -> Result<&mut Vec<Id>> {
+    match ctx.heap.get_mut(receiver) {
+        Value::List(items) => Ok(items),
+        _ => Err(type_error("expected list")),
+    }
+}
+
 pub(super) fn entries(ctx: &Context, dict: Id) -> Result<&[(Id, Id)]> {
     ctx.dict_entries(dict)
         .ok_or_else(|| type_error("expected a dictionary"))
@@ -450,25 +458,42 @@ pub(super) fn method(
             update(ctx, receiver, args.first().copied(), kwargs)?;
             Ok(NONE)
         }
-        "list.append" | "list.extend" => {
+        "list.append" => {
             arity(name, args, 1, 1)?;
-            let added = if name == "list.extend" {
-                ctx.items(args[0])?
+            list_items_mut(ctx, receiver)?.push(args[0]);
+            Ok(NONE)
+        }
+        "list.extend" => {
+            arity(name, args, 1, 1)?;
+            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(args[0]) {
+                let added = items.clone();
+                list_items_mut(ctx, receiver)?.extend(added);
             } else {
-                vec![args[0]]
-            };
-            let Value::List(items) = ctx.heap.get_mut(receiver) else {
-                return Err(type_error("expected list"));
-            };
-            items.extend(added);
+                let iterator = ctx.iterator(args[0])?;
+                ctx.heap.keep(iterator);
+                let default = ctx.int(8);
+                let hint = ctx.length_hint(args[0], Some(default))?;
+                let hint = ctx.as_integer(hint)? as usize;
+                let items = list_items_mut(ctx, receiver)?;
+                if hint <= isize::MAX as usize - items.len() {
+                    items
+                        .try_reserve(hint)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                }
+                while let Some(item) = ctx.next_item(iterator)? {
+                    let items = list_items_mut(ctx, receiver)?;
+                    items
+                        .try_reserve(1)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    items.push(item);
+                }
+            }
             Ok(NONE)
         }
         "list.insert" => {
             arity(name, args, 2, 2)?;
             let index = ctx.as_integer(args[0])?;
-            let Value::List(items) = ctx.heap.get_mut(receiver) else {
-                return Err(type_error("expected list"));
-            };
+            let items = list_items_mut(ctx, receiver)?;
             let len = items.len() as i64;
             let index = if index < 0 {
                 (len + index).max(0)
