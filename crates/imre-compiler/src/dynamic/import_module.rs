@@ -1,23 +1,64 @@
 use super::{Expr, Visitor, ast, resolve, visitor};
 use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
-/// Include literal import_module targets in the same source registry as import statements.
+pub(super) fn bootstrap_source(name: &str) -> Option<(&'static str, &'static str)> {
+    match name {
+        "importlib.util" => Some((
+            "importlib/util.py",
+            include_str!("../../stdlib/importlib/util.py"),
+        )),
+        "importlib.machinery" => Some((
+            "importlib/machinery.py",
+            include_str!("../../stdlib/importlib/machinery.py"),
+        )),
+        "_frozen_importlib" => {
+            // Compile the pinned ModuleSpec definition with the boxed object protocol.
+            let bootstrap = include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap.py"
+            );
+            let start = bootstrap.find("class ModuleSpec:").unwrap();
+            let (spec, _) = bootstrap[start..]
+                .split_once("\ndef spec_from_loader(")
+                .unwrap();
+            Some(("_frozen_importlib.py", spec))
+        }
+        "_frozen_importlib_external" => Some((
+            "_frozen_importlib_external.py",
+            include_str!("../../stdlib/importlib/source_loader.py"),
+        )),
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct RegisteredImports {
+    pub(super) called: bool,
+    pub(super) targets: Vec<String>,
+}
+
+/// Include literal import_module and find_spec targets in the same source registry as import statements.
 /// Runtime expressions still select their target when the call executes.
-pub(crate) fn literal_targets(graph: &SourceGraph) -> Vec<String> {
+pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
     struct Calls<'a> {
         graph: &'a SourceGraph,
         module: usize,
-        names: Vec<String>,
+        imports: RegisteredImports,
     }
     impl<'ast> Visitor<'ast> for Calls<'_> {
         fn visit_expr(&mut self, expr: &'ast Expr) {
             if let Expr::Call(call) = expr
-                && self.graph.resolve(self.module, &call.func)
-                    == Some(Binding::Intrinsic(Intrinsic::ImportModule))
-                && let Some(name) = target(call)
-                && self.graph.session.is_import_module(self.module, &call.func)
+                && let Some(Binding::Intrinsic(Intrinsic::RegisteredImport(function))) =
+                    self.graph.resolve(self.module, &call.func)
+                && let Some((owner, function)) = function.rsplit_once('.')
+                && self
+                    .graph
+                    .session
+                    .is_stdlib_function(self.module, &call.func, owner, function)
             {
-                self.names.push(name);
+                self.imports.called = true;
+                if let Some(name) = target(call) {
+                    self.imports.targets.push(name);
+                }
             }
             visitor::walk_expr(self, expr);
         }
@@ -25,21 +66,23 @@ pub(crate) fn literal_targets(graph: &SourceGraph) -> Vec<String> {
     let mut calls = Calls {
         graph,
         module: 0,
-        names: Vec::new(),
+        imports: RegisteredImports::default(),
     };
     for (id, module) in graph.modules.iter().enumerate() {
         if module.bindings.values().any(|binding| {
             matches!(
                 binding,
-                Binding::Intrinsic(Intrinsic::ImportModule)
-                    | Binding::IntrinsicModule(IntrinsicModule::Importlib)
+                Binding::Intrinsic(Intrinsic::RegisteredImport(_))
+                    | Binding::IntrinsicModule(
+                        IntrinsicModule::Importlib | IntrinsicModule::ImportlibUtil
+                    )
             )
         }) {
             calls.module = id;
             calls.visit_body(&module.parsed.syntax().body);
         }
     }
-    calls.names
+    calls.imports
 }
 
 fn target(call: &ast::ExprCall) -> Option<String> {

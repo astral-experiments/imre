@@ -2,7 +2,7 @@
 
 mod emit;
 mod import_module;
-pub(super) use import_module::literal_targets;
+pub(super) use import_module::{RegisteredImports, registered_imports};
 
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -291,7 +291,7 @@ pub(crate) fn compile(
     module_root: Option<&Path>,
     options: &CompileOptions,
     runtime_imports: bool,
-    literal_modules: Vec<String>,
+    registered_imports: RegisteredImports,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -336,7 +336,7 @@ pub(crate) fn compile(
     };
     first
         .names
-        .extend(literal_modules.into_iter().map(|name| (0, name)));
+        .extend(registered_imports.targets.into_iter().map(|name| (0, name)));
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
@@ -394,7 +394,9 @@ pub(crate) fn compile(
     let mut seen = HashSet::new();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     while let Some((owner, package, imports)) = work.pop_front() {
-        if imports.needs_typed_machinery() {
+        // Source imports install the actual boxed ModuleSpec class. Other users
+        // keep the existing typed construction and diagnostics.
+        if !registered_imports.called && imports.needs_typed_machinery() {
             return Ok(None);
         }
         for (level, requested) in imports.names {
@@ -416,7 +418,8 @@ pub(crate) fn compile(
                         include_str!("../../stdlib/dataclasses.py"),
                     ))
                 } else {
-                    crate::modules::bundled_runtime_source(&prefix)
+                    import_module::bootstrap_source(&prefix)
+                        .or_else(|| crate::modules::bundled_runtime_source(&prefix))
                 };
                 if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
