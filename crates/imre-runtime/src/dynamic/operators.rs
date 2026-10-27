@@ -1616,6 +1616,9 @@ impl Context {
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        if matches!(self.heap.get(obj), Value::Deque(_)) {
+            return deque::IndexOp::Get.apply(self, obj, key, false);
+        }
         if let Some(value) = super::union::subscribe(self, obj, key) {
             return value;
         }
@@ -1761,6 +1764,11 @@ impl Context {
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        if matches!(self.heap.get(obj), Value::Deque(_)) {
+            return deque::IndexOp::Set(val)
+                .apply(self, obj, key, false)
+                .map(|_| ());
+        }
         if matches!(
             self.heap.get(obj),
             Value::Dict(_) | Value::DefaultDict { .. }
@@ -2507,6 +2515,11 @@ impl Context {
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        if matches!(self.heap.get(obj), Value::Deque(_)) {
+            return deque::IndexOp::Delete
+                .apply(self, obj, key, false)
+                .map(|_| ());
+        }
         if let Some(method) = self.bound_slot(obj, "__delitem__")? {
             self.call(method, vec![key], vec![])?;
             return Ok(());

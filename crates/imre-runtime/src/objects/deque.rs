@@ -77,6 +77,13 @@ impl<T, K> Ring<T, K> {
         self.items.make_contiguous().reverse();
     }
 
+    /// Invalidate live cursors when an indexed removal succeeds.
+    pub(crate) fn remove_at(&mut self, index: usize) -> Option<T> {
+        let item = self.items.remove(index)?;
+        self.state = self.state.wrapping_add(1);
+        Some(item)
+    }
+
     /// Advance a cursor, dropping its remaining items on a mutation error.
     pub(crate) fn cursor_item(
         &self,
@@ -337,8 +344,7 @@ pub unsafe extern "C" fn imre_deque_delete(value: *const Object, at: usize) {
         object(value).0.with_mut(|storage| {
             let deque = storage.deque_mut();
             let i = deque.position(&at)?;
-            deque.state = deque.state.wrapping_add(1);
-            Ok(deque.items.remove(i))
+            Ok(deque.remove_at(i))
         })
     };
     drop(finish(result, None));
