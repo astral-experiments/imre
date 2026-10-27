@@ -1,5 +1,6 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -786,13 +787,13 @@ impl Value {
         }
     }
 
-    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut Vec<Id>) {
+    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut MarkQueue<'_>) {
         for (key, value) in bindings {
             visit.extend([*key, *value]);
         }
     }
 
-    fn children(&self, visit: &mut Vec<Id>) {
+    fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
             Self::ReverseSequence { source, .. } => visit.extend(*source),
@@ -1156,10 +1157,64 @@ impl DictIterator {
     }
 }
 
+// A slot's trace link is UNMARKED until queued. END terminates the queue and marks a
+// visited slot. Both sentinels exceed the largest possible Vec index.
+const UNMARKED: usize = usize::MAX;
+const END: usize = usize::MAX - 1;
+
+struct Slot {
+    value: Option<Value>,
+    trace: Cell<usize>,
+}
+
+impl Slot {
+    fn new(value: Value) -> Self {
+        Self {
+            value: Some(value),
+            trace: Cell::new(UNMARKED),
+        }
+    }
+
+    fn marked(&self) -> bool {
+        self.trace.get() != UNMARKED
+    }
+}
+
+/// The pending trace lives in heap slots, so looking up a weak intern entry needs no scratch allocation.
+pub(super) struct MarkQueue<'a> {
+    slots: &'a [Slot],
+    next: usize,
+}
+
+impl MarkQueue<'_> {
+    fn push(&mut self, id: Id) {
+        let slot = &self.slots[id as usize];
+        if !slot.marked() {
+            slot.trace.set(self.next);
+            self.next = id as usize;
+        }
+    }
+
+    pub(super) fn extend<T: std::borrow::Borrow<Id>>(&mut self, ids: impl IntoIterator<Item = T>) {
+        for id in ids {
+            self.push(*id.borrow());
+        }
+    }
+
+    fn pop(&mut self) -> Option<Id> {
+        let index = self.next;
+        if index == END {
+            return None;
+        }
+        self.next = self.slots[index].trace.replace(END);
+        Some(index as Id)
+    }
+}
+
 /// Native frames hold temporaries until the next Python statement. A caller's
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
-    slots: Vec<Option<Value>>,
+    slots: Vec<Slot>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
@@ -1225,11 +1280,11 @@ impl Heap {
     pub fn new() -> Self {
         Self {
             slots: vec![
-                Some(Value::None),
-                Some(Value::Bool(false)),
-                Some(Value::Bool(true)),
-                Some(Value::Ellipsis),
-                Some(Value::NotImplemented),
+                Slot::new(Value::None),
+                Slot::new(Value::Bool(false)),
+                Slot::new(Value::Bool(true)),
+                Slot::new(Value::Ellipsis),
+                Slot::new(Value::NotImplemented),
             ],
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
@@ -1356,10 +1411,10 @@ impl Heap {
 
     fn alloc_slot(&mut self, value: Value) -> Id {
         let index = if let Some(index) = self.free.pop() {
-            self.slots[index] = Some(value);
+            self.slots[index].value = Some(value);
             index
         } else {
-            self.slots.push(Some(value));
+            self.slots.push(Slot::new(value));
             self.slots.len() - 1
         };
         let id = index as Id;
@@ -1433,7 +1488,7 @@ impl Heap {
             && (entry.id == id
                 || entry.literal
                 || self.bound_in_active_frame(entry.id)
-                || self.marked(roots)[entry.id as usize])
+                || self.reachable(entry.id, roots))
         {
             self.keep(entry.id);
             return entry.id;
@@ -1454,11 +1509,13 @@ impl Heap {
 
     pub fn get(&self, id: Id) -> &Value {
         self.slots[id as usize]
+            .value
             .as_ref()
             .expect("live native handle")
     }
     pub fn get_mut(&mut self, id: Id) -> &mut Value {
         self.slots[id as usize]
+            .value
             .as_mut()
             .expect("live native handle")
     }
@@ -1557,8 +1614,12 @@ impl Heap {
     }
 
     /// Trace the same roots for collection and for a weak interning lookup between collections.
-    fn marked(&self, globals: impl Iterator<Item = Id>) -> Vec<bool> {
-        let mut pending: Vec<_> = globals.collect();
+    fn mark(&self, globals: impl Iterator<Item = Id>) {
+        let mut pending = MarkQueue {
+            slots: &self.slots,
+            next: END,
+        };
+        pending.extend(globals);
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         pending.extend(
             self.interned
@@ -1577,13 +1638,18 @@ impl Heap {
             pending.extend(frame.object);
             pending.extend(&frame.live);
         }
-        let mut marked = vec![false; self.slots.len()];
         while let Some(id) = pending.pop() {
-            if !std::mem::replace(&mut marked[id as usize], true) {
-                self.get(id).children(&mut pending);
-            }
+            self.get(id).children(&mut pending);
         }
-        marked
+    }
+
+    fn reachable(&self, id: Id, roots: impl Iterator<Item = Id>) -> bool {
+        self.mark(roots);
+        let reachable = self.slots[id as usize].marked();
+        for slot in &self.slots {
+            slot.trace.set(UNMARKED);
+        }
+        reachable
     }
 
     pub fn statement(
@@ -1600,7 +1666,7 @@ impl Heap {
             caught
         };
         if let Some(id) = frame.object
-            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize]
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
         {
             *lineno = location.line;
         }
@@ -1612,18 +1678,20 @@ impl Heap {
         {
             return None;
         }
-        let marked = self.marked(globals);
-        self.interned.retain(|_, entry| marked[entry.id as usize]);
+        self.mark(globals);
+        self.interned
+            .retain(|_, entry| self.slots[entry.id as usize].marked());
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
         self.weak.retain(|&target, refs| {
-            refs.retain(|&id| marked[id as usize]);
-            if marked[target as usize] {
+            refs.retain(|&id| self.slots[id as usize].marked());
+            if self.slots[target as usize].marked() {
                 return !refs.is_empty();
             }
             for &id in refs.iter() {
                 let wr = self.slots[id as usize]
+                    .value
                     .as_mut()
                     .unwrap()
                     .weak_reference_mut()
@@ -1636,10 +1704,12 @@ impl Heap {
             }
             false
         });
-        self.abc_registrations
-            .retain(|&[owner, member]| marked[owner as usize] && marked[member as usize]);
-        for (id, alive) in marked.into_iter().enumerate() {
-            if !alive && self.slots[id].take().is_some() {
+        self.abc_registrations.retain(|&[owner, member]| {
+            self.slots[owner as usize].marked() && self.slots[member as usize].marked()
+        });
+        for (id, slot) in self.slots.iter_mut().enumerate() {
+            let dead = slot.trace.replace(UNMARKED) == UNMARKED;
+            if dead && slot.value.take().is_some() {
                 self.immutable_hashes.remove(&(id as Id));
                 self.free.push(id);
             }
@@ -1688,7 +1758,31 @@ mod tests {
 
         heap.next_collection = 0;
         heap.statement(std::iter::empty(), &[], location, NONE);
-        assert!(heap.slots[key as usize].is_none());
-        assert!(heap.slots[value as usize].is_none());
+        assert!(heap.slots[key as usize].value.is_none());
+        assert!(heap.slots[value as usize].value.is_none());
+    }
+}
+
+#[cfg(test)]
+mod reachability_tests {
+    use super::{Heap, Value};
+
+    #[test]
+    fn clear_trace_links_between_cyclic_reachability_queries() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let root = heap.alloc(Value::List(Vec::new()));
+        let child = heap.alloc(Value::Tuple(vec![root]));
+        let other = heap.alloc(Value::List(vec![root]));
+        let Value::List(items) = heap.get_mut(root) else {
+            unreachable!()
+        };
+        items.extend([child, child]);
+        heap.release_temporaries_since(mark);
+
+        assert!(heap.reachable(child, [root].into_iter()));
+        assert!(!heap.reachable(other, [root].into_iter()));
+        assert!(!heap.reachable(child, std::iter::empty()));
+        assert!(heap.reachable(child, [other].into_iter()));
     }
 }
