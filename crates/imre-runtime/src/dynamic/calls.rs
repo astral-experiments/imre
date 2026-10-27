@@ -630,6 +630,7 @@ impl Context {
             Value::DefaultDict { .. } => "collections.defaultdict",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
+            Value::Filter { .. } => "filter",
             Value::Weak(wr) => wr.kind.class(),
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
@@ -833,6 +834,7 @@ impl Context {
             | ("slice", Value::Slice(_))
             | ("range", Value::Range(_))
             | ("map", Value::Map { .. })
+            | ("filter", Value::Filter { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
@@ -1400,9 +1402,9 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(class) if class == "map" => match name {
-                "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
-                "__name__" | "__qualname__" => return Ok(self.text("map")),
+            Value::Native(class) if matches!(class.as_str(), "map" | "filter") => match name {
+                "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text(&class)),
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
@@ -2596,6 +2598,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "map"
+                                | "filter"
                                 | "set"
                                 | "int"
                                 | "frozenset"

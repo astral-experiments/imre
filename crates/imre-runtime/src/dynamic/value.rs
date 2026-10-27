@@ -247,6 +247,7 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Map { .. } => "map",
+            Value::Filter { .. } => "filter",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
@@ -679,6 +680,10 @@ pub(super) enum Value {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
     },
+    Filter {
+        predicate: Id,
+        input: Id,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -784,6 +789,7 @@ impl Value {
                 visit.extend(inputs.iter());
             }
             Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
+            Self::Filter { predicate, input } => visit.extend([*predicate, *input]),
             Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
             Self::LoopIterator { source, peeked } => {
                 visit.push(*source);

@@ -54,6 +54,17 @@ class FailedCursor:
 
 
 def current():
+    log = []
+    source = [0, 2, 3]
+    def select(item):
+        log.append(item)
+        return item
+    cursor = filter(select, source)
+    assert iter(cursor) is cursor and not log
+    assert next(cursor) == 2 and log == [0, 2]
+    source.append(4)
+    assert list(cursor) == [3, 4] and log == [0, 2, 3, 4]
+    assert list(filter(None, [False, "x", 0, 1])) == ["x", 1]
     from operator import length_hint
 
     for source, last, rest in (("é中x", "x", ["中", "é"]), (b"\x00\xffA", 65, [255, 0])):
