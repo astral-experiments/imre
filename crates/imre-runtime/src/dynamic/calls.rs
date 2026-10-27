@@ -369,7 +369,7 @@ impl Context {
     fn native_data_descriptor(&self, descriptor: Id) -> bool {
         matches!(
             self.heap.get(descriptor),
-            Value::Property(_) | Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_)
+            Value::Property(_) | Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_)
         )
     }
 
@@ -415,7 +415,7 @@ impl Context {
             let method = match self.heap.get(value) {
                 Value::Property(property) => return property.read(self, receiver),
                 Value::WeakrefDescriptor(owner) => return self.weakref_list(*owner, receiver),
-                Value::ReadOnlyDescriptor { get, .. } => {
+                Value::GetSetDescriptor { get, .. } => {
                     return self.call(*get, vec![receiver], Vec::new());
                 }
                 Value::Function { .. }
@@ -667,7 +667,7 @@ impl Context {
             Value::Union(_) => "typing.Union",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
-            Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
+            Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::MappingProxy(_) => "mappingproxy",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
@@ -758,6 +758,10 @@ impl Context {
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
+            Value::TextFile(_) => {
+                self.module("io")?;
+                Ok(self.builtins["_io.TextIOWrapper"])
+            }
             Value::Instance { class, .. }
             | Value::Module {
                 constructor: Some(class),
@@ -807,7 +811,9 @@ impl Context {
         if let Some(actual) = self
             .builtin_type_name(value)
             .and_then(|name| self.builtins.get(name))
-            && super::mapping_abc::registered_subclass(self, *actual, class)
+            && (super::mapping_abc::registered_subclass(self, *actual, class)
+                || matches!(self.heap.get(value), Value::TextFile(_))
+                    && self.direct_subclass(*actual, class))
         {
             return true;
         }
@@ -1957,7 +1963,11 @@ impl Context {
             match *self.heap.get(descriptor) {
                 Value::Property(property) => return property.remove(self, obj),
                 Value::WeakrefDescriptor(owner) => return Err(self.readonly_weakref(owner)),
-                Value::ReadOnlyDescriptor { owner, name, .. } => {
+                Value::GetSetDescriptor { set: Some(set), .. } => {
+                    self.call(set, vec![obj], Vec::new())?;
+                    return Ok(());
+                }
+                Value::GetSetDescriptor { owner, name, .. } => {
                     return Err(Error::new(
                         "AttributeError",
                         format!("attribute '{name}' of '{owner}' objects is not writable"),
@@ -2315,7 +2325,14 @@ impl Context {
             if let Value::WeakrefDescriptor(owner) = *self.heap.get(descriptor) {
                 return Err(self.readonly_weakref(owner));
             }
-            if let Value::ReadOnlyDescriptor { owner, name, .. } = *self.heap.get(descriptor) {
+            if let Value::GetSetDescriptor {
+                owner, name, set, ..
+            } = *self.heap.get(descriptor)
+            {
+                if let Some(set) = set {
+                    self.call(set, vec![obj, value], Vec::new())?;
+                    return Ok(());
+                }
                 return Err(Error::new(
                     "AttributeError",
                     format!("attribute '{name}' of '{owner}' objects is not writable"),
