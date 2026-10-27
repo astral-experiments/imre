@@ -519,6 +519,13 @@ impl Function<'_, '_> {
             Body::Statements(stmts) | Body::GeneratorFunction(stmts) => {
                 closure_names.visit_body(stmts)
             }
+            Body::Namespace(stmts) => {
+                let mut bindings = ClosureNames::default();
+                bindings.visit_body(stmts);
+                closure_names.nonlocals = bindings.nonlocals;
+                // Methods and nested classes can still capture the enclosing frame.
+                closure_names.incomplete = true;
+            }
             Body::Expression(expr) => closure_names.visit_expr(expr),
             _ => closure_names.incomplete = true,
         }
