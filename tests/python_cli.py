@@ -448,6 +448,7 @@ def report(text):
             "boxed_complex.py",
             "boxed_float.py",
             "boxed_float_arithmetic.py",
+            "boxed_bytes_fields.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",

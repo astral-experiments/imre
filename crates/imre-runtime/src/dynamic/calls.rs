@@ -1104,6 +1104,9 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
+            Value::Native(class) if class == "bytes" && name == "__mod__" => {
+                return Ok(self.builtin("bytes.__mod__"));
+            }
             Value::Bytes(_) if name == "maketrans" => return Ok(self.builtin("bytes.maketrans")),
             Value::ByteArray(_) if name == "maketrans" => {
                 return Ok(self.builtin("bytearray.maketrans"));
