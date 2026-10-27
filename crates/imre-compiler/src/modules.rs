@@ -31,6 +31,15 @@ pub(crate) type ModuleId = usize;
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
+        "contextlib" => Some((
+            "contextlib.py",
+            concat!(
+                include_str!("../stdlib/contextlib.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_exitstack.py")
+            ),
+        )),
         "_imre_socketserver_poll" => Some((
             "_imre_socketserver_poll.py",
             if cfg!(any(target_os = "linux", target_os = "macos")) {
@@ -43,13 +52,31 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
+        "logging" => Some((
+            "logging/__init__.py",
+            concat!(
+                include_str!("../stdlib/logging/stream.py"),
+                "\n",
+                include_str!("../stdlib/logging/boxed.py"),
+            ),
+        )),
         "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
+        // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
+        "string" => Some((
+            "string/__init__.py",
+            include_str!("../stdlib/string/cpython.py"),
+        )),
         "http" => Some((
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),
         )),
         "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
         "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
+        "_imre_gettext_locale" => Some((
+            "_imre_gettext_locale.py",
+            include_str!("../stdlib/_imre_gettext_locale.py"),
+        )),
+        "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => None,
     }
@@ -80,6 +107,8 @@ pub(crate) struct DefinitionId {
 pub(crate) enum Binding {
     Module(ModuleId),
     Definition(DefinitionId),
+    /// A module guard selects the function object when the module executes.
+    ConditionalFunction,
     Value(DefinitionId),
     TypeAlias(ModuleId, usize),
     IntrinsicModule(IntrinsicModule),
@@ -156,6 +185,8 @@ pub(crate) enum IntrinsicModule {
     Gzip,
     UnicodeData,
     WeakRef,
+    Threading,
+    Thread,
     Codecs,
     Socket,
     Hashlib,
@@ -365,6 +396,7 @@ pub(crate) enum Intrinsic {
     Sha256,
     CodecInfoClass,
     UnicodeNormalize { check: bool },
+    ObjectRuntimeExport(&'static str),
     WeakProxy,
     WeakProxyClass { callable: bool },
     CodecLookup,
@@ -581,6 +613,8 @@ impl IntrinsicModule {
             "types" => Some(Self::Types),
             "unicodedata" => Some(Self::UnicodeData),
             "weakref" => Some(Self::WeakRef),
+            "threading" => Some(Self::Threading),
+            "_thread" => Some(Self::Thread),
             "codecs" => Some(Self::Codecs),
             "socket" => Some(Self::Socket),
             "hashlib" => Some(Self::Hashlib),
@@ -912,6 +946,9 @@ impl IntrinsicModule {
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Threading, "local") | (Self::Thread, "_local") => {
+                Intrinsic::ObjectRuntimeExport("_thread._local")
+            }
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
@@ -1176,6 +1213,7 @@ pub(crate) struct SourceGraph {
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
     reachable: Option<reachability::Reachable>,
+    required_library: Option<(ModuleId, reachability::Reachable)>,
     pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
@@ -1345,9 +1383,17 @@ impl SourceGraph {
         self.reachable.is_some()
     }
 
+    fn required_definitions(&self, module: ModuleId) -> Option<&reachability::Reachable> {
+        if let Some((library, roots)) = &self.required_library
+            && *library == module
+        {
+            return Some(roots);
+        }
+        self.reachable.as_ref()
+    }
+
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
-        self.reachable
-            .as_ref()
+        self.required_definitions(definition.module)
             .is_none_or(|r| r.definitions.contains(&definition))
     }
 
@@ -1364,8 +1410,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
-        self.reachable
-            .as_ref()
+        self.required_definitions(module)
             .is_none_or(|r| r.methods.contains(&(module, method.start())))
     }
 
@@ -1553,6 +1598,10 @@ impl SourceGraph {
             })
             .collect();
         let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
+        if let Some((library, roots)) = &self.required_library {
+            skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[*library]
+                .extend_from_slice(&roots.skipped[*library]);
+        }
         // The bundled _simple_enum factories are lowered to immutable member tables.
         // Keep the actual category property bodies and every caller in ty's check.
         if let Some((id, http)) = self
@@ -1879,6 +1928,7 @@ fn resolve_binding(
                     stdlib_attribute(modules, module, target, attribute)
                 }
                 Binding::Definition(_)
+                | Binding::ConditionalFunction
                 | Binding::Value(_)
                 | Binding::TypeAlias(..)
                 | Binding::Intrinsic(_) => None,
@@ -1891,6 +1941,7 @@ fn resolve_binding(
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
+const CONTEXTLIB_EXIT_STACK: &str = "__imre_contextlib_exit_stack__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
@@ -1918,6 +1969,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
+            IntrinsicModule::Contextlib if name == "ExitStack" => CONTEXTLIB_EXIT_STACK,
             IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
@@ -1946,6 +1998,7 @@ struct Loader<'a> {
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
+    needs_object_imports: bool,
     inputs: crate::SourceInputs,
     root: PathBuf,
     extension_roots: Vec<PathBuf>,
@@ -1990,6 +2043,7 @@ impl<'a> Loader<'a> {
             extension_roots,
             inputs: crate::SourceInputs::default(),
             checked_builtin_imports: Vec::new(),
+            needs_object_imports: false,
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -2153,7 +2207,7 @@ impl<'a> Loader<'a> {
             virtual_command: false,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
-            needs_object_runtime: std::cell::Cell::new(false),
+            needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -2161,6 +2215,7 @@ impl<'a> Loader<'a> {
             mutable_documents: false,
             mutable_builtin_len: false,
             reachable: None,
+            required_library: None,
             entry_filename,
             inputs: self.inputs,
             session: self.session,
@@ -2172,7 +2227,18 @@ impl<'a> Loader<'a> {
             initialization: self.initialization,
             errno_names: self.errno_names,
         };
-        graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
+        if reachable_only {
+            graph.reachable = Some(reachability::Reachable::collect(&graph, false));
+        } else if let Some(library) = graph
+            .modules
+            .iter()
+            .position(|m| m.is_bundled(CONTEXTLIB_EXIT_STACK))
+        {
+            // A sealed library can own higher-order methods that require object dispatch.
+            // Strict builds still visit even an uncalled first-party function using them.
+            graph.required_library =
+                Some((library, reachability::Reachable::collect(&graph, true)));
+        }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.mutable_documents = graph.uses_mutable_documents();
         graph.mutable_builtin_len = graph.writes_builtin_len();
@@ -2359,6 +2425,30 @@ impl<'a> Loader<'a> {
                     )?;
                 }
                 _ => {
+                    if let ast::Stmt::If(guard) = statement
+                        && guard
+                            .elif_else_clauses
+                            .last()
+                            .is_some_and(|clause| clause.test.is_none())
+                    {
+                        for function in guard
+                            .body
+                            .iter()
+                            .filter_map(ast::Stmt::as_function_def_stmt)
+                        {
+                            let name = function.name.as_str();
+                            if guard.elif_else_clauses.iter().all(|clause| {
+                                clause
+                                    .body
+                                    .iter()
+                                    .filter_map(ast::Stmt::as_function_def_stmt)
+                                    .any(|other| other.name.as_str() == name)
+                            }) {
+                                self.bind(id, name, Binding::ConditionalFunction, function)?;
+                                self.needs_object_imports = true;
+                            }
+                        }
+                    }
                     let entry_global = id == 0
                         && !executable
                         && (last_definition.is_some_and(|last| index < last)
@@ -2570,6 +2660,10 @@ impl<'a> Loader<'a> {
                         };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        self.needs_object_imports |= matches!(
+                            binding,
+                            Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_))
+                        );
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)
                         {
@@ -2612,6 +2706,7 @@ impl<'a> Loader<'a> {
                                     ready
                                 }
                                 Binding::Value(def) => package && self.initialized(def),
+                                Binding::ConditionalFunction => false,
                                 _ => package,
                             };
                             if !available {
@@ -2690,6 +2785,16 @@ impl<'a> Loader<'a> {
                         .any(|a| a.name.as_str() == "AbstractContextManager")
                 }))
             .then_some((CONTEXTLIB_ABSTRACT, include_str!("../stdlib/contextlib.py"))),
+            (module == Some(IntrinsicModule::Contextlib)
+                && imports
+                    .is_none_or(|names| names.iter().any(|a| a.name.as_str() == "ExitStack")))
+            .then_some((
+                CONTEXTLIB_EXIT_STACK,
+                concat!(
+                    "from contextlib import AbstractContextManager\n",
+                    include_str!("../stdlib/contextlib_exitstack.py")
+                ),
+            )),
             (module == Some(IntrinsicModule::Tempfile)
                 && imports.is_none_or(|names| {
                     names
@@ -2702,7 +2807,11 @@ impl<'a> Loader<'a> {
             .then_some((INSPECT_FUNCTIONS, include_str!("../stdlib/inspect.py"))),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
-                include_str!("../stdlib/logging/classes.py"),
+                concat!(
+                    include_str!("../stdlib/logging/stream.py"),
+                    "\n",
+                    include_str!("../stdlib/logging/classes.py")
+                ),
             )),
             (module == Some(IntrinsicModule::LoggingHandlers)).then_some((
                 LOGGING_HANDLER_CLASSES,

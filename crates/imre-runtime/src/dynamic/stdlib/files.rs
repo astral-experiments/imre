@@ -1,8 +1,52 @@
-use std::io::{BufRead, Read, Seek, SeekFrom};
+use std::cell::RefCell;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
 use std::process::{Command, Stdio};
 
 use super::{Context, Error, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error};
+
+/// Binary handles retain their access mode after close.
+pub(in crate::dynamic) enum BinaryFile {
+    Reader(RefCell<Option<BufReader<ReadSource>>>),
+    Writer(RefCell<crate::objects::FileState>),
+}
+
+impl BinaryFile {
+    /// Opens the documented read, truncate, append, or exclusive-create mode.
+    pub(in crate::dynamic) fn open(path: &str, mode: &str) -> Result<Self> {
+        let mode = match mode {
+            "rb" => {
+                let (file, _) = crate::objects::open_file(path, 0)?;
+                return Ok(Self::reader(BufReader::new(ReadSource::File(file))));
+            }
+            "wb" => 1,
+            "ab" => 2,
+            "xb" => 3,
+            _ => {
+                return Err(Error::new(
+                    "ValueError",
+                    "unsupported mode for dynamic files",
+                ));
+            }
+        };
+        Ok(Self::Writer(RefCell::new(
+            crate::objects::FileState::binary_writer(path, mode)?,
+        )))
+    }
+
+    /// Files and sockets share the same buffered reader methods.
+    pub(in crate::dynamic) fn reader(reader: BufReader<ReadSource>) -> Self {
+        Self::Reader(RefCell::new(Some(reader)))
+    }
+
+    /// All aliases observe closure through the same buffered stream.
+    pub(in crate::dynamic) fn closed(&self) -> bool {
+        match self {
+            Self::Reader(slot) => slot.borrow().is_none(),
+            Self::Writer(file) => file.borrow().closed(),
+        }
+    }
+}
 
 /// One buffered cursor serves filesystem input and a socket retained by makefile.
 pub(in crate::dynamic) enum ReadSource {
@@ -191,7 +235,59 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected a file"));
     };
     let handle = handle.clone();
-    let mut slot = handle.borrow_mut();
+    let mut slot = match handle.as_ref() {
+        BinaryFile::Reader(slot) => slot.borrow_mut(),
+        BinaryFile::Writer(file) => {
+            let mut file = file.borrow_mut();
+            return match (name, &args[1..]) {
+                ("file.write", [value]) => {
+                    let bytes = ctx.bytes_like(*value)?;
+                    file.write_bytes(bytes)?;
+                    Ok(ctx.int(bytes.len() as i64))
+                }
+                ("file.flush", []) => {
+                    file.flush()?;
+                    Ok(NONE)
+                }
+                ("file.close", []) | ("file.__exit__", [_, _, _]) => {
+                    file.close().map_err(crate::objects::errno_error)?;
+                    Ok(NONE)
+                }
+                ("file.__enter__", []) if file.closed() => {
+                    Err(Error::new("ValueError", "I/O operation on closed file."))
+                }
+                ("file.__enter__", []) => Ok(first),
+                ("file.fileno", []) => Ok(ctx.int(i64::from(file.fileno()?))),
+                ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
+                    match (name, &args[1..]) {
+                        ("file.read", [size]) => {
+                            crate::objects::FileState::check_writer_read_size(&ctx.as_int(*size)?)?;
+                        }
+                        ("file.readline", [size]) if *size != NONE => {
+                            ctx.as_integer(*size)?;
+                        }
+                        ("file.readinto", [buffer])
+                            if !matches!(ctx.heap.get(*buffer), Value::ByteArray(_)) =>
+                        {
+                            return Err(Error::new(
+                                "TypeError",
+                                "readinto() requires a writable bytes-like object",
+                            ));
+                        }
+                        _ => {}
+                    }
+                    Err(Error::new("UnsupportedOperation", "read"))
+                }
+                _ => Err(Error::new(
+                    "TypeError",
+                    format!("invalid arguments to {name}"),
+                )),
+            };
+        }
+    };
+    if name == "file.write" {
+        return Err(Error::new("UnsupportedOperation", "write"));
+    }
     if matches!(name, "file.__exit__" | "file.close") {
         if let Some(reader) = slot.take()
             && let ReadSource::Socket(mut raw) = reader.into_inner()
@@ -200,11 +296,35 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    let f = slot
+    let reader = slot
         .as_mut()
-        .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"))?;
+        .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"));
+    if matches!(name, "file.read" | "file.readline") {
+        let length = args
+            .get(1)
+            .map(|&id| ctx.as_integer(id))
+            .transpose()?
+            .unwrap_or(-1);
+        if name == "file.read" && length < -1 {
+            return Err(Error::new(
+                "ValueError",
+                "read length must be non-negative or -1",
+            ));
+        }
+        let mut bytes = Vec::new();
+        let mut input = reader?.take(u64::try_from(length).unwrap_or(u64::MAX));
+        if name == "file.readline" {
+            input.read_until(b'\n', &mut bytes)
+        } else {
+            input.read_to_end(&mut bytes)
+        }
+        .map_err(os_error)?;
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
+    let f = reader?;
     match name {
         "file.__enter__" => Ok(first),
+        "file.flush" => Ok(NONE),
         "file.fileno" => Ok(ctx.int(i64::from(f.get_ref().as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
         "file.seek" => {
@@ -241,22 +361,6 @@ pub(super) fn call(
                 }
             }
             Ok(ctx.int(count as i64))
-        }
-        "file.read" | "file.readline" => {
-            let length = args
-                .get(1)
-                .map(|&id| ctx.as_integer(id))
-                .transpose()?
-                .unwrap_or(-1);
-            let mut bytes = Vec::new();
-            let mut input = f.take(u64::try_from(length).unwrap_or(u64::MAX));
-            if name == "file.readline" {
-                input.read_until(b'\n', &mut bytes)
-            } else {
-                input.read_to_end(&mut bytes)
-            }
-            .map_err(os_error)?;
-            Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         _ => Err(Error::new(
             "AttributeError",

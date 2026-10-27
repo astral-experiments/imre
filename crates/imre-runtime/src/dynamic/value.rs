@@ -10,15 +10,26 @@ pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 
 /// Immutable executable and argument layout shared by functions from one Python definition.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct CodeObject {
-    pub entry: Code,
+    pub body: Body,
     pub parameters: Id,
     pub name: Id,
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
     pub coroutine: bool,
+    pub nested: Vec<(usize, Id)>,
+}
+
+#[derive(Clone)]
+pub(super) enum Body {
+    Native(Code),
+    Source(std::rc::Rc<super::source_code::Program>),
+    PendingGenerator {
+        source: &'static str,
+        body_line: u32,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -34,9 +45,9 @@ pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
-    pub file: &'static str,
+    pub file: std::borrow::Cow<'static, str>,
     pub line: u32,
     pub span: Option<[u32; 3]>,
 }
@@ -98,6 +109,16 @@ impl Error {
 }
 
 impl Context {
+    /// Reuse the Python exception object when an already observed error is raised again.
+    pub(super) fn raised_instance(&mut self, mut error: Error) -> Id {
+        if let Some(id) = error.trace.as_mut().and_then(|trace| trace.instance.take()) {
+            *self.heap.get_mut(id) = Value::Raised(error);
+            id
+        } else {
+            self.alloc(Value::Raised(error))
+        }
+    }
+
     pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
         if let Some((mut loc, frame)) = self.heap.trace_location() {
             if let Some(&[line, start, split, end]) = span {
@@ -149,11 +170,18 @@ impl Context {
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
             Value::Float(_) => "float",
+            Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Zip { .. } => "zip",
+            Value::Count { .. } => "count",
+            Value::Repeat(_) => "repeat",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
+            Value::File(file) => match file.as_ref() {
+                super::stdlib::BinaryFile::Reader(_) => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+            },
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
@@ -163,9 +191,14 @@ impl Context {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
+            Value::Slice(_) => "slice",
             Value::Range { .. } => "range",
             Value::Iterator { kind, .. } => kind,
-            Value::Generator { .. } => "generator",
+            Value::DictIterator(iter) => match iter.kind {
+                DictViewKind::Keys => "dict_keyiterator",
+                DictViewKind::Values => "dict_valueiterator",
+                DictViewKind::Items => "dict_itemiterator",
+            },
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
@@ -173,8 +206,17 @@ impl Context {
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
+            Value::Generator { .. } => "generator",
+            Value::TypeVar(_) => "TypeVar",
+            Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
+            Value::ClassMethod(_) => "classmethod",
+            Value::ThreadLocal(_) => super::thread_local::CLASS,
+            Value::FormatIterator { kind, .. } => match kind {
+                FormatKind::Markup => "formatteriterator",
+                FormatKind::Field => "fieldnameiterator",
+            },
             Value::Partial { .. } => "partial",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
@@ -249,13 +291,23 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
+    pub is_abstract: bool,
     pub class_cell: Option<Id>,
+    pub class_lineage: Option<(Id, Id)>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
+    pub exec_globals: Option<ExecGlobals>,
+    pub exec_locals: Option<Id>,
     pub parent: Option<Id>,
     pub module: String,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ExecGlobals {
+    pub dict: Id,
+    pub builtins: Id,
 }
 
 #[derive(Clone)]
@@ -266,11 +318,13 @@ pub(super) enum Value {
     Bool(bool),
     Int(crate::Int),
     Float(f64),
+    Complex(super::complex::Complex),
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
     },
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
+    Slice([Id; 3]),
     Range {
         start: i64,
         stop: i64,
@@ -290,6 +344,8 @@ pub(super) enum Value {
         format: String,
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
+    LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
+    HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
@@ -309,6 +365,7 @@ pub(super) enum Value {
         dict: Id,
         kind: DictViewKind,
     },
+    DictIterator(DictIterator),
     DefaultDict {
         factory: Id,
         entries: Vec<(Id, Id)>,
@@ -332,11 +389,20 @@ pub(super) enum Value {
         defaults: Id,
     },
     Code(CodeObject),
+    Generator {
+        code: Id,
+        scope: Id,
+        iterators: Vec<Id>,
+        offset: Option<usize>,
+        running: bool,
+    },
     Class {
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
     },
+    TypeVar(super::typing::TypeVariable),
+    GenericAlias(super::typing::Alias),
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
@@ -346,6 +412,7 @@ pub(super) enum Value {
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
+    ThreadLocal(super::thread_local::Dictionaries),
     Raised(Error),
     Traceback {
         frame: Id,
@@ -361,7 +428,9 @@ pub(super) enum Value {
     Method {
         callable: Id,
         receiver: Id,
+        explicit: bool,
     },
+    ClassMethod(Id),
     StaticMethod {
         callable: Id,
         dictionary: Id,
@@ -382,14 +451,13 @@ pub(super) enum Value {
         function: Id,
         entries: Vec<CachedCall>,
     },
-    Generator {
-        code: Id,
-        scope: Id,
-        running: bool,
-        exhausted: bool,
-    },
     Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
+    Count {
+        current: Id,
+        step: Id,
+    },
+    Repeat(crate::objects::Repeat<Id>),
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -407,11 +475,16 @@ pub(super) enum Value {
         offset: usize,
         reverse: bool,
     },
+    FormatIterator {
+        input: Id,
+        offset: usize,
+        kind: FormatKind,
+    },
     IoMethod {
         owner: Id,
         name: &'static str,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
+    File(std::rc::Rc<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {
@@ -433,6 +506,12 @@ pub(super) enum Value {
     TokenMissing,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum FormatKind {
+    Markup,
+    Field,
+}
+
 #[derive(Clone)]
 pub(super) struct CachedCall {
     pub args: Vec<Id>,
@@ -445,6 +524,12 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::DictIterator(iter) => visit.extend(iter.dict),
+            Self::FormatIterator { input, .. } => visit.push(*input),
+            Self::ClassMethod(callable) => visit.push(*callable),
+            Self::ThreadLocal(local) => visit.extend(local.live()),
+            Self::Count { current, step } => visit.extend([*current, *step]),
+            Self::Repeat(repeat) => visit.push(repeat.value),
             Self::Zip {
                 inputs, pending, ..
             } => {
@@ -487,8 +572,8 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::Generator { code, scope, .. } => visit.extend([*code, *scope]),
             Self::Yielded(item) => visit.push(*item),
+            Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
@@ -501,8 +586,15 @@ impl Value {
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
                 visit.extend(scope.class_cell);
+                if let Some((bases, mro)) = scope.class_lineage {
+                    visit.extend([bases, mro]);
+                }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
+                visit.extend(scope.exec_locals);
+                if let Some(globals) = scope.exec_globals {
+                    visit.extend([globals.dict, globals.builtins]);
+                }
                 visit.extend(scope.names.values());
             }
             Self::ClassCell(class) => visit.extend(class),
@@ -524,13 +616,27 @@ impl Value {
                 visit.extend(class_cell);
                 fields.children(visit);
             }
-            Self::Code(code) => visit.extend([code.parameters, code.name, code.filename]),
+            Self::Code(code) => {
+                visit.extend([code.name, code.filename, code.parameters]);
+                visit.extend(code.nested.iter().map(|&(_, id)| id));
+            }
+            Self::Generator {
+                code,
+                scope,
+                iterators,
+                ..
+            } => {
+                visit.extend([*code, *scope]);
+                visit.extend(iterators);
+            }
             Self::Class {
                 scope, ancestors, ..
             } => {
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
+            Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
+            Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
             Self::Instance {
                 class,
                 fields,
@@ -543,7 +649,9 @@ impl Value {
                 visit.extend(fields.values());
                 visit.extend(scalar);
             }
-            Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
+            Self::Method {
+                callable, receiver, ..
+            } => visit.extend([*callable, *receiver]),
             Self::StaticMethod {
                 callable,
                 dictionary,
@@ -580,12 +688,15 @@ impl Value {
             | Self::Bool(_)
             | Self::Int(_)
             | Self::Float(_)
+            | Self::Complex(_)
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
             | Self::Hash(_)
+            | Self::LoggerHandle(_)
+            | Self::HandlerLock(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
@@ -601,6 +712,59 @@ pub(super) enum DictViewKind {
     Keys,
     Values,
     Items,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DictIterator {
+    dict: Option<Id>,
+    kind: DictViewKind,
+    expected_len: Option<usize>,
+    index: usize,
+}
+
+impl DictIterator {
+    /// Capture the original size while keeping the entries live.
+    pub(super) fn new(dict: Id, kind: DictViewKind, size: usize) -> Self {
+        Self {
+            dict: Some(dict),
+            kind,
+            expected_len: Some(size),
+            index: 0,
+        }
+    }
+
+    /// An invalid or exhausted iterator has no remaining length hint.
+    pub(super) fn length_hint(&self, ctx: &Context) -> usize {
+        self.dict
+            .and_then(|dict| ctx.dict_entries(dict))
+            .filter(|entries| Some(entries.len()) == self.expected_len)
+            .map_or(0, |entries| entries.len() - self.index)
+    }
+
+    /// Check the live size before each pull, including the one that reaches exhaustion.
+    pub(super) fn next(&mut self, ctx: &mut Context) -> Result<Option<Id>> {
+        let Some(dict) = self.dict else {
+            return Ok(None);
+        };
+        let entries = ctx.dict_entries(dict).expect("dictionary iterator source");
+        if self.expected_len != Some(entries.len()) {
+            self.expected_len = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "dictionary changed size during iteration",
+            ));
+        }
+        let Some(&(key, value)) = entries.get(self.index) else {
+            self.dict = None;
+            return Ok(None);
+        };
+        self.index += 1;
+        Ok(Some(match self.kind {
+            DictViewKind::Keys => key,
+            DictViewKind::Values => value,
+            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
+        }))
+    }
 }
 
 /// Native frames hold temporaries until the next Python statement. A caller's
@@ -698,7 +862,7 @@ impl Heap {
     /// Materialize one frame per activation only when an exception unwinds it.
     pub fn trace_location(&mut self) -> Option<(Location, Id)> {
         let frame = self.frames.last()?;
-        let location = frame.location?;
+        let location = frame.location.clone()?;
         if let Some(object) = frame.object {
             return Some((location, object));
         }
@@ -716,7 +880,7 @@ impl Heap {
     }
 
     pub fn current_location(&self) -> Option<Location> {
-        self.frames.last()?.location
+        self.frames.last()?.location.clone()
     }
 
     pub fn statement(
@@ -727,7 +891,6 @@ impl Heap {
         caught: Id,
     ) {
         let frame = self.frames.last_mut().unwrap();
-        frame.location = Some(location);
         frame.active = if caught == NONE {
             frame.inherited
         } else {
@@ -738,6 +901,7 @@ impl Heap {
         {
             *lineno = location.line;
         }
+        frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
         if self.slots.len() < self.next_collection || !self.free.is_empty() {

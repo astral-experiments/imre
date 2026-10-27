@@ -15,14 +15,17 @@ pub(super) mod datetime;
 mod email;
 mod files;
 mod fnmatch;
+mod formatters;
 mod functools;
 mod hashlib;
 mod hmac;
 mod inspect;
+pub(super) mod itertools;
 mod time;
-pub(super) use files::ReadSource;
+pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
 mod json;
+mod logging;
 mod marshal;
 mod operator;
 mod pickle;
@@ -37,6 +40,9 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "threading"
+            | "_thread"
+            | "abc"
             | "codecs"
             | "types"
             | "io"
@@ -46,6 +52,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "os"
             | "os.path"
             | "fnmatch"
+            | "itertools"
             | "operator"
             | "platform"
             | "site"
@@ -53,6 +60,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "json"
+            | "_imre_logging"
             | "marshal"
             | "pickle"
             | "datetime"
@@ -65,6 +73,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib"
             | "importlib.machinery"
             | "functools"
+            | "_string"
             | "inspect"
             | "collections"
             | "_collections_abc"
@@ -207,10 +216,14 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
 }
 
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
+    if module == "_imre_logging" && logging::is_function(name) {
+        return Ok(ctx.builtin(&format!("{module}.{name}")));
+    }
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", "ASCII") => ctx.int(regex::ASCII),
         ("re", "UNICODE") => ctx.int(regex::UNICODE),
         ("re", "VERBOSE") => ctx.int(regex::VERBOSE),
@@ -225,8 +238,26 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
+        ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),
+        ("types", "FunctionType") => ctx.builtin("function"),
+        ("types", "BuiltinFunctionType") => ctx.builtin("builtin_function_or_method"),
+        ("types", "EllipsisType") => ctx.builtin("ellipsis"),
+        ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
+        ("itertools", "count") => ctx.builtin("itertools.count"),
+        ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
+        ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("typing", "TYPE_CHECKING") => FALSE,
+        ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
+        ("_collections_abc", "Callable") => {
+            super::typing::named_class(ctx, "collections.abc", "Callable")
+        }
+        (
+            "typing",
+            "TypeVar" | "Any" | "Callable" | "cast" | "overload" | "get_overloads"
+            | "clear_overloads" | "_overload_dummy" | "get_args" | "get_origin",
+        ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "mktime" | "struct_time") => {
@@ -381,6 +412,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "Enum" | "IntEnum" | "StrEnum" | "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
+        | ("_string", "formatter_parser" | "formatter_field_name_split")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
@@ -405,6 +437,15 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == super::thread_local::CLASS {
+        if !args.is_empty() || !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "Initialization arguments are not supported",
+            ));
+        }
+        return Ok(ctx.alloc(Value::ThreadLocal(Default::default())));
+    }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
     }
@@ -414,14 +455,47 @@ pub(super) fn call(
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
     }
+    if name == "itertools.count" {
+        return itertools::count(ctx, args, kwargs);
+    }
+    if name == "itertools.repeat" {
+        return itertools::repeat(ctx, args, kwargs);
+    }
+    if let Some(method) = name
+        .strip_prefix("itertools.count.")
+        .or_else(|| name.strip_prefix("itertools.repeat."))
+    {
+        return itertools::method(ctx, method, args, kwargs);
+    }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
+    }
+    if let Some(function) = name.strip_prefix("_imre_logging.") {
+        return logging::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("ast.") {
         return ast::call(ctx, name, args, kwargs);
+    }
+    if let Some(operation) = name.strip_prefix("typing.") {
+        return super::typing::call(ctx, operation, args, kwargs);
+    }
+    if name == "types.GenericAlias" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "GenericAlias() takes no keyword arguments",
+            ));
+        }
+        let [origin, parameters] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("GenericAlias expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        return Ok(super::typing::builtin_alias(ctx, *origin, *parameters));
     }
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {
@@ -535,7 +609,9 @@ pub(super) fn call(
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
-        | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
+        | "file.read" | "file.readline" | "file.readinto" | "file.write" | "warnings.warn" => {
+            (2, &[])
+        }
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
@@ -548,11 +624,14 @@ pub(super) fn call(
         | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
+        | "_string.formatter_parser"
+        | "_string.formatter_field_name_split"
         | "collections.defaultdict"
         | "functools.lru_cache"
         | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
+        | "file.flush"
         | "file.fileno"
         | "file.tell"
         | "file.__enter__" => (1, &[]),
@@ -569,6 +648,12 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "_string.formatter_parser" | "_string.formatter_field_name_split" => {
+            return ctx.format_cursor(
+                argument(args, 0)?,
+                name == "_string.formatter_field_name_split",
+            );
+        }
         "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
         "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => {
             let id = option(args, 0, kwargs, "s")?
@@ -804,6 +889,7 @@ pub(super) fn call(
             ctx.alloc(Value::Method {
                 callable,
                 receiver: argument(args, 0)?,
+                explicit: false,
             })
         }
         "warnings.warn" => {

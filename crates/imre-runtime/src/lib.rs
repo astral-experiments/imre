@@ -35,6 +35,7 @@
 mod dynamic;
 mod extensions;
 mod floats;
+mod format_grammar;
 mod shared;
 mod string_owner;
 use shared::Shared;

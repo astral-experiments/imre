@@ -31,8 +31,9 @@ impl Context {
         Ok(self.alloc(Value::Generator {
             code,
             scope,
+            iterators: Vec::new(),
             running: false,
-            exhausted: false,
+            offset: Some(0),
         }))
     }
 
@@ -42,7 +43,8 @@ impl Context {
             code,
             scope,
             running,
-            exhausted,
+            offset,
+            ..
         } = self.heap.get_mut(generator)
         else {
             unreachable!()
@@ -50,7 +52,7 @@ impl Context {
         if *running {
             return Err(Error::new("ValueError", "generator already executing"));
         }
-        if *exhausted {
+        if offset.is_none() {
             return Ok(None);
         }
         *running = true;
@@ -61,18 +63,28 @@ impl Context {
             _ => unreachable!("compiled generator step result"),
         });
         let Value::Generator {
-            running, exhausted, ..
+            running, offset, ..
         } = self.heap.get_mut(generator)
         else {
             unreachable!()
         };
         *running = false;
-        *exhausted = !matches!(result, Ok(Some(_)));
-        match result {
-            Err(e) if self.is_stop_iteration(&e) => {
-                Err(Error::new("RuntimeError", "generator raised StopIteration"))
-            }
-            result => result,
+        if !matches!(result, Ok(Some(_))) {
+            *offset = None;
         }
+        result.map_err(|error| self.generator_error(error))
+    }
+
+    /// Preserve an escaping StopIteration as the cause and context of the generator's RuntimeError.
+    pub(super) fn generator_error(&mut self, error: Error) -> Error {
+        if !self.is_stop_iteration(&error) {
+            return error;
+        }
+        let cause = self.raised_instance(error);
+        let mut error = Error::new("RuntimeError", "generator raised StopIteration");
+        let trace = error.tracing();
+        trace.cause = Some(cause);
+        trace.context = Some(cause);
+        error
     }
 }
