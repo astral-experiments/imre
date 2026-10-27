@@ -1,5 +1,5 @@
 //! Python AST nodes and traversal for runtime-loaded modules.
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use super::super::{Context, Error, Id, NONE, Result, Value, builtins};
 
@@ -165,7 +165,7 @@ fn init(ctx: &mut Context, instance: Id, args: &[Id], kwargs: &[(String, Id)]) -
             ),
         ));
     }
-    let mut fields: HashMap<String, Id> = args
+    let mut fields: indexmap::IndexMap<String, Id> = args
         .iter()
         .zip(spec.fields)
         .map(|(&v, (k, _))| ((*k).to_owned(), v))
@@ -189,6 +189,18 @@ fn init(ctx: &mut Context, instance: Id, args: &[Id], kwargs: &[(String, Id)]) -
             fields.insert(name.into(), value);
         }
     }
+    if let Value::Instance {
+        namespace: Some(dictionary),
+        ..
+    } = *ctx.heap.get(instance)
+    {
+        let storage = ctx.dict_storage(dictionary).expect("instance namespace");
+        for (name, value) in fields {
+            let key = ctx.text(name);
+            ctx.put_item(storage, key, value)?;
+        }
+        return Ok(NONE);
+    }
     let Value::Instance {
         fields: existing, ..
     } = ctx.heap.get_mut(instance)
@@ -211,7 +223,7 @@ fn parsed_instance(
         .find(|s| s.name == kind)
         .expect("known AST node");
     debug_assert_eq!(values.len(), spec.fields.len());
-    let mut fields: HashMap<_, _> = spec
+    let mut fields: indexmap::IndexMap<_, _> = spec
         .fields
         .iter()
         .zip(values)
@@ -226,6 +238,7 @@ fn parsed_instance(
         );
     }
     ctx.alloc(Value::Instance {
+        namespace: None,
         class: ctx.builtins[&format!("ast.{kind}")],
         fields,
         dictionary: None,
