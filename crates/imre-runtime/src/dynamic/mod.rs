@@ -30,7 +30,8 @@ use std::path::PathBuf;
 
 use crate::objects::exceptions::string_repr;
 use value::{
-    Code, DictIterator, DictViewKind, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value,
+    Code, DictIterator, DictViewKind, Error, FALSE, FrameOwner, Heap, Id, NONE, Result, Scope,
+    TRUE, Value,
 };
 
 struct SourceModule {
@@ -841,14 +842,14 @@ impl Context {
         }
         value
     }
-    fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
+    fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
         let entry = match &self.code_object(code).body {
             value::Body::Native(entry) => *entry,
             value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                return self.call_source(code, scope);
+                return self.call_source(code, scope, owner);
             }
         };
-        self.heap.enter(scope, code);
+        self.heap.enter(scope, code, owner);
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
         let result = unsafe { entry(self, scope) };
@@ -1179,7 +1180,7 @@ impl Context {
                 }
                 importlib::SourceBody::Compiled(entry) => {
                     let code = self.module_code(entry, &path);
-                    self.execute(code, scope)
+                    self.execute(code, scope, FrameOwner::Module(name_id))
                 }
                 importlib::SourceBody::Filesystem => Ok(NONE),
             };

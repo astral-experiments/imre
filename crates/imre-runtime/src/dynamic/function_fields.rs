@@ -51,17 +51,11 @@ impl FunctionFields {
 }
 
 impl Context {
-    fn function_module(&mut self, mut scope: Id) -> Id {
+    pub(super) fn function_module(&self, mut scope: Id) -> Id {
         while let Some(parent) = self.scope_data(scope).parent {
             scope = parent;
         }
-        let root = self.scope_data(scope);
-        if let Some(globals) = root.exec_globals {
-            return self
-                .dict_named_item(globals.dict, "__name__")
-                .unwrap_or(NONE);
-        }
-        self.text(root.module.clone())
+        self.scope_name(scope, "__name__").unwrap_or(NONE)
     }
 
     pub(super) fn function_attr(

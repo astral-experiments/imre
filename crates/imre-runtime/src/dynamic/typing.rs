@@ -674,8 +674,7 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
             "Constraints cannot be combined with bound=...",
         ));
     }
-    let module = ctx.scope_data(ctx.heap.current_scope()).module.clone();
-    let module = ctx.text(module);
+    let module = ctx.heap.caller_module();
     let constraints = ctx.alloc(Value::Tuple(constraints.to_vec()));
     Ok(ctx.alloc(Value::TypeVar(TypeVariable {
         name,

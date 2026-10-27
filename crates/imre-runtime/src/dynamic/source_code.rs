@@ -23,6 +23,7 @@ enum Instruction {
     Eval(ast::Expr),
     Assign(String, ast::Expr),
     AssignItem(ast::ExprSubscript, ast::Expr),
+    AssignAttr(ast::ExprAttribute, ast::Expr),
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
@@ -89,6 +90,9 @@ impl Program {
                         let name = n.id.to_string();
                         self.locals.insert(name.clone());
                         Instruction::Assign(name, (*s.value).clone())
+                    }
+                    [ast::Expr::Attribute(target)] => {
+                        Instruction::AssignAttr(target.clone(), (*s.value).clone())
                     }
                     [ast::Expr::Subscript(target)]
                         if !matches!(*target.slice, ast::Expr::Slice(_)) =>
@@ -486,6 +490,7 @@ impl Context {
         source: Id,
         globals: Id,
         locals: Option<Id>,
+        function: Option<Id>,
     ) -> Result<Id> {
         if self.dict_storage(globals).is_none() {
             let ty = self.type_name(globals);
@@ -582,12 +587,16 @@ impl Context {
             } else {
                 scope
             };
-            self.execute(code_id, module)?;
+            let owner = function.map_or_else(
+                || FrameOwner::Module(self.function_module(scope)),
+                FrameOwner::Function,
+            );
+            self.execute(code_id, module, owner)?;
         }
         Ok(NONE)
     }
 
-    pub(super) fn call_source(&mut self, code: Id, scope: Id) -> Result<Id> {
+    pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
         let generator = match &self.code_object(code).body {
             Body::Source(program) => program.generator,
             Body::PendingGenerator { .. } => true,
@@ -595,6 +604,7 @@ impl Context {
         };
         if generator {
             Ok(self.alloc(Value::Generator {
+                owner,
                 code,
                 scope,
                 iterators: Vec::new(),
@@ -602,7 +612,7 @@ impl Context {
                 running: false,
             }))
         } else {
-            match self.run_source(code, scope, 0, &mut Vec::new())? {
+            match self.run_source(code, scope, owner, 0, &mut Vec::new())? {
                 Step::Return(v) => Ok(v),
                 Step::Yield(..) => unreachable!("classified generator"),
             }
@@ -642,6 +652,7 @@ impl Context {
     pub(super) fn resume_source(&mut self, id: Id) -> Result<Option<Id>> {
         self.heap.keep(id);
         let Value::Generator {
+            owner,
             code,
             scope,
             iterators,
@@ -658,16 +669,17 @@ impl Context {
             return Ok(None);
         };
         *running = true;
-        let (code, scope) = (*code, *scope);
+        let (code, scope, owner) = (*code, *scope, *owner);
         let mut active = std::mem::take(iterators);
         let result = self
             .prepare_generator(code)
-            .and_then(|()| self.run_source(code, scope, ip, &mut active))
+            .and_then(|()| self.run_source(code, scope, owner, ip, &mut active))
             .map_err(|error| self.generator_error(error));
         let Value::Generator {
             running,
             offset,
             scope,
+            owner,
             iterators,
             ..
         } = self.heap.get_mut(id)
@@ -677,6 +689,7 @@ impl Context {
         *running = false;
         if !matches!(result, Ok(Step::Yield(..))) {
             *scope = NONE;
+            *owner = FrameOwner::Module(NONE);
         }
         match result? {
             Step::Yield(value, ip) => {
@@ -693,6 +706,7 @@ impl Context {
         &mut self,
         owner: Id,
         scope: Id,
+        frame_owner: FrameOwner,
         mut ip: usize,
         iterators: &mut Vec<Id>,
     ) -> Result<Step> {
@@ -700,7 +714,7 @@ impl Context {
             unreachable!("source frame")
         };
         self.heap.keep(owner);
-        self.heap.enter(scope, owner);
+        self.heap.enter(scope, owner, frame_owner);
         let result = (|| {
             while let Some((line, op)) = code.instructions.get(ip) {
                 let loc = Location {
@@ -802,6 +816,11 @@ impl Context {
             Instruction::Assign(n, e) => {
                 let value = eval(self, e)?;
                 self.bind_source_name(scope, n, value)?;
+            }
+            Instruction::AssignAttr(target, e) => {
+                let value = eval(self, e)?;
+                let object = eval(self, &target.value)?;
+                self.set_attr(object, target.attr.as_str(), value)?;
             }
             Instruction::AssignItem(target, e) => {
                 let value = eval(self, e)?;

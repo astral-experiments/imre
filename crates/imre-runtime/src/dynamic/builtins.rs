@@ -830,7 +830,7 @@ pub(super) fn call(
         "exec" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
-            ctx.exec_source(args[0], args[1], args.get(2).copied())
+            ctx.exec_source(args[0], args[1], args.get(2).copied(), None)
         }
         "abs" => {
             if !kwargs.is_empty() {

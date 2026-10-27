@@ -2364,7 +2364,7 @@ impl Context {
                         ));
                     }
                     let globals = self.module_globals(scope);
-                    return self.exec_source(code, globals, None);
+                    return self.exec_source(code, globals, None, Some(callable));
                 }
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
@@ -2482,8 +2482,9 @@ impl Context {
                 }
                 self.check_call_depth(0)?;
                 self.call_depth += 1;
-                let result =
-                    stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || self.execute(code, local));
+                let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.execute(code, local, FrameOwner::Function(callable))
+                });
                 self.call_depth -= 1;
                 let value = result?;
                 if let Some(expected) = sig["return_type"].as_str() {
@@ -2593,7 +2594,7 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
-        self.execute(code, scope)?;
+        self.execute(code, scope, FrameOwner::Function(body))?;
         if self.scope_name(scope, "__module__").is_none() {
             let namespace = self.module_globals(parent);
             if let Some(name) = self.dict_named_item(namespace, "__name__") {
