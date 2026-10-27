@@ -253,6 +253,7 @@ impl Context {
                 | Value::MappingViewIterator { .. }
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
+                | Value::Filter { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
@@ -367,6 +368,7 @@ impl Context {
                 | Value::MappingViewIterator { .. }
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
+                | Value::Filter { .. }
                 | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
@@ -526,6 +528,12 @@ impl Context {
             }
             Value::Repeat(repeat) => return Ok(repeat.next()),
             Value::Map { .. } => return self.next_zip_or_map(id),
+            Value::Filter { predicate, input } => {
+                let (predicate, input) = (*predicate, *input);
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.next_filtered(predicate, input)
+                });
+            }
             Value::Zip { .. } => {
                 // A zip input can itself be a zip, so advancing a row can descend many native frames.
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
@@ -666,6 +674,7 @@ impl Context {
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
                 | Value::Map { .. }
+                | Value::Filter { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)

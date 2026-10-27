@@ -125,6 +125,7 @@ const TYPES: &[&str] = &[
     "complex",
     "dict",
     "enumerate",
+    "filter",
     "float",
     "frozenset",
     "int",
@@ -403,6 +404,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
+        Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Deque(_) if super::deque::METHODS.contains(&attr) => super::deque::CLASS,
@@ -775,7 +777,7 @@ pub(super) fn call(
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
+            "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -1158,6 +1160,22 @@ pub(super) fn call(
             Ok(ctx.int(size))
         }
         "map" | "zip" => ctx.zip_or_map(name, args, kwargs),
+        "filter" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("filter() takes no keyword arguments"));
+            }
+            let [predicate, source] = args else {
+                return Err(type_error(format!(
+                    "filter expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            let input = ctx.iterator(*source)?;
+            Ok(ctx.alloc(Value::Filter {
+                predicate: *predicate,
+                input,
+            }))
+        }
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;
