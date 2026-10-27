@@ -1027,12 +1027,19 @@ pub(super) fn call(
             if let Value::Range(range) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
             }
-            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(object) {
+            let start = match ctx.heap.get(object) {
+                Value::List(items) => Some((items.len(), "list_reverseiterator")),
+                Value::Tuple(items) => Some((items.len(), "reversed")),
+                Value::Str(text) => Some((text.len(), "reversed")),
+                Value::Bytes(bytes) => Some((bytes.len(), "reversed")),
+                _ => None,
+            };
+            if let Some((offset, kind)) = start {
                 return Ok(ctx.alloc(Value::Iterator {
                     sequence: Some(object),
-                    offset: items.len(),
+                    offset,
                     reverse: true,
-                    kind: "list_reverseiterator",
+                    kind,
                     context: None,
                 }));
             }
