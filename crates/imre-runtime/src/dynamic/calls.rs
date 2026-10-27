@@ -18,6 +18,17 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if builtins::is_exception(kind) => match name {
+                "__new__" => self
+                    .builtins
+                    .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
+                    .copied(),
+                "__init__" if kind == "StopIteration" => {
+                    self.builtins.get("StopIteration.__init__").copied()
+                }
+                "__init__" => self.builtins.get("BaseException.__init__").copied(),
+                _ => None,
+            },
             Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str") => {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -198,6 +209,8 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
+                            | "BaseException.__init__"
+                            | "StopIteration.__init__"
                             | "int.to_bytes"
                             | "list.pop"
                             | "list.clear"
@@ -868,9 +881,9 @@ impl Context {
             {
                 return self.lookup_attr(dict, name);
             }
-            Value::Native(symbol)
+            Value::Native(ref symbol)
                 if name == "__self__"
-                    && let Some(owner) = builtins::constructor_owner(&symbol) =>
+                    && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(self.builtin(owner));
             }
@@ -1041,6 +1054,8 @@ impl Context {
             }
             Value::Native(class)
                 if class == "dict"
+                    || (builtins::is_exception(&class)
+                        && matches!(name, "__new__" | "__init__"))
                     || (class == "int" && name == "to_bytes")
                     || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
             {
@@ -1584,6 +1599,11 @@ impl Context {
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
+                    || builtins::constructor_owner(&name).is_some()
+                    || matches!(
+                        name.as_str(),
+                        "BaseException.__init__" | "StopIteration.__init__"
+                    )
                     || !name.contains('.')
                     || matches!(
                         name.split('.').next(),
@@ -1705,11 +1725,7 @@ impl Context {
                 });
                 Ok(result)
             }
-            Value::Class {
-                name,
-                scope,
-                ancestors,
-            } => {
+            Value::Class { name, scope, .. } => {
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
                 }
@@ -1732,16 +1748,6 @@ impl Context {
                         "TypeError",
                         "Can't instantiate typing.Generic directly",
                     ));
-                }
-                if ancestors.iter().any(|&base| {
-                    matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
-                }) {
-                    let mut error = self.exception(&name, &args);
-                    error.class = Some(callable);
-                    if self.has_base(callable, "StopIteration") {
-                        error.set_stop_value(args.first().copied().unwrap_or(NONE));
-                    }
-                    return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
                     if args.len() > names.len() {
@@ -1798,9 +1804,18 @@ impl Context {
                         .then(|| self.dict(Vec::new()));
                     self.instance(callable, dictionary)
                 };
-                if let Some(init) = self.bound_slot(instance, "__init__")? {
-                    if self.call(init, args, kwargs)? != NONE {
-                        return Err(Error::new("TypeError", "__init__ must return None"));
+                let actual = self.exact_type(instance)?;
+                if let Some(init) = self.class_attr(actual, "__init__") {
+                    let init = self.bind_attribute(init, instance, actual)?;
+                    let result = self.call(init, args, kwargs)?;
+                    if result != NONE {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "__init__() should return None, not '{}'",
+                                self.type_name(result)
+                            ),
+                        ));
                     }
                 } else if new.is_none()
                     && string_base.is_none()
