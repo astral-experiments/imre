@@ -113,10 +113,22 @@ def observation(module, toolchain, directory, source):
     def subclass(code):
         path = directory / "subclass"
         path.mkdir(exist_ok=True)
-        program = toolchain.build(code.encode(), path)
-        output = subprocess.run([program], check=True, text=True, capture_output=True, timeout=15)
-        if output.stderr:
-            raise AssertionError(output.stderr)
+        (path / "intern_argument.py").write_text(code, encoding="utf-8")
+        # Import the original class through the same boxed module loader as Jinja.
+        entry = path / "case.py"
+        entry.write_text('import sys\nif sys.argv[1] == "check":\n    import intern_argument\n')
+        program = path / "case"
+        build = subprocess.run(
+            [toolchain.imre, "build", entry, "--runtime-imports", "--module-root", path,
+             "--runtime", toolchain.runtime, "--clang", toolchain.clang,
+             "--opt-level", str(toolchain.level), "--no-cache", "-o", program],
+            capture_output=True, text=True, timeout=180,
+        )
+        if build.returncode:
+            raise NativeCompileError(build.stderr or build.stdout or f"compiler exit {build.returncode}")
+        output = subprocess.run([program, "check"], text=True, capture_output=True, timeout=15)
+        if output.returncode or output.stderr:
+            raise AssertionError((output.returncode, output.stdout, output.stderr))
         return output.stdout.rstrip("\n")
 
     method, events = drive(module, [binary], subclass)

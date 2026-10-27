@@ -994,6 +994,8 @@ impl DictIterator {
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
     slots: Vec<Option<Value>>,
+    // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
+    interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
     free: Vec<usize>,
@@ -1004,6 +1006,12 @@ pub(super) struct Heap {
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     weak_edge_removed: bool,
+}
+
+#[derive(Clone, Copy)]
+struct InternedString {
+    id: Id,
+    literal: bool,
 }
 
 /// A Python call observes its mutable function, while bare code keeps its entry module.
@@ -1057,6 +1065,7 @@ impl Heap {
                 Some(Value::Ellipsis),
                 Some(Value::NotImplemented),
             ],
+            interned: HashMap::new(),
             abc_registrations: Vec::new(),
             free: Vec::new(),
             immutable_hashes: HashMap::new(),
@@ -1143,17 +1152,43 @@ impl Heap {
         })
     }
 
+    pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
+        let Value::Cell(contents) = self.get_mut(cell) else {
+            unreachable!("compiled closure cell")
+        };
+        let previous = std::mem::replace(contents, value);
+        if let Some(old) = previous
+            && Some(old) != value
+        {
+            self.weak_edge_removed(old);
+        }
+        previous
+    }
+
     pub fn weak_edge_removed(&mut self, value: Id) {
         if self.has_weak_values
-            && (self.weak_edge(value) || matches!(self.get(value), Value::Function { .. }))
+            && (self.weak_edge(value)
+                || matches!(
+                    self.get(value),
+                    Value::Function { .. } | Value::Cell(Some(_))
+                ))
             && !self.bound_in_active_frame(value)
         {
-            // A dropped function may have held the last strong path through its captured scope.
+            // A function or a cell may own the last strong path to a captured value.
             self.weak_edge_removed = true;
         }
     }
 
     pub fn alloc(&mut self, value: Value) -> Id {
+        if let Value::Str(text) = &value
+            && let Some(owner) = crate::objects::short_string(text)
+        {
+            return self.intern_literal(owner);
+        }
+        self.alloc_slot(value)
+    }
+
+    fn alloc_slot(&mut self, value: Value) -> Id {
         let index = if let Some(index) = self.free.pop() {
             self.slots[index] = Some(value);
             index
@@ -1163,6 +1198,59 @@ impl Heap {
         };
         let id = index as Id;
         self.keep(id);
+        id
+    }
+
+    /// A code literal and every occurrence of a Latin-1 character share their Python handle.
+    fn intern_literal(&mut self, owner: crate::StrOwner) -> Id {
+        if let Some(entry) = self.interned.get_mut(&owner) {
+            entry.literal = true;
+            let id = entry.id;
+            self.keep(id);
+            return id;
+        }
+        let id = self.alloc_slot(Value::Str(owner.to_string()));
+        self.interned
+            .insert(owner, InternedString { id, literal: true });
+        id
+    }
+
+    pub fn string_literal(&mut self, text: &str) -> Id {
+        if text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            if let Some(entry) = self.interned.get_mut(text) {
+                entry.literal = true;
+                let id = entry.id;
+                self.keep(id);
+                return id;
+            }
+            return self.intern_literal(crate::sys::intern_owner(&crate::objects::literal_string(
+                text,
+            )));
+        }
+        self.alloc(Value::Str(text.to_owned()))
+    }
+
+    pub fn is_interned(&self, id: Id) -> bool {
+        matches!(self.get(id), Value::Str(s) if self.interned.get(s.as_str()).is_some_and(|entry| entry.id == id))
+    }
+
+    /// A dead boxed string may still occupy its slot until the next collection.
+    pub fn intern(&mut self, id: Id, roots: impl Iterator<Item = Id>) -> Id {
+        let Value::Str(text) = self.get(id) else {
+            unreachable!()
+        };
+        if let Some(&entry) = self.interned.get(text.as_str())
+            && (entry.id == id
+                || entry.literal
+                || self.bound_in_active_frame(entry.id)
+                || self.marked(roots)[entry.id as usize])
+        {
+            self.keep(entry.id);
+            return entry.id;
+        }
+        let owner = crate::sys::intern_owner(&crate::objects::literal_string(text));
+        self.interned
+            .insert(owner, InternedString { id, literal: false });
         id
     }
 
@@ -1260,6 +1348,36 @@ impl Heap {
         self.frames.last()?.location.clone()
     }
 
+    /// Trace the same roots for collection and for a weak interning lookup between collections.
+    fn marked(&self, globals: impl Iterator<Item = Id>) -> Vec<bool> {
+        let mut pending: Vec<_> = globals.collect();
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
+        pending.extend(
+            self.interned
+                .values()
+                .filter(|entry| entry.literal)
+                .map(|entry| entry.id),
+        );
+        for frame in &self.frames {
+            pending.extend([
+                frame.scope,
+                frame.code,
+                frame.owner.root(),
+                frame.active,
+                frame.inherited,
+            ]);
+            pending.extend(frame.object);
+            pending.extend(&frame.live);
+        }
+        let mut marked = vec![false; self.slots.len()];
+        while let Some(id) = pending.pop() {
+            if !std::mem::replace(&mut marked[id as usize], true) {
+                self.get(id).children(&mut pending);
+            }
+        }
+        marked
+    }
+
     pub fn statement(
         &mut self,
         globals: impl Iterator<Item = Id>,
@@ -1286,25 +1404,8 @@ impl Heap {
         {
             return None;
         }
-        let mut pending: Vec<_> = globals.collect();
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
-        for frame in &self.frames {
-            pending.extend([
-                frame.scope,
-                frame.code,
-                frame.owner.root(),
-                frame.active,
-                frame.inherited,
-            ]);
-            pending.extend(frame.object);
-            pending.extend(&frame.live);
-        }
-        let mut marked = vec![false; self.slots.len()];
-        while let Some(id) = pending.pop() {
-            if !std::mem::replace(&mut marked[id as usize], true) {
-                self.get(id).children(&mut pending);
-            }
-        }
+        let marked = self.marked(globals);
+        self.interned.retain(|_, entry| marked[entry.id as usize]);
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();

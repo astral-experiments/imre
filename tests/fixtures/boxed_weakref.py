@@ -148,6 +148,19 @@ def current():
     alias = None
     print(observed() is None)
 
+    owner = hold(Item())
+    cell = owner.__closure__[0]
+    previous = ref(cell.cell_contents)
+    cell.cell_contents = Item()
+    current_value = ref(owner())
+    del owner
+    print(previous() is None, cell.cell_contents is current_value())
+    alias = cell
+    del cell
+    print(alias.cell_contents is current_value())
+    del alias
+    print(current_value() is None)
+
     first, second = EqualKey(), EqualKey()
     left, right = ref(first), ref(second)
     by_ref = {left: 'retained key'}
