@@ -410,7 +410,7 @@ impl Context {
             ));
         }
         for &cell in cells {
-            if !matches!(self.heap.get(cell), Value::Cell { .. }) {
+            if !matches!(self.heap.get(cell), Value::Cell(_)) {
                 return Err(Error::new(
                     "TypeError",
                     format!(
@@ -439,16 +439,7 @@ impl Context {
             dict: globals,
             builtins,
         });
-        let scope = if freevars.is_empty() {
-            scope
-        } else {
-            let captured = self.scope("", Some(scope));
-            let Value::Scope(frame) = self.heap.get_mut(captured) else {
-                unreachable!()
-            };
-            frame.closure.cells.extend(freevars.into_iter().zip(cells));
-            captured
-        };
+        let scope = self.closure_environment(scope, freevars, &cells);
         let fields = super::function_fields::FunctionFields::new(
             self,
             scope,
@@ -988,7 +979,7 @@ impl Context {
                 let name = n.id.as_str();
                 if code.name != "<module>"
                     && code.locals.contains(name)
-                    && !self.scope_data(scope).names.contains_key(name)
+                    && self.scope_name(scope, name).is_none()
                 {
                     return Err(Error::new(
                         "UnboundLocalError",

@@ -434,7 +434,7 @@ impl Context {
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
-            | Value::Cell { .. }
+            | Value::Cell(_)
             | Value::Generator { .. }
             | Value::Module { .. }
             | Value::ThreadLocal(_)
@@ -924,13 +924,8 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Cell {
-                scope,
-                name: cell_name,
-            } if name == "cell_contents" => {
-                return self
-                    .scope_name(scope, &cell_name)
-                    .ok_or_else(|| Error::new("ValueError", "Cell is empty"));
+            Value::Cell(contents) if name == "cell_contents" => {
+                return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
@@ -1466,14 +1461,10 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
-        if let Value::Cell {
-            scope,
-            name: cell_name,
-        } = self.heap.get(obj).clone()
-            && name == "cell_contents"
+        if name == "cell_contents"
+            && let Value::Cell(contents) = self.heap.get_mut(obj)
         {
-            let key = self.text(&cell_name);
-            self.remove_binding(scope, &cell_name, key)?;
+            *contents = None;
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
@@ -1708,13 +1699,10 @@ impl Context {
                 Some(value),
             );
         }
-        if let Value::Cell {
-            scope,
-            name: cell_name,
-        } = self.heap.get(obj).clone()
-            && name == "cell_contents"
+        if name == "cell_contents"
+            && let Value::Cell(contents) = self.heap.get_mut(obj)
         {
-            self.bind(scope, &cell_name, value);
+            *contents = Some(value);
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
