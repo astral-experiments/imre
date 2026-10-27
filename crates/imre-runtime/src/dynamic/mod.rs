@@ -618,12 +618,7 @@ impl Context {
             let mut cursor = self.scope_data(scope).parent;
             while let Some(parent) = cursor {
                 let frame = self.scope_data(parent);
-                if let Some(&cell) = frame.closure.cells.get(name)
-                    && let Value::Cell { scope, .. } = self.heap.get(cell)
-                {
-                    return *scope;
-                }
-                if frame.closure.declared.contains(name) {
+                if frame.closure.cells.contains_key(name) || frame.closure.declared.contains(name) {
                     return parent;
                 }
                 cursor = frame.parent;
@@ -639,10 +634,33 @@ impl Context {
 
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
+        if let Some(&cell) = scope.closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get(cell)
+        {
+            return *contents;
+        }
         if let Some(namespace) = scope.namespace {
             return self.dict_named_item(namespace, name);
         }
         scope.names.get(name).copied()
+    }
+
+    /// Link a function's free-variable cells to its globals without retaining its caller's frame.
+    fn closure_environment(&mut self, globals: Id, names: Vec<String>, cells: &[Id]) -> Id {
+        if cells.is_empty() {
+            return globals;
+        }
+        let module = self.scope_data(globals).module.clone();
+        let environment = self.scope(&module, Some(globals));
+        let Value::Scope(frame) = self.heap.get_mut(environment) else {
+            unreachable!()
+        };
+        frame.closure.declared_complete = true;
+        frame
+            .closure
+            .cells
+            .extend(names.into_iter().zip(cells.iter().copied()));
+        environment
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
@@ -673,6 +691,11 @@ impl Context {
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get_mut(cell)
+        {
+            return Ok(contents.take().is_some());
+        }
         if let Some(locals) = self.scope_data(scope).exec_locals {
             return Ok(self.delete_item(locals, key).is_ok());
         }
@@ -699,6 +722,12 @@ impl Context {
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get_mut(cell)
+        {
+            *contents = Some(value);
+            return;
+        }
         if let Some(namespace) = self.scope_data(scope).namespace {
             let key = self.text(name);
             let storage = self.dict_storage(namespace).expect("module namespace");
@@ -730,13 +759,8 @@ impl Context {
                 }
             }
             let s = self.scope_data(scope);
-            if let Some(&cell) = s.closure.cells.get(name)
-                && let Value::Cell {
-                    scope: owner,
-                    name: cell_name,
-                } = self.heap.get(cell)
-            {
-                return self.scope_name(*owner, cell_name).ok_or_else(|| {
+            if s.closure.cells.contains_key(name) {
+                return self.scope_name(scope, name).ok_or_else(|| {
                     Error::new(
                         "NameError",
                         format!("free variable '{name}' is not associated with a value"),

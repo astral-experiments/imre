@@ -261,7 +261,7 @@ impl Context {
             Value::Function { .. } => "function",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
-            Value::Cell { .. } => "cell",
+            Value::Cell(_) => "cell",
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -451,10 +451,7 @@ pub(super) enum Value {
         entries: super::dictionary::Entries,
     },
     Scope(Scope),
-    Cell {
-        scope: Id,
-        name: String,
-    },
+    Cell(Option<Id>),
     ClassCell(Option<Id>),
     Super {
         start: Id,
@@ -733,7 +730,7 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(origin);
             }
-            Self::Cell { scope, .. } => visit.push(*scope),
+            Self::Cell(value) => visit.extend(value),
             Self::Function {
                 closure,
                 scope,
