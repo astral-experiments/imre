@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 84 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 41 modules with recorded suites, 112 complete test executions pass natively at both optimization levels; 15,141 of 15,288 upstream executions have a classification.
+**At a glance:** 85 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 41 modules with recorded suites, 112 complete test executions pass natively at both optimization levels; 15,141 of 15,288 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -55,6 +55,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `logging` | Yes | Send runtime-loaded log messages to `sys.stderr` with `getLogger` and `StreamHandler`, change the handler stream, and rotate log files by size or time. [Evidence](../benchmarks/cpython_stdlib/full/logging/README.md) | [0 / 272](../benchmarks/cpython_stdlib/full/logging/) | 25 | 55 |
 | `math` | Yes | `prod` multiplies integer factors from iterables with an optional integer start. [Evidence](../tests/fixtures/iterables/math_product.py) | — | — | — |
 | `mimetypes` | Yes | Guess the MIME type and encoding of a filename or URL with POSIX host tables or a custom database. [Evidence](../benchmarks/cpython_stdlib/full/mimetypes/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/mimetypes/) | 7 | 10 |
+| `numbers` | Yes | Check typed numeric values and builtin classes against `Number` with `isinstance` and `issubclass`. [Evidence](../tests/fixtures/unions/numeric_membership.py) | — | — | — |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 30 | 15 |
 | `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 136 | 63 |
@@ -94,6 +95,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
 | `weakref` | Yes | Callback-free proxy for source-defined records, including cached identity, attribute and call forwarding, and ReferenceError after the referent is released. [Evidence](../tests/fixtures/classes/weak_proxy.py) | — | — | — |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
+| `zipimport` | Yes | Read stored and deflated resources with `zipimporter.get_data()`. Importing Python modules from ZIP paths is unsupported. [Evidence](../tests/fixtures/files/zipimport_resources.py) | — | — | — |
 | `zlib` | Yes | `adler32` computes an unsigned checksum of bytes with an optional integer seed. Compressed-input failures preserve the `error` exception. [Evidence](../tests/fixtures/bytes/zlib_adler32.py) | — | — | — |
 
 ## Modules without an accepted import or a suite measurement
@@ -152,7 +154,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `nt` |
 | `ntpath` |
 | `nturl2path` |
-| `numbers` |
 | `opcode` |
 | `optparse` |
 | `pdb` |
@@ -206,7 +207,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `xml` |
 | `xmlrpc` |
 | `zipapp` |
-| `zipimport` |
 | `zoneinfo` |
 
 ## Proposed scope exclusions

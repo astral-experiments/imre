@@ -161,6 +161,7 @@ pub(crate) enum IntrinsicModule {
     Builtins,
     Sys,
     SysJit,
+    Traceback,
     Typing,
     Dataclasses,
     Difflib,
@@ -208,6 +209,7 @@ pub(crate) enum IntrinsicModule {
     Copy,
     Itertools,
     Math,
+    Numbers,
     Operator,
     Textwrap,
     Io,
@@ -247,6 +249,7 @@ pub(crate) enum Intrinsic {
     ModuleSpec,
     CachePath { reverse: bool },
     NominalClass(&'static str),
+    Number,
     GetAnnotations,
     Overload,
     GetOverloads,
@@ -279,6 +282,7 @@ pub(crate) enum Intrinsic {
     HandlerLookup,
     FileEncodingUsesUtf8,
     PrintActiveException,
+    TracebackPrintExc,
     HandlerLevelType,
     TextOutputType,
     HandlerFallback,
@@ -609,6 +613,7 @@ impl IntrinsicModule {
             "argparse" => Some(Self::Argparse),
             "builtins" => Some(Self::Builtins),
             "sys" => Some(Self::Sys),
+            "traceback" => Some(Self::Traceback),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "difflib" => Some(Self::Difflib),
@@ -638,6 +643,7 @@ impl IntrinsicModule {
             "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
             "math" => Some(Self::Math),
+            "numbers" => Some(Self::Numbers),
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
@@ -727,6 +733,7 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
+            (Self::Numbers, "Number") => Intrinsic::Number,
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::CollectionsAbc, "Sequence") => {
@@ -886,6 +893,7 @@ impl IntrinsicModule {
             (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::Traceback, "print_exc") => Intrinsic::TracebackPrintExc,
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
@@ -1078,6 +1086,7 @@ impl IntrinsicModule {
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
+            (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
@@ -1254,6 +1263,7 @@ impl SourceModule {
 pub(crate) struct SourceGraph {
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
+    pub(crate) handled_tracebacks: bool,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
@@ -2340,6 +2350,15 @@ impl<'a> Loader<'a> {
         let mut graph = SourceGraph {
             command_startup: None,
             virtual_command: false,
+            handled_tracebacks: self.modules.iter().any(|module| {
+                module.bindings.values().any(|binding| {
+                    matches!(
+                        binding,
+                        Binding::IntrinsicModule(IntrinsicModule::Traceback)
+                            | Binding::Intrinsic(Intrinsic::TracebackPrintExc)
+                    )
+                })
+            }),
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
@@ -3113,6 +3132,9 @@ impl<'a> Loader<'a> {
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
+            "zipimport" if cfg!(unix) => {
+                Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))
+            }
             "platform" => Some((
                 "platform.py",
                 concat!(

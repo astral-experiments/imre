@@ -4,6 +4,7 @@ import argparse
 import errno
 import json
 import os
+import platform
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,54 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
+def check_slice_stack(imre, imports, root, env):
+    def output(exe, depths, stack_mib=None):
+        set_stack = None
+        if stack_mib is not None:
+            import resource
+
+            def set_stack():
+                _, hard = resource.getrlimit(resource.RLIMIT_STACK)
+                resource.setrlimit(resource.RLIMIT_STACK, (stack_mib * 1024**2, hard))
+
+        command = imports + f"arithmetic.current({depths})"
+        result = subprocess.run(
+            [exe, "-IB", "-c", command], cwd=root, env=env, capture_output=True,
+            preexec_fn=set_stack, timeout=60,
+        )
+        assert (result.returncode, result.stderr) == (0, b""), result
+        return result.stdout
+
+    def compare(depths, stack_mib=None):
+        expected = output(sys.executable, depths, stack_mib)
+        actual = output(imre, depths, stack_mib)
+        assert actual == expected, (depths, stack_mib, actual, expected)
+        return expected
+
+    boundary = "(15500,)"
+    if sys.platform != "linux" or platform.machine() != "x86_64":
+        compare("")
+        compare(boundary)
+        return
+
+    for stack_mib, expected in ((8, b"recursion"), (96, b"760001 ")):
+        stdout = compare("", stack_mib)
+        for renderer in (b"repr", b"str"):
+            assert b"40000 " + renderer + b" " + expected in stdout, stdout
+
+    exhausted = compare(boundary, 6)
+    rendered = compare(boundary, 16)
+    for renderer in (b"repr", b"str"):
+        assert b"15500 " + renderer + b" recursion\n" in exhausted, exhausted
+        assert b"15500 " + renderer + b" 294501 " in rendered, rendered
+
+    # At 8 MiB the pinned GCC build fits 15,500 frames at 528 bytes per level.
+    # Clang and the native guard use 624 bytes per level and must raise here.
+    gcc_reference = sys.version_info[:3] == (3, 14, 5) and platform.python_compiler().strip() == "GCC 13.3.0"
+    assert output(sys.executable, boundary, 8) == (rendered if gcc_reference else exhausted)
+    assert output(imre, boundary, 8) == exhausted
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -42,11 +91,12 @@ def main():
         }
         env["IMRE_CACHE_DIR"] = str(root / "cache")
 
-        def run(exe, *args, extra=None):
+        def run(exe, *args, extra=None, stdin=None):
             return subprocess.run(
                 [exe, *args],
                 cwd=root,
                 env=env | (extra or {}),
+                input=stdin,
                 capture_output=True,
                 check=False,
                 timeout=60,
@@ -69,6 +119,15 @@ def main():
         # A cached object-runtime executable cannot satisfy a subsequent static build.
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
+
+        (root / "reader.py").write_text(
+            "for _ in range(3):\n    print(repr(input()))\n"
+            "try:\n    input()\nexcept EOFError:\n    print('EOF')\n"
+        )
+        for exe in (sys.executable, imre):
+            actual = run(exe, "-B", "-c", "import reader", stdin="one\r\n\nλ".encode())
+            assert actual.returncode == 0 and not actual.stderr, actual.stderr
+            assert actual.stdout == "'one\\r'\n''\n'λ'\nEOF\n".encode()
 
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
@@ -152,6 +211,7 @@ def main():
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
         (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
         inspect_entry = root / "inspect_views.py"
@@ -413,8 +473,9 @@ def report(text):
             "    raise ValueError('from plugin')\n"
         )
         plugin.write_text(source)
-        imports = f"import sys\nsys.path = [{str(installed)!r}] + sys.path\nimport arithmetic\n"
-        compare("-IB", "-c", imports + "print(arithmetic.total())")
+        roots = [str(installed), str(installed)]
+        imports = f"import sys\nsys.path = {roots!r} + sys.path\nimport arithmetic\n"
+        compare("-IB", "-c", imports + f"print(arithmetic.total())\nprint(sys.path[:2] == {roots!r})")
         plugin.write_text(source.replace("n = 0", "n = 7"))
         compare("-IB", "-c", imports + "print(arithmetic.total())")
         error = run(imre, "-IB", "-c", imports + "arithmetic.fail()")
@@ -438,6 +499,7 @@ def report(text):
             "boxed_complex.py",
             "boxed_float.py",
             "boxed_float_arithmetic.py",
+            "boxed_bytes_fields.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
@@ -448,6 +510,7 @@ def report(text):
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_re_split.py",
+            "boxed_re_findall_empty.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
             "boxed_email_dates.py",
@@ -455,10 +518,12 @@ def report(text):
             "boxed_codecs.py",
             "boxed_selector_wide_fds.py",
             "boxed_urlsplit.py",
+            "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_type_identity.py",
             "boxed_singleton_types.py",
+            "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
             "boxed_functiontype.py",
@@ -475,6 +540,7 @@ def report(text):
             "boxed_recursion.py",
             "boxed_function_defaults.py",
             "boxed_set_union.py",
+            "boxed_weakref.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -516,7 +582,10 @@ def report(text):
             "boxed_string_expandtabs.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
-            compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_slice_deep_repr.py":
+                check_slice_stack(imre, imports, root, env)
+            else:
+                compare("-IB", "-c", imports + "arithmetic.current()")
         if os.name == "posix":
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

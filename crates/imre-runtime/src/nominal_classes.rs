@@ -37,6 +37,7 @@ pub unsafe extern "C" fn imre_builtin_issubclass(child: *const Str, parent: *con
             || match parent {
                 "object" => true,
                 "int" => child == "bool",
+                "numbers.Number" => matches!(child, "bool" | "int" | "float" | "complex"),
                 "collections.abc.MutableSequence" => mutable_sequence,
                 "collections.abc.Sequence" => {
                     mutable_sequence
