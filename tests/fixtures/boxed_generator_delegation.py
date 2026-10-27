@@ -66,7 +66,14 @@ def boolean_values(items, trace):
         yield (item and visited(trace, 'and', 7)) or visited(trace, 'or', 9)
 
 
+def unpacked(rows):
+    for row in rows:
+        left, [middle, right] = row
+        yield left, middle, right
+
+
 def current():
+    print(list(unpacked([(1, [2, 3]), (4, (5, 6))])))
     pulls = []
     values = (x + y for x in visited(pulls, "outer", [1, 2])
               for y in visited(pulls, x, range(x)) if y == 0)
