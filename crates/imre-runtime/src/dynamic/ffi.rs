@@ -192,7 +192,19 @@ impl Context {
                     _ => "__invert__",
                 };
                 if let Some(method) = self.bound_slot(a, slot)? {
-                    return self.call(method, vec![], vec![]);
+                    let result = self.call(method, vec![], vec![])?;
+                    if result != NOT_IMPLEMENTED {
+                        return Ok(result);
+                    }
+                    let symbol = match op {
+                        "neg" => "-",
+                        "pos" => "+",
+                        _ => "~",
+                    };
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("bad operand type for unary {symbol}: '{}'", self.type_name(a)),
+                    ));
                 }
                 let v = self.as_int(a)?;
                 let result = match op {
