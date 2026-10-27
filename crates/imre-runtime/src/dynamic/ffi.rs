@@ -79,10 +79,7 @@ impl Context {
                 let name = self.str_value(b)?.to_owned();
                 let scope = self.binding_scope(a, &name);
                 if !self.remove_binding(scope, &name, b)? && op == "delname" {
-                    return Err(Error::new(
-                        "NameError",
-                        format!("name '{name}' is not defined"),
-                    ));
+                    return Err(self.missing_binding(a, scope, &name));
                 }
                 Ok(NONE)
             }
