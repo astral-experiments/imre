@@ -886,6 +886,7 @@ impl Context {
             class_body: None,
             enum_namespace: None,
             is_abstract: false,
+            is_comprehension: false,
             class_cell: None,
             class_namespace: None,
             first_argument: None,
@@ -899,6 +900,17 @@ impl Context {
             module: module.to_owned(),
         }))
     }
+    /// Comprehensions own their loop variables, but assignment expressions bind outside them.
+    fn comprehension_scope(&mut self, parent: Id) -> Id {
+        let module = self.scope_data(parent).module.clone();
+        let scope = self.scope(&module, Some(parent));
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.is_comprehension = true;
+        scope
+    }
+
     fn scope_data(&self, scope: Id) -> &Scope {
         let Value::Scope(s) = self.heap.get(scope) else {
             unreachable!("compiled scope handle")

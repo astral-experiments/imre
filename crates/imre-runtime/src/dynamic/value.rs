@@ -484,6 +484,7 @@ pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
+    pub is_comprehension: bool,
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,

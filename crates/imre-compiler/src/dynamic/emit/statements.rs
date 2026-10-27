@@ -13,6 +13,7 @@ struct ClosureNames {
     reads: std::collections::BTreeSet<String>,
     globals: std::collections::BTreeSet<String>,
     nonlocals: std::collections::BTreeSet<String>,
+    in_comprehension: bool,
     incomplete: bool,
     locals_incomplete: bool,
 }
@@ -91,6 +92,13 @@ impl<'a> Visitor<'a> for ClosureNames {
     }
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         match expr {
+            ast::Expr::Named(named) if self.in_comprehension => {
+                if let ast::Expr::Name(target) = &*named.target {
+                    self.locals.insert(target.id.to_string());
+                }
+                self.visit_expr(&named.value);
+            }
+            ast::Expr::Name(_) if self.in_comprehension => {}
             ast::Expr::Name(n) => match n.ctx {
                 ast::ExprContext::Load => {
                     self.reads.insert(n.id.to_string());
@@ -116,6 +124,9 @@ impl<'a> Visitor<'a> for ClosureNames {
             | ast::Expr::Generator(_) => {
                 self.incomplete = true;
                 self.locals_incomplete = true;
+                let previous = std::mem::replace(&mut self.in_comprehension, true);
+                visitor::walk_expr(self, expr);
+                self.in_comprehension = previous;
             }
             _ => visitor::walk_expr(self, expr),
         }

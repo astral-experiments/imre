@@ -29,8 +29,7 @@ impl Context {
                 "expected a compiled generator body",
             ));
         };
-        let module = self.scope_data(scope).module.clone();
-        let scope = self.scope(&module, Some(scope));
+        let scope = self.comprehension_scope(scope);
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };

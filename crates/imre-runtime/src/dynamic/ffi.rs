@@ -43,10 +43,19 @@ impl Context {
                 }
                 self.lookup(a, &name)
             }
-            "assign" => {
+            "assign" | "assign_expr" => {
+                let mut scope = a;
+                if op == "assign_expr" {
+                    while self.scope_data(scope).is_comprehension {
+                        scope = self
+                            .scope_data(scope)
+                            .parent
+                            .expect("enclosing comprehension scope");
+                    }
+                }
                 let name = self.str_value(b)?.to_owned();
-                let value = self.enum_assignment(a, &name, c)?;
-                self.bind_source_name(a, &name, value)?;
+                let value = self.enum_assignment(scope, &name, c)?;
+                self.bind_source_name(scope, &name, value)?;
                 Ok(c)
             }
             "declare_global" => {
@@ -65,10 +74,7 @@ impl Context {
                 }
                 Ok(NONE)
             }
-            "scope" => {
-                let module = self.scope_data(a).module.clone();
-                Ok(self.scope(&module, Some(a)))
-            }
+            "comprehension_scope" => Ok(self.comprehension_scope(a)),
             "import" => {
                 let name = self.str_value(b)?.to_owned();
                 self.module(&name)
