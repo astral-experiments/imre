@@ -9,19 +9,50 @@ pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
             args.len()
         )));
     };
-    let mut values = ctx.items(*iterable)?;
-    // Python callbacks can remove every reference from the input while sorting.
+    let values = ctx.items(*iterable)?;
+    let list = ctx.alloc(Value::List(values));
+    list_sort(ctx, list, &[], kwargs)?;
+    Ok(list)
+}
+
+/// Leave an empty list visible to callbacks and restore its original elements on every exit.
+fn list_sort(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [key, reverse] = bind_method_arguments("sort", args, kwargs, ["key", "reverse"], 0)?;
+    let reverse = ctx.optional_truth(reverse, false)?;
+    let Value::List(live) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    let mut values = std::mem::take(live);
     for &value in &values {
         ctx.heap.keep(value);
     }
-    let [key, reverse] = bind_method_arguments("sort", &[], kwargs, ["key", "reverse"], 0)?;
-    let reverse = ctx.optional_truth(reverse, false)?;
+    let result = sort_list_items(ctx, &mut values, key, reverse);
+    let Value::List(live) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    // An append allocates storage even if the callback subsequently pops the item.
+    let modified = live.capacity() != 0;
+    *live = values;
+    result?;
+    if modified {
+        return Err(Error::new("ValueError", "list modified during sort"));
+    }
+    Ok(NONE)
+}
+
+/// Evaluate each key in input order before changing the order of the items.
+fn sort_list_items(
+    ctx: &mut Context,
+    values: &mut [Id],
+    key: Option<Id>,
+    reverse: bool,
+) -> Result<()> {
     if let Some(key) = key.filter(|&key| key != NONE) {
         let mut keyed = Vec::new();
         keyed
             .try_reserve_exact(values.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for &value in &values {
+        for &value in values.iter() {
             let sort_key = ctx.call(key, vec![value], vec![])?;
             ctx.heap.keep(sort_key);
             keyed.push((sort_key, value));
@@ -31,9 +62,9 @@ pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
             *slot = value;
         }
     } else {
-        sort_values(ctx, &mut values, reverse, |value| value)?;
+        sort_values(ctx, values, reverse, |value| value)?;
     }
-    Ok(ctx.alloc(Value::List(values)))
+    Ok(())
 }
 
 fn sort_values<T: Copy>(
@@ -258,8 +289,23 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "list.pop" {
-        return list_pop(ctx, args, kwargs);
+    if let Some(method @ ("pop" | "sort")) = name.strip_prefix("list.") {
+        let Some((&receiver, args)) = args.split_first() else {
+            return Err(type_error(format!(
+                "unbound method {name}() needs an argument"
+            )));
+        };
+        if !matches!(ctx.heap.get(receiver), Value::List(_)) {
+            return Err(type_error(format!(
+                "descriptor '{method}' for 'list' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            )));
+        }
+        return if method == "sort" {
+            list_sort(ctx, receiver, args, kwargs)
+        } else {
+            list_pop(ctx, receiver, args, kwargs)
+        };
     }
     let slot = matches!(
         name,
@@ -450,16 +496,7 @@ pub(super) fn method(
     }
 }
 
-fn list_pop(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let Some((&receiver, args)) = args.split_first() else {
-        return Err(type_error("unbound method list.pop() needs an argument"));
-    };
-    if !matches!(ctx.heap.get(receiver), Value::List(_)) {
-        return Err(type_error(format!(
-            "descriptor 'pop' for 'list' objects doesn't apply to a '{}' object",
-            ctx.type_name(receiver)
-        )));
-    }
+fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error("list.pop() takes no keyword arguments"));
     }

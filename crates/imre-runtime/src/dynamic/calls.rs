@@ -141,6 +141,7 @@ impl Context {
                             | "object.__init__"
                             | "int.to_bytes"
                             | "list.pop"
+                            | "list.sort"
                             | "map.__iter__"
                             | "map.__next__"
                     ) || name.starts_with("dict.")
@@ -938,8 +939,8 @@ impl Context {
             Value::Native(class) if class == "bool" && name == "to_bytes" => {
                 return Ok(self.builtin("int.to_bytes"));
             }
-            Value::Native(class) if class == "list" && name == "pop" => {
-                return Ok(self.builtin("list.pop"));
+            Value::Native(class) if class == "list" && matches!(name, "pop" | "sort") => {
+                return Ok(self.builtin(&format!("list.{name}")));
             }
             Value::Native(class)
                 if class == "dict"
