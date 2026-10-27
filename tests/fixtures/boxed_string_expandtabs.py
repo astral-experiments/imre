@@ -16,6 +16,8 @@ def current():
     source = "abc\r\tX\nA\tb"
     print(repr(source.expandtabs()), repr(source.expandtabs(tabsize=4)))
     print(repr("a\tb".expandtabs(-1)), repr("\t".expandtabs(True)))
+    assert "a\tb".expandtabs(Width(True)) == "a b"
+    assert "a\tb".expandtabs(Width(False)) == "ab"
     plain = "plain text"
     width = Width(3)
     print(plain.expandtabs(width) is plain, width.calls)
