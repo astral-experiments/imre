@@ -778,6 +778,20 @@ pub(super) fn method(
             };
             Ok(boolean(set_member(ctx, receiver, *value, true)?))
         }
+        "set.__reduce__" | "frozenset.__reduce__" => {
+            arity(name, args, 0, 0)?;
+            let entries = match ctx.heap.get(receiver) {
+                Value::Set { entries, frozen } if *frozen == (name == "frozenset.__reduce__") => {
+                    entries
+                }
+                _ => return Err(type_error(format!("invalid receiver for {name}"))),
+            };
+            let items = entries.iter().map(|&(key, _)| key).collect();
+            let items = ctx.alloc(Value::List(items));
+            let args = ctx.alloc(Value::Tuple(vec![items]));
+            let class = ctx.exact_type(receiver)?;
+            Ok(ctx.alloc(Value::Tuple(vec![class, args, NONE])))
+        }
         "frozenset.copy" => {
             arity(name, args, 0, 0)?;
             Ok(receiver)

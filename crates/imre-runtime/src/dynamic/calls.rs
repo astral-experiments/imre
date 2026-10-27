@@ -1681,6 +1681,15 @@ impl Context {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(class)
+                if name == "__reduce__"
+                    && matches!(
+                        class.as_str(),
+                        "set" | "frozenset" | "collections.defaultdict"
+                    ) =>
+            {
+                return Ok(self.builtin(&format!("{class}.__reduce__")));
+            }
+            Value::Native(class)
                 if name == "fromkeys"
                     && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
             {
