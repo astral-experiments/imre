@@ -66,6 +66,9 @@ pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
         Value::Ellipsis => "...".to_owned(),
         Value::Native(name) => name.clone(),
         Value::Class { name, scope, .. } => format!("{}.{name}", ctx.scope_data(*scope).module),
+        Value::Instance { .. } if ctx.module_value("typing", "Final") == Some(id) => {
+            "typing.Final".to_owned()
+        }
         _ => ctx.repr(id),
     }
 }
@@ -572,7 +575,8 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         unreachable!()
     };
     let (origin, kind) = (alias.origin, alias.kind);
-    if matches!(kind, AliasKind::Literal(_)) {
+    if matches!(kind, AliasKind::Literal(_)) || ctx.module_value("typing", "Final") == Some(origin)
+    {
         return Err(Error::new(
             "TypeError",
             format!("Cannot subclass {}", alias.repr(ctx)),
@@ -850,8 +854,15 @@ pub(super) fn call(
     }
     match (operation, args) {
         ("Any", _) => Err(Error::new("TypeError", "Any cannot be instantiated")),
+        ("_GenericAlias", [origin, parameters]) => {
+            let args = match ctx.heap.get(*parameters) {
+                Value::Tuple(items) => items.clone(),
+                _ => vec![*parameters],
+            };
+            Ok(alias(ctx, AliasKind::Generic, *origin, args))
+        }
         ("_LiteralGenericAlias", [origin, parameters]) => literal_alias(ctx, *origin, *parameters),
-        ("_LiteralGenericAlias", _) => Err(Error::new(
+        ("_LiteralGenericAlias" | "_GenericAlias", _) => Err(Error::new(
             "TypeError",
             "_GenericAlias.__init__() requires an origin and arguments",
         )),

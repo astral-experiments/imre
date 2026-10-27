@@ -4,6 +4,12 @@ import typing
 
 def current():
     from typing import assert_never
+    from typing import Final
+
+    label: Final = "fixed"
+    assert label == "fixed" and Final is typing.Final
+    assert repr(Final[int]) == "typing.Final[int]"
+    assert typing.get_origin(Final[int]) is Final and typing.get_args(Final[int]) == (int,)
 
     assert assert_never is typing.assert_never
     try:
