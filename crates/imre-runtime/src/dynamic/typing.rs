@@ -908,6 +908,10 @@ impl Context {
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
+        // A class-body __eq__ suppresses inherited hashing at type creation.
+        if fields.names.contains_key("__eq__") && !fields.names.contains_key("__hash__") {
+            fields.names.insert("__hash__".to_owned(), NONE);
+        }
         let namespace = fields.class_namespace.get_or_insert_with(Default::default);
         namespace.bases = bases;
         namespace.mro = mro;
