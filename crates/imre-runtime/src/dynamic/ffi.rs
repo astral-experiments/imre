@@ -260,15 +260,22 @@ impl Context {
                 }
             }
             "neg" | "pos" | "~" => {
-                let slot = match op {
-                    "neg" => "__neg__",
-                    "pos" => "__pos__",
-                    _ => "__invert__",
+                let (slot, symbol) = match op {
+                    "neg" => ("__neg__", "-"),
+                    "pos" => ("__pos__", "+"),
+                    _ => ("__invert__", "~"),
                 };
                 if let Some(method) = self.bound_slot(a, slot)? {
                     return self.call(method, vec![], vec![]);
                 }
-                let v = self.as_int(a)?;
+                let v = self.as_int(a).map_err(|_| {
+                    let name = self.type_name(a);
+                    let name = &name[..name.floor_char_boundary(200)];
+                    Error::new(
+                        "TypeError",
+                        format!("bad operand type for unary {symbol}: '{name}'"),
+                    )
+                })?;
                 let result = match op {
                     "neg" => crate::integer_binary(&crate::Int::from(0), &v, 1)?,
                     "~" => crate::integer_binary(&crate::Int::from(-1), &v, 7)?,
