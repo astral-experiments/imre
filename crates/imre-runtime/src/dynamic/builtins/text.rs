@@ -842,7 +842,7 @@ pub(super) fn method(
         }
         "splitlines" => {
             let [keep] = bind(name, args, kwargs, ["keepends"])?;
-            let keep = keep.map(|x| ctx.as_integer(x)).transpose()?.unwrap_or(0) != 0;
+            let keep = ctx.optional_truth(keep, false)?;
             let mut values = Vec::new();
             split_lines(&source, keep, |field| values.push(ctx.text(field)));
             Ok(ctx.alloc(Value::List(values)))
