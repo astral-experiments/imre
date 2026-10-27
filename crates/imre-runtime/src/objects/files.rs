@@ -295,9 +295,11 @@ impl FileState {
 
     /// BufferedWriter.read converts its count to a C int before rejecting the access mode.
     pub(crate) fn check_writer_read_size(value: &Int) -> Result<()> {
-        i32::try_from(super::bytes::native_size(value)?)
+        value
+            .to_i64()
+            .and_then(|value| i32::try_from(value).ok())
             .map(|_| ())
-            .map_err(|_| {
+            .ok_or_else(|| {
                 Error::new(
                     Kind::OverflowError,
                     "Python int too large to convert to C int",
