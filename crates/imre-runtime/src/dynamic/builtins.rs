@@ -6,6 +6,7 @@ use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TR
 mod collections;
 mod exceptions;
 mod float;
+mod round;
 pub(super) use float::from_numeric;
 mod integer;
 mod print;
@@ -83,6 +84,7 @@ const FUNCTIONS: &[&str] = &[
     "ord",
     "chr",
     "divmod",
+    "round",
     "callable",
     "abs",
     "all",
@@ -486,15 +488,20 @@ pub(super) fn bind_method_arguments<const N: usize>(
     Ok(values)
 }
 
-/// Bind the positional or named operands of `pow` before selecting its numeric operation.
-fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let names = ["base", "exp", "mod"];
+/// Bind built-in arguments in the order Argument Clinic reports missing and invalid names.
+fn bind_builtin_arguments<const N: usize>(
+    builtin: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+    required: usize,
+) -> Result<[Option<Id>; N]> {
     if args.len() + kwargs.len() <= names.len() {
         // Argument Clinic diagnoses missing required operands before duplicate or unknown names.
-        for (index, &name) in names[..2].iter().enumerate().skip(args.len()) {
+        for (index, &name) in names[..required].iter().enumerate().skip(args.len()) {
             if !kwargs.iter().any(|(key, _)| key == name) {
                 return Err(type_error(format!(
-                    "pow() missing required argument '{name}' (pos {})",
+                    "{builtin}() missing required argument '{name}' (pos {})",
                     index + 1
                 )));
             }
@@ -505,11 +512,17 @@ fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> 
             && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
         {
             return Err(type_error(format!(
-                "pow() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
+                "{builtin}() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
             )));
         }
     }
-    let [Some(base), Some(exp), modulus] = bind_method_arguments("pow", args, kwargs, names, 3)?
+    bind_method_arguments(builtin, args, kwargs, names, N)
+}
+
+/// Bind the positional or named operands of `pow` before selecting its numeric operation.
+fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(base), Some(exp), modulus] =
+        bind_builtin_arguments("pow", args, kwargs, ["base", "exp", "mod"], 2)?
     else {
         unreachable!("required pow operands were checked above")
     };
@@ -847,6 +860,7 @@ pub(super) fn call(
                 ))),
             }
         }
+        "round" => round::call(ctx, args, kwargs),
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
