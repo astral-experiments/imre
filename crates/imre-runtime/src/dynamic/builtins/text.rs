@@ -220,6 +220,9 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
 /// Apply a scalar format specifier used by both f-strings and str.format.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
     if spec.is_empty() {
+        if let Value::Int(number) = ctx.heap.get(value) {
+            return Ok(crate::integer_text::decimal_string(number)?.into_string());
+        }
         return Ok(ctx.display(value));
     }
     if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {

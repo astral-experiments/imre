@@ -50,3 +50,9 @@ def current():
             format(value, "2c")
         except OverflowError as error:
             print(str(error))
+    huge = 1 << 14500
+    for spec in ("", "d", "x"):
+        try:
+            print(len(format(huge, spec)))
+        except ValueError as error:
+            print(str(error))
