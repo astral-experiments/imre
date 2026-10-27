@@ -70,6 +70,7 @@ pub(crate) struct Context {
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
+    zip_directories: HashMap<String, crate::objects::ZipArchive>,
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,

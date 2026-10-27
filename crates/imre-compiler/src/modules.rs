@@ -31,6 +31,14 @@ pub(crate) type ModuleId = usize;
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "zipimport" if cfg!(unix) => Some((
+            "zipimport.py",
+            concat!(
+                include_str!("../stdlib/zipimport_boxed.py"),
+                "\n",
+                include_str!("../stdlib/zipimport.py"),
+            ),
+        )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
@@ -3131,9 +3139,14 @@ impl<'a> Loader<'a> {
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
-            "zipimport" if cfg!(unix) => {
-                Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))
-            }
+            "zipimport" if cfg!(unix) => Some((
+                "zipimport.py",
+                concat!(
+                    include_str!("../stdlib/zipimport_typed.py"),
+                    "\n",
+                    include_str!("../stdlib/zipimport.py")
+                ),
+            )),
             "platform" => Some((
                 "platform.py",
                 concat!(

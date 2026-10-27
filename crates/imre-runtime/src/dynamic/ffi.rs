@@ -451,6 +451,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,
+        zip_directories: HashMap::new(),
         codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),

@@ -443,15 +443,17 @@ pub(crate) fn compile(
             }
         }
     }
-    // The object runtime also exposes platform to __import__(name) when the name
-    // is supplied at runtime. Its initializer only depends on native re and sys.
-    if !seen.contains("platform") {
-        let (name, source) = crate::modules::bundled_runtime_source("platform").unwrap();
-        sources.push((
-            "platform".into(),
-            Path::new(bundled_root).join(name),
-            source.into(),
-        ));
+    // These bundled initializers depend only on native modules and may be selected by name at runtime.
+    for name in ["platform", "zipimport"] {
+        if !seen.contains(name)
+            && let Some((file, source)) = crate::modules::bundled_runtime_source(name)
+        {
+            sources.push((
+                name.into(),
+                Path::new(bundled_root).join(file),
+                source.into(),
+            ));
+        }
     }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
