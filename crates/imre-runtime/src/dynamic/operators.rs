@@ -943,6 +943,11 @@ impl Context {
             }
             return Err(self.lookup_error("KeyError", key));
         }
+        // A scalar subclass inherits subscription unless its type overrides __getitem__.
+        let scalar = self.scalar_value(obj);
+        if obj != scalar && matches!(self.heap.get(scalar), Value::Str(_) | Value::Bytes(_)) {
+            return self.get_item(scalar, key);
+        }
         if matches!(
             self.heap.get(obj),
             Value::Set { .. } | Value::DictView { .. }

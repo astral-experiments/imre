@@ -32,6 +32,19 @@ def current():
     seq = Sequence(item)
     assert choice is secrets.choice
     assert choice(seq=seq) is item and seq.events == ["len", "len", 0]
+    class Text(str):
+        pass
+
+    class IndexedText(str):
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return item
+
+    assert choice(Text("🎉")) == "🎉"
+    assert Text("abc")[:1] == "a"
+    assert choice(IndexedText("abc")) is item
     assert choice([item]) is item and choice((item,)) is item
     assert choice({0: item}) is item
     assert choice("🎉") == "🎉" and choice(b"\xff") == 255

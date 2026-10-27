@@ -1017,7 +1017,15 @@ pub(super) fn call(
                     ctx.items(args[0])?.len()
                 }
                 Value::Instance { .. } => {
-                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
+                    if let Some(size) = ctx.instance_len(args[0])? {
+                        size
+                    } else {
+                        let scalar = ctx.scalar_value(args[0]);
+                        if matches!(ctx.heap.get(scalar), Value::Str(_) | Value::Bytes(_)) {
+                            return call(ctx, "len", &[scalar], &[]);
+                        }
+                        return Err(no_length(ctx));
+                    }
                 }
                 _ => return Err(no_length(ctx)),
             };
