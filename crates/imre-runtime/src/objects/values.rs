@@ -10,7 +10,7 @@ use num_traits::ToPrimitive;
 
 use super::exceptions::Error;
 use super::records::descriptor;
-use super::words::{NULLABLE, WordKind};
+use super::words::{NULLABLE, OwnedWord, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
 
 const GENERATED_EQ: u32 = 1;
@@ -501,6 +501,55 @@ pub(super) unsafe fn try_write_unchecked_repr(
 }
 
 type ReprStack = smallvec::SmallVec<[ReprTask; 4]>;
+thread_local! {
+    static ACTIVE_CONTAINERS: std::cell::RefCell<smallvec::SmallVec<[(usize, u32); 8]>> =
+        std::cell::RefCell::default();
+}
+
+pub(super) fn active_repr_depth() -> usize {
+    ACTIVE_CONTAINERS.with_borrow(|active| active.len())
+}
+
+struct ReprGuard(OwnedWord);
+
+impl ReprGuard {
+    /// The cursor owns a reference across nested repr callbacks. Dropping the
+    /// pending cursor also removes the recursion marker on any formatting error.
+    unsafe fn enter(
+        word: usize,
+        kind: WordKind,
+        pending: &mut ReprStack,
+    ) -> Result<bool, std::fmt::Error> {
+        let key = (word, kind.raw());
+        let entered =
+            ACTIVE_CONTAINERS.with_borrow_mut(|active| -> Result<bool, std::fmt::Error> {
+                if active.contains(&key) {
+                    return Ok(false);
+                }
+                active.try_reserve(1).map_err(|_| std::fmt::Error)?;
+                active.push(key);
+                Ok(true)
+            })?;
+        if entered {
+            // SAFETY: this cursor has the rooted container's exact storage kind.
+            let guard = Self(unsafe { kind.acquire(word) });
+            pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
+            pending.push(ReprTask::Leave(guard));
+        }
+        Ok(entered)
+    }
+}
+
+impl Drop for ReprGuard {
+    fn drop(&mut self) {
+        ACTIVE_CONTAINERS.with_borrow_mut(|active| {
+            let key = (self.0.word, self.0.kind.raw());
+            let index = active.iter().rposition(|item| *item == key).unwrap();
+            active.swap_remove(index);
+        });
+    }
+}
+
 unsafe fn write_repr_with(
     output: &mut ReprWriter<'_>,
     word: usize,
@@ -511,6 +560,14 @@ unsafe fn write_repr_with(
     let mut callback_roots = std::collections::HashMap::new();
     let mut current = Some(ReprTask::Word(word, kind));
     while let Some(task) = current.take().or_else(|| pending.pop()) {
+        // SAFETY: each cursor carries the rooted container's concrete storage kind.
+        if let Some((word, kind, marker)) = unsafe { task.recursive_container() }
+            // SAFETY: the current cursor keeps this container live while its guard takes a reference.
+            && !unsafe { ReprGuard::enter(word, kind, &mut pending) }?
+        {
+            output.write_str(marker)?;
+            continue;
+        }
         // SAFETY: tasks store values and positions, never references to mutable
         // storage. A callback roots every pending value before it may mutate a parent.
         current = unsafe {
@@ -776,6 +833,10 @@ unsafe fn write_repr_with(
                     &mut pending,
                     check_digits,
                 )?,
+                ReprTask::Leave(guard) => {
+                    drop(guard);
+                    None
+                }
                 ReprTask::KeySeparator => {
                     output.write_str(": ")?;
                     None
@@ -787,6 +848,7 @@ unsafe fn write_repr_with(
 }
 
 enum ReprTask {
+    Leave(ReprGuard),
     Context(super::contextvars::ReprView),
     ContextEnd(super::contextvars::ReprEnd, bool),
     Word(usize, WordKind),
@@ -797,6 +859,41 @@ enum ReprTask {
 }
 
 impl ReprTask {
+    /// On first entry, container repr guards outlive all their child cursors.
+    unsafe fn recursive_container(&self) -> Option<(usize, WordKind, &'static str)> {
+        match *self {
+            Self::Object(owner, 0) => {
+                // SAFETY: the task roots this exact object for the storage inspection.
+                let marker = unsafe {
+                    object(owner).0.with(|storage| match storage {
+                        Storage::Sequence(sequence)
+                            if sequence.rows().is_none()
+                                && matches!(sequence.kind.raw() & !NULLABLE, 5 | 6 | 9) =>
+                        {
+                            Some("[...]")
+                        }
+                        Storage::Dictionary(mapping) => Some(mapping.recursive_repr()),
+                        _ => None,
+                    })
+                }?;
+                Some((owner as usize, WordKind::new(5), marker))
+            }
+            Self::Record(payload, 0, _) => {
+                // SAFETY: the record task carries the compiler's exact rooted descriptor.
+                let semantics = unsafe { descriptor(payload).semantics.as_ref() }?;
+                let marker = if semantics.kind == TUPLE && semantics.name.is_null() {
+                    "(...)"
+                } else if semantics.kind != TUPLE && semantics.flags & GENERATED_REPR != 0 {
+                    "..."
+                } else {
+                    return None;
+                };
+                Some((payload as usize, WordKind::new(6), marker))
+            }
+            _ => None,
+        }
+    }
+
     fn root(&self) -> Option<(usize, WordKind)> {
         match *self {
             Self::ContextEnd(_, _) => None,
@@ -806,7 +903,7 @@ impl ReprTask {
                 Some((owner as usize, WordKind::new(5)))
             }
             Self::Record(record, _, _) => Some((record as usize, WordKind::new(6))),
-            Self::KeySeparator => None,
+            Self::Leave(_) | Self::KeySeparator => None,
         }
     }
 }
