@@ -7587,6 +7587,15 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                     return self.json_load_callable(Some(receiver), None, attribute);
                 }
+                if receiver.ty == Type::FrozenStrings && attribute.attr.as_str() == "__contains__" {
+                    return Ok(self.bound_builtin(
+                        attribute,
+                        receiver,
+                        Builtin::SetContains,
+                        vec![Type::Str],
+                        Type::Bool,
+                    ));
+                }
                 if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some()
                 {
                     return Ok(self.bound_builtin(
