@@ -1338,7 +1338,7 @@ pub(super) fn call(
                 "w" | "wt" | "tw" => Some(1),
                 _ => None,
             };
-            let writing = mode.bytes().any(|b| matches!(b, b'w' | b'a' | b'x'));
+            let writing = mode.contains(['w', 'a', 'x']);
             let file = match text_mode {
                 Some(mode) => crate::objects::TextFile::open(path, mode)
                     .map(Value::TextFile)
@@ -1348,6 +1348,12 @@ pub(super) fn call(
             };
             match file {
                 Ok(file) => {
+                    if writing {
+                        ctx.heap
+                            .file_writers
+                            .try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", ""))?;
+                    }
                     let id = ctx.alloc(file);
                     if writing {
                         ctx.heap.file_writers.push(id);
