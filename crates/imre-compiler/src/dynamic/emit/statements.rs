@@ -89,8 +89,17 @@ impl<'a> Visitor<'a> for ClosureNames {
                 }
                 _ => {}
             },
-            ast::Expr::Lambda(_)
-            | ast::Expr::ListComp(_)
+            ast::Expr::Lambda(lambda) => {
+                self.incomplete = true;
+                if let Some(parameters) = &lambda.parameters {
+                    for parameter in parameters.iter_non_variadic_params() {
+                        if let Some(default) = &parameter.default {
+                            self.visit_expr(default);
+                        }
+                    }
+                }
+            }
+            ast::Expr::ListComp(_)
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_)
             | ast::Expr::Generator(_) => {

@@ -1,6 +1,15 @@
 import types
+from _weakref import ref
 
 marker = "module"
+
+
+class Payload:
+    pass
+
+
+def global_lambda(unused):
+    return (lambda: marker), ref(unused)
 
 
 def make_late():
@@ -86,3 +95,9 @@ def current():
     reader = globally_bound_reader()
     print(reader.__code__.co_freevars, reader.__closure__, reader())
     print(types.FunctionType(reader.__code__, {"marker": "supplied"})())
+
+    reader, unused = global_lambda(Payload())
+    pressure = []
+    for index in range(20000):
+        pressure.append([index])
+    print(reader(), unused() is None)
