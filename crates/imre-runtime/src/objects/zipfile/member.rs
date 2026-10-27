@@ -4,11 +4,12 @@ use crate::StrOwner;
 use flate2::{Crc, Decompress, FlushDecompress, Status};
 use num_bigint::Sign;
 use num_traits::ToPrimitive;
-use std::io::SeekFrom;
+use std::io::{ErrorKind, Read, Seek, SeekFrom};
 
 use super::super::{
     Bytes, Str, bytes,
     exceptions::{Error, Kind, Result, string_repr},
+    files,
 };
 use super::{
     Info,
@@ -24,6 +25,73 @@ fn deflate_error(message: &str) -> Error {
         Kind::ZlibError,
         format!("Error -3 while decompressing data: {message}"),
     )
+}
+
+/// Read exactly the cached compressed byte count using the current local header.
+pub(super) fn read_import_data(path: &str, info: &Info) -> Result<Bytes> {
+    let (mut file, _) = files::open_file(path, 0)?;
+    let seek_error = |_| {
+        Error::new(
+            Kind::ImportError,
+            format!("can't read Zip file: {}", string_repr(path)),
+        )
+    };
+    file.seek(SeekFrom::Start(files::disk_offset(info.offset)?))
+        .map_err(seek_error)?;
+    let mut header = [0; 30];
+    file.read_exact(&mut header).map_err(|err| {
+        if err.kind() == ErrorKind::UnexpectedEof {
+            Error::new(Kind::EOFError, "EOF read where not expected")
+        } else {
+            files::errno_error(err)
+        }
+    })?;
+    if !header.starts_with(b"PK\x03\x04") {
+        return Err(Error::new(
+            Kind::ImportError,
+            format!("bad local file header: {}", string_repr(path)),
+        ));
+    }
+    let skip = i64::from(u16_at(&header, 26)) + i64::from(u16_at(&header, 28));
+    file.seek(SeekFrom::Current(skip)).map_err(seek_error)?;
+    let mut raw = Vec::new();
+    file.take(info.compress_size)
+        .read_to_end(&mut raw)
+        .map_err(files::errno_error)?;
+    if raw.len() as u64 != info.compress_size {
+        return Err(Error::new(Kind::OSError, "zipimport: can't read data"));
+    }
+    if info.method == 0 {
+        return Ok(raw);
+    }
+
+    let mut inflater = Decompress::new(false);
+    let mut input = raw.as_slice();
+    let mut result = Vec::new();
+    let mut chunk = [0; 16 * 1024];
+    loop {
+        let before_in = inflater.total_in();
+        let before_out = inflater.total_out();
+        let status = inflater
+            .decompress(input, &mut chunk, FlushDecompress::None)
+            .map_err(|err| deflate_error(err.message().unwrap_or("invalid compressed data")))?;
+        let used = (inflater.total_in() - before_in) as usize;
+        let written = (inflater.total_out() - before_out) as usize;
+        result
+            .try_reserve(written)
+            .map_err(|_| Error::allocation())?;
+        result.extend_from_slice(&chunk[..written]);
+        if status == Status::StreamEnd {
+            return Ok(result);
+        }
+        if used == 0 && written == 0 {
+            return Err(Error::new(
+                Kind::ZlibError,
+                "Error -5 while decompressing data: incomplete or truncated stream",
+            ));
+        }
+        input = &input[used..];
+    }
 }
 
 pub(in crate::objects) struct Member {
@@ -139,12 +207,6 @@ impl Member {
             crc: Some(Crc::new()),
             min_read: 4096,
         })
-    }
-
-    /// zipimport reads the indexed bytes without checking the optional ZIP checksum.
-    pub(super) fn read_import_data(mut self) -> Result<Bytes> {
-        self.crc = None;
-        self.read(None)
     }
 
     pub(in crate::objects) fn name(&self) -> &StrOwner {

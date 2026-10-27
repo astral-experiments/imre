@@ -711,6 +711,12 @@ def seed(directory: Path, case: str) -> None:
         for name, method in [("stored.zip", zipfile.ZIP_STORED), ("deflated.zip", zipfile.ZIP_DEFLATED)]:
             with zipfile.ZipFile(directory / name, "w") as archive:
                 archive.writestr(zipfile.ZipInfo("pkg/templates/page.html"), b"hello {{ name }}", compress_type=method)
+            with zipfile.ZipFile(directory / (name + ".replacement"), "w") as archive:
+                archive.writestr(zipfile.ZipInfo("new/templates/page.html"), b"world {{ name }}", compress_type=method)
+            contents = bytearray((directory / name).read_bytes())
+            uncompressed_size = contents.index(b"PK\x01\x02") + 24
+            contents[uncompressed_size:uncompressed_size + 4] = (1).to_bytes(4, "little")
+            (directory / (name + ".short-size")).write_bytes(contents)
     if case == "stream_reads":
         (directory / "truncated-after-open.gz").write_bytes(
             gzip.compress(b"x" * 300_000, compresslevel=0, mtime=0)
