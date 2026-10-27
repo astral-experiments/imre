@@ -94,6 +94,8 @@ impl Input {
 }
 
 pub(crate) fn read_input_line() -> Result<String> {
+    // A preceding print must be visible before waiting for the next input line.
+    crate::flush_stdout().map_err(errno_error)?;
     let mut input = INPUT.lock().unwrap_or_else(|poison| poison.into_inner());
     input.line(&mut io::stdin().lock())
 }
