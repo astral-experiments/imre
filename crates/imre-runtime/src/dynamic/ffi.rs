@@ -10,6 +10,16 @@ fn flag(v: bool) -> Id {
 }
 
 impl Context {
+    /// Instantiate exception classes used by raise and its explicit cause.
+    fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
+        let base = self.builtin("BaseException");
+        if self.subclass(value, base) {
+            self.call(value, Vec::new(), Vec::new())
+        } else {
+            Ok(value)
+        }
+    }
+
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
             "lookup" => {
@@ -283,12 +293,7 @@ impl Context {
                 if op == "reraise" && a == NONE {
                     return Err(Error::new("RuntimeError", "No active exception to reraise"));
                 }
-                let exception =
-                    if matches!(self.heap.get(a), Value::Native(_) | Value::Class { .. }) {
-                        self.call(a, Vec::new(), Vec::new())?
-                    } else {
-                        a
-                    };
+                let exception = self.instantiate_exception_class(a)?;
                 let Value::Raised(e) = self.heap.get(exception) else {
                     return Err(Error::new(
                         "TypeError",
@@ -304,12 +309,7 @@ impl Context {
                         trace.context = Some(active);
                     }
                     if c == TRUE {
-                        let cause =
-                            if matches!(self.heap.get(b), Value::Native(_) | Value::Class { .. }) {
-                                self.call(b, Vec::new(), Vec::new())?
-                            } else {
-                                b
-                            };
+                        let cause = self.instantiate_exception_class(b)?;
                         if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
                             return Err(Error::new(
                                 "TypeError",
