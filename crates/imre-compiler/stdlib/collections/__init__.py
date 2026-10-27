@@ -1,12 +1,18 @@
 """Integer counters for the runtime collections module."""
 
 import operator as _operator
+from itertools import repeat as _repeat
 
 
 def _count_elements(mapping, iterable):
     get = mapping.get
     for key in iterable:
         mapping[key] = get(key, 0) + 1
+
+
+def _elements(items):
+    for key, count in items:
+        yield from _repeat(key, count)
 
 
 def _compare_counts(left, right, compare):
@@ -54,6 +60,9 @@ class Counter(dict):
 
     def total(self):
         return sum(self.values())
+
+    def elements(self):
+        return _elements(iter(self.items()))
 
     def copy(self):
         return self.__class__(self)
