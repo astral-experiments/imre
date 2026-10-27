@@ -38,7 +38,7 @@ mod difflib;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
-pub(crate) use files::read_path_bytes;
+pub(crate) use files::{read_path_bytes, read_path_text};
 mod text_file;
 pub(crate) use text_file::TextFile;
 pub(crate) mod fnmatch;

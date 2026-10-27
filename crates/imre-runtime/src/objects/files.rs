@@ -805,7 +805,7 @@ fn with_path_file<T>(
     closed.and(result)
 }
 
-pub(super) fn read_path_text(path: &str) -> Result<Str> {
+pub(crate) fn read_path_text(path: &str) -> Result<Str> {
     path_text::read(path, None, None, None)
 }
 

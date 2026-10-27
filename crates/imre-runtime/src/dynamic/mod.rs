@@ -920,18 +920,21 @@ impl Context {
         first.is_ok_and(|first| first == root)
     }
 
-    fn module(&mut self, name: &str) -> Result<Id> {
-        self.find_module(name)?.ok_or_else(|| {
-            Error::new(
-                "ModuleNotFoundError",
-                format!("No module named {}", string_repr(name)),
-            )
-            .with_import(Some(name), None, None)
-        })
+    fn missing_module(name: &str) -> Error {
+        Error::new(
+            "ModuleNotFoundError",
+            format!("No module named {}", string_repr(name)),
+        )
+        .with_import(Some(name), None, None)
     }
 
-    /// Keep an absent final name distinct from a failure in a package initializer.
-    fn find_module(&mut self, name: &str) -> Result<Option<Id>> {
+    fn module(&mut self, name: &str) -> Result<Id> {
+        self.find_module(name, false)?
+            .ok_or_else(|| Self::missing_module(name))
+    }
+
+    /// Package resource lookups can initialize filesystem sources added after compilation.
+    fn find_module(&mut self, name: &str, filesystem: bool) -> Result<Option<Id>> {
         if let Some(value) = self.modules.get(name) {
             return Ok(Some(*value));
         }
@@ -939,7 +942,9 @@ impl Context {
         // constrains child modules to its __path__; namespace packages combine
         // their locations in search order.
         let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-            let id = self.module(parent)?;
+            let id = self
+                .find_module(parent, filesystem)?
+                .ok_or_else(|| Self::missing_module(parent))?;
             if let Some(id) = self.modules.get(name) {
                 return Ok(Some(*id));
             }
@@ -952,7 +957,7 @@ impl Context {
             self.sources
                 .get(name)
                 .and_then(|sources| sources.first())
-                .map(|m| (m.path.clone(), m.code))
+                .map(|m| (m.path.clone(), Some(m.code)))
         } else if stdlib::is_module(name) {
             if matches!(name, "email" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
@@ -966,7 +971,7 @@ impl Context {
                 sources
                     .iter()
                     .find(|source| source.path.starts_with(root))
-                    .map(|source| (source.path.clone(), source.code))
+                    .map(|source| (source.path.clone(), Some(source.code)))
             })
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
@@ -1008,22 +1013,38 @@ impl Context {
                 };
                 let Ok(root) = root else { continue };
                 let stem = root.join(child);
-                let Some(choices) = self.sources.get(name) else {
-                    continue;
+                let choices = match self.sources.get(name) {
+                    Some(choices) => choices.as_slice(),
+                    None if !filesystem => continue,
+                    None => &[],
                 };
-                if let Some(module) = choices.iter().find(|m| {
-                    m.path == stem.join("__init__.py") || m.path == stem.with_extension("py")
-                }) {
-                    locations.clear();
-                    if module.path.ends_with("__init__.py") {
-                        locations.push(stem);
+                let disk = filesystem
+                    && !bundle.is_some_and(|dir| root.starts_with(dir))
+                    && std::path::Path::new(child).file_name() == Some(std::ffi::OsStr::new(child));
+                for path in [stem.join("__init__.py"), stem.with_extension("py")] {
+                    let entry = choices
+                        .iter()
+                        .find(|module| module.path == path)
+                        .map(|m| m.code);
+                    if entry.is_some() || (disk && path.is_file()) {
+                        locations.clear();
+                        if path.ends_with("__init__.py") {
+                            locations.push(stem.clone());
+                        }
+                        selected = Some((path, entry));
+                        break;
                     }
-                    selected = Some((module.path.clone(), module.code));
+                }
+                if selected.is_some() {
                     break;
                 }
-                if let Some(module) = choices.iter().find(|m| m.path == stem) {
-                    locations.push(stem);
-                    namespace.get_or_insert((module.path.clone(), module.code));
+                let entry = choices
+                    .iter()
+                    .find(|module| module.path == stem)
+                    .map(|m| m.code);
+                if entry.is_some() || (disk && stem.is_dir()) {
+                    locations.push(stem.clone());
+                    namespace.get_or_insert((stem, entry));
                 }
             }
             selected.or(namespace)
@@ -1111,23 +1132,29 @@ impl Context {
             _ => {}
         }
         if let Some((path, entry)) = source {
-            let filename = self.text(path.to_string_lossy());
-            let name_id = self.text("<module>");
-            let code = self.alloc(Value::Code(value::CodeObject {
-                body: value::Body::Native(entry),
-                parameters: NONE,
-                nested: Vec::new(),
-                freevars: Vec::new(),
-                closure_supported: false,
-                name: name_id,
-                qualname: name_id,
-                doc: NONE,
-                filename,
-                first_line: 1,
-                module_definition: true,
-                coroutine: false,
-            }));
-            let result = self.execute(code, scope);
+            let result = if let Some(entry) = entry {
+                let filename = self.text(path.to_string_lossy());
+                let name_id = self.text("<module>");
+                let code = self.alloc(Value::Code(value::CodeObject {
+                    body: value::Body::Native(entry),
+                    parameters: NONE,
+                    nested: Vec::new(),
+                    freevars: Vec::new(),
+                    closure_supported: false,
+                    name: name_id,
+                    qualname: name_id,
+                    doc: NONE,
+                    filename,
+                    first_line: 1,
+                    module_definition: true,
+                    coroutine: false,
+                }));
+                self.execute(code, scope)
+            } else if locations.contains(&path) {
+                Ok(NONE)
+            } else {
+                self.execute_package_source(&path, scope)
+            };
             let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
                 unreachable!()
             };

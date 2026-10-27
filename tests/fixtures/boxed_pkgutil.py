@@ -15,7 +15,8 @@ def current():
     assert isinstance(found[0], tuple) and isinstance(found[0], pkgutil.ModuleInfo)
     assert (finder.path, name, is_package) == (root, 'found.' + __name__, False)
     assert get_data(__name__, os.path.basename(__file__))[:10] == b'import os\n'
-    assert get_data(package='pkgutil_resource', resource='payload.bin') == b'\x00\xff\r\n'
+    package = 'pkgutil_resource'
+    assert get_data(package=package, resource='payload.bin') == b'\x00\xff\r\n'
     assert get_data('missing_pkgutil_fixture_module', 'data') is None
     try:
         get_data(__name__ + '.child', 'unused')

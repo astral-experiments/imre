@@ -45,12 +45,29 @@ pub(super) fn call(
         }),
         "find_module" => {
             let name = text.to_owned();
-            Ok(ctx.find_module(&name)?.unwrap_or(NONE))
+            Ok(ctx.find_module(&name, true)?.unwrap_or(NONE))
         }
         "read_bytes" => {
             let bytes = crate::objects::read_path_bytes(text)?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         _ => unreachable!(),
+    }
+}
+
+impl Context {
+    /// Run a late filesystem initializer in its real module dictionary.
+    pub(in crate::dynamic) fn execute_package_source(
+        &mut self,
+        path: &Path,
+        scope: Id,
+    ) -> Result<Id> {
+        let path = crate::objects::path_utf8(path.as_os_str().to_owned())?;
+        let source = self.text(crate::objects::read_path_text(path.as_str())?);
+        let filename = self.text(path.as_str());
+        let mode = self.text("exec");
+        let code = self.compile_source(source, filename, mode)?;
+        let globals = self.module_globals(scope);
+        self.exec_source(code, globals, None)
     }
 }
