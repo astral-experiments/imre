@@ -70,12 +70,17 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     ctx.bind(scope, "__module__", module_name);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
+    let descriptor_owner = if name == "BytesIO" {
+        "_io.BytesIO"
+    } else {
+        "_io._IOBase"
+    };
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
         let attr = if name == "closed" {
             ctx.alloc(Value::ReadOnlyDescriptor {
                 get: method,
-                owner: "_io._IOBase",
+                owner: descriptor_owner,
                 name,
             })
         } else {
@@ -95,22 +100,39 @@ pub(in super::super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let bytes_io = ctx.builtins.get("_io.BytesIO").copied();
     let Some((&receiver, rest)) = args.split_first() else {
-        return Err(Error::new(
-            "TypeError",
-            format!("unbound I/O method {name} needs a receiver"),
-        ));
+        let message = if bytes_io == Some(owner) {
+            if name == "__init__" {
+                "descriptor '__init__' of '_io.BytesIO' object needs an argument".into()
+            } else {
+                format!("unbound method BytesIO.{name}() needs an argument")
+            }
+        } else {
+            format!("unbound I/O method {name} needs a receiver")
+        };
+        return Err(Error::new("TypeError", message));
     };
     if !ctx.instance_of(receiver, owner) {
-        return Err(Error::new(
-            "TypeError",
-            format!("invalid receiver for {name}"),
-        ));
+        let message = if bytes_io == Some(owner) {
+            let actual = ctx.type_name(receiver);
+            if name == "__init__" {
+                format!(
+                    "descriptor '__init__' requires a '_io.BytesIO' object but received a '{actual}'"
+                )
+            } else {
+                format!(
+                    "descriptor '{name}' for '_io.BytesIO' objects doesn't apply to a '{actual}' object"
+                )
+            }
+        } else {
+            format!("invalid receiver for {name}")
+        };
+        return Err(Error::new("TypeError", message));
     }
-    if ctx
-        .builtins
-        .get("_io.BytesIO")
-        .is_some_and(|&class| ctx.instance_of(receiver, class))
+    if bytes_io == Some(owner)
+        || matches!(name, "__enter__" | "__exit__")
+            && bytes_io.is_some_and(|class| ctx.instance_of(receiver, class))
     {
         return bytes_io::call(ctx, receiver, name, rest, kwargs);
     }

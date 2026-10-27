@@ -35,6 +35,12 @@ def current():
     assert stream.write(b"!") == 1
     assert stream.getvalue() == b"\x00aXY\nlast\x00\x00!"
     snapshot = stream.getvalue()
+    try:
+        stream.truncate("5")
+    except TypeError as error:
+        assert str(error) == "'str' object cannot be interpreted as an integer"
+    else:
+        raise AssertionError("truncate accepted text")
     assert stream.truncate(100) == 100 and stream.getvalue() is snapshot
     assert stream.truncate(5) == 5 and stream.tell() == len(snapshot)
     assert stream.getvalue() == snapshot[:5] and snapshot == b"\x00aXY\nlast\x00\x00!"
@@ -48,6 +54,17 @@ def current():
         assert str(error) == "I/O operation on closed file."
     else:
         raise AssertionError("read from closed stream")
+
+    class NeverIndex:
+        def __index__(self):
+            raise AssertionError("truncate called __index__ on a closed stream")
+
+    try:
+        stream.truncate(NeverIndex())
+    except ValueError as error:
+        assert str(error) == "I/O operation on closed file."
+    else:
+        raise AssertionError("truncated a closed stream")
 
     source = bytearray(b"mutable")
     try:

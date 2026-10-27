@@ -9,7 +9,7 @@ use crate::objects::FileState;
 
 pub(super) const METHODS: &[&str] = &[
     "__init__", "read", "read1", "readline", "readinto", "truncate", "write", "seek", "tell",
-    "getvalue", "isatty",
+    "getvalue", "isatty", "closed", "close", "flush", "readable", "writable", "seekable",
 ];
 
 pub(in crate::dynamic) struct BytesIo {
@@ -86,7 +86,7 @@ impl BytesIo {
     }
 }
 
-fn argument_count(name: &str, n: usize) -> Result<()> {
+fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
     let message = match name {
         "read" | "read1" | "readline" | "truncate" if n > 1 => {
             format!("{name} expected at most 1 argument, got {n}")
@@ -99,7 +99,7 @@ fn argument_count(name: &str, n: usize) -> Result<()> {
         "read" | "read1" | "readline" | "seek" | "write" | "readinto" | "truncate" | "__exit__" => {
             return Ok(());
         }
-        _ if n != 0 => format!("BytesIO.{name}() takes no arguments ({n} given)"),
+        _ if n != 0 => format!("{owner}.{name}() takes no arguments ({n} given)"),
         _ => return Ok(()),
     };
     Err(Error::new("TypeError", message))
@@ -125,16 +125,20 @@ pub(super) fn call(
     if name == "__init__" {
         return stream.init(ctx, args, kwargs);
     }
+    let owner = if matches!(name, "__enter__" | "__exit__") {
+        "_IOBase"
+    } else {
+        "BytesIO"
+    };
     if !kwargs.is_empty() {
-        let prefix = if name == "__exit__" { "" } else { "BytesIO." };
         return Err(Error::new(
             "TypeError",
-            format!("{prefix}{name}() takes no keyword arguments"),
+            format!("{owner}.{name}() takes no keyword arguments"),
         ));
     }
-    argument_count(name, args.len())?;
+    argument_count(owner, name, args.len())?;
     match name {
-        "read" | "read1" | "readline" | "truncate" => {
+        "read" | "read1" | "readline" => {
             let size = match args.first().copied() {
                 None | Some(NONE) => None,
                 Some(id) => {
@@ -156,13 +160,6 @@ pub(super) fn call(
                     Some(n)
                 }
             };
-            if name == "truncate" {
-                let (size, changed) = stream.file.borrow_mut().truncate_memory(size)?;
-                if changed {
-                    stream.snapshot.set(None);
-                }
-                return Ok(ctx.int(size as i64));
-            }
             let limit = size.and_then(|n| usize::try_from(n).ok());
             let bytes = stream
                 .file
@@ -176,6 +173,21 @@ pub(super) fn call(
                     Ok(value)
                 }
             }
+        }
+        "truncate" => {
+            // Unlike read, truncate checks the stream before it invokes the size's __index__.
+            stream.file.borrow_mut().flush()?;
+            let size = match args.first().copied() {
+                None | Some(NONE) => None,
+                Some(id) => Some(ctx.index_integer(id)?.to_i64().ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C long")
+                })?),
+            };
+            let (size, changed) = stream.file.borrow_mut().truncate_memory(size)?;
+            if changed {
+                stream.snapshot.set(None);
+            }
+            Ok(ctx.int(size as i64))
         }
         "write" => {
             let input = ctx.bytes_like(args[0])?;
