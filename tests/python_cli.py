@@ -414,6 +414,7 @@ def report(text):
             "boxed_list_pop.py",
             "boxed_zip.py",
             "boxed_python_iterators.py",
+            "boxed_sorted.py",
             "boxed_generator_delegation.py",
             "boxed_slice.py",
             "boxed_bytes_separators.py",

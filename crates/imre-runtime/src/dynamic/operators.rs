@@ -243,7 +243,17 @@ impl Context {
             },
         }
     }
-    pub(super) fn compare(&self, a: Id, b: Id) -> Result<Option<Ordering>> {
+    pub(super) fn compare(&self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
+        let unsupported = || {
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{op}' not supported between instances of '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            )
+        };
         let (a, b) = (self.scalar_value(a), self.scalar_value(b));
         let int_float = |integer, float| {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
@@ -271,17 +281,17 @@ impl Context {
                 if matches!(self.heap.get(a), Value::List(_))
                     != matches!(self.heap.get(b), Value::List(_))
                 {
-                    return Err(Error::new("TypeError", "incomparable sequence types"));
+                    return Err(unsupported());
                 }
                 if let (Some(x), Some(y)) = (self.sequence(a), self.sequence(b)) {
                     for (&i, &j) in x.iter().zip(&y) {
                         if !self.checked_equal(i, j)? {
-                            return self.compare(i, j);
+                            return self.compare(op, i, j);
                         }
                     }
                     Ok(Some(x.len().cmp(&y.len())))
                 } else {
-                    Err(Error::new("TypeError", "objects do not support ordering"))
+                    Err(unsupported())
                 }
             }
         }
@@ -835,7 +845,7 @@ impl Context {
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => {
-                let Some(c) = self.compare(a, b)? else {
+                let Some(c) = self.compare(op, a, b)? else {
                     return Ok(FALSE);
                 };
                 return Ok(truth(match op {
