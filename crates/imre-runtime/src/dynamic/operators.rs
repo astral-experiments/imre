@@ -1757,14 +1757,7 @@ impl Context {
             self.heap.get(obj),
             Value::Dict(_) | Value::DefaultDict { .. }
         ) {
-            let (_, index) = self.find_dictionary_key(obj, key, None)?;
-            if let Some(index) = index {
-                return Ok(self.dict_entries(obj).expect("dictionary")[index].1);
-            }
-            if matches!(self.heap.get(obj), Value::DefaultDict { .. }) {
-                return self.defaultdict_missing(obj, key);
-            }
-            return Err(self.lookup_error("KeyError", key));
+            return self.dictionary_item(obj, key);
         }
         let storage = self.scalar_value(obj);
         if let Value::Slice(parts) = *self.heap.get(key) {
@@ -1853,6 +1846,22 @@ impl Context {
         })
     }
     /// Call the current factory, preserving any value it inserts for this key.
+    /// Look up a builtin mapping key before dispatching the original object's missing hook.
+    pub(super) fn dictionary_item(&mut self, object: Id, key: Id) -> Result<Id> {
+        let storage = self.dict_storage(object).expect("dictionary");
+        let (_, index) = self.find_dictionary_key(storage, key, None)?;
+        if let Some(index) = index {
+            return Ok(self.dict_entries(storage).expect("dictionary")[index].1);
+        }
+        if let Some(hook) = self.bound_slot(object, "__missing__")? {
+            return self.call(hook, vec![key], Vec::new());
+        }
+        if matches!(self.heap.get(storage), Value::DefaultDict { .. }) {
+            return self.defaultdict_missing(object, key);
+        }
+        Err(self.lookup_error("KeyError", key))
+    }
+
     pub(super) fn defaultdict_missing(&mut self, obj: Id, key: Id) -> Result<Id> {
         let Value::DefaultDict { factory, .. } = *self.heap.get(obj) else {
             return Err(Error::new(
