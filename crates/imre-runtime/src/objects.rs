@@ -60,7 +60,7 @@ pub(crate) use json::{
 mod linecache;
 pub(crate) mod locks;
 pub(crate) mod logging;
-pub(crate) use logging::record::percent_integer_field;
+pub(crate) use logging::record::{brace_integer_field, percent_integer_field};
 mod mappings;
 mod module_specs;
 mod namespaces;
