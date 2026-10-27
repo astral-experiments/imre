@@ -51,8 +51,14 @@ def current():
         except OverflowError as error:
             print(str(error))
     huge = 1 << 14500
-    for spec in ("", "d", "x"):
+    for render in (
+        lambda: f"{huge}",
+        lambda: "{}".format(huge),
+        lambda: format(huge, ""),
+        lambda: format(huge, "d"),
+        lambda: format(huge, "x"),
+    ):
         try:
-            print(len(format(huge, spec)))
+            print(len(render()))
         except ValueError as error:
             print(str(error))
