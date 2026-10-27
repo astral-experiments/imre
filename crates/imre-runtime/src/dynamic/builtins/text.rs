@@ -682,7 +682,7 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                 let arg = field_args
                     .next()
                     .ok_or_else(|| type_error("not enough arguments for format string"))?;
-                if decorated && number_field {
+                if number_field {
                     let (_, (start, _)) = positions
                         .find(|(i, _)| i == position)
                         .expect("parsed percent fields follow their source character positions");
@@ -708,8 +708,6 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     },
                     'r' => ctx.repr(arg).into(),
                     'a' => ascii(&ctx.repr(arg)).into(),
-                    'd' | 'i' | 'u' => ctx.as_int(arg)?.to_string().into(),
-                    ch @ ('o' | 'x' | 'X') => format_value(ctx, arg, &ch.to_string())?.into(),
                     'c' => match ctx.heap.get(arg) {
                         Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
                         _ => u32::try_from(ctx.as_integer(arg)?)
