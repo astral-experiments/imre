@@ -1122,6 +1122,9 @@ impl Context {
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {
+                if let ast::Number::Float(value) = &v.value {
+                    return Ok(self.alloc(Value::Float(*value)));
+                }
                 let ast::Number::Int(n) = &v.value else {
                     return Err(unsupported("noninteger literal"));
                 };
