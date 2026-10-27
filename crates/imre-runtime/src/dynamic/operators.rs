@@ -736,6 +736,11 @@ impl Context {
         };
         let [start, end, step] = super::slice::sequence_bounds(self, parts, target.len())?;
         let data = builtins::bytes_from_iterable(self, source)?;
+        if (step == 1 && data.len() != (end - start).max(0) as usize)
+            || (step != 1 && data.is_empty() && slice_positions(start, end, step).next().is_some())
+        {
+            self.check_bytearray_resize(obj)?;
+        }
         let Value::ByteArray(target) = self.heap.get_mut(obj) else {
             unreachable!()
         };

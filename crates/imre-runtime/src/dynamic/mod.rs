@@ -56,6 +56,8 @@ pub(crate) struct Context {
     sys_path: Id,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
+    // A buffer export pins its bytearray's size while Python callbacks run.
+    bytearray_exports: Vec<Id>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
@@ -144,6 +146,17 @@ impl Context {
                     self.type_name(id)
                 ),
             )),
+        }
+    }
+
+    fn check_bytearray_resize(&self, id: Id) -> Result<()> {
+        if self.bytearray_exports.contains(&id) {
+            Err(Error::new(
+                "BufferError",
+                "Existing exports of data: object cannot be re-sized",
+            ))
+        } else {
+            Ok(())
         }
     }
 

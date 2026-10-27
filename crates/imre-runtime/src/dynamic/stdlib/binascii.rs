@@ -32,6 +32,13 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 2 {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes at most 2 arguments ({count} given)"),
+        ));
+    }
     let [data] = args else {
         return Err(Error::new(
             "TypeError",
@@ -52,15 +59,22 @@ pub(super) fn call(
     // Argument Clinic converts the input before invoking the flag's __bool__.
     let option = if let Some((_, value)) = kwargs.first() {
         input(ctx, *data, decode)?;
-        ctx.truth(*value)?
+        if matches!(ctx.heap.get(*data), Value::ByteArray(_)) {
+            ctx.bytearray_exports.push(*data);
+            let result = ctx.truth(*value);
+            ctx.bytearray_exports.pop();
+            result?
+        } else {
+            ctx.truth(*value)?
+        }
     } else {
         !decode
     };
     let bytes = input(ctx, *data, decode)?;
     let result = if decode {
-        crate::objects::base64_decode(bytes, option)?
+        crate::objects::binascii_decode(bytes, option)?
     } else {
-        crate::objects::base64_encode(bytes, option)?
+        crate::objects::binascii_encode(bytes, option)?
     };
     Ok(ctx.alloc(Value::Bytes(result)))
 }

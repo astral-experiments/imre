@@ -67,6 +67,7 @@ exception_kinds!(
     PermissionError,
     AssertionError,
     MemoryError,
+    BufferError,
     SystemExit,
     StopIteration,
     Warning,
@@ -579,6 +580,9 @@ pub(super) fn call(
                 positional(name, kwargs)?;
                 arity(name, args, 2, 2)?;
                 let data = text::bytes_from_iterable(ctx, args[1])?;
+                if !data.is_empty() {
+                    ctx.check_bytearray_resize(args[0])?;
+                }
                 let Value::ByteArray(target) = ctx.heap.get_mut(args[0]) else {
                     return Err(type_error("expected bytearray"));
                 };

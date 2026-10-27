@@ -1,6 +1,15 @@
 import binascii
 
 
+class Resize:
+    def __init__(self, data):
+        self.data = data
+
+    def __bool__(self):
+        self.data.extend(b"!")
+        return True
+
+
 def current():
     from binascii import Error, Incomplete, a2b_base64, b2a_base64
 
@@ -20,3 +29,10 @@ def current():
         a2b_base64(b"A")
     except Error as error:
         print(isinstance(error, ValueError), error.args)
+    data = bytearray(b"YWJj")
+    try:
+        a2b_base64(data, strict_mode=Resize(data))
+    except BufferError as error:
+        print(str(error), data)
+    data.extend(b"!")
+    print(data)
