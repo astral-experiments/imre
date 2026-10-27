@@ -711,9 +711,15 @@ pub(super) fn call(
             ctx.exec_source(args[0], args[1], args.get(2).copied())
         }
         "abs" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            let value = args[0];
+            if !kwargs.is_empty() {
+                return Err(type_error("abs() takes no keyword arguments"));
+            }
+            let &[value] = args else {
+                return Err(type_error(format!(
+                    "abs() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
             if let Some(method) = ctx.bound_slot(value, "__abs__")? {
                 return ctx.call(method, vec![], vec![]);
             }
