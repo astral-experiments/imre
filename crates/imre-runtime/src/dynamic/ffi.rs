@@ -1136,9 +1136,23 @@ impl Context {
 
     pub(super) fn checkpoint(&mut self, live: &[Id], location: value::Location, caught: Id) {
         let (heap, roots) = self.heap_and_roots();
-        let Some(callbacks) = heap.statement(roots, live, location, caught) else {
-            return;
-        };
+        if let Some(callbacks) = heap.statement(roots, live, location, caught) {
+            self.run_weak_callbacks(callbacks);
+        }
+    }
+
+    /// Flush unreachable file owners before the caller evaluates its next operand.
+    pub(super) fn leave_frame(&mut self, result: Id, returning: bool) {
+        if self.heap.leave(result, returning) {
+            let (heap, roots) = self.heap_and_roots();
+            if let Some(callbacks) = heap.collect(roots) {
+                self.run_weak_callbacks(callbacks);
+            }
+        }
+    }
+
+    /// Invoke pending callbacks after the heap has cleared every dead reference.
+    fn run_weak_callbacks(&mut self, callbacks: Vec<(Id, Id)>) {
         for (callback, reference) in callbacks {
             if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
                 eprintln!("Exception ignored while calling weakref callback: {error}");

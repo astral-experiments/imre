@@ -1233,7 +1233,7 @@ pub(super) struct Heap {
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
     // Weak handles to buffered output files returned by open().
-    pub(super) file_writers: Vec<Id>,
+    file_writers: Vec<Id>,
 }
 
 #[derive(Clone, Copy)]
@@ -1266,6 +1266,8 @@ struct Frame {
     object: Option<Id>,
     inherited: Id,
     active: Id,
+    // This activation or one of its calls opened a buffered output file.
+    opened_writer: bool,
 }
 
 impl Frame {
@@ -1279,6 +1281,7 @@ impl Frame {
             object: None,
             inherited,
             active: inherited,
+            opened_writer: false,
         }
     }
 }
@@ -1531,16 +1534,22 @@ impl Heap {
         self.frames
             .push(Frame::new(scope, code, owner, self.active_exception()));
     }
-    pub fn leave(&mut self, value: Id) {
+    /// Release the activation and report whether a returning function may have dropped a writer.
+    pub fn leave(&mut self, value: Id, returning: bool) -> bool {
         let frame = self.frames.pop().expect("returning native activation");
-        if self.has_weak_values
+        let opened = frame.opened_writer && !self.file_writers.is_empty();
+        if opened {
+            self.frames.last_mut().unwrap().opened_writer = true;
+        }
+        let writer_released = opened && returning && self.has_unbound_writer(value);
+        if (self.has_weak_values || writer_released)
             && let Value::Scope(scope) = self.get(frame.scope)
         {
-            let released =
-                frame.live.iter().chain(scope.names.values()).any(|&id| {
+            let weak_released = self.has_weak_values
+                && frame.live.iter().chain(scope.names.values()).any(|&id| {
                     id != value && self.weak_edge(id) && !self.bound_in_active_frame(id)
                 });
-            if released {
+            if weak_released || writer_released {
                 // A normal function allocates its scope in the caller before entering.
                 // Once it returns, only an escaped closure or frame can keep that scope alive.
                 if scope.parent.is_some() && scope.class_body.is_none() {
@@ -1549,10 +1558,11 @@ impl Heap {
                         caller.swap_remove(index);
                     }
                 }
-                self.collect_next_statement = true;
+                self.collect_next_statement |= weak_released;
             }
         }
         self.keep(value);
+        writer_released
     }
     /// Reserve temporary roots before taking a snapshot that may outlive a Python callback.
     pub(super) fn reserve_temporaries(&mut self, additional: usize) -> Result<()> {
@@ -1660,15 +1670,27 @@ impl Heap {
         reachable
     }
 
+    /// Track a disk writer in the activation whose locals or return value may own it.
+    pub(super) fn alloc_file_writer(&mut self, file: Value) -> Result<Id> {
+        self.file_writers
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let id = self.alloc(file);
+        self.file_writers.push(id);
+        self.frames.last_mut().unwrap().opened_writer = true;
+        Ok(id)
+    }
+
+    /// A returned writer or a surviving name keeps a direct owner.
+    fn has_unbound_writer(&self, retained: Id) -> bool {
+        self.file_writers
+            .iter()
+            .any(|&id| id != retained && !self.bound_in_active_frame(id))
+    }
+
     /// Recheck unbound writers after control flow discards temporary roots.
     pub fn release_unbound_writers(&mut self) {
-        if self
-            .file_writers
-            .iter()
-            .any(|&id| !self.bound_in_active_frame(id))
-        {
-            self.collect_next_statement = true;
-        }
+        self.collect_next_statement |= self.has_unbound_writer(NONE);
     }
 
     pub fn statement(
@@ -1697,6 +1719,11 @@ impl Heap {
         {
             return None;
         }
+        self.collect(globals)
+    }
+
+    /// Drop unreachable values and preserve callbacks that must run after the sweep.
+    pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<Vec<(Id, Id)>> {
         self.mark(globals);
         self.file_writers.retain(|&id| {
             let slot = &self.slots[id as usize];

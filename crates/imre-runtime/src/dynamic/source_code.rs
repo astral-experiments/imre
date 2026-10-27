@@ -985,10 +985,12 @@ impl Context {
             }
             Ok(Step::Return(NONE))
         })();
-        self.heap.leave(match &result {
-            Ok(Step::Yield(v, _) | Step::Return(v)) => *v,
-            Err(_) => NONE,
-        });
+        let (value, returning) = match &result {
+            Ok(Step::Return(v)) => (*v, true),
+            Ok(Step::Yield(v, _)) => (*v, false),
+            Err(_) => (NONE, false),
+        };
+        self.leave_frame(value, returning);
         result
     }
 

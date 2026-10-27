@@ -1224,7 +1224,7 @@ impl Context {
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
         let result = unsafe { entry(self, scope) };
-        self.heap.leave(result);
+        self.leave_frame(result, self.pending.is_none());
         self.pending.take().map_or(Ok(result), Err)
     }
 
