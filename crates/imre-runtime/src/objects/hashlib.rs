@@ -21,6 +21,10 @@ impl State {
         Self::Sha1(Sha1::new_with_prefix(data))
     }
 
+    pub(crate) fn sha256(data: &[u8]) -> Self {
+        Self::Sha256(Sha256::new_with_prefix(data))
+    }
+
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Sha1(_) => "sha1",
