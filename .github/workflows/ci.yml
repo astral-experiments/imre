@@ -233,6 +233,38 @@ jobs:
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
+      - name: Verify unchanged normalization owns its release result
+        run: |
+          cargo test --package imre-runtime --release --locked --lib objects::text::tests::unchanged_normalization_retains_the_input -- --exact
+          python3 -B - <<'PY'
+          import hashlib, json, os, subprocess, sys, tempfile
+          from pathlib import Path
+          root = Path.cwd()
+          source = root / "tests/fixtures/text/unicodedata_normalize.py"
+          compiler = root / "target/release/imre"
+          runtime = root / "target/release/libimre_runtime.a"
+          def digest(path):
+              with path.open("rb") as file:
+                  return hashlib.file_digest(file, "sha256").hexdigest()
+          reference = subprocess.run([sys.executable, "-I", "-B", source], capture_output=True, check=True)
+          assert digest(source) == "e57993683484a7132bff974fc8b1a5eeff1ab33596e2aacc33464e444b9ccd63"
+          assert len(reference.stdout.splitlines()) == 147 and not reference.stderr
+          assert hashlib.sha256(reference.stdout).hexdigest() == "0ce196834d39b21d2e5cdaa810a4bde168ff8d62a7d172eda54d38ac84266483"
+          observed = {"compiler_sha256":digest(compiler), "runtime_sha256":digest(runtime), "modes":{}}
+          with tempfile.TemporaryDirectory(prefix="imre-text-") as temp:
+              for level in ("0", "3"):
+                  binary = Path(temp) / ("unicodedata_normalize-O" + level)
+                  subprocess.run([compiler,"build",source,"--module-root",source.parent,"-o",binary,"--opt-level",level,
+                                  "--quiet","--runtime",runtime,"--clang","clang-18"],cwd=temp,check=True)
+                  actual = subprocess.run([binary],cwd=temp,input=b"",capture_output=True,timeout=60)
+                  verdict = {"returncode":actual.returncode,"stderr":actual.stderr.decode(errors="replace"),
+                             "stdout_sha256":hashlib.sha256(actual.stdout).hexdigest(),"elf_sha256":digest(binary)}
+                  print("Original Unicode fixture",level,json.dumps(verdict),flush=True)
+                  assert (actual.returncode,actual.stdout,actual.stderr)==(reference.returncode,reference.stdout,reference.stderr)
+                  observed["modes"][level]=verdict
+          print("Release Unicode ownership receipt",json.dumps(observed),flush=True)
+          PY
+          python3 -B tests/text.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - &verify-stdlib-table
         name: Verify the standard library support table
         run: python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre --check
