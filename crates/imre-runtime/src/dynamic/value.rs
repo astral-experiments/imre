@@ -529,6 +529,7 @@ pub(super) enum Value {
         dictionary: Option<Id>,
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
+        weak_reference: Option<Box<super::weakref::Reference>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -828,11 +829,15 @@ impl Value {
                 fields,
                 dictionary,
                 scalar,
+                weak_reference,
                 memory_stream,
                 property,
             } => {
                 if let Some(property) = property {
                     property.children(visit);
+                }
+                if let Some(reference) = weak_reference {
+                    visit.push(reference.callback);
                 }
                 if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
                     visit.extend(stream.snapshot.get());
@@ -1066,9 +1071,10 @@ impl Heap {
         target: Id,
         callback: Id,
         kind: super::weakref::Kind,
+        subclass: Option<Id>,
     ) -> Id {
         let references = self.weak_references(target);
-        if callback == NONE
+        if subclass.is_none() && callback == NONE
             && let Some(&id) = references.iter().find(|&&id|
                 matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
         {
@@ -1077,19 +1083,31 @@ impl Heap {
         // Callback-free canonical references precede proxies, then callbacks in newest-first order.
         let index = references
             .iter()
-            .position(|&id| {
-                let Value::Weak(wr) = self.get(id) else {
-                    unreachable!()
-                };
-                wr.callback != NONE || (callback == NONE && kind == super::weakref::Kind::Reference)
+            .position(|&id| match self.get(id) {
+                Value::Weak(wr) => {
+                    wr.callback != NONE
+                        || (subclass.is_none()
+                            && callback == NONE
+                            && kind == super::weakref::Kind::Reference)
+                }
+                _ => true,
             })
             .unwrap_or(references.len());
-        let id = self.alloc(Value::Weak(super::weakref::Reference {
+        let reference = super::weakref::Reference {
             target: Some(target),
             callback,
             kind,
             hash: None,
-        }));
+        };
+        let id = if let Some(owner) = subclass {
+            let Value::Instance { weak_reference, .. } = self.get_mut(owner) else {
+                unreachable!()
+            };
+            *weak_reference = Some(Box::new(reference));
+            owner
+        } else {
+            self.alloc(Value::Weak(reference))
+        };
         self.weak.entry(target).or_default().insert(index, id);
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
@@ -1099,7 +1117,10 @@ impl Heap {
 
     fn weak_edge(&self, value: Id) -> bool {
         self.weak.contains_key(&value)
-            || matches!(self.get(value), Value::Weak(wr) if wr.target.is_some())
+            || self
+                .get(value)
+                .weak_reference()
+                .is_some_and(|wr| wr.target.is_some())
     }
 
     /// A name in a surviving frame keeps this object alive until that binding changes.
@@ -1287,9 +1308,11 @@ impl Heap {
                 return !refs.is_empty();
             }
             for &id in refs.iter() {
-                let Some(Value::Weak(wr)) = &mut self.slots[id as usize] else {
-                    unreachable!()
-                };
+                let wr = self.slots[id as usize]
+                    .as_mut()
+                    .unwrap()
+                    .weak_reference_mut()
+                    .unwrap();
                 wr.target = None;
                 let callback = std::mem::replace(&mut wr.callback, NONE);
                 if callback != NONE {

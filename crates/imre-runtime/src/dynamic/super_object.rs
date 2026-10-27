@@ -1,7 +1,7 @@
 use super::*;
 
 impl Context {
-    fn class_name(&self, class: Id) -> &str {
+    pub(super) fn class_name(&self, class: Id) -> &str {
         match self.heap.get(class) {
             Value::Class { name, .. } | Value::Native(name) => name,
             _ => self.type_name(class),

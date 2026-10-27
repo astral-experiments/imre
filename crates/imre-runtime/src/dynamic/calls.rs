@@ -41,7 +41,7 @@ impl Context {
             Value::Native(kind)
                 if matches!(
                     kind.as_str(),
-                    "dict" | "int" | "str" | "property" | "module"
+                    "dict" | "int" | "str" | "property" | "module" | weakref::REFERENCE_TYPE
                 ) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
@@ -376,8 +376,12 @@ impl Context {
                             | "list.sort"
                             | "map.__iter__"
                             | "map.__next__"
-                            | weakref::REFERENCE_HASH
-                    ) || name.starts_with("property.")
+                    ) || name
+                        .strip_prefix("weakref.ReferenceType.")
+                        .is_some_and(|method| {
+                            method != "__new__" && weakref::REFERENCE_METHODS.contains(&method)
+                        })
+                        || name.starts_with("property.")
                         || name.starts_with("dict.")
                         || name.starts_with("abc.")
                         || name
@@ -422,6 +426,12 @@ impl Context {
             }
             // Without a Python class member, object.__class__ is a data descriptor.
             (None, _) if name == "__class__" => Ok(class),
+            (None, _)
+                if name == "__callback__"
+                    && let Some(wr) = self.heap.get(object).weak_reference() =>
+            {
+                Ok(wr.callback)
+            }
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
             (None, None) if matches!(name, "__getattribute__" | "__delattr__") => {
@@ -1397,15 +1407,16 @@ impl Context {
                 _ => {}
             },
             Value::Weak(wr) if name == "__callback__" => return Ok(wr.callback),
-            Value::Weak(_) if name == "__hash__" => {
-                let callable = self.builtin(weakref::REFERENCE_HASH);
-                let class = self.builtin(weakref::Kind::Reference.class());
+            Value::Weak(_) if weakref::REFERENCE_METHODS.contains(&name) => {
+                let callable = self.builtin(&format!("{}.{name}", weakref::REFERENCE_TYPE));
+                let class = self.builtin(weakref::REFERENCE_TYPE);
                 return self.bind_attribute(callable, obj, class);
             }
             Value::Native(ref class)
-                if class == weakref::Kind::Reference.class() && name == "__hash__" =>
+                if class == weakref::REFERENCE_TYPE
+                    && weakref::REFERENCE_METHODS.contains(&name) =>
             {
-                return Ok(self.builtin(weakref::REFERENCE_HASH));
+                return Ok(self.builtin(&format!("{}.{name}", weakref::REFERENCE_TYPE)));
             }
             Value::Native(ref method)
                 if method == weakref::REFERENCE_HASH && name == "__qualname__" =>
@@ -1706,6 +1717,12 @@ impl Context {
         }
         let exception_member = self.exception_member(obj, name);
         let member = self.slot(obj, name);
+        if name == "__callback__"
+            && member.is_none()
+            && self.heap.get(obj).weak_reference().is_some()
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if let Some(descriptor) = member.or(exception_member)
             && self.data_descriptor(descriptor)
         {
@@ -1970,6 +1987,12 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if name == "__callback__"
+            && self.slot(obj, name).is_none()
+            && self.heap.get(obj).weak_reference().is_some()
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_base_local_attribute(obj, name, Some(value));
         }
@@ -2181,6 +2204,7 @@ impl Context {
             class,
             dictionary,
             property,
+            weak_reference: None,
             memory_stream: None,
             fields: HashMap::new(),
             scalar: None,
@@ -2218,6 +2242,7 @@ impl Context {
             scalar: Some(value),
             dictionary: None,
             property: None,
+            weak_reference: None,
             memory_stream: None,
         }))
     }
@@ -2257,6 +2282,7 @@ impl Context {
             dictionary: None,
             scalar: Some(text),
             property: None,
+            weak_reference: None,
             memory_stream: None,
         }))
     }
@@ -2280,17 +2306,7 @@ impl Context {
     ) -> Result<Id> {
         match self.heap.get(callable).clone() {
             Value::Weak(wr) => match wr.kind {
-                weakref::Kind::Reference if args.is_empty() && kwargs.is_empty() => {
-                    Ok(wr.target.unwrap_or(NONE))
-                }
-                weakref::Kind::Reference if !kwargs.is_empty() => Err(Error::new(
-                    "TypeError",
-                    "weakref() takes no keyword arguments",
-                )),
-                weakref::Kind::Reference => Err(Error::new(
-                    "TypeError",
-                    format!("weakref expected 0 arguments, got {}", args.len()),
-                )),
+                weakref::Kind::Reference => wr.call(&args, &kwargs),
                 weakref::Kind::CallableProxy => self.call(wr.upgrade()?, args, kwargs),
                 weakref::Kind::Proxy => Err(Error::new(
                     "TypeError",
@@ -2514,6 +2530,7 @@ impl Context {
                         dictionary: None,
                         scalar: None,
                         property: None,
+                        weak_reference: None,
                         memory_stream: None,
                     }));
                 }
