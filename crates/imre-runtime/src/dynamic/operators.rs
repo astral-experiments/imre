@@ -640,6 +640,7 @@ impl Context {
                     let item = match ctx.heap.get(id) {
                         Value::Slice(v) => v.get(index),
                         Value::List(v) | Value::Tuple(v) => v.get(index),
+                        Value::ItemGetter(keys) => ctx.itemgetter_keys(*keys).get(index),
                         _ => unreachable!("active sequence"),
                     };
                     if let Some(&item) = item {
@@ -773,6 +774,12 @@ impl Context {
                     }
                     let (start, end, placeholder, entries) = match ctx.heap.get(id) {
                         Value::List(_) => ("[", "]", "[...]", None),
+                        Value::ItemGetter(_) => (
+                            "operator.itemgetter(",
+                            ")",
+                            "operator.itemgetter(...)",
+                            None,
+                        ),
                         Value::Tuple(items) => (
                             "(",
                             if items.len() == 1 { ",)" } else { ")" },
