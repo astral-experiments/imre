@@ -359,6 +359,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         sys_path: NONE,
         contexts: Vec::new(),
         bytearray_exports: Vec::new(),
+        sorting_lists: Vec::new(),
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,
