@@ -153,6 +153,34 @@ impl Context {
             _ => true,
         })
     }
+    /// Unwrap nested method bindings and retain the identity comparison of their receivers.
+    fn method_equality_operands(&self, mut a: Id, mut b: Id) -> Option<(Id, Id, bool)> {
+        let mut same_receivers = true;
+        while a != b {
+            let (
+                Value::Method {
+                    callable: left,
+                    receiver: x,
+                    ..
+                },
+                Value::Method {
+                    callable: right,
+                    receiver: y,
+                    ..
+                },
+            ) = (self.heap.get(a), self.heap.get(b))
+            else {
+                break;
+            };
+            if self.builtin_type_name(a) != self.builtin_type_name(b) {
+                return None;
+            }
+            same_receivers &= x == y;
+            (a, b) = (*left, *right);
+        }
+        Some((a, b, same_receivers))
+    }
+
     pub(super) fn equal(&self, a: Id, b: Id) -> bool {
         // Hashable dictionary, set and cache keys cannot contain cyclic containers.
         self.equal_inner(a, b, usize::MAX, &mut false)
@@ -188,6 +216,25 @@ impl Context {
                 }
                 if check_special && let Some(result) = self.binary_special("==", a, b)? {
                     if !self.truth(result)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
+                if matches!(self.heap.get(a), Value::Method { .. })
+                    && matches!(self.heap.get(b), Value::Method { .. })
+                {
+                    let Some((left, right, same_receivers)) = self.method_equality_operands(a, b)
+                    else {
+                        return Ok(false);
+                    };
+                    if left != right {
+                        self.heap.keep(a);
+                        self.heap.keep(b);
+                        if !self.checked_equal(left, right)? {
+                            return Ok(false);
+                        }
+                    }
+                    if !same_receivers {
                         return Ok(false);
                     }
                     continue;
@@ -337,6 +384,9 @@ impl Context {
             (Value::Bytes(a) | Value::ByteArray(a), Value::Bytes(b) | Value::ByteArray(b)) => {
                 a == b
             }
+            (Value::Method { .. }, Value::Method { .. }) => self
+                .method_equality_operands(a, b)
+                .is_some_and(|(x, y, same)| same && equal(x, y)),
             (Value::Native(a), Value::Native(b)) => a == b,
             (Value::GenericAlias(a), Value::GenericAlias(b)) => {
                 a.kind == b.kind && a.origin == b.origin && equal(a.args, b.args)
