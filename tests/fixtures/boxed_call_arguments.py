@@ -8,11 +8,18 @@ def collect(*arguments):
     return arguments
 
 
-positions = tuple(range(113))
+def collect_tail(head, *tail):
+    visits.append(head)
+    return tail
+
+
+has_fixed_parameter = len(sys.argv) > 1
+function = collect_tail if has_fixed_parameter else collect
+positions = tuple(range(114 if has_fixed_parameter else 113))
 marker = {}
 marker["probe"] = True
 try:
-    result = collect(*positions)
+    result = function(*positions)
 except MemoryError as error:
     print("caught", error.args, len(visits))
-print(len(collect(*positions)), len(positions), len(visits))
+print(len(function(*positions)), len(positions), len(visits))

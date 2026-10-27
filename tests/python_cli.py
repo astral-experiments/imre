@@ -89,6 +89,9 @@ def check_argument_allocation(imre, root, run):
     cases = [
         ((), 0, b"113 113 2\n", b""),
         ((), 1, b"caught () 0\n113 113 1\n", b"refused\n"),
+        ((), 2, b"113 113 2\n", b""),
+        (("tail",), 0, b"113 114 2\n", b""),
+        (("tail",), 1, b"caught () 0\n113 114 1\n", b"refused\n"),
     ]
     for arguments, ordinal, stdout, stderr in cases:
         result = run(imre, "-B", fixtures / "boxed_call_arguments.py", *arguments, extra={

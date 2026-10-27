@@ -2248,9 +2248,12 @@ impl Context {
                     self.bind(local, n, v);
                 }
                 if let Some(n) = sig["varargs"].as_str() {
-                    let extra = self.alloc(Value::Tuple(
-                        args.get(pos.len()..).unwrap_or_default().to_vec(),
-                    ));
+                    let extra = if pos.is_empty() {
+                        args
+                    } else {
+                        copy_ids(args.get(pos.len()..).unwrap_or_default())?
+                    };
+                    let extra = self.alloc(Value::Tuple(extra));
                     self.bind(local, n, extra);
                 } else if args.len() > pos.len() {
                     return Err(Error::new(
