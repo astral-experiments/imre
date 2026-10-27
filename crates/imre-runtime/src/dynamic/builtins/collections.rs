@@ -614,9 +614,13 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             break;
         };
         if item != needle {
+            let mark = ctx.heap.temporary_mark();
             ctx.heap.keep(item);
-            let equal = ctx.binary("==", item, needle)?;
-            if !ctx.truth(equal)? {
+            let matched = ctx
+                .binary("==", item, needle)
+                .and_then(|equal| ctx.truth(equal));
+            ctx.heap.release_temporaries_since(mark);
+            if !matched? {
                 continue;
             }
         }
