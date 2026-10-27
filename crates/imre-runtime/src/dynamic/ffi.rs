@@ -322,7 +322,10 @@ impl Context {
                 Err(error)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
-            _ => self.binary(op, a, b),
+            _ => match op.strip_prefix("inplace:") {
+                Some(op) => self.inplace(op, a, b),
+                None => self.binary(op, a, b),
+            },
         }
     }
 }
