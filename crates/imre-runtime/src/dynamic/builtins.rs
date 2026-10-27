@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use super::Context;
-use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
 mod float;
@@ -1057,6 +1057,21 @@ pub(super) fn call(
             Ok(boolean(!stop_value))
         }
         "print" => print::call(ctx, args, kwargs),
+        "NoneType" | "NotImplementedType" | "ellipsis" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                let ty = if name == "ellipsis" {
+                    "EllipsisType"
+                } else {
+                    name
+                };
+                return Err(type_error(format!("{ty} takes no arguments")));
+            }
+            Ok(match name {
+                "NoneType" => NONE,
+                "NotImplementedType" => NOT_IMPLEMENTED,
+                _ => ELLIPSIS,
+            })
+        }
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);
