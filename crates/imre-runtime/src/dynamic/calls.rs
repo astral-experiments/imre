@@ -643,6 +643,7 @@ impl Context {
             | Value::MappingViewIterator { .. }
             | Value::CallableIterator(_)
             | Value::FormatIterator { .. }
+            | Value::File(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
