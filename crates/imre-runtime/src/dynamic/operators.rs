@@ -384,7 +384,7 @@ impl Context {
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
             Value::Repeat(repeat) => {
-                let value = self.repr(repeat.value);
+                let value = self.format_value(repeat.value, true, active);
                 match repeat.remaining {
                     Some(n) => format!("repeat({value}, {n})"),
                     None => format!("repeat({value})"),
