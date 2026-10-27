@@ -16,6 +16,9 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "unused_struct_keeps_return_checks": ({
+        "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
+    }, "expected int, got str"),
     "serialization_import_preserves_annotation": ({
         "main.py": "import helper\n",
         "helper.py": (
@@ -127,6 +130,18 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "imported_struct_timestamp": {
+        "main.py": (
+            "from wire import encode, decode\nimport struct\n"
+            "wire = encode(2**64 - 1)\n"
+            "print(struct.calcsize('>Q'), wire, decode(wire), struct.unpack('>Q', wire))\n"
+        ),
+        "wire.py": (
+            "import struct\nfrom struct import Struct as Format\n"
+            "layout = Format('>Q')\nassert Format is struct.Struct\n"
+            "encode = layout.pack\ndecode = layout.unpack\n"
+        ),
+    },
     "imported_bytecode_header": {
         "main.py": "from header import magic, decode, encode\nprint(list(magic), decode, encode)\n",
         "header.py": (
