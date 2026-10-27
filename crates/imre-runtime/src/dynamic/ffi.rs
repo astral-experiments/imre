@@ -13,10 +13,45 @@ impl Context {
     /// Instantiate exception classes used by raise and its explicit cause.
     fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
         let base = self.builtin("BaseException");
-        if self.subclass(value, base) {
-            self.call(value, Vec::new(), Vec::new())
+        if !self.subclass(value, base) {
+            return Ok(value);
+        }
+        let result = self.call(value, Vec::new(), Vec::new())?;
+        if !matches!(self.heap.get(result), Value::Raised(_)) {
+            let actual = self.exact_type(result)?;
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "calling {} should have returned an instance of BaseException, not {}",
+                    self.exception_class_repr(value),
+                    self.exception_class_repr(actual)
+                ),
+            ));
+        }
+        Ok(result)
+    }
+
+    /// Format exception-construction diagnostics with the class's Python module.
+    fn exception_class_repr(&self, class: Id) -> String {
+        let Value::Class { name, scope, .. } = self.heap.get(class) else {
+            return self.repr(class);
+        };
+        let scope = self.scope_data(*scope);
+        let attr = |key: &str| {
+            scope
+                .names
+                .get(key)
+                .and_then(|&id| match self.heap.get(id) {
+                    Value::Str(s) => Some(s.as_str()),
+                    _ => None,
+                })
+        };
+        let module = attr("__module__").unwrap_or(&scope.module);
+        let name = attr("__qualname__").unwrap_or(name);
+        if module == "builtins" {
+            format!("<class '{name}'>")
         } else {
-            Ok(value)
+            format!("<class '{module}.{name}'>")
         }
     }
 
@@ -302,10 +337,6 @@ impl Context {
                 let trace = error.tracing();
                 trace.instance = Some(exception);
                 if op == "raise" {
-                    let active = self.heap.active_exception();
-                    if active != NONE && active != exception {
-                        trace.context = Some(active);
-                    }
                     if c == TRUE {
                         let cause = self.instantiate_exception_class(b)?;
                         if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
@@ -315,6 +346,31 @@ impl Context {
                             ));
                         }
                         trace.cause = Some(cause);
+                    }
+                    if exception != a && !self.instance_of(exception, a) {
+                        // A class may allocate a different exception. CPython normalizes
+                        // the target by calling the requested class with that instance.
+                        let Value::Raised(original) = self.heap.get_mut(exception) else {
+                            unreachable!()
+                        };
+                        *original = error;
+                        let normalized = self.call(a, vec![exception], Vec::new())?;
+                        let Value::Raised(result) = self.heap.get(normalized) else {
+                            return Err(Error::new(
+                                "TypeError",
+                                format!(
+                                    "calling {} should have returned an instance of BaseException, not {}",
+                                    self.exception_class_repr(a),
+                                    self.type_name(normalized)
+                                ),
+                            ));
+                        };
+                        error = result.clone();
+                        error.tracing().instance = Some(normalized);
+                    }
+                    let active = self.heap.active_exception();
+                    if active != NONE && error.tracing().instance != Some(active) {
+                        error.tracing().context = Some(active);
                     }
                 }
                 Err(error)
