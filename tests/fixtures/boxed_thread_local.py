@@ -40,6 +40,7 @@ def current():
     print(state.item, backing is state.__dict__)
     attribute_names()
     slot_methods()
+    descriptor_lookup()
 
 
 def attribute_names():
@@ -151,6 +152,35 @@ def slot_methods():
     for index in range(8192):
         temporary = [index]
     print(get("kept"))
+
+
+def descriptor_lookup():
+    state = local()
+    backing = state.__dict__
+    calls = [0]
+    mode = ["fill"]
+
+    class Key(str):
+        def __eq__(self, other):
+            return self is other
+
+        def __hash__(self):
+            calls[0] += 1
+            if calls[0] == 2 and mode[0] == "refuse":
+                raise LookupError("second hash")
+            if calls[0] == 3 and mode[0] == "fill":
+                backing[self] = 37
+            return 29
+
+    key = Key("field")
+    print(getattr(state, key), calls[0])
+    mode[0] = "refuse"
+    for change in (lambda: setattr(state, key, 12), lambda: delattr(state, key)):
+        calls[0] = 0
+        try:
+            change()
+        except LookupError as error:
+            print(str(error), calls[0], backing[key])
 
 
 if __name__ == "__main__":
