@@ -1,10 +1,22 @@
 """Integer counters for the runtime collections module."""
 
+import operator as _operator
+
 
 def _count_elements(mapping, iterable):
     get = mapping.get
     for key in iterable:
         mapping[key] = get(key, 0) + 1
+
+
+def _compare_counts(left, right, compare):
+    if not isinstance(right, Counter):
+        return NotImplemented
+    for counter in (left, right):
+        for key in counter:
+            if not compare(left[key], right[key]):
+                return False
+    return True
 
 
 class Counter(dict):
@@ -48,3 +60,27 @@ class Counter(dict):
 
     def __delitem__(self, key):
         dict.pop(self, key, None)
+
+    def __eq__(self, other):
+        return _compare_counts(self, other, _operator.eq)
+
+    def __ne__(self, other):
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return not self == other
+
+    def __le__(self, other):
+        return _compare_counts(self, other, _operator.le)
+
+    def __lt__(self, other):
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return self <= other and self != other
+
+    def __ge__(self, other):
+        return _compare_counts(self, other, _operator.ge)
+
+    def __gt__(self, other):
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return self >= other and self != other

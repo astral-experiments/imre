@@ -12,6 +12,10 @@ def current():
     del counts["c"]
     del counts["absent"]
     print(list(counts.items()), copied.total(), copied["absent"])
+    plain = Counter(a=1)
+    with_zero = Counter(a=1, b=0)
+    print(plain == with_zero, plain != with_zero, with_zero == dict(plain))
+    print(Counter(b=-1) < Counter(), plain <= with_zero, with_zero > plain)
 
     class Data(dict):
         pass
