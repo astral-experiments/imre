@@ -35,7 +35,11 @@ def current():
             print(fn(*args))
         except NameError as error:
             print(type(error).__name__, str(error))
-    print(read_class_namespace(False))
+    print(read_class_namespace(False), read_class_namespace(True), read_class_cell(True))
+    try:
+        print(read_class_cell(False))
+    except NameError as error:
+        print(str(error))
 
 
 marker = "global"
@@ -48,6 +52,15 @@ def read_class_namespace(assigned):
     class C:
         seen = marker
         marker = "class"
+    return C.seen
+
+
+def read_class_cell(assigned):
+    if assigned:
+        marker = "outer"
+
+    class C:
+        seen = marker
     return C.seen
 
 

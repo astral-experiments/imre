@@ -631,7 +631,13 @@ impl Context {
         };
         s
     }
-    fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+    fn root_scope(&self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        scope
+    }
+    fn binding_scope(&self, scope: Id, name: &str) -> Id {
         if self.scope_data(scope).closure.nonlocals.contains(name) {
             let mut cursor = self.scope_data(scope).parent;
             while let Some(parent) = cursor {
@@ -643,9 +649,7 @@ impl Context {
             }
         }
         if self.scope_data(scope).globals.contains(name) {
-            while let Some(parent) = self.scope_data(scope).parent {
-                scope = parent;
-            }
+            return self.root_scope(scope);
         }
         scope
     }
@@ -682,10 +686,8 @@ impl Context {
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
-    fn module_globals(&mut self, mut scope: Id) -> Id {
-        while let Some(parent) = self.scope_data(scope).parent {
-            scope = parent;
-        }
+    fn module_globals(&mut self, scope: Id) -> Id {
+        let scope = self.root_scope(scope);
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
@@ -792,7 +794,6 @@ impl Context {
 
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         let origin = scope;
-        let function_lookup = self.scope_data(origin).class_body.is_none();
         loop {
             scope = self.binding_scope(scope, name);
             if let Some(locals) = self.scope_data(scope).exec_locals {
@@ -813,7 +814,7 @@ impl Context {
             if let Some(id) = self.scope_name(scope, name) {
                 return Ok(id);
             }
-            if function_lookup && s.class_body.is_none() && s.closure.declared.contains(name) {
+            if s.class_body.is_none() && s.closure.declared.contains(name) {
                 return Err(self.missing_binding(origin, scope, name));
             }
             if name == "__class__"
