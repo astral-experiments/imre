@@ -1383,8 +1383,8 @@ impl Context {
             }),
             Value::GenericAlias(alias) => alias.repr(self),
             Value::Union(union) => super::union::repr(self, *union),
-            Value::Class { .. } if self.classes.get("typing.Union") == Some(&id) => {
-                "<class 'typing.Union'>".to_owned()
+            Value::Class { name, scope, .. } if self.scope_data(*scope).module == "typing" => {
+                format!("<class 'typing.{name}'>")
             }
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()

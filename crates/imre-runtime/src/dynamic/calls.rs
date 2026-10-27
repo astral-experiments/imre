@@ -442,19 +442,29 @@ impl Context {
         }
     }
 
-    pub(super) fn python_subclass_check(&self, child: Id, parent: Id) -> Result<bool> {
+    pub(super) fn python_subclass_check(&mut self, child: Id, parent: Id) -> Result<bool> {
         if let Value::Union(union) = self.heap.get(parent) {
             return self.python_subclass_check(child, union.args);
         }
         if let Value::Tuple(classes) = self.heap.get(parent) {
-            for &class in classes {
+            for class in classes.clone() {
                 if self.python_subclass_check(child, class)? {
                     return Ok(true);
                 }
             }
             return Ok(false);
         }
-        let is_class = |id| self.builtin_type_name(id) == Some("type");
+        if let Value::GenericAlias(alias) = self.heap.get(parent) {
+            return Err(alias.kind.class_check_error("issubclass"));
+        }
+        if let Some(check) = self.bound_slot(parent, "__subclasscheck__")? {
+            let result = self.call(check, vec![child], Vec::new())?;
+            return self.truth(result);
+        }
+        let is_class = |id| {
+            matches!(self.builtin_type_name(id), Some("type" | "typing._AnyMeta"))
+                || matches!(self.heap.get(id), Value::Native(name) if super::builtins::is_builtin_type(name))
+        };
         if !is_class(child) {
             return Err(Error::new(
                 "TypeError",

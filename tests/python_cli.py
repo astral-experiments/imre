@@ -588,6 +588,7 @@ def report(text):
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
+            "boxed_typing_optional.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
