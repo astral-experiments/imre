@@ -217,20 +217,20 @@ fn render(
         let Value::Raised(error) = ctx.heap.get(current) else {
             break;
         };
-        let Some(trace) = &error.trace else { break };
-        let (prior, message) = if let Some(cause) = trace.cause {
-            (
-                cause,
-                "\nThe above exception was the direct cause of the following exception:\n\n",
-            )
-        } else if let Some(context) = trace.context {
-            (
-                context,
-                "\nDuring handling of the above exception, another exception occurred:\n\n",
-            )
-        } else {
-            break;
-        };
+        let (prior, message) =
+            if let Some(cause) = error.trace.as_ref().and_then(|trace| trace.cause) {
+                (
+                    cause,
+                    "\nThe above exception was the direct cause of the following exception:\n\n",
+                )
+            } else if error.context != NONE {
+                (
+                    error.context,
+                    "\nDuring handling of the above exception, another exception occurred:\n\n",
+                )
+            } else {
+                break;
+            };
         if prior == NONE || !seen.insert(prior) {
             break;
         }

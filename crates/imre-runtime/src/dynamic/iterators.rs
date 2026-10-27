@@ -104,9 +104,8 @@ impl Context {
         }
         let cause = self.raised_instance(error);
         let mut error = Error::new("RuntimeError", "generator raised StopIteration");
-        let trace = error.tracing();
-        trace.cause = Some(cause);
-        trace.context = Some(cause);
+        error.tracing().cause = Some(cause);
+        error.context = cause;
         error
     }
 }

@@ -1176,7 +1176,7 @@ impl Context {
                 match name {
                     "__traceback__" => return self.exception_traceback(obj),
                     "__context__" => {
-                        return Ok(error.trace.as_ref().and_then(|t| t.context).unwrap_or(NONE));
+                        return Ok(error.context);
                     }
                     "__cause__" => {
                         return Ok(error.trace.as_ref().and_then(|t| t.cause).unwrap_or(NONE));
@@ -2285,7 +2285,7 @@ impl Context {
             let Value::Raised(error) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
-            error.tracing().context = (value != NONE).then_some(value);
+            error.context = value;
             return Ok(());
         }
         if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
