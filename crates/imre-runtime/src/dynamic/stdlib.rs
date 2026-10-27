@@ -45,6 +45,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "threading"
             | "_thread"
             | "abc"
+            | "_collections"
             | "codecs"
             | "types"
             | "_io"
@@ -254,6 +255,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
+        ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
@@ -444,6 +446,45 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     Ok(id)
 }
 
+/// Count each key before pulling the next and preserve updates if a callback raises.
+fn count_elements(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_collections._count_elements() takes no keyword arguments",
+        ));
+    }
+    let &[mapping, iterable] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("_count_elements expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let iterator = ctx.iterator(iterable)?;
+    let dict_get = ctx.builtin("dict.get");
+    let dict_set = ctx.builtin("dict.__setitem__");
+    // The builtin dict operations bypass instance attributes when neither type method is overridden.
+    let receiver = ctx
+        .dict_storage(mapping)
+        .filter(|_| {
+            ctx.slot(mapping, "get").is_none_or(|get| get == dict_get)
+                && ctx
+                    .slot(mapping, "__setitem__")
+                    .is_none_or(|set| set == dict_set)
+        })
+        .unwrap_or(mapping);
+    let get = ctx.lookup_attr(receiver, "get")?;
+    let zero = ctx.int(0);
+    let one = ctx.int(1);
+    while let Some(key) = ctx.next_item(iterator)? {
+        ctx.heap.keep(key);
+        let previous = ctx.call(get, vec![key, zero], vec![])?;
+        let count = ctx.binary("+", previous, one)?;
+        ctx.put_item(receiver, key, count)?;
+    }
+    Ok(NONE)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -479,6 +520,9 @@ pub(super) fn call(
     }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
+    }
+    if name == "_collections._count_elements" {
+        return count_elements(ctx, args, kwargs);
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
