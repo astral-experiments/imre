@@ -51,6 +51,9 @@ def current():
             print(type(error).__name__)
     number = FormatNumber()
     assert "%x %i %u %o %X %d" % ((number,) * 6) == "-3 5 5 -3 -3 5"
+    assert "%(n)d %(n)i %(n)u %(n)o %(n)x %(n)X" % {"n": number} == "5 5 5 -3 -3 -3"
+    fields = {"name": "Imre", "count": 3, "ratio": 2.5}
+    assert "%(name)s/%(count)d/%(ratio).1f" % fields == "Imre/3/2.5"
     print("%04x %04i %04u" % (number, number, 2.75))
     for field in ("%02d", "%02x"):
         try:
