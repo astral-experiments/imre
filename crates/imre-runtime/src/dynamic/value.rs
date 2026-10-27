@@ -249,7 +249,8 @@ impl Context {
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Slice(_) => "slice",
-            Value::Range { .. } => "range",
+            Value::Range(_) => "range",
+            Value::RangeIterator(iter) => iter.kind,
             Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
             Value::DictIterator(iter) => match iter.kind {
@@ -435,11 +436,8 @@ pub(super) enum Value {
     },
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
-    Range {
-        start: i64,
-        stop: i64,
-        step: i64,
-    },
+    Range(super::range::Range),
+    RangeIterator(super::range::Cursor),
     Str(String),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
@@ -739,7 +737,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
-            Self::Range { .. } => {}
+            Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),

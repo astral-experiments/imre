@@ -15,6 +15,7 @@ mod mapping_abc;
 mod module_type;
 mod operators;
 mod property;
+mod range;
 mod slice;
 mod source_code;
 mod static_method;
@@ -46,7 +47,6 @@ enum IteratorSlice<'a> {
     Values(&'a [Id]),
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
-    Range { value: i128, len: usize },
 }
 
 impl IteratorSlice<'_> {
@@ -55,7 +55,6 @@ impl IteratorSlice<'_> {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
-            Self::Range { len, .. } => *len,
         }
     }
 }
@@ -234,6 +233,7 @@ impl Context {
         matches!(
             self.heap.get(id),
             Value::Iterator { .. }
+                | Value::RangeIterator(_)
                 | Value::DictIterator(_)
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
@@ -268,7 +268,9 @@ impl Context {
             Value::Tuple(_) => (id, "tuple_iterator"),
             Value::Bytes(_) => (id, "bytes_iterator"),
             Value::ByteArray(_) => (id, "bytearray_iterator"),
-            Value::Range { .. } => (id, "range_iterator"),
+            Value::Range(ref range) => {
+                return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
+            }
             Value::Dict(_) | Value::DefaultDict { .. } => {
                 return Ok(self.dict_iterator(id, DictViewKind::Keys));
             }
@@ -365,10 +367,6 @@ impl Context {
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
             }
-            Value::Range { start, stop, step } => IteratorSlice::Range {
-                value: i128::from(*start) + i128::from(*step) * *offset as i128,
-                len: builtins::range_len(*start, *stop, *step)?.saturating_sub(*offset),
-            },
             _ => unreachable!("iterator sequence"),
         })
     }
@@ -380,6 +378,9 @@ impl Context {
         }
         if matches!(self.heap.get(id), Value::Count { .. }) {
             return Ok(true);
+        }
+        if let Value::RangeIterator(iter) = self.heap.get(id) {
+            return Ok(iter.remaining.as_small() != Some(0));
         }
         if let Value::Repeat(repeat) = self.heap.get(id) {
             return Ok(repeat.remaining != Some(0));
@@ -456,6 +457,10 @@ impl Context {
                 return self.next_enumerated(id, input);
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
+            Value::RangeIterator(iter) => {
+                let item = iter.next()?;
+                return Ok(item.map(|n| self.alloc(Value::Int(n))));
+            }
             Value::Repeat(repeat) => return Ok(repeat.next()),
             Value::Map { .. } => return self.next_zip_or_map(id),
             Value::Zip { .. } => {
@@ -504,7 +509,6 @@ impl Context {
             IteratorSlice::Values(values) => values[0],
             IteratorSlice::Reversed(values) => values[values.len() - 1],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
-            IteratorSlice::Range { value, .. } => self.int(value as i64),
         };
         if let Value::Iterator {
             offset, reverse, ..
@@ -565,7 +569,26 @@ impl Context {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
             }
             Value::Context(bindings) => Ok(bindings.keys().copied().collect()),
-            Value::Range { start, stop, step } => builtins::range_items(self, start, stop, step),
+            Value::Range(_) | Value::RangeIterator(_) => {
+                let iter = self.iterator(id)?;
+                let Value::RangeIterator(cursor) = self.heap.get(iter) else {
+                    unreachable!()
+                };
+                let size = cursor.remaining.to_i64().ok_or_else(|| {
+                    Error::new(
+                        "OverflowError",
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+                let mut items = Vec::new();
+                items
+                    .try_reserve_exact(size as usize)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                while let Some(item) = self.next_item(iter)? {
+                    items.push(item);
+                }
+                Ok(items)
+            }
             Value::MappingView { mapping, kind } => mapping_abc::view_items(self, mapping, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
             Value::Bytes(s) | Value::ByteArray(s) => {
@@ -575,7 +598,7 @@ impl Context {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
                     IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    remaining @ (IteratorSlice::Bytes(_) | IteratorSlice::Range { .. }) => {
+                    remaining @ IteratorSlice::Bytes(_) => {
                         let mut values = Vec::new();
                         values.try_reserve_exact(remaining.len()).map_err(|_| {
                             Error::new("MemoryError", "iterator is too large to materialize")
