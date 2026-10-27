@@ -477,6 +477,7 @@ pub(super) struct ClassNamespace {
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
+    pub namedtuple_defaults: Option<Id>,
     pub annotation_thunks: Option<Id>,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
@@ -888,6 +889,7 @@ impl Value {
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
+                    visit.extend(class.namedtuple_defaults);
                     visit.extend(class.annotation_thunks);
                     visit.extend(class.dictionary);
                 }

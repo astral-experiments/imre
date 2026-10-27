@@ -33,6 +33,7 @@ zlib-rs = { version = "=0.6.8", default-features = false }
 ruff_python_literal = "=0.0.15"
 ruff_python_ast.workspace = true
 ruff_python_parser.workspace = true
+ruff_python_stdlib.workspace = true
 ruff_text_size.workspace = true
 icu_properties = "=2.3.0"
 ryu = "=1.0.23"

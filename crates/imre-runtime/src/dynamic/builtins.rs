@@ -399,7 +399,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "list"
         }
-        Value::Tuple(_) if attr == "__repr__" => "tuple",
+        Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
         Value::Set { frozen: false, .. }
             if matches!(
                 attr,
@@ -858,6 +858,29 @@ pub(super) fn call(
                     .map_err(|_| Error::new("MemoryError", "bytearray is too large"))?;
                 target.extend(data);
                 Ok(NONE)
+            }
+            "tuple" if method == "__getitem__" => {
+                let (&receiver, args) = args.split_first().ok_or_else(|| {
+                    type_error("descriptor '__getitem__' of 'tuple' object needs an argument")
+                })?;
+                if !ctx.builtin_slot_accepts(receiver, "tuple") {
+                    return Err(type_error(format!(
+                        "descriptor '__getitem__' requires a 'tuple' object but received a '{}'",
+                        ctx.type_name(receiver)
+                    )));
+                }
+                if !kwargs.is_empty() {
+                    return Err(type_error(
+                        "wrapper __getitem__() takes no keyword arguments",
+                    ));
+                }
+                let [key] = args else {
+                    return Err(type_error(format!(
+                        "expected 1 argument, got {}",
+                        args.len()
+                    )));
+                };
+                ctx.sequence_subscript(receiver, *key)
             }
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)

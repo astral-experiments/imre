@@ -14,6 +14,7 @@ mod importlib;
 mod iterators;
 mod mapping_abc;
 mod module_type;
+mod namedtuple;
 mod operators;
 mod os_error;
 mod property;
@@ -1196,7 +1197,8 @@ impl Context {
             "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
             "list" => &["__repr__", "__init__"],
-            "tuple" | "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],
+            "tuple" => &["__repr__", "__getitem__"],
+            "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],
             "property" => property::METHODS,
             "int" => &["to_bytes"],
             "str" => {
@@ -1536,6 +1538,8 @@ impl Context {
             "collections" => {
                 let deque = self.builtin(deque::CLASS);
                 self.bind(scope, "deque", deque);
+                let namedtuple = self.builtin("collections.namedtuple");
+                self.bind(scope, "namedtuple", namedtuple);
                 let abc = self.module("_collections_abc")?;
                 self.bind(scope, "abc", abc);
                 self.modules.insert("collections.abc".to_owned(), abc);
