@@ -1,6 +1,5 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::io::{self, Write};
 use std::rc::Rc;
 
 use super::Context;
@@ -9,8 +8,9 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 mod collections;
 mod float;
 mod integer;
+mod print;
 mod text;
-pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, view_items};
+pub(super) use collections::{hashable, remove_dict_item, set_add, set_member};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 macro_rules! exception_kinds {
@@ -75,7 +75,9 @@ const FUNCTIONS: &[&str] = &[
     "len",
     "reversed",
     "ord",
+    "chr",
     "callable",
+    "all",
     "any",
     "isinstance",
     "issubclass",
@@ -176,6 +178,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "isspace",
     "join",
     "lower",
     "lstrip",
@@ -709,16 +712,20 @@ pub(super) fn call(
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
         }
-        "ord" => {
+        "chr" | "ord" => {
             if !kwargs.is_empty() {
-                return Err(type_error("ord() takes no keyword arguments"));
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
             }
             let [value] = args else {
                 return Err(type_error(format!(
-                    "ord() takes exactly one argument ({} given)",
+                    "{name}() takes exactly one argument ({} given)",
                     args.len()
                 )));
             };
+            if name == "chr" {
+                let code = ctx.index_integer(*value)?;
+                return Ok(ctx.text(crate::objects::chr_scalar(&code)?.to_string()));
+            }
             let code = match ctx.heap.get(*value) {
                 Value::Bytes(b) | Value::ByteArray(b) => crate::objects::ord_byte(b)?,
                 _ => {
@@ -942,44 +949,19 @@ pub(super) fn call(
         }
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
-        "any" => {
+        "all" | "any" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let iter = ctx.iterator(args[0])?;
+            let stop_value = name == "any";
             while let Some(item) = ctx.next_item(iter)? {
-                if ctx.truth(item)? {
-                    return Ok(TRUE);
+                if ctx.truth(item)? == stop_value {
+                    return Ok(boolean(stop_value));
                 }
             }
-            Ok(FALSE)
+            Ok(boolean(!stop_value))
         }
-        "print" => {
-            let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;
-            let flush = ctx.optional_truth(flush, false)?;
-            if file.is_some_and(|id| id != NONE) {
-                return Err(type_error("print supports standard output"));
-            }
-            let sep = sep
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or(" ");
-            let end = end
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or("\n");
-            let values = args
-                .iter()
-                .map(|&id| ctx.display(id))
-                .collect::<Vec<_>>()
-                .join(sep);
-            let mut out = io::stdout().lock();
-            write!(out, "{values}{end}")
-                .and_then(|()| if flush { out.flush() } else { Ok(()) })
-                .map_err(|err| Error::new("OSError", err.to_string()))?;
-            Ok(NONE)
-        }
+        "print" => print::call(ctx, args, kwargs),
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

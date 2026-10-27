@@ -40,6 +40,8 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "threading"
+            | "_thread"
             | "abc"
             | "codecs"
             | "types"
@@ -221,6 +223,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", "ASCII") => ctx.int(regex::ASCII),
         ("re", "UNICODE") => ctx.int(regex::UNICODE),
         ("re", "VERBOSE") => ctx.int(regex::VERBOSE),
@@ -434,6 +437,15 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == super::thread_local::CLASS {
+        if !args.is_empty() || !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "Initialization arguments are not supported",
+            ));
+        }
+        return Ok(ctx.alloc(Value::ThreadLocal(Default::default())));
+    }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
     }

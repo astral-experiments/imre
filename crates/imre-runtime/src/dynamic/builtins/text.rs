@@ -782,6 +782,20 @@ pub(super) fn method(
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
+    if name == "isspace" {
+        if !kwargs.is_empty() {
+            return Err(type_error("str.isspace() takes no keyword arguments"));
+        }
+        if !args.is_empty() {
+            return Err(type_error(format!(
+                "str.isspace() takes no arguments ({} given)",
+                args.len()
+            )));
+        }
+        return Ok(boolean(crate::objects::python_isspace(
+            ctx.str_value(receiver)?,
+        )));
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => {
@@ -842,7 +856,7 @@ pub(super) fn method(
         }
         "splitlines" => {
             let [keep] = bind(name, args, kwargs, ["keepends"])?;
-            let keep = keep.map(|x| ctx.as_integer(x)).transpose()?.unwrap_or(0) != 0;
+            let keep = ctx.optional_truth(keep, false)?;
             let mut values = Vec::new();
             split_lines(&source, keep, |field| values.push(ctx.text(field)));
             Ok(ctx.alloc(Value::List(values)))
