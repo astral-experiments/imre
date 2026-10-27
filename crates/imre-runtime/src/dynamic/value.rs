@@ -47,6 +47,7 @@ pub(super) struct Trace {
     pub instance: Option<Id>,
     pub context: Option<Id>,
     pub cause: Option<Id>,
+    pub fields: HashMap<String, Id>,
     cached: Option<(usize, Id)>,
 }
 
@@ -88,6 +89,7 @@ impl Error {
                     .chain(trace.instance)
                     .chain(trace.context)
                     .chain(trace.cause)
+                    .chain(trace.fields.values().copied())
                     .chain(trace.cached.map(|(_, head)| head))
             }))
     }

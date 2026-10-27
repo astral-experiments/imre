@@ -25,3 +25,22 @@ def current():
         open("missing-exception-repr-fixture/file", "w")
     except FileNotFoundError as caught:
         print(repr(caught), caught.filename)
+
+    class Declared(ValueError):
+        label = "class"
+
+        @property
+        def token(self):
+            return self.label
+
+        @token.setter
+        def token(self, value):
+            self.label = value
+
+    error = Declared()
+    print(error.label, error.token)
+    saved = ["instance"]
+    error.token = saved
+    print(error.label is saved, error.token is saved)
+    del error.label
+    print(error.label, error.token)

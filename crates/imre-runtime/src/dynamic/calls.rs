@@ -19,6 +19,14 @@ impl Context {
             _ => None,
         }
     }
+    /// Find a Python-declared member on an exception that retains its original class.
+    fn exception_member(&self, object: Id, name: &str) -> Option<Id> {
+        let Value::Raised(error) = self.heap.get(object) else {
+            return None;
+        };
+        self.class_attr(error.class?, name)
+    }
+
     /// Special methods are looked up on the type, even if the instance shadows them.
     pub(super) fn slot(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
@@ -466,7 +474,9 @@ impl Context {
 
     fn error_kind_matches(&self, kind: &str, class: Id, registered: Option<Id>) -> bool {
         match self.heap.get(class) {
-            Value::Tuple(classes) => classes.iter().any(|&c| self.error_kind_matches(kind, c, registered)),
+            Value::Tuple(classes) => classes
+                .iter()
+                .any(|&c| self.error_kind_matches(kind, c, registered)),
             Value::Class { name, .. } | Value::Native(name) => {
                 kind == name
                     || name == "BaseException"
@@ -556,6 +566,17 @@ impl Context {
                 return Ok(if name == "name" { member_name } else { value });
             }
             return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
+        }
+        if let Value::Raised(error) = self.heap.get(obj)
+            && let Some(class) = error.class
+        {
+            let field = error
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.fields.get(name).copied());
+            if field.is_some() || self.class_attr(class, name).is_some() {
+                return self.instance_attribute(obj, class, field, name);
+            }
         }
         if name == "__class__" {
             return self.exact_type(obj);
@@ -903,7 +924,8 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
-        if let Some(descriptor) = self.slot(obj, name)
+        let exception_member = self.exception_member(obj, name);
+        if let Some(descriptor) = self.slot(obj, name).or(exception_member)
             && self.data_descriptor(descriptor)
         {
             match *self.heap.get(descriptor) {
@@ -921,6 +943,19 @@ impl Context {
                 .ok_or_else(|| Error::new("AttributeError", "__delete__"))?;
             self.call(delete, vec![obj], Vec::new())?;
             return Ok(());
+        }
+        if let Value::Raised(error) = self.heap.get_mut(obj) {
+            if error
+                .trace
+                .as_mut()
+                .and_then(|trace| trace.fields.remove(name))
+                .is_some()
+            {
+                return Ok(());
+            }
+            if exception_member.is_some() {
+                return Err(self.missing_attribute(obj, name));
+            }
         }
         if name == "__class__" {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
@@ -1047,7 +1082,8 @@ impl Context {
         if matches!(self.heap.get(obj), Value::Function { .. }) {
             return self.set_function_attr(obj, name, value);
         }
-        if let Some(descriptor) = self.slot(obj, name)
+        let exception_member = self.exception_member(obj, name);
+        if let Some(descriptor) = self.slot(obj, name).or(exception_member)
             && self.data_descriptor(descriptor)
         {
             if let Value::Property(property) = *self.heap.get(descriptor) {
@@ -1074,6 +1110,12 @@ impl Context {
                 .is_some_and(|fields| fields.iter().any(|field| field == name))
         {
             return Err(Error::new("AttributeError", "can't set attribute"));
+        }
+        if exception_member.is_some()
+            && let Value::Raised(error) = self.heap.get_mut(obj)
+        {
+            error.tracing().fields.insert(name.to_owned(), value);
+            return Ok(());
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
