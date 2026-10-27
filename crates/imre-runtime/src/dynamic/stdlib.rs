@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::{
     Context,
-    value::{DictViewKind, Error, FALSE, Id, NONE, Result, TRUE, Value},
+    value::{Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 use crate::objects::interpreter_stdlib as system;
 
@@ -31,6 +31,7 @@ mod logging;
 mod marshal;
 mod math;
 mod operator;
+mod ordered_dict;
 mod pickle;
 mod pkgutil;
 mod posixpath;
@@ -758,62 +759,8 @@ pub(super) fn call(
     if name == "_collections._count_elements" {
         return count_elements(ctx, args, kwargs);
     }
-    if name == "_collections._ordered_dict_equal" {
-        if let [left, right] = args
-            && kwargs.is_empty()
-            && let (Some(left), Some(right)) = (ctx.dict_storage(*left), ctx.dict_storage(*right))
-        {
-            return Ok(if ctx.dictionary_equal(left, right)? {
-                TRUE
-            } else {
-                FALSE
-            });
-        }
-        return Err(Error::new("TypeError", "expected two dictionaries"));
-    }
-    if name == "_collections._ordered_dict_repr" {
-        let [object] = args else {
-            return Err(Error::new("TypeError", "expected a dictionary"));
-        };
-        let storage = ctx
-            .dict_storage(*object)
-            .filter(|_| kwargs.is_empty())
-            .ok_or_else(|| Error::new("TypeError", "expected a dictionary"))?;
-        if ctx.repr_ancestors.contains(object) {
-            return Ok(ctx.text("..."));
-        }
-        let items = if ctx.stored_entries(storage).is_empty() {
-            String::new()
-        } else {
-            ctx.checked_dict_repr(*object, storage)?
-        };
-        let class = ctx.exact_type(*object)?;
-        return Ok(ctx.text(format!("{}({items})", ctx.class_name(class))));
-    }
-    if name == "_collections._ordered_dict_view" {
-        let [dict, kind] = args else {
-            return Err(Error::new(
-                "TypeError",
-                "expected a dictionary and view kind",
-            ));
-        };
-        if !kwargs.is_empty() || ctx.dict_storage(*dict).is_none() {
-            return Err(Error::new(
-                "TypeError",
-                "expected a dictionary and view kind",
-            ));
-        }
-        let kind = match ctx.str_value(*kind)? {
-            "keys" => DictViewKind::Keys,
-            "items" => DictViewKind::Items,
-            "values" => DictViewKind::Values,
-            _ => return Err(Error::new("ValueError", "unknown dictionary view")),
-        };
-        return Ok(ctx.alloc(Value::DictView {
-            dict: *dict,
-            kind,
-            ordered: true,
-        }));
+    if let Some(operation) = name.strip_prefix("_collections._ordered_dict_") {
+        return ordered_dict::call(ctx, operation, args, kwargs);
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);

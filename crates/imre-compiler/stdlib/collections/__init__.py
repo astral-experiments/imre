@@ -37,11 +37,7 @@ class OrderedDict(dict):
         return _ordered_dict_repr(self)
 
     def __eq__(self, other):
-        if not isinstance(other, dict):
-            return NotImplemented
-        if not _ordered_dict_equal(self, other):
-            return False
-        return not isinstance(other, OrderedDict) or list(dict.keys(self)) == list(dict.keys(other))
+        return _ordered_dict_equal(self, other, isinstance(other, OrderedDict))
 
     def __ne__(self, other):
         equal = self.__eq__(other)
