@@ -46,6 +46,9 @@ def current():
     assert iter(counter) is counter and next(counter) == 1
     assert isinstance(Cursor(), Iterator) and issubclass(Cursor, Iterator)
     assert isinstance(iter([1]), Iterator) and not isinstance([1], Iterator)
+    assert isinstance((item for item in [1]), Iterator)
+    with open(__file__, "rb") as stream:
+        assert isinstance(stream, Iterator) and issubclass(type(stream), Iterator)
 
     assert (array.__module__, array.__qualname__, repr(array)) == ("array", "array", "<class 'array.array'>")
     assert issubclass(array, MutableSequence) and issubclass(array, Sequence)
