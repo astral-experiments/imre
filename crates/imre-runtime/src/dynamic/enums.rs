@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(super) mod auto;
+
 impl Context {
     pub(super) fn scalar_value(&self, id: Id) -> Id {
         match self.heap.get(id) {
@@ -230,7 +232,22 @@ impl Context {
         let Value::Class { scope, .. } = *self.heap.get(class) else {
             unreachable!()
         };
-        let declarations = self.scope_data(scope).names.clone();
+        let Value::Scope(fields) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        let state = fields.enum_namespace.take();
+        let classified = state.is_some();
+        let declarations: Vec<_> = match state {
+            Some(state) => state
+                .members
+                .into_iter()
+                .map(|name| {
+                    let raw = fields.names[&name];
+                    (name, raw)
+                })
+                .collect(),
+            None => fields.names.clone().into_iter().collect(),
+        };
         let names = self.dict(Vec::new());
         let values = self.dict(Vec::new());
         self.bind(scope, "_member_map_", names);
@@ -239,14 +256,22 @@ impl Context {
         self.bind(scope, "__members__", proxy);
         let new = self.class_attr(class, "__new__");
         for (name, raw) in declarations {
-            if name.starts_with('_') {
-                continue;
-            }
-            if self.is_enum_descriptor(raw)? {
+            if !classified && (name.starts_with('_') || self.is_enum_descriptor(raw)?) {
                 continue;
             }
             let (member, value) = if let Some(base) = base {
                 self.scalar_member(class, base, new, raw)?
+            } else if let Some(new) = new {
+                let args = self.enum_new_args(class, raw);
+                let member = self.call(new, args, Vec::new())?;
+                let value = self.lookup_attr(member, "_value_").or_else(|error| {
+                    if self.is_attribute_error(&error) {
+                        Ok(raw)
+                    } else {
+                        Err(error)
+                    }
+                })?;
+                (member, value)
             } else {
                 (self.instance(class, None), raw)
             };
@@ -287,12 +312,17 @@ impl Context {
         Ok(false)
     }
 
-    fn scalar_member(&mut self, class: Id, base: Id, new: Option<Id>, raw: Id) -> Result<(Id, Id)> {
+    fn enum_new_args(&self, class: Id, raw: Id) -> Vec<Id> {
         let mut args = vec![class];
         match self.heap.get(raw) {
             Value::Tuple(items) => args.extend(items),
             _ => args.push(raw),
         }
+        args
+    }
+
+    fn scalar_member(&mut self, class: Id, base: Id, new: Option<Id>, raw: Id) -> Result<(Id, Id)> {
+        let args = self.enum_new_args(class, raw);
         let member = if let Some(new) = new {
             self.call(new, args, Vec::new())?
         } else if matches!(self.heap.get(base), Value::Native(name) if name == "enum.StrEnum") {

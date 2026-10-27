@@ -111,7 +111,12 @@ pub(super) fn split(
 
 /// After an empty split, Python tries the same position once more. Follow the
 /// engine's priority-ordered NFA, accepting only paths that consume input.
-fn nonempty(pattern: &Pattern, text: &[u8], start: usize, caps: &mut Captures) -> Result<bool> {
+pub(super) fn nonempty(
+    pattern: &Pattern,
+    text: &[u8],
+    start: usize,
+    caps: &mut Captures,
+) -> Result<bool> {
     if start == text.len() {
         return Ok(false);
     }

@@ -60,7 +60,7 @@ pub(crate) use json::{
 mod linecache;
 pub(crate) mod locks;
 pub(crate) mod logging;
-pub(crate) use logging::record::{brace_integer_field, percent_integer_field};
+pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
 mod mappings;
 mod module_specs;
 mod namespaces;
@@ -71,6 +71,7 @@ pub(crate) use paths::is_file;
 pub(crate) mod posixpath;
 mod processes;
 mod random;
+pub(crate) use random::imre_random_float;
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;

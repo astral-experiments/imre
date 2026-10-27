@@ -5,6 +5,7 @@ from _imre_socketserver_reader import _SocketReader
 from _imre_socketserver_poll import _open_poll, _poll_ready, _close_poll
 import socket
 import sys
+from traceback import print_exc as _print_exc
 
 
 class BaseRequestHandler:
@@ -209,9 +210,7 @@ class TCPServer:
     def handle_error(self, request: socket.socket, client_address: tuple[str, int]) -> None:
         sys.stderr.write("----------------------------------------\n")
         sys.stderr.write("Exception occurred during processing of request from " + repr(client_address) + "\n")
-        exc = sys.exception()
-        if exc is not None:
-            sys.stderr.write(str(exc) + "\n")
+        _print_exc()
         sys.stderr.write("----------------------------------------\n")
 
     def serve_forever(self, poll_interval: float | None = 0.5) -> None:

@@ -63,6 +63,7 @@ pub(super) struct Trace {
     pub context: Option<Id>,
     pub cause: Option<Id>,
     pub fields: HashMap<String, Id>,
+    stop_value: Id,
     cached: Option<(usize, Id)>,
 }
 
@@ -118,6 +119,20 @@ impl Error {
         self
     }
 
+    /// Read the independent StopIteration value without allocating exception metadata.
+    pub(super) fn stop_value(&self) -> Id {
+        self.trace.as_ref().map_or(NONE, |trace| trace.stop_value)
+    }
+
+    /// Store the value in the cold payload, which owns its reference during collection.
+    pub(super) fn set_stop_value(&mut self, value: Id) {
+        if value != NONE {
+            self.tracing().stop_value = value;
+        } else if let Some(trace) = self.trace.as_mut() {
+            trace.stop_value = NONE;
+        }
+    }
+
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
             .iter()
@@ -129,6 +144,7 @@ impl Error {
                     .frames
                     .iter()
                     .map(|&(_, frame)| frame)
+                    .chain((trace.stop_value != NONE).then_some(trace.stop_value))
                     .chain(trace.instance)
                     .chain(trace.context)
                     .chain(trace.cause)
@@ -282,6 +298,9 @@ impl Context {
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let mut error = Error::new(kind, "");
         error.args = Some(args.to_vec());
+        if kind == "StopIteration" {
+            error.set_stop_value(args.first().copied().unwrap_or(NONE));
+        }
         error.message = self.exception_message(&error, &mut Vec::new());
         if kind == "SystemExit" {
             error.exit_status = match args {
@@ -328,12 +347,21 @@ impl fmt::Display for Error {
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
+/// Data retained by class namespaces after their body has run.
+#[derive(Clone, Default)]
+pub(super) struct ClassNamespace {
+    pub bases: Id,
+    pub mro: Id,
+    pub annotation_thunks: Option<Id>,
+}
+
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
+    pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
     pub class_cell: Option<Id>,
-    pub class_lineage: Option<(Id, Id)>,
+    pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
     pub closure: Box<ClosureScope>,
@@ -405,7 +433,7 @@ pub(super) enum Value {
         extras: Vec<(&'static str, Id)>,
     },
     Set {
-        items: Vec<Id>,
+        entries: super::dictionary::Entries,
         frozen: bool,
     },
     Dict(super::dictionary::Entries),
@@ -601,7 +629,8 @@ impl Value {
 
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) => visit.extend(v),
+            Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
             Self::Iterator {
                 sequence, context, ..
             } => {
@@ -671,8 +700,13 @@ impl Value {
             Self::Scope(scope) => {
                 visit.extend(scope.closure.cells.values().copied());
                 visit.extend(scope.class_cell);
-                if let Some((bases, mro)) = scope.class_lineage {
-                    visit.extend([bases, mro]);
+                if let Some(state) = &scope.enum_namespace {
+                    visit.extend(state.generator);
+                    visit.extend(&state.history);
+                }
+                if let Some(class) = &scope.class_namespace {
+                    visit.extend([class.bases, class.mro]);
+                    visit.extend(class.annotation_thunks);
                 }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
@@ -968,6 +1002,15 @@ impl Heap {
     }
     pub fn keep(&mut self, value: Id) {
         self.frames.last_mut().unwrap().live.push(value);
+    }
+
+    /// Mark temporary roots that must survive the next iteration of a native loop.
+    pub fn temporary_mark(&self) -> usize {
+        self.frames.last().unwrap().live.len()
+    }
+
+    pub fn release_temporaries_since(&mut self, mark: usize) {
+        self.frames.last_mut().unwrap().live.truncate(mark);
     }
 
     pub fn active_exception(&self) -> Id {

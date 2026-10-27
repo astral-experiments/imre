@@ -42,11 +42,12 @@ def main():
         }
         env["IMRE_CACHE_DIR"] = str(root / "cache")
 
-        def run(exe, *args, extra=None):
+        def run(exe, *args, extra=None, stdin=None):
             return subprocess.run(
                 [exe, *args],
                 cwd=root,
                 env=env | (extra or {}),
+                input=stdin,
                 capture_output=True,
                 check=False,
                 timeout=60,
@@ -69,6 +70,15 @@ def main():
         # A cached object-runtime executable cannot satisfy a subsequent static build.
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
+
+        (root / "reader.py").write_text(
+            "for _ in range(3):\n    print(repr(input()))\n"
+            "try:\n    input()\nexcept EOFError:\n    print('EOF')\n"
+        )
+        for exe in (sys.executable, imre):
+            actual = run(exe, "-B", "-c", "import reader", stdin="one\r\n\nλ".encode())
+            assert actual.returncode == 0 and not actual.stderr, actual.stderr
+            assert actual.stdout == "'one\\r'\n''\n'λ'\nEOF\n".encode()
 
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
@@ -438,15 +448,19 @@ def report(text):
             "boxed_complex.py",
             "boxed_float.py",
             "boxed_float_arithmetic.py",
+            "boxed_bytes_fields.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
+            "boxed_random.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_re_split.py",
+            "boxed_re_findall_empty.py",
             "boxed_datetime.py",
+            "boxed_dataclasses.py",
             "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",
@@ -456,6 +470,7 @@ def report(text):
             "boxed_exception_repr.py",
             "boxed_type_identity.py",
             "boxed_singleton_types.py",
+            "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
             "boxed_functiontype.py",
@@ -464,12 +479,14 @@ def report(text):
             "boxed_logging.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
+            "boxed_str_maketrans.py",
             "boxed_map_capwords.py",
             "boxed_module_globals.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
+            "boxed_set_union.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -481,6 +498,7 @@ def report(text):
             "boxed_posixpath.py",
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
+            "boxed_enum_auto.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
             "boxed_itertools_repeat.py",

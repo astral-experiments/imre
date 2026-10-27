@@ -5238,7 +5238,7 @@ impl<'a> Checker<'a> {
     }
 
     fn exception_origin(&self, exception: Expr, site: &impl Ranged) -> Expr {
-        if self.graph.command_startup.is_none() {
+        if self.graph.command_startup.is_none() && !self.graph.handled_tracebacks {
             return exception;
         }
         let filename = if self.graph.virtual_command && self.module == self.graph.entry {
@@ -8846,6 +8846,14 @@ impl<'a> Checker<'a> {
                 return self.public_fspath(call, symbol);
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
+            Some(Binding::Intrinsic(Intrinsic::TracebackPrintExc)) => {
+                let args = self.arguments(call, &[], None)?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Logging(ir::LogOperation::PrintActiveException),
+                    Type::None,
+                    args,
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => {
                 let args = self.arguments(call, &[], None)?;
                 return Ok(self.ordered_builtin(

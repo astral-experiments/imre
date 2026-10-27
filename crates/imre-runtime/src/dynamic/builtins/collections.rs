@@ -201,33 +201,63 @@ pub(in super::super) fn remove_dict_item(
 }
 
 pub(in super::super) fn set_member(
-    ctx: &Context,
+    ctx: &mut Context,
     set: Id,
     value: Id,
     allow_mutable_key: bool,
 ) -> Result<bool> {
-    let Value::Set { items, .. } = ctx.heap.get(set) else {
-        return Err(type_error("expected set"));
-    };
-    // Membership accepts a mutable set as an equivalent frozen key. Insertion and
-    // issuperset(iterable) require each element itself to be hashable.
-    if !(allow_mutable_key && matches!(ctx.heap.get(value), Value::Set { frozen: false, .. }))
-        && let Some(part) = unhashable_part(ctx, value)
+    // A mutable set may be tested for membership as an equivalent frozen key.
+    let value = if allow_mutable_key
+        && let Value::Set {
+            entries,
+            frozen: false,
+        } = ctx.heap.get(value)
     {
-        return Err(type_error(format!(
-            "cannot use '{}' as a set element (unhashable type: '{}')",
-            ctx.type_name(value),
-            ctx.type_name(part),
-        )));
-    }
-    Ok(items.iter().any(|&entry| ctx.equal(entry, value)))
+        ctx.alloc(Value::Set {
+            entries: entries.clone(),
+            frozen: true,
+        })
+    } else {
+        value
+    };
+    Ok(ctx.find_dictionary_key(set, value, None)?.1.is_some())
 }
 
 pub(in super::super) fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result<()> {
-    if !set_member(ctx, set, value, false)?
-        && let Value::Set { items, .. } = ctx.heap.get_mut(set)
-    {
-        items.push(value);
+    ctx.set_dictionary_key(set, value, NONE, None, false)?;
+    Ok(())
+}
+
+pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
+    if matches!(ctx.heap.get(source), Value::Set { .. }) {
+        return merge_set(ctx, target, source);
+    }
+    let iterator = ctx.iterator(source)?;
+    while let Some(item) = ctx.next_item(iterator)? {
+        set_add(ctx, target, item)?;
+    }
+    Ok(())
+}
+
+fn merge_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
+    if target == source {
+        return Ok(());
+    }
+    if matches!(ctx.heap.get(target), Value::Set { entries, .. } if entries.is_empty()) {
+        let Value::Set { entries, .. } = ctx.heap.get(source) else {
+            unreachable!()
+        };
+        let copy = entries.clone();
+        let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
+            unreachable!()
+        };
+        *entries = copy;
+        return Ok(());
+    }
+    let mut position = 0;
+    while let Some((at, key, _, hash)) = ctx.dictionary_pair(source, position) {
+        ctx.set_dictionary_key(target, key, NONE, hash, false)?;
+        position = at + 1;
     }
     Ok(())
 }
@@ -256,14 +286,11 @@ pub(super) fn construct(
             return Ok(*one);
         }
         let set = ctx.alloc(Value::Set {
-            items: Vec::new(),
+            entries: Default::default(),
             frozen,
         });
         if let [source] = args {
-            let iterator = ctx.iterator(*source)?;
-            while let Some(item) = ctx.next_item(iterator)? {
-                set_add(ctx, set, item)?;
-            }
+            update_set(ctx, set, *source)?;
         }
         return Ok(set);
     }
@@ -525,9 +552,7 @@ pub(super) fn method(
         }
         "set.update" => {
             for &input in args {
-                for item in ctx.items(input)? {
-                    set_add(ctx, receiver, item)?;
-                }
+                update_set(ctx, receiver, input)?;
             }
             Ok(NONE)
         }

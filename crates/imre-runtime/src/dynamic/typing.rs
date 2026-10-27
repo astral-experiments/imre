@@ -108,7 +108,7 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
         let parameters = ctx.alloc(Value::Tuple(Vec::new()));
         ctx.bind(scope, "__parameters__", parameters);
         let abstract_methods = ctx.alloc(Value::Set {
-            items: Vec::new(),
+            entries: Default::default(),
             frozen: true,
         });
         ctx.bind(scope, "__abstractmethods__", abstract_methods);
@@ -601,8 +601,12 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             _ => return None,
         },
         Value::Class { scope, .. } if name == "__bases__" || name == "__mro__" => {
-            let (bases, mro) = ctx.scope_data(*scope).class_lineage?;
-            if name == "__mro__" { mro } else { bases }
+            let class = ctx.scope_data(*scope).class_namespace.as_ref()?;
+            if name == "__mro__" {
+                class.mro
+            } else {
+                class.bases
+            }
         }
         _ => return None,
     };
@@ -873,7 +877,10 @@ impl Context {
                 ));
             }
             if let Value::Native(name) = self.heap.get(base)
-                && matches!(name.as_str(), "typing.TypeVar" | "slice")
+                && matches!(
+                    name.as_str(),
+                    "typing.TypeVar" | "slice" | "NoneType" | "NotImplementedType" | "ellipsis"
+                )
             {
                 return Err(Error::new(
                     "TypeError",
@@ -905,7 +912,9 @@ impl Context {
         if fields.names.contains_key("__eq__") && !fields.names.contains_key("__hash__") {
             fields.names.insert("__hash__".to_owned(), NONE);
         }
-        fields.class_lineage = Some((bases, mro));
+        let namespace = fields.class_namespace.get_or_insert_with(Default::default);
+        namespace.bases = bases;
+        namespace.mro = mro;
         Ok(class)
     }
 

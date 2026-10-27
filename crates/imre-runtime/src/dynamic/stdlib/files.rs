@@ -350,10 +350,10 @@ pub(super) fn call(
         // SocketIO.tell() calls its unsupported raw seek even after close.
         return Err(Error::new("UnsupportedOperation", "seek"));
     }
-    // BufferedReader validates whence before checking the stream or converting the offset.
-    let whence = if name == "file.seek" {
+    if name == "file.seek" {
+        let target = argument(args, 1)?;
         let value = option(args, 2, kwargs, "whence")?;
-        let value = match value {
+        let whence = match value {
             None => 0,
             Some(value) => ctx
                 .index_integer(value)?
@@ -364,18 +364,55 @@ pub(super) fn call(
                 })?,
         };
         if !matches!(
-            value,
+            whence,
             libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
         ) {
             return Err(Error::new(
                 "ValueError",
-                format!("whence value {value} unsupported"),
+                format!("whence value {whence} unsupported"),
             ));
         }
-        value
-    } else {
-        0
-    };
+        {
+            let mut slot = slot.borrow_mut();
+            let reader = slot
+                .as_mut()
+                .ok_or_else(|| Error::new("ValueError", "seek of closed file"))?;
+            let seekable = match reader {
+                ReadSource::File(file) => file.get_mut().stream_position().is_ok(),
+                ReadSource::Socket(_) => false,
+            };
+            if !seekable {
+                return Err(Error::new(
+                    "UnsupportedOperation",
+                    "File or stream is not seekable.",
+                ));
+            }
+        }
+        // An offset conversion may advance or close this same stream.
+        let offset = ctx.index_integer(target)?.to_i64().ok_or_else(|| {
+            Error::new(
+                "ValueError",
+                format!(
+                    "cannot fit '{}' into an offset-sized integer",
+                    ctx.type_name(target)
+                ),
+            )
+        })?;
+        let mut slot = slot.borrow_mut();
+        let reader = slot
+            .as_mut()
+            .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"))?;
+        let pos = match whence {
+            0 => SeekFrom::Start(
+                u64::try_from(offset)
+                    .map_err(|_| Error::new("OSError", "invalid negative seek position"))?,
+            ),
+            1 => SeekFrom::Current(offset),
+            2 => SeekFrom::End(offset),
+            _ => return Err(Error::new("ValueError", "invalid seek whence")),
+        };
+        return Ok(ctx.int(reader.seek(pos).map_err(os_error)? as i64));
+    }
     let mut slot = slot.borrow_mut();
     if name == "file.write" {
         return Err(Error::new("UnsupportedOperation", "write"));
@@ -391,7 +428,6 @@ pub(super) fn call(
             "file.read" => "read of closed file",
             "file.readline" => "readline of closed file",
             "file.readinto" => "readinto of closed file",
-            "file.seek" => "seek of closed file",
             "file.__enter__" | "file.flush" => "I/O operation on closed file.",
             _ => "I/O operation on closed file",
         };
@@ -436,26 +472,6 @@ pub(super) fn call(
         "file.flush" => Ok(NONE),
         "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
-        "file.seek" => {
-            let target = argument(args, 1)?;
-            if socket {
-                return Err(Error::new(
-                    "UnsupportedOperation",
-                    "File or stream is not seekable.",
-                ));
-            }
-            let offset = ctx.as_integer(target)?;
-            let pos = match whence {
-                0 => SeekFrom::Start(
-                    u64::try_from(offset)
-                        .map_err(|_| Error::new("OSError", "invalid negative seek position"))?,
-                ),
-                1 => SeekFrom::Current(offset),
-                2 => SeekFrom::End(offset),
-                _ => return Err(Error::new("ValueError", "invalid seek whence")),
-            };
-            Ok(ctx.int(f.seek(pos).map_err(os_error)? as i64))
-        }
         "file.readinto" => {
             let Value::ByteArray(buffer) = ctx.heap.get_mut(argument(args, 1)?) else {
                 return Err(Error::new(

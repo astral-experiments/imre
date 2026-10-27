@@ -39,6 +39,7 @@ def current():
             print(type(error).__name__, str(error))
     print(state.item, backing is state.__dict__)
     attribute_names()
+    slot_methods()
 
 
 def attribute_names():
@@ -102,6 +103,54 @@ def attribute_names():
             action()
         except LookupError as error:
             print(error.args, state.item)
+
+
+def slot_methods():
+    state = local()
+    state.__setattr__("item", 7)
+    get = state.__getattribute__
+    state.__getattribute__ = "shadow"
+    print(state.__getattribute__, get("item"))
+    print(object.__getattribute__(state, "__getattribute__")("item"))
+    local.__delattr__(state, "item")
+    print(hasattr(state, "item"))
+
+    descriptor = local.__getattribute__
+    state.__dict__[17] = "raw"
+    print(get(17), descriptor.__get__(None, local) is descriptor, get.__self__ is state)
+    for action in (
+        lambda: get([]),
+        lambda: get(([],)),
+        lambda: state.__setattr__([], 3),
+        lambda: descriptor.__get__(0),
+        lambda: descriptor(),
+        lambda: descriptor(state, name="item"),
+    ):
+        try:
+            action()
+        except TypeError as error:
+            print(error.args)
+
+    original = KeyError("from hash")
+
+    class Interrupted(str):
+        def __hash__(self):
+            raise original
+
+    key = Interrupted("item")
+    for action in (lambda: get(key), lambda: local.__delattr__(state, key),
+                   lambda: local.__setattr__(state, key, 8)):
+        try:
+            action()
+        except (KeyError, AttributeError) as error:
+            print(type(error).__name__, error is original, error.args)
+
+    state.kept = 43
+    del state
+    # Let the boxed heap trace with only the saved method keeping the receiver alive.
+    for index in range(8192):
+        temporary = [index]
+    print(get("kept"))
 
 
 if __name__ == "__main__":

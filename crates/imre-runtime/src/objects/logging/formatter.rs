@@ -548,7 +548,7 @@ pub(super) fn format_specifier(
         // SAFETY: an integer word retains the native Int throughout formatting.
         let number = unsafe { Int::borrow(value.word) };
         let code = if c == 'n' { 'd' } else { c };
-        record::percent_integer_field(&format!("{flags}{code}"), (*number).clone())?
+        record::percent_integer_field(&format!("{flags}{code}"), [(*number).clone()])?
     } else if c == 'b' {
         if !integer {
             return Err(error("Unknown format code 'b' for this value"));

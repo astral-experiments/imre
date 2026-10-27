@@ -174,6 +174,7 @@ impl Output {
         let mut f = Function {
             output: self,
             source,
+            class_body: matches!(body, Body::Namespace(_)) && !prefix.is_empty(),
             prefix,
             ir: String::new(),
             block: "entry".into(),
@@ -234,6 +235,7 @@ struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
     prefix: String,
+    class_body: bool,
     ir: String,
     block: String,
     error: String,
