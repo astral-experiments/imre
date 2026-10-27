@@ -1428,6 +1428,10 @@ impl Context {
             Value::Raised(error) if name == "args" => {
                 return Ok(self.exception_argument_tuple(obj, error));
             }
+            Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
+            Value::Native(class) if class == "collections.defaultdict" && name == "__missing__" => {
+                return Ok(self.builtin("collections.defaultdict.__missing__"));
+            }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),
                 "size" => return Ok(self.int(layout.size as i64)),
@@ -2193,6 +2197,10 @@ impl Context {
         self.check_instance_field(obj, name)?;
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
+            Value::DefaultDict { factory, .. } if name == "default_factory" => {
+                let old = std::mem::replace(factory, value);
+                self.heap.weak_edge_removed(old);
+            }
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
