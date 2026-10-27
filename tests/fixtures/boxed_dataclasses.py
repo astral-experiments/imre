@@ -19,6 +19,24 @@ class Key:
 
 
 def current():
+    class Clearing(dict):
+        def __eq__(self, other):
+            self.left.clear()
+            self.right.clear()
+            for i in range(12000):
+                item = [i]
+            return NotImplemented
+
+    clearing = Clearing(code=7)
+    clearing.left = [field(metadata=clearing).metadata]
+    clearing.right = [field(metadata={"code": 7}).metadata]
+    assert clearing.left == clearing.right
+
+    backing = {"code": 7}
+    view = field(metadata=backing).metadata
+    assert view == {"code": 7} and {"code": 7} == view
+    backing["code"] = 9
+    assert view != {"code": 7} and view["code"] == 9
     assert InitVar[int].type is int
     a = Entry("root")
     b = Entry(name="root")
