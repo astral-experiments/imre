@@ -62,6 +62,10 @@ class Counter(dict):
     def __missing__(self, key):
         return 0
 
+    @classmethod
+    def fromkeys(cls, iterable, v=None):
+        raise NotImplementedError("Counter.fromkeys() is undefined.  Use Counter(iterable) instead.")
+
     def update(self, iterable=None, /, **counts):
         if isinstance(iterable, dict):
             if self:

@@ -9,6 +9,18 @@ pub(super) enum MappingOperation {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if name == "__hash__" {
+            if matches!(self.heap.get(class), Value::Native(_)) {
+                return self.own_class_attr(class, name);
+            }
+            return self
+                .find_in_mro(class, |base| {
+                    let slot = self.own_class_attr(base, name);
+                    (slot.is_some() || matches!(self.heap.get(base), Value::Native(_)))
+                        .then_some(slot)
+                })
+                .flatten();
+        }
         self.find_in_mro(class, |base| self.own_class_attr(base, name))
     }
 
@@ -29,6 +41,15 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if name == "__hash__" && kind == "object" => {
+                self.builtins.get("object.__hash__").copied()
+            }
+            Value::Native(kind)
+                if name == "__hash__"
+                    && matches!(kind.as_str(), "list" | "dict" | "set" | "bytearray") =>
+            {
+                Some(NONE)
+            }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
                 "__new__" => self
                     .builtins
@@ -333,7 +354,20 @@ impl Context {
             || self.slot(descriptor, "__delete__").is_some()
     }
 
+    /// Bind the inherited dictionary constructor to the class used for the result.
+    fn bind_dict_fromkeys(&mut self, owner: Id) -> Id {
+        let callable = self.builtin("dict.fromkeys");
+        self.alloc(Value::Method {
+            callable,
+            receiver: owner,
+            explicit: false,
+        })
+    }
+
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
+        if matches!(self.heap.get(value), Value::Native(name) if name == "dict.fromkeys") {
+            return Ok(self.bind_dict_fromkeys(owner));
+        }
         if let Value::ClassMethod(callable) = *self.heap.get(value) {
             return Ok(self.alloc(Value::Method {
                 callable,
@@ -1569,6 +1603,16 @@ impl Context {
             Value::Native(class) if class == "collections.defaultdict" && name == "copy" => {
                 return Ok(self.builtin("collections.defaultdict.copy"));
             }
+            Value::Native(class)
+                if name == "fromkeys"
+                    && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
+            {
+                return Ok(self.bind_dict_fromkeys(obj));
+            }
+            Value::Dict(_) | Value::DefaultDict { .. } if name == "fromkeys" => {
+                let owner = self.exact_type(obj)?;
+                return Ok(self.bind_dict_fromkeys(owner));
+            }
             Value::Native(class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
             }
@@ -1597,7 +1641,11 @@ impl Context {
                 if class == "object"
                     && matches!(
                         name,
-                        "__getattribute__" | "__setattr__" | "__delattr__" | "__init__"
+                        "__hash__"
+                            | "__getattribute__"
+                            | "__setattr__"
+                            | "__delattr__"
+                            | "__init__"
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
