@@ -404,7 +404,7 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
-        text_memory: Option<crate::objects::TextFile>,
+        memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
@@ -636,8 +636,11 @@ impl Value {
                 fields,
                 dictionary,
                 scalar,
-                ..
+                memory_stream,
             } => {
+                if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
+                    visit.extend(stream.snapshot.get());
+                }
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());

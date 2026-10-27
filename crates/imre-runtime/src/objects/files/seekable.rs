@@ -69,7 +69,7 @@ impl Memory {
 
 impl FileState {
     /// Expose the entire buffer without advancing the cursor. Later writes detach shared bytes.
-    fn memory_value(&mut self) -> Result<crate::BytesOwner> {
+    pub(crate) fn memory_value(&mut self) -> Result<crate::BytesOwner> {
         if self.kind != FileKind::Memory {
             return Err(Error::new(
                 Kind::AttributeError,
@@ -86,6 +86,10 @@ impl FileState {
     }
 
     pub(in crate::objects) fn memory(data: crate::BytesOwner) -> crate::ObjectOwner {
+        Self::bytes_io(data).into_object()
+    }
+
+    pub(crate) fn bytes_io(data: crate::BytesOwner) -> Self {
         Self {
             fd: None,
             raw: false,
@@ -95,7 +99,6 @@ impl FileState {
             kind: FileKind::Memory,
             stream: Some(Stream::Memory(Memory { data, position: 0 })),
         }
-        .into_object()
     }
 
     pub(in crate::objects) fn member(member: Member) -> crate::ObjectOwner {
@@ -146,6 +149,69 @@ impl FileState {
         }
     }
 
+    /// An entire buffer can be shared with getvalue; its caller advances after acquiring the snapshot.
+    pub(crate) fn read_memory_bytes(
+        &mut self,
+        limit: Option<usize>,
+        line: bool,
+    ) -> Result<Option<Bytes>> {
+        let Stream::Memory(memory) = self.stream()? else {
+            unreachable!()
+        };
+        let data = memory.remaining();
+        let end = limit.unwrap_or(usize::MAX).min(data.len());
+        let end = if line {
+            memchr::memchr(b'\n', &data[..end]).map_or(end, |i| i + 1)
+        } else {
+            end
+        };
+        if memory.position == 0 && end == data.len() {
+            Ok(None)
+        } else {
+            memory.read(Some(end)).map(Some)
+        }
+    }
+
+    /// Shrink a memory buffer without changing its cursor. Larger sizes leave the contents intact.
+    pub(crate) fn truncate_memory(&mut self, size: Option<i64>) -> Result<(u64, bool)> {
+        let Stream::Memory(memory) = self.stream()? else {
+            unreachable!()
+        };
+        let size = match size {
+            None => memory.position,
+            Some(n) => u64::try_from(n)
+                .map_err(|_| Error::new(Kind::ValueError, format!("negative size value {n}")))?,
+        };
+        let changed = size < memory.data.len() as u64;
+        if changed {
+            let end = size as usize;
+            if let Some(data) = crate::BytesOwner::get_mut(&mut memory.data) {
+                data.truncate(end);
+            } else {
+                memory.data = crate::BytesOwner::try_new(copied(&memory.data[..end])?)
+                    .map_err(|_| Error::allocation())?;
+            }
+        }
+        Ok((size, changed))
+    }
+
+    /// Validate BytesIO's whence and apply it to the shared native cursor.
+    pub(crate) fn seek_memory(&mut self, offset: i64, whence: i32) -> Result<u64> {
+        self.stream()?;
+        let at = match whence {
+            0 => SeekFrom::Start(self.absolute_offset(i128::from(offset))?),
+            1 => SeekFrom::Current(offset),
+            2 => SeekFrom::End(offset),
+            _ => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("invalid whence ({whence}, should be 0, 1 or 2)"),
+                ));
+            }
+        };
+        self.seek(at)
+    }
+
     pub(super) fn read_line_bytes(&mut self) -> Result<Bytes> {
         match self.kind {
             FileKind::BinaryRandom => match self.stream.as_mut() {
@@ -193,7 +259,7 @@ impl FileState {
         }
     }
 
-    pub(in crate::objects) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
+    pub(crate) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
         if matches!(self.kind, FileKind::BinaryRead | FileKind::BinaryRandom)
             && self.stream.is_none()
         {
@@ -211,7 +277,7 @@ impl FileState {
         }
     }
 
-    pub(in crate::objects) fn read_into(&mut self, buf: &mut [u8]) -> Result<usize> {
+    pub(crate) fn read_into(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.stream()? {
             Stream::Read(input) => input.read_into(buf),
             Stream::Random(file) => file.read_into(buf),
@@ -305,8 +371,7 @@ pub unsafe extern "C" fn imre_binary_seek(
                                 "Python int too large to convert to C ssize_t",
                             )
                         })?;
-                    f.stream()?;
-                    off
+                    return f.seek_memory(off, whence as i32);
                 }
                 _ => {
                     if !(0..=2).contains(&whence) {
@@ -333,12 +398,6 @@ pub unsafe extern "C" fn imre_binary_seek(
                 0 => SeekFrom::Start(f.absolute_offset(i128::from(off))?),
                 1 => SeekFrom::Current(off),
                 2 => SeekFrom::End(off),
-                _ if f.kind == FileKind::Memory => {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        format!("invalid whence ({whence}, should be 0, 1 or 2)"),
-                    ));
-                }
                 _ => return Err(Error::new(Kind::ValueError, "whence value unsupported")),
             };
             f.seek(at)

@@ -3,6 +3,14 @@
 use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+mod bytes_io;
+
+#[derive(Clone)]
+pub(in crate::dynamic) enum MemoryStream {
+    Text(crate::objects::TextFile),
+    Bytes(std::rc::Rc<bytes_io::BytesIo>),
+}
+
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
 /// Install canonical class objects so subclasses inherit the same methods across imports.
@@ -35,6 +43,9 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         io,
         &["read", "readall", "readinto"],
     );
+    let buffered = class(ctx, module, "BufferedIOBase", io, &[]);
+    let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
+    ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
     let text = class(ctx, module, "TextIOBase", io, &[]);
     let string_io = class(
         ctx,
@@ -51,7 +62,11 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     let owner = ctx
         .allocate_class(name.into(), scope, vec![base])
         .expect("a single I/O base has a linearization");
-    let module_name = ctx.text(if name == "StringIO" { "_io" } else { "io" });
+    let module_name = ctx.text(if matches!(name, "StringIO" | "BytesIO") {
+        "_io"
+    } else {
+        "io"
+    });
     ctx.bind(scope, "__module__", module_name);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
@@ -92,6 +107,13 @@ pub(in super::super) fn call(
             format!("invalid receiver for {name}"),
         ));
     }
+    if ctx
+        .builtins
+        .get("_io.BytesIO")
+        .is_some_and(|&class| ctx.instance_of(receiver, class))
+    {
+        return bytes_io::call(ctx, receiver, name, rest, kwargs);
+    }
     if name == "__init__" {
         return string_io_init(ctx, receiver, rest, kwargs);
     }
@@ -100,10 +122,14 @@ pub(in super::super) fn call(
         .get("_io.StringIO")
         .is_some_and(|&class| ctx.instance_of(receiver, class))
     {
-        let Value::Instance { text_memory, .. } = ctx.heap.get(receiver) else {
+        let Value::Instance { memory_stream, .. } = ctx.heap.get(receiver) else {
             unreachable!("StringIO methods have an instance receiver");
         };
-        return string_io_method(ctx, text_memory.clone(), receiver, name, rest, kwargs);
+        let file = match memory_stream {
+            Some(MemoryStream::Text(file)) => Some(file.clone()),
+            _ => None,
+        };
+        return string_io_method(ctx, file, receiver, name, rest, kwargs);
     }
     let arity = match name {
         "read" => 1..=2,
@@ -257,10 +283,10 @@ fn string_io_init(
             return Err(error);
         }
     };
-    let Value::Instance { text_memory, .. } = ctx.heap.get_mut(receiver) else {
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         unreachable!("StringIO.__init__ has an instance receiver");
     };
-    *text_memory = Some(file);
+    *memory_stream = Some(MemoryStream::Text(file));
     Ok(NONE)
 }
 
