@@ -725,6 +725,7 @@ impl Context {
                             | "frame"
                             | "typing.TypeVar"
                             | "typing._GenericAlias"
+                            | "typing._LiteralGenericAlias"
                             | "typing._CallableGenericAlias"
                             | "typing._CallableType"
                             | "typing._AnyMeta"

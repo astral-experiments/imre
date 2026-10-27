@@ -948,7 +948,12 @@ impl Value {
                 visit.extend(ancestors);
             }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
-            Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
+            Self::GenericAlias(alias) => {
+                visit.extend([alias.origin, alias.args, alias.parameters]);
+                if let super::typing::AliasKind::Literal(members) = alias.kind {
+                    visit.push(members);
+                }
+            }
             Self::Union(union) => {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);

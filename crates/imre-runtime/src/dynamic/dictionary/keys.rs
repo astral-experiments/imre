@@ -418,6 +418,10 @@ impl Context {
         // Immutable scalar subclasses inherit the hash of their backing value.
         let key = self.scalar_value(key);
         if let Value::GenericAlias(alias) = self.heap.get(key) {
+            if matches!(alias.kind, super::super::typing::AliasKind::Literal(_)) {
+                let members = super::super::typing::literal_members(self, alias.args)?;
+                return self.dictionary_hash(members);
+            }
             let (origin, args) = (alias.origin, alias.args);
             return Ok(normalized(
                 data_hash(&origin.to_ne_bytes()) ^ self.dictionary_hash(args)?,
@@ -630,11 +634,14 @@ impl Context {
                         Work::Pair(a, b)
                     } else if let Some(answer) = self.binary_special("==", left, right)? {
                         Work::Done(self.truth(answer)?)
-                    } else if let (Value::GenericAlias(a), Value::GenericAlias(b)) =
-                        (self.heap.get(left), self.heap.get(right))
-                    {
-                        if a.kind == b.kind && a.origin == b.origin {
-                            Work::Pair(a.args, b.args)
+                    } else if matches!(
+                        (self.heap.get(left), self.heap.get(right)),
+                        (Value::GenericAlias(_), Value::GenericAlias(_))
+                    ) {
+                        if let Some((a, b)) =
+                            super::super::typing::checked_alias_parts(self, left, right)?
+                        {
+                            Work::Pair(a, b)
                         } else {
                             Work::Done(false)
                         }
