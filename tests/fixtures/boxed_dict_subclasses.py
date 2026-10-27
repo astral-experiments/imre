@@ -16,6 +16,12 @@ def current():
     with_zero = Counter(a=1, b=0)
     print(plain == with_zero, plain != with_zero, with_zero == dict(plain))
     print(Counter(b=-1) < Counter(), plain <= with_zero, with_zero > plain)
+    counts = Counter(a=2, b=1, ignored=-3)
+    elements = counts.elements()
+    print(next(elements))
+    counts["a"] = 0
+    counts["b"] = 2
+    print(list(elements))
 
     class Data(dict):
         pass
