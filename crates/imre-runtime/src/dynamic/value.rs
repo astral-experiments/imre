@@ -324,7 +324,7 @@ impl Context {
                 constructor: Some(class),
                 ..
             } => match self.heap.get(*class) {
-                Value::Class { name, .. } | Value::Native(name) => name,
+                Value::Class { .. } | Value::Native(_) => self.class_name(*class),
                 _ => "object",
             },
             _ => "object",
@@ -471,6 +471,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
+    /// A name assigned through type's __name__ descriptor, including a str subclass.
+    pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
@@ -876,6 +878,7 @@ impl Value {
                 }
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
+                    visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
                     visit.extend(class.dictionary);
                 }
