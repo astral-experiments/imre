@@ -495,12 +495,12 @@ pub(super) enum Value {
     Repeat(crate::objects::Repeat<Id>),
     Map {
         function: Id,
-        input: Id,
+        inputs: std::rc::Rc<[Id]>,
+        strict: bool,
     },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
-        pending: Option<Id>,
     },
     CallableIterator(Option<[Id; 2]>),
     // Private to a compiled loop. Python-visible iterators keep their original identity.
@@ -569,13 +569,13 @@ impl Value {
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
-            Self::Map { function, input } => visit.extend([*function, *input]),
-            Self::Zip {
-                inputs, pending, ..
+            Self::Map {
+                function, inputs, ..
             } => {
+                visit.push(*function);
                 visit.extend(inputs.iter());
-                visit.extend(pending);
             }
+            Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
             Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
             Self::LoopIterator { source, peeked } => {
                 visit.push(*source);
