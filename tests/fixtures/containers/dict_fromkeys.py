@@ -14,6 +14,11 @@ def argument(keys: list[int], events: list[int]) -> int:
     return 7
 
 
+def ordered_receiver(events: list[int]) -> OrderedDict[str, int]:
+    events.append(5)
+    return OrderedDict(seed=1)
+
+
 def before(keys: list[int], events: list[int]) -> list[int]:
     events.append(10)
     return keys
@@ -57,6 +62,12 @@ def main() -> None:
     print(from_keywords[4])
     print(order)
     print(list(ordered.fromkeys(iterable=["b", "a", "b"])))
+    order.clear()
+    computed = ordered_receiver(order).fromkeys(
+        value=argument(keys_arg, order), iterable=before(keys_arg, order)
+    )
+    print(list(computed))
+    print(order)
 
     print(dict.fromkeys("éaé"))
     print(dict.fromkeys((4, 5), 0))

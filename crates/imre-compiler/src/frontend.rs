@@ -9583,6 +9583,9 @@ impl<'a> Checker<'a> {
             {
                 return self.string_io_method(receiver, attribute.attr.as_str(), call);
             }
+            if attribute.attr.as_str() == "fromkeys" && self.types.mapping(receiver.ty).is_some() {
+                return self.dict_fromkeys(call, None, Some(receiver));
+            }
             self.reject_builtin_keywords(call)?;
             if receiver.ty == Type::StringIO
                 && let Some(value) =
@@ -9683,9 +9686,6 @@ impl<'a> Checker<'a> {
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
-                if attribute.attr.as_str() == "fromkeys" {
-                    return self.dict_fromkeys(call, None, Some(receiver));
-                }
                 if attribute.attr.as_str() == "copy" {
                     if !call.arguments.is_empty() {
                         return Err(error(self.source, call, "dict.copy() takes no arguments"));
