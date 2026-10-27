@@ -147,6 +147,7 @@
     "Lib/test/decimaltestdata/tointegral.decTest": "7f3fb9995170f60425886453624a57c5c2e88d97",
     "Lib/test/decimaltestdata/tointegralx.decTest": "0ce0d0935e1951cdbb58572bdd9c1b06b23eb3f3",
     "Lib/test/decimaltestdata/xor.decTest": "cd71bbcf86ba6a22c8a9e72e65b45828ef8c76ee",
+    "Lib/test/mapping_tests.py": "20306e1526d7b84819a6dbf2f224f6da1a0e45fd",
     "Lib/test/test_base64.py": "9fe69f4f692d8f5782bdf33270d08070a0a580ad",
     "Lib/test/test_collections.py": "c1dadc4e274ec97e194e8a2bbfa009b7c4d4d763",
     "Lib/test/test_csv.py": "a0a1e91777d89345d543b27ee23049162cf3a0a3",
@@ -195,6 +196,7 @@
     "Lib/test/test_subprocess.py": "7e04934c317a91d1f5f1a284929d5f35c9cf5a58",
     "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7",
     "Lib/test/test_unicodedata.py": "93d573996407590982168d2a8a2e7d58ace99fa5",
+    "Lib/test/test_weakref.py": "4c7c900eb56ae16344e287b840c402776fcca56d",
     "Lib/test/test_zipfile/__init__.py": "4b16ecc31156a512db4a28fe272e5339994a4538",
     "Lib/test/test_zipfile/test_core.py": "0d407371f40a0f785558a829c1f1805ac5b6e3ed"
   }

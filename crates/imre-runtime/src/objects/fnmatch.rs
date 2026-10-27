@@ -7,30 +7,36 @@ use super::paths::{Pattern, class_characters, class_end};
 use super::words::Words;
 use super::{Bytes, Object, Str, object};
 
+pub(crate) fn compile(pattern: &str) -> impl Fn(&str) -> bool + use<> {
+    let pattern = Pattern::component(pattern);
+    move |name| pattern.matches(name)
+}
+
+pub(crate) fn byte_spelling(bytes: &[u8]) -> Cow<'_, str> {
+    if bytes.is_ascii() {
+        Cow::Borrowed(std::str::from_utf8(bytes).expect("ASCII is UTF-8"))
+    } else {
+        Cow::Owned(bytes.iter().copied().map(char::from).collect())
+    }
+}
+
 /// Bytes patterns match single bytes, including values that also form valid UTF-8.
 unsafe fn spelling<'a>(raw: *const (), bytes: bool) -> Cow<'a, str> {
     if bytes {
         // SAFETY: the caller passes a rooted Bytes owner with the indicated tag.
-        let value = unsafe { &*raw.cast::<Bytes>() };
-        if value.is_ascii() {
-            return Cow::Borrowed(std::str::from_utf8(value).expect("ASCII is UTF-8"));
-        }
-        Cow::Owned(value.iter().copied().map(char::from).collect())
+        byte_spelling(unsafe { &*raw.cast::<Bytes>() })
     } else {
         // SAFETY: the caller passes a rooted Str owner with the indicated tag.
         Cow::Borrowed(unsafe { &*raw.cast::<Str>() }.as_str())
     }
 }
 
-fn mixed(pattern_bytes: bool) -> Error {
-    Error::new(
-        Kind::TypeError,
-        if pattern_bytes {
-            "cannot use a bytes pattern on a string-like object"
-        } else {
-            "cannot use a string pattern on a bytes-like object"
-        },
-    )
+pub(crate) fn mixed_message(pattern_bytes: bool) -> &'static str {
+    if pattern_bytes {
+        "cannot use a bytes pattern on a string-like object"
+    } else {
+        "cannot use a string pattern on a bytes-like object"
+    }
 }
 
 /// # Safety
@@ -43,7 +49,7 @@ pub unsafe extern "C" fn imre_fnmatch(
     pat_bytes: u32,
 ) -> u32 {
     if name_bytes != pat_bytes {
-        return mixed(pat_bytes != 0).returning(0);
+        return Error::new(Kind::TypeError, mixed_message(pat_bytes != 0)).returning(0);
     }
     // SAFETY: both tags choose the actual immutable owner representations.
     let (name, pat) = unsafe {
@@ -52,7 +58,7 @@ pub unsafe extern "C" fn imre_fnmatch(
             spelling(pat, pat_bytes != 0),
         )
     };
-    u32::from(Pattern::component(&pat).matches(&name))
+    u32::from(compile(&pat)(&name))
 }
 
 /// # Safety
@@ -66,7 +72,7 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
     inverse: u32,
 ) -> *const Object {
     // SAFETY: the pattern's tag and the list layout were checked at the call site.
-    let pattern = Pattern::component(&unsafe { spelling(pat, pat_bytes != 0) });
+    let matches = compile(&unsafe { spelling(pat, pat_bytes != 0) });
     let filter = |storage: &super::Storage| {
         let source = storage.sequence()?;
         let mut output = Words::new(source.kind.raw());
@@ -78,11 +84,11 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
                 _ => unreachable!("fnmatch filter input must contain str or bytes"),
             };
             if name_bytes != (pat_bytes != 0) {
-                return Err(mixed(pat_bytes != 0));
+                return Err(Error::new(Kind::TypeError, mixed_message(pat_bytes != 0)));
             }
             // SAFETY: the immutable list roots every element throughout this scan.
             let name = unsafe { spelling(pointer as *const (), name_bytes) };
-            if pattern.matches(&name) != (inverse != 0) {
+            if matches(&name) != (inverse != 0) {
                 output
                     .values
                     .try_reserve(1)

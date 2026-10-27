@@ -27,6 +27,18 @@ CASES = (
     ("view_exception", "POST", "/total", b"{}"),
     ("after_exception", "GET", "/health", None),
 )
+DEFAULT_BUILD_TIMEOUT = 120
+
+
+def add_build_timeout(parser):
+    def positive_seconds(value):
+        seconds = int(value)
+        if seconds < 1:
+            raise argparse.ArgumentTypeError("expected a positive number of seconds")
+        return seconds
+
+    parser.add_argument("--build-timeout", type=positive_seconds, default=DEFAULT_BUILD_TIMEOUT, metavar="SECONDS",
+                        help="time limit per native compilation (default: %(default)s seconds)")
 
 
 def digest(path):
@@ -159,16 +171,33 @@ def exercise(command, work, expected, *, prove_binary=None):
     return row
 
 
-def native(compiler, runtime, site, work, expected, opt, flags, *, prove=False):
-    binary = work / "server"
+def native_build(compiler, runtime, site, binary, opt, flags, timeout):
     command = [compiler, "build", site / "serve.py", "--module-root", site,
                "--runtime", runtime, "--opt-level", str(opt), "-o", binary, *flags]
+    started = time.monotonic()
+    p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, start_new_session=True)
     try:
-        p = subprocess.run(command, capture_output=True, text=True, timeout=120)
-    except subprocess.TimeoutExpired as exc:
-        return {"outcome": "compile_timeout", "stderr": (exc.stderr or b"").decode(errors="replace")}
-    build = {"status": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
-    if p.returncode:
+        stdout, stderr = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = p.communicate()
+        build = {"outcome": "compile_timeout", "status": None, "stdout": stdout, "stderr": stderr}
+    else:
+        build = {"outcome": "compile_error" if p.returncode else "compiled",
+                 "status": p.returncode, "stdout": stdout, "stderr": stderr}
+    return {**build, "timeout_seconds": timeout, "elapsed_seconds": time.monotonic() - started}
+
+
+def native(compiler, runtime, site, work, expected, opt, flags, *, prove=False, build_timeout=DEFAULT_BUILD_TIMEOUT):
+    binary = work / "server"
+    build = native_build(compiler, runtime, site, binary, opt, flags, build_timeout)
+    if build["outcome"] == "compile_timeout":
+        return {"outcome": "compile_timeout", "build": build, "stderr": build["stderr"]}
+    if build["status"]:
         return {"outcome": "compile_error", "build": build}
     return {"build": build, **exercise([binary], work, expected, prove_binary=binary if prove else None)}
 
@@ -182,6 +211,7 @@ def main():
     parser.add_argument("--runtime-imports", action="store_true", help="also try native runtime imports at O0 and O3")
     parser.add_argument("--compiler", type=Path)
     parser.add_argument("--runtime", type=Path)
+    add_build_timeout(parser)
     args = parser.parse_args()
     expected = json.loads((HERE / "expected.json").read_text())
     if sys.implementation.name != "cpython" or sys.version.split()[0] != expected["python"]:
@@ -224,7 +254,8 @@ def main():
                     mode = f"{name}-O{opt}"
                     work = root / mode
                     work.mkdir()
-                    row = native(compiler, runtime, site, work, expected, opt, flags, prove=args.prove_native)
+                    row = native(compiler, runtime, site, work, expected, opt, flags,
+                                 prove=args.prove_native, build_timeout=args.build_timeout)
                     report["modes"][mode] = row
                     if args.prove_native:
                         row["verified_native_responses"] = len(row["responses"]) if row["outcome"] == "pass" else 0

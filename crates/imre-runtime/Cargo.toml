@@ -12,6 +12,7 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 allocator-api2 = "=0.2.21"
 imre-regex = { path = "../imre-regex" }
+indexmap = "=2.14.2"
 base64 = "=0.22.1"
 constant_time_eq = "=0.4.2"
 num-bigint.workspace = true
@@ -29,6 +30,9 @@ corosensei = "=0.3.4"
 flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 zlib-rs = { version = "=0.6.8", default-features = false }
 ruff_python_literal = "=0.0.15"
+ruff_python_ast.workspace = true
+ruff_python_parser.workspace = true
+ruff_text_size.workspace = true
 icu_properties = "=2.3.0"
 ryu = "=1.0.23"
 serde = { version = "=1.0.229", features = ["derive"] }

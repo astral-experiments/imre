@@ -66,6 +66,9 @@ impl Checker<'_> {
     pub(super) fn collection_class_name(&self, expression: &ast::Expr) -> Option<&'static str> {
         match self.collection_binding(expression) {
             Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) => Some(name),
+            Some(Binding::Intrinsic(Intrinsic::WeakProxyClass { callable })) => {
+                Some(Self::weak_proxy_type_name(callable))
+            }
             Some(Binding::Intrinsic(Intrinsic::Deque)) => Some("collections.deque"),
             Some(Binding::Intrinsic(Intrinsic::Mapping {
                 typing_alias: false,

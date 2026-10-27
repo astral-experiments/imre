@@ -179,40 +179,93 @@ pub extern "C" fn imre_time_component(value: usize) -> usize {
     )
 }
 
+/// Local civil time and the backing storage for its optional POSIX timezone name.
+pub(crate) struct LocalTime {
+    tm: libc::tm,
+    zone: Vec<u8>,
+}
+
+impl LocalTime {
+    pub(crate) fn new(parts: [libc::c_int; 9]) -> Result<Self, Error> {
+        let [
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            _weekday,
+            yearday,
+            isdst,
+        ] = parts;
+        // SAFETY: zero initializes every numeric field and the timezone pointer.
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        tm.tm_year = year
+            .checked_sub(1900)
+            .ok_or_else(|| Error::new(Kind::OverflowError, "year out of range"))?;
+        tm.tm_mon = month.wrapping_sub(1);
+        tm.tm_mday = day;
+        tm.tm_hour = hour;
+        tm.tm_min = minute;
+        tm.tm_sec = second;
+        tm.tm_yday = yearday.wrapping_sub(1);
+        tm.tm_isdst = isdst;
+        Ok(Self {
+            tm,
+            zone: Vec::new(),
+        })
+    }
+
+    pub(crate) fn set_zone(&mut self, name: &str) {
+        self.zone.clear();
+        self.zone.extend_from_slice(name.as_bytes());
+        self.zone.push(0);
+    }
+
+    pub(crate) fn set_offset(&mut self, offset: &Int) -> Result<(), Error> {
+        self.tm.tm_gmtoff = offset
+            .to_i64()
+            .and_then(|n| libc::c_long::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C long",
+                )
+            })?;
+        Ok(())
+    }
+
+    pub(crate) fn timestamp(mut self) -> Result<f64, Error> {
+        if !self.zone.is_empty() {
+            self.tm.tm_zone = self.zone.as_mut_ptr().cast();
+        }
+        self.tm.tm_wday = -1;
+        // SAFETY: the zone buffer lives through mktime. Success sets the normalized
+        // weekday even for the valid timestamp -1.
+        let stamp = unsafe { libc::mktime(&mut self.tm) };
+        if stamp == -1 && self.tm.tm_wday == -1 {
+            Err(Error::new(
+                Kind::OverflowError,
+                "mktime argument out of range",
+            ))
+        } else {
+            Ok(stamp as f64)
+        }
+    }
+}
+
 /// Validate the visible fields and timezone name before converting the offset.
 unsafe fn mktime_fields(
     record: *const usize,
     original: *const usize,
-    zone_bytes: Option<&mut Vec<u8>>,
-) -> Result<libc::tm, Error> {
+    copy_zone: bool,
+) -> Result<LocalTime, Error> {
     let mut parts = [0; 9];
     for (i, part) in parts.iter_mut().enumerate() {
         // SAFETY: all nine slots remain rooted while validating the integer arguments.
         *part = c_component(unsafe { *record.add(i) })?;
     }
-    let [
-        year,
-        month,
-        day,
-        hour,
-        minute,
-        second,
-        _weekday,
-        yearday,
-        isdst,
-    ] = parts;
-    // SAFETY: zero initializes every numeric field and any timezone pointer.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    tm.tm_year = year
-        .checked_sub(1900)
-        .ok_or_else(|| Error::new(Kind::OverflowError, "year out of range"))?;
-    tm.tm_mon = month.wrapping_sub(1);
-    tm.tm_mday = day;
-    tm.tm_hour = hour;
-    tm.tm_min = minute;
-    tm.tm_sec = second;
-    tm.tm_yday = yearday.wrapping_sub(1);
-    tm.tm_isdst = isdst;
+    let mut local = LocalTime::new(parts)?;
     // The extended tuple may contain caller-supplied attributes. CPython
     // validates them even though POSIX mktime determines the timezone itself.
     // SAFETY: original remains rooted with its own physical descriptor.
@@ -229,15 +282,13 @@ unsafe fn mktime_fields(
                 .ok_or_else(|| {
                     Error::new(Kind::TypeError, "bad argument type for built-in operation")
                 })?;
-                if let Some(bytes) = zone_bytes {
-                    bytes.extend_from_slice(text.as_bytes());
-                    bytes.push(0);
-                    tm.tm_zone = bytes.as_mut_ptr().cast();
+                if copy_zone {
+                    local.set_zone(text.as_str());
                 }
             }
         }
     }
-    Ok(tm)
+    Ok(local)
 }
 
 /// Read an offset for Python index conversion after the preceding fields have passed validation.
@@ -248,16 +299,15 @@ unsafe fn mktime_fields(
 pub unsafe extern "C" fn imre_mktime_offset(record: *const usize, original: *const usize) -> usize {
     // SAFETY: the tuple layouts and ownership are supplied by the caller.
     let result =
-        unsafe { mktime_fields(record, original, None).map(|_| imre_time_extra(original, false)) };
+        unsafe { mktime_fields(record, original, false).map(|_| imre_time_extra(original, false)) };
     finish(result, 0)
 }
 
 /// Convert a rooted time tuple using an optional preconverted offset word.
 unsafe fn mktime(record: *const usize, original: *const usize, indexed: usize) -> f64 {
     let result = (|| {
-        let mut zone_bytes = Vec::new();
-        // SAFETY: the caller roots both tuples and the zone buffer outlives the system call.
-        let mut tm = unsafe { mktime_fields(record, original, Some(&mut zone_bytes)) }?;
+        // SAFETY: the caller roots both tuples throughout conversion.
+        let mut local = unsafe { mktime_fields(record, original, true) }?;
         // SAFETY: the descriptor identifies the two additional words of a struct_time.
         unsafe {
             if descriptor(original).has_time_zone() {
@@ -267,16 +317,9 @@ unsafe fn mktime(record: *const usize, original: *const usize, indexed: usize) -
                     (*original.add(10), extra_kind(original, 10).base())
                 };
                 if offset != 0 {
-                    tm.tm_gmtoff = match kind {
-                        1 => (offset - 1) as libc::c_long,
-                        2 => num_traits::ToPrimitive::to_i64(&*Int::borrow(offset).big())
-                            .and_then(|n| libc::c_long::try_from(n).ok())
-                            .ok_or_else(|| {
-                                Error::new(
-                                    Kind::OverflowError,
-                                    "Python int too large to convert to C long",
-                                )
-                            })?,
+                    match kind {
+                        1 => local.tm.tm_gmtoff = (offset - 1) as libc::c_long,
+                        2 => local.set_offset(&Int::borrow(offset))?,
                         _ => {
                             let name = match kind {
                                 3 => "str",
@@ -295,18 +338,7 @@ unsafe fn mktime(record: *const usize, original: *const usize, indexed: usize) -
                 }
             }
         }
-        tm.tm_wday = -1;
-        // SAFETY: mktime owns no pointers from this initialized tm. On success it
-        // writes the normalized weekday, even when the timestamp is exactly -1.
-        let stamp = unsafe { libc::mktime(&mut tm) };
-        if stamp == -1 && tm.tm_wday == -1 {
-            Err(Error::new(
-                Kind::OverflowError,
-                "mktime argument out of range",
-            ))
-        } else {
-            Ok(stamp as f64)
-        }
+        local.timestamp()
     })();
     finish(result, -1.0)
 }

@@ -244,6 +244,14 @@ pub unsafe extern "C" fn imre_float_parse(value: *const Str) -> f64 {
     )
 }
 
+/// Apply the float grammar to ASCII buffer contents.
+pub(crate) fn parse_bytes(bytes: &[u8]) -> Option<f64> {
+    bytes
+        .is_ascii()
+        .then(|| std::str::from_utf8(bytes).expect("ASCII is valid UTF-8"))
+        .and_then(parse)
+}
+
 /// Parses the ASCII byte grammar without applying Unicode text normalization.
 ///
 /// # Safety
@@ -252,10 +260,7 @@ pub unsafe extern "C" fn imre_float_parse(value: *const Str) -> f64 {
 pub unsafe extern "C" fn imre_bytes_float(value: *const Bytes) -> f64 {
     // SAFETY: the caller keeps this immutable bytes allocation alive.
     let bytes = unsafe { &*value };
-    let parsed = bytes
-        .is_ascii()
-        .then(|| std::str::from_utf8(bytes).expect("ASCII is valid UTF-8"))
-        .and_then(parse);
+    let parsed = parse_bytes(bytes);
     finish(
         parsed.ok_or_else(|| Error::new(Kind::ValueError, "could not convert bytes to float")),
         0.0,

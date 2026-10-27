@@ -34,6 +34,7 @@ impl Checker<'_> {
     /// A nullable Mapping follows the same user-defined truth protocol on its
     /// present arm. Capture it once before testing and unwrapping.
     pub(super) fn test_truth(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        let value = Self::weak_target(value);
         if let Some(class) = self.mapping_class(value.ty) {
             return self.mapping_truth(class, value, at);
         }

@@ -1,24 +1,54 @@
 //! Object operations for native Python functions with dynamically loaded modules.
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
+mod abstract_class;
 mod builtins;
 mod calls;
+mod complex;
+mod enums;
 mod ffi;
 mod function_fields;
+mod iterators;
 mod operators;
 mod property;
+mod slice;
+mod source_code;
+mod static_method;
 mod stdlib;
 mod super_object;
+mod thread_local;
+mod typing;
 mod value;
+mod zip;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use value::{Code, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value};
+use value::{
+    Code, DictIterator, DictViewKind, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value,
+};
 
 struct SourceModule {
     path: PathBuf,
     code: Code,
+}
+
+enum IteratorSlice<'a> {
+    Values(&'a [Id]),
+    Reversed(&'a [Id]),
+    Bytes(&'a [u8]),
+    Range { value: i128, len: usize },
+}
+
+impl IteratorSlice<'_> {
+    /// Counts positions without allocating boxed integer elements.
+    fn len(&self) -> usize {
+        match self {
+            Self::Values(values) | Self::Reversed(values) => values.len(),
+            Self::Bytes(bytes) => bytes.len(),
+            Self::Range { len, .. } => *len,
+        }
+    }
 }
 
 pub(crate) struct Context {
@@ -30,15 +60,27 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     token_missing: Id,
+    native_code_objects: HashMap<usize, Id>,
+    source_builtins: Option<Id>,
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
+    typing: typing::Registry,
+    // Python wrappers retain their registered logger for the lifetime of this heap.
+    logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     pending: Option<Error>,
 }
 
 impl Context {
+    fn code_object(&self, id: Id) -> &value::CodeObject {
+        let Value::Code(code) = self.heap.get(id) else {
+            unreachable!("function must retain its code object")
+        };
+        code
+    }
+
     fn alloc(&mut self, value: Value) -> Id {
         self.heap.alloc(value)
     }
@@ -83,15 +125,42 @@ impl Context {
             .collect()
     }
 
-    fn str_value(&self, id: Id) -> Result<&str> {
-        if let Value::Str(value) = self.heap.get(id) {
-            Ok(value)
-        } else {
-            Err(Error::new("TypeError", "expected str"))
+    /// The immutable text backing an exact string or a Python subclass of str.
+    fn string_storage(&self, id: Id) -> Option<Id> {
+        match self.heap.get(id) {
+            Value::Str(_) => Some(id),
+            Value::Instance {
+                scalar: Some(value),
+                ..
+            } if matches!(self.heap.get(*value), Value::Str(_)) => Some(*value),
+            _ => None,
         }
     }
-    fn as_int(&self, id: Id) -> Result<crate::Int> {
+
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
         match self.heap.get(id) {
+            Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(id)
+                ),
+            )),
+        }
+    }
+
+    fn str_value(&self, id: Id) -> Result<&str> {
+        let id = self
+            .string_storage(id)
+            .ok_or_else(|| Error::new("TypeError", "expected str"))?;
+        let Value::Str(value) = self.heap.get(id) else {
+            unreachable!()
+        };
+        Ok(value)
+    }
+    fn as_int(&self, id: Id) -> Result<crate::Int> {
+        match self.heap.get(self.scalar_value(id)) {
             Value::Int(n) => Ok(n.clone()),
             Value::Bool(b) => Ok(crate::Int::from(i64::from(*b))),
             _ => Err(Error::new("TypeError", "expected an integer")),
@@ -107,49 +176,344 @@ impl Context {
             )
         })
     }
-    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
-    fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
-        let Value::Iterator { values, offset } = self.heap.get_mut(id) else {
+    fn is_native_iterator(&self, id: Id) -> bool {
+        matches!(
+            self.heap.get(id),
+            Value::Iterator { .. }
+                | Value::DictIterator(_)
+                | Value::AstWalk(_)
+                | Value::Zip { .. }
+                | Value::CallableIterator(_)
+                | Value::FormatIterator { .. }
+                | Value::Generator { .. }
+                | Value::File(_)
+                | Value::TextFile(_)
+                | Value::Enumerate { .. }
+                | Value::Count { .. }
+                | Value::Repeat(_)
+        )
+    }
+
+    /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
+    fn iterator(&mut self, id: Id) -> Result<Id> {
+        if self.is_native_iterator(id) {
+            return Ok(id);
+        }
+        let (sequence, kind) = match *self.heap.get(id) {
+            Value::List(_) => (id, "list_iterator"),
+            Value::Tuple(_) => (id, "tuple_iterator"),
+            Value::Bytes(_) => (id, "bytes_iterator"),
+            Value::ByteArray(_) => (id, "bytearray_iterator"),
+            Value::Range { .. } => (id, "range_iterator"),
+            Value::Dict(_) | Value::DefaultDict { .. } => {
+                return Ok(self.dict_iterator(id, DictViewKind::Keys));
+            }
+            Value::DictView { dict, kind } => return Ok(self.dict_iterator(dict, kind)),
+            Value::Instance { class, .. }
+                if let Some(slot) = self.class_attr(class, "__iter__") =>
+            {
+                if slot == NONE {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("'{}' object is not iterable", self.type_name(id)),
+                    ));
+                }
+                let method = self.bind_attribute(slot, id, class)?;
+                let result = self.call(method, Vec::new(), Vec::new())?;
+                if self.is_native_iterator(result) || self.slot(result, "__next__").is_some() {
+                    return Ok(result);
+                }
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "iter() returned non-iterator of type '{}'",
+                        self.type_name(result)
+                    ),
+                ));
+            }
+            _ => {
+                let values = self.items(id)?;
+                (self.alloc(Value::Tuple(values)), "iterator")
+            }
+        };
+        Ok(self.alloc(Value::Iterator {
+            sequence: Some(sequence),
+            offset: 0,
+            reverse: false,
+            kind,
+        }))
+    }
+
+    /// Start a cursor at the first entry without copying keys or values.
+    fn dict_iterator(&mut self, dict: Id, kind: DictViewKind) -> Id {
+        let size = self
+            .dict_entries(dict)
+            .expect("dictionary iterator source")
+            .len();
+        self.alloc(Value::DictIterator(DictIterator::new(dict, kind, size)))
+    }
+
+    /// Compiled loops test for an item before consuming it. User code must advance only once.
+    fn loop_iterator(&mut self, iterable: Id) -> Result<Id> {
+        let source = self.iterator(iterable)?;
+        if matches!(
+            self.heap.get(source),
+            Value::Instance { .. }
+                | Value::DictIterator(_)
+                | Value::CallableIterator(_)
+                | Value::Generator { .. }
+                | Value::File(_)
+                | Value::TextFile(_)
+                | Value::Enumerate { .. }
+        ) {
+            return Ok(self.alloc(Value::LoopIterator {
+                source,
+                peeked: None,
+            }));
+        }
+        Ok(source)
+    }
+
+    /// Borrows the unconsumed part of the iterator's current sequence.
+    fn iterator_remaining(&self, id: Id) -> Result<IteratorSlice<'_>> {
+        let Value::Iterator {
+            sequence,
+            offset,
+            reverse,
+            ..
+        } = self.heap.get(id)
+        else {
             return Err(Error::new("TypeError", "expected iterator"));
         };
-        let Some(&value) = values.get(*offset) else {
-            return Ok(None);
+        let Some(sequence) = sequence else {
+            return Ok(IteratorSlice::Values(&[]));
         };
-        *offset += 1;
-        Ok(Some(value))
+        Ok(match self.heap.get(*sequence) {
+            Value::List(values) if *reverse => {
+                IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
+            }
+            Value::List(values) | Value::Tuple(values) => {
+                IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
+            }
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => {
+                IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
+            }
+            Value::Range { start, stop, step } => IteratorSlice::Range {
+                value: i128::from(*start) + i128::from(*step) * *offset as i128,
+                len: builtins::range_len(*start, *stop, *step)?.saturating_sub(*offset),
+            },
+            _ => unreachable!("iterator sequence"),
+        })
+    }
+
+    /// Reads the current position and permanently detaches the source on exhaustion.
+    fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
+        if let Value::FormatIterator { input, offset, .. } = *self.heap.get(id) {
+            return Ok(offset < self.str_value(input)?.len());
+        }
+        if matches!(self.heap.get(id), Value::Count { .. }) {
+            return Ok(true);
+        }
+        if let Value::Repeat(repeat) = self.heap.get(id) {
+            return Ok(repeat.remaining != Some(0));
+        }
+        if let Value::LoopIterator { source, peeked } = *self.heap.get(id) {
+            if peeked.is_some() {
+                return Ok(true);
+            }
+            let item = self.next_item(source)?;
+            *self.heap.get_mut(id) = Value::LoopIterator {
+                source,
+                peeked: item,
+            };
+            return Ok(item.is_some());
+        }
+        if let Value::AstWalk(queue) = self.heap.get(id) {
+            return Ok(!queue.is_empty());
+        }
+        if matches!(self.heap.get(id), Value::Zip { .. }) {
+            return self.zip_has_item(id);
+        }
+        let more = self.iterator_remaining(id)?.len() != 0;
+        if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
+            *sequence = None;
+        }
+        Ok(more)
+    }
+
+    /// Discard StopIteration's payload only for consumers that treat it as exhaustion.
+    fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
+        match self.next_result(id) {
+            Err(error) if self.is_stop_iteration(&error) => Ok(None),
+            result => result,
+        }
+    }
+
+    fn is_stop_iteration(&mut self, error: &Error) -> bool {
+        let stop = self.builtin("StopIteration");
+        self.error_matches(&error.kind, stop)
+    }
+
+    fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
+        match self.call(callable, Vec::new(), Vec::new()) {
+            Ok(item) => {
+                // A recursive call can exhaust the same iterator inside the callable.
+                if matches!(self.heap.get(id), Value::CallableIterator(None)) {
+                    return Ok(None);
+                }
+                if item != sentinel {
+                    let equal = self.binary("==", sentinel, item)?;
+                    if !self.truth(equal)? {
+                        return Ok(Some(item));
+                    }
+                }
+            }
+            Err(error) if self.is_stop_iteration(&error) => {}
+            Err(error) => return Err(error),
+        }
+        *self.heap.get_mut(id) = Value::CallableIterator(None);
+        Ok(None)
+    }
+
+    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
+    fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        match self.heap.get_mut(id) {
+            Value::Iterator { .. } | Value::Zip { .. } => {}
+            Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::DictIterator(iter) => {
+                let mut iter = *iter;
+                let item = iter.next(self);
+                *self.heap.get_mut(id) = Value::DictIterator(iter);
+                return item;
+            }
+            Value::FormatIterator { .. } => return self.next_format_row(id),
+            Value::Enumerate { input, .. } => {
+                let input = *input;
+                return self.next_enumerated(id, input);
+            }
+            Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
+            Value::Repeat(repeat) => return Ok(repeat.next()),
+            Value::Generator { code, .. } => {
+                let code = *code;
+                return match self.code_object(code).body {
+                    value::Body::Native(_) => self.next_generator_item(id),
+                    value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                        self.resume_source(id)
+                    }
+                };
+            }
+            Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
+            Value::File(_) | Value::TextFile(_) => {
+                let readline = self.lookup_attr(id, "readline")?;
+                let line = self.call(readline, Vec::new(), Vec::new())?;
+                return Ok(self.truth(line)?.then_some(line));
+            }
+            Value::CallableIterator(None) => return Ok(None),
+            Value::CallableIterator(Some(state)) => {
+                let [callable, sentinel] = *state;
+                return self.next_callable_item(id, callable, sentinel);
+            }
+            _ => {
+                if let Some(method) = self.bound_slot(id, "__next__")? {
+                    return self.call(method, Vec::new(), Vec::new()).map(Some);
+                }
+                return Err(Error::new(
+                    "TypeError",
+                    format!("'{}' object is not an iterator", self.type_name(id)),
+                ));
+            }
+        }
+        if !self.iterator_has_item(id)? {
+            return Ok(None);
+        }
+        if let Value::Zip { pending, .. } = self.heap.get_mut(id) {
+            return Ok(pending.take());
+        }
+        let item = match self.iterator_remaining(id)? {
+            IteratorSlice::Values(values) => values[0],
+            IteratorSlice::Reversed(values) => values[values.len() - 1],
+            IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+            IteratorSlice::Range { value, .. } => self.int(value as i64),
+        };
+        if let Value::Iterator {
+            offset, reverse, ..
+        } = self.heap.get_mut(id)
+        {
+            if *reverse {
+                *offset -= 1;
+            } else {
+                *offset += 1;
+            }
+        }
+        Ok(Some(item))
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
+        if matches!(
+            self.heap.get(id),
+            Value::AstWalk(_)
+                | Value::DictIterator(_)
+                | Value::DictView { .. }
+                | Value::Zip { .. }
+                | Value::CallableIterator(_)
+                | Value::FormatIterator { .. }
+                | Value::Generator { .. }
+                | Value::File(_)
+                | Value::TextFile(_)
+                | Value::Count { .. }
+                | Value::Repeat(_)
+                | Value::Enumerate { .. }
+        ) || self.slot(id, "__iter__").is_some()
+        {
+            let iter = self.iterator(id)?;
+            let mut items = Vec::new();
+            while let Some(item) = self.next_item(iter)? {
+                items.push(item);
+            }
+            return Ok(items);
+        }
+        if let Some(values) = self.enum_values(id) {
+            let Value::Dict(entries) = self.heap.get(values) else {
+                unreachable!()
+            };
+            return Ok(entries.iter().map(|&(_, member)| member).collect());
+        }
+        if let Value::MappingProxy(dict) = *self.heap.get(id) {
+            return self.items(dict);
+        }
         match self.heap.get(id).clone() {
             Value::List(items)
             | Value::Tuple(items)
-            | Value::Set(items)
+            | Value::Set { items, .. }
             | Value::NamedTuple { values: items, .. } => Ok(items),
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
             }
             Value::Context(bindings) => Ok(bindings.keys().copied().collect()),
             Value::Range { start, stop, step } => builtins::range_items(self, start, stop, step),
-            Value::DictView { dict, kind } => builtins::view_items(self, dict, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
-            Value::Iterator { values, offset } => {
-                if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
-                    *offset = values.len();
+            Value::Iterator { .. } => {
+                let values = match self.iterator_remaining(id)? {
+                    IteratorSlice::Values(values) => values.to_vec(),
+                    IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
+                    remaining @ (IteratorSlice::Bytes(_) | IteratorSlice::Range { .. }) => {
+                        let mut values = Vec::new();
+                        values.try_reserve_exact(remaining.len()).map_err(|_| {
+                            Error::new("MemoryError", "iterator is too large to materialize")
+                        })?;
+                        while let Some(item) = self.next_item(id)? {
+                            values.push(item);
+                        }
+                        return Ok(values);
+                    }
+                };
+                if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
+                    *sequence = None;
                 }
-                Ok(values[offset..].to_vec())
-            }
-            Value::Instance {
-                dictionary: Some(_),
-                ..
-            } => {
-                let iter = self
-                    .bound_slot(id, "__iter__")?
-                    .expect("dict iterator slot");
-                let values = self.call(iter, Vec::new(), Vec::new())?;
-                self.items(values)
+                Ok(values)
             }
             Value::Instance { class, fields, .. } if self.namedtuple_fields(class).is_some() => {
                 Ok(self
@@ -159,15 +523,28 @@ impl Context {
                     .map(|k| fields[&k])
                     .collect())
             }
-            _ => Err(Error::new("TypeError", "object is not iterable")),
+            Value::Instance { .. } if self.slot(id, "__iter__").is_some() => {
+                let iter = self.iterator(id)?;
+                self.items(iter)
+            }
+            _ => Err(Error::new(
+                "TypeError",
+                format!("'{}' object is not iterable", self.type_name(id)),
+            )),
         }
     }
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
         self.alloc(Value::Scope(Scope {
             class_body: None,
+            is_abstract: false,
             class_cell: None,
+            class_lineage: None,
             first_argument: None,
-            names: HashMap::new(),
+            names: Default::default(),
+            namespace: None,
+            globals: Default::default(),
+            exec_globals: None,
+            exec_locals: None,
             parent,
             module: module.to_owned(),
         }))
@@ -178,7 +555,80 @@ impl Context {
         };
         s
     }
+    fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+        if self.scope_data(scope).globals.contains(name) {
+            while let Some(parent) = self.scope_data(scope).parent {
+                scope = parent;
+            }
+        }
+        scope
+    }
+
+    fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
+        let scope = self.scope_data(scope);
+        if let Some(namespace) = scope.namespace {
+            return self.dict_named_item(namespace, name);
+        }
+        scope.names.get(name).copied()
+    }
+
+    /// Materialize once and keep that exact dict as the module's binding storage.
+    fn module_globals(&mut self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!("compiled scope handle")
+        };
+        if let Some(globals) = frame.exec_globals {
+            return globals.dict;
+        }
+        if let Some(dict) = frame.namespace {
+            return dict;
+        }
+        let names = std::mem::take(&mut frame.names);
+        let entries = names
+            .into_iter()
+            .map(|(name, v)| (self.text(name), v))
+            .collect();
+        let dict = self.dict(entries);
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.namespace = Some(dict);
+        dict
+    }
+
+    fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
+        if let Some(locals) = self.scope_data(scope).exec_locals {
+            return Ok(self.delete_item(locals, key).is_ok());
+        }
+        if let Some(namespace) = self.scope_data(scope).namespace {
+            if self.scope_name(scope, name).is_none() {
+                return Ok(false);
+            }
+            let storage = self.dict_storage(namespace).expect("module namespace");
+            self.delete_item(storage, key)?;
+            return Ok(true);
+        }
+        let Value::Scope(data) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        if let Some(order) = &mut data.class_body {
+            order.retain(|member| member != name);
+        }
+        Ok(data.names.shift_remove(name).is_some())
+    }
+
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
+        let scope = self.binding_scope(scope, name);
+        if let Some(namespace) = self.scope_data(scope).namespace {
+            let key = self.text(name);
+            let storage = self.dict_storage(namespace).expect("module namespace");
+            self.put_item(storage, key, value)
+                .expect("string key in module dictionary");
+            return;
+        }
         let Value::Scope(s) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
@@ -191,9 +641,19 @@ impl Context {
     }
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         loop {
+            scope = self.binding_scope(scope, name);
+            if let Some(locals) = self.scope_data(scope).exec_locals {
+                match self.load_exec_name(locals, name) {
+                    Err(error) if self.is_builtin_error(&error, "KeyError") => {}
+                    value => return value,
+                }
+            }
             let s = self.scope_data(scope);
-            if let Some(id) = s.names.get(name) {
-                return Ok(*id);
+            if let Some(globals) = s.exec_globals {
+                return self.source_global(globals, name);
+            }
+            if let Some(id) = self.scope_name(scope, name) {
+                return Ok(id);
             }
             if name == "__class__"
                 && s.class_body.is_none()
@@ -219,7 +679,7 @@ impl Context {
         }
         Err(Error::new(
             "NameError",
-            format!("name {name:?} is not defined"),
+            format!("name '{name}' is not defined"),
         ))
     }
     fn builtin(&mut self, name: &str) -> Id {
@@ -228,18 +688,28 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
-        if name == "dict" {
-            for method in builtins::DICT_METHODS {
-                self.builtin(&format!("dict.{method}"));
-            }
+        let methods = match name {
+            "dict" => builtins::DICT_METHODS,
+            "int" => &["to_bytes"],
+            "str" => builtins::STR_METHODS,
+            _ => &[],
+        };
+        for method in methods {
+            self.builtin(&format!("{name}.{method}"));
         }
         value
     }
-    fn execute(&mut self, code: Code, scope: Id) -> Result<Id> {
-        self.heap.enter(scope);
+    fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
+        let entry = match &self.code_object(code).body {
+            value::Body::Native(entry) => *entry,
+            value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                return self.call_source(code, scope);
+            }
+        };
+        self.heap.enter(scope, code);
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
-        let result = unsafe { code(self, scope) };
+        let result = unsafe { entry(self, scope) };
         self.heap.leave(result);
         self.pending.take().map_or(Ok(result), Err)
     }
@@ -383,10 +853,20 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
-            if name == "urllib" {
-                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            if matches!(name, "email" | "urllib") {
+                locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
+            } else if name == "collections" {
+                locations.push(stdlib::package_path(self, name)?);
             }
-            None
+            // A sealed namespace may have both native operations and bundled Python classes.
+            // Only its bundled initializer may extend it, never a same-named file on sys.path.
+            self.sources.get(name).and_then(|sources| {
+                let root = std::path::Path::new(self.config["bundled_root"].as_str()?);
+                sources
+                    .iter()
+                    .find(|source| source.path.starts_with(root))
+                    .map(|source| (source.path.clone(), source.code))
+            })
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
                 (
@@ -408,12 +888,20 @@ impl Context {
             };
             let mut selected = None;
             let mut namespace = None;
-            for root in self.items(search)? {
-                let Ok(root) = self.str_value(root) else {
-                    continue;
-                };
-                let root = if root.is_empty() {
+            // A bundled package contributes its own __path__. A first-party
+            // regular package can never acquire one of its children implicitly.
+            let search = self.items(search)?;
+            let bundle = self.config["bundled_root"]
+                .as_str()
+                .map(std::path::Path::new);
+            let roots = search
+                .iter()
+                .filter_map(|&id| self.str_value(id).ok().map(std::path::Path::new));
+            for root in roots.chain(bundle.filter(|_| parent.is_none())) {
+                let root = if root.as_os_str().is_empty() {
                     std::env::current_dir()
+                } else if bundle.is_some_and(|dir| root.starts_with(dir)) {
+                    Ok(root.to_owned())
                 } else {
                     std::path::absolute(root)
                 };
@@ -447,8 +935,16 @@ impl Context {
             .with_import(Some(name), None, None));
         }
         let scope = self.scope(name, None);
-        let name_id = self.text(name);
+        // CPython's private module publishes its ABCs under the public name.
+        let name_id = self.text(if name == "_collections_abc" {
+            "collections.abc"
+        } else {
+            name
+        });
         self.bind(scope, "__name__", name_id);
+        if source.is_some() {
+            self.bind(scope, "__doc__", NONE);
+        }
         if !locations.is_empty() {
             let dirs = locations
                 .iter()
@@ -484,11 +980,39 @@ impl Context {
         self.modules.insert(name.to_owned(), module);
         match name {
             "io" => stdlib::io::install(self, scope),
+            "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
+            "sys" => {
+                for (name, original, stderr) in [
+                    ("stdout", "__stdout__", false),
+                    ("stderr", "__stderr__", true),
+                ] {
+                    let stream =
+                        self.alloc(Value::TextFile(crate::objects::TextFile::standard(stderr)));
+                    self.bind(scope, name, stream);
+                    self.bind(scope, original, stream);
+                }
+            }
+            "collections" => {
+                let abc = self.module("_collections_abc")?;
+                self.bind(scope, "abc", abc);
+                self.modules.insert("collections.abc".to_owned(), abc);
+            }
             _ => {}
         }
-        if let Some((_, code)) = source {
-            self.bind(scope, "__doc__", NONE);
+        if let Some((path, entry)) = source {
+            let filename = self.text(path.to_string_lossy());
+            let name_id = self.text("<module>");
+            let code = self.alloc(Value::Code(value::CodeObject {
+                body: value::Body::Native(entry),
+                parameters: NONE,
+                nested: Vec::new(),
+                name: name_id,
+                filename,
+                first_line: 1,
+                module_definition: true,
+                coroutine: false,
+            }));
             let result = self.execute(code, scope);
             let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
                 unreachable!()

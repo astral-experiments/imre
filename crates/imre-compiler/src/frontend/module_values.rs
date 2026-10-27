@@ -441,8 +441,20 @@ impl Initialization {
                     available.insert(definition);
                     continue;
                 }
-                ast::Stmt::FunctionDef(_) => {
+                ast::Stmt::FunctionDef(function) => {
                     available.insert(definition);
+                    if inspect::marks_function(checker.graph, checker.module, function)
+                        && let Some(signature) = checker.functions.get(&definition)
+                    {
+                        let original = checker.callable_value(signature, None, None, statement)?;
+                        body.push(Statement::Expr(Expr {
+                            ty: original.ty,
+                            kind: ExprKind::Builtin(
+                                Builtin::MarkCoroutine(signature.id),
+                                vec![original],
+                            ),
+                        }));
+                    }
                     if module.overloads.contains(&index) {
                         let signature = &checker.functions[&definition];
                         let original = checker.callable_value(signature, None, None, statement)?;

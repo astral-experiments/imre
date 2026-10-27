@@ -18,17 +18,25 @@ impl Context {
             }
             "assign" => {
                 let name = self.str_value(b)?.to_owned();
-                self.bind(a, &name, c);
+                self.bind_source_name(a, &name, c)?;
                 Ok(c)
             }
-            "delname" => {
+            "declare_global" => {
                 let name = self.str_value(b)?.to_owned();
-                let Value::Scope(s) = self.heap.get_mut(a) else {
+                let Value::Scope(scope) = self.heap.get_mut(a) else {
                     unreachable!()
                 };
-                s.names.remove(&name);
-                if let Some(order) = &mut s.class_body {
-                    order.retain(|member| member != &name);
+                scope.globals.insert(name);
+                Ok(NONE)
+            }
+            "delname" | "clearname" => {
+                let name = self.str_value(b)?.to_owned();
+                let scope = self.binding_scope(a, &name);
+                if !self.remove_binding(scope, &name, b)? && op == "delname" {
+                    return Err(Error::new(
+                        "NameError",
+                        format!("name '{name}' is not defined"),
+                    ));
                 }
                 Ok(NONE)
             }
@@ -50,7 +58,16 @@ impl Context {
                 self.set_attr(a, &name, c)?;
                 Ok(c)
             }
+            "delattr" => {
+                let name = self.str_value(b)?.to_owned();
+                self.delete_attr(a, &name)?;
+                Ok(NONE)
+            }
             "get" => self.get_item(a, b),
+            "delitem" => {
+                self.delete_item(a, b)?;
+                Ok(NONE)
+            }
             "put" | "keyword" => {
                 if op == "keyword" && self.contains(b, a)? {
                     return Err(Error::new(
@@ -62,23 +79,19 @@ impl Context {
                 Ok(c)
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
-            "set" => Ok(self.alloc(Value::Set(Vec::new()))),
+            "set" => Ok(self.alloc(Value::Set {
+                items: Vec::new(),
+                frozen: false,
+            })),
             "dict" => Ok(self.dict(Vec::new())),
             "tuple" => {
                 let vs = self.items(a)?;
                 Ok(self.alloc(Value::Tuple(vs)))
             }
             "append" => {
-                if matches!(self.heap.get(a), Value::Set(_)) {
-                    if !builtins::hashable(self, b) {
-                        return Err(Error::new("TypeError", "unhashable set element"));
-                    }
-                    if self.contains(b, a)? {
-                        return Ok(a);
-                    }
-                }
                 match self.heap.get_mut(a) {
-                    Value::List(v) | Value::Set(v) => v.push(b),
+                    Value::List(v) => v.push(b),
+                    Value::Set { frozen: false, .. } => builtins::set_add(self, a, b)?,
                     _ => return Err(Error::new("TypeError", "expected a list or set")),
                 }
                 Ok(a)
@@ -127,40 +140,50 @@ impl Context {
                     Ok(self.alloc(Value::List(out)))
                 }
             }
-            "slice" => self.slice(a, b),
-            "setslice" => {
-                self.set_slice(a, b, c)?;
-                Ok(c)
-            }
+            "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "call" => {
                 let args = self.items(b)?;
                 let kwargs = self.keyword_args(c)?;
                 self.call(a, args, kwargs)
             }
             "class" => self.class(a, b, c),
+            "coroutine_function" => {
+                let Value::Function { code, .. } = *self.heap.get(a) else {
+                    return Err(Error::new("SystemError", "invalid coroutine definition"));
+                };
+                let Value::Code(code) = self.heap.get_mut(code) else {
+                    unreachable!("function code")
+                };
+                code.coroutine = true;
+                Ok(a)
+            }
             "annotate" => {
-                if let Some(mapping) = self.scope_data(a).names.get("__annotations__").copied() {
+                if let Some(mapping) = self.scope_name(a, "__annotations__") {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "iter" => {
-                let values = self.items(a)?;
-                Ok(self.alloc(Value::Iterator { values, offset: 0 }))
-            }
-            "more" => {
-                let Value::Iterator { values, offset } = self.heap.get(a) else {
-                    return Err(Error::new("TypeError", "expected iterator"));
-                };
-                Ok(flag(*offset < values.len()))
-            }
+            "generator" => self.generator(a, b),
+            "yielded" => Ok(self.alloc(Value::Yielded(a))),
+            "iter" => self.loop_iterator(a),
+            "more" => Ok(flag(self.iterator_has_item(a)?)),
             "next" => self
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
+            }
+            "neg" | "pos" if let Value::Complex(z) = self.heap.get(a) => {
+                if op == "pos" {
+                    Ok(a)
+                } else {
+                    Ok(self.alloc(Value::Complex(super::complex::Complex {
+                        real: -z.real,
+                        imag: -z.imag,
+                    })))
+                }
             }
             "neg" | "pos" | "~" => {
                 let slot = match op {
@@ -220,11 +243,11 @@ impl Context {
                 Ok(self.text(s))
             }
             "take_error" => {
-                let e = self
+                let error = self
                     .pending
                     .take()
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
-                Ok(self.alloc(Value::Raised(e)))
+                Ok(self.raised_instance(error))
             }
             "matches" => {
                 if let Value::Raised(Error { kind, .. }) = self.heap.get(a) {
@@ -234,17 +257,28 @@ impl Context {
                 }
             }
             "type" => {
-                let Value::Raised(Error { kind, .. }) = self.heap.get(a) else {
+                if !matches!(self.heap.get(a), Value::Raised(_)) {
                     return Err(Error::new("TypeError", "expected exception"));
-                };
-                let kind = kind.clone();
-                Ok(self
-                    .classes
-                    .get(&kind)
-                    .copied()
-                    .unwrap_or_else(|| self.alloc(Value::Native(kind))))
+                }
+                self.exact_type(a)
             }
-            "raise" => {
+            "exit_exception" => {
+                let class = self.exact_type(b)?;
+                let traceback = self.exception_traceback(b)?;
+                let prior = self.heap.replace_active(b);
+                let result = self.call(a, vec![class, b, traceback], Vec::new());
+                self.heap.replace_active(prior);
+                result
+            }
+            "raise" | "reraise" => {
+                let a = if op == "reraise" && a == NONE {
+                    self.heap.active_exception()
+                } else {
+                    a
+                };
+                if op == "reraise" && a == NONE {
+                    return Err(Error::new("RuntimeError", "No active exception to reraise"));
+                }
                 let exception =
                     if matches!(self.heap.get(a), Value::Native(_) | Value::Class { .. }) {
                         self.call(a, Vec::new(), Vec::new())?
@@ -257,7 +291,31 @@ impl Context {
                         "exceptions must derive from BaseException",
                     ));
                 };
-                Err(e.clone())
+                let mut error = e.clone();
+                let trace = error.tracing();
+                trace.instance = Some(exception);
+                if op == "raise" {
+                    let active = self.heap.active_exception();
+                    if active != NONE && active != exception {
+                        trace.context = Some(active);
+                    }
+                    if c == TRUE {
+                        let cause =
+                            if matches!(self.heap.get(b), Value::Native(_) | Value::Class { .. }) {
+                                self.call(b, Vec::new(), Vec::new())?
+                            } else {
+                                b
+                            };
+                        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+                            return Err(Error::new(
+                                "TypeError",
+                                "exception causes must derive from BaseException",
+                            ));
+                        }
+                        trace.cause = Some(cause);
+                    }
+                }
+                Err(error)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
             _ => self.binary(op, a, b),
@@ -297,9 +355,13 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         sys_path: NONE,
         contexts: Vec::new(),
         token_missing: NONE,
+        native_code_objects: HashMap::new(),
+        source_builtins: None,
         codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
+        typing: super::typing::Registry::default(),
+        logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
         pending: None,
@@ -362,17 +424,17 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
+    finish_at(ctx, result, None)
+}
+
+fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> Id {
     match result {
         Ok(id) => {
             ctx.heap.keep(id);
             id
         }
         Err(mut error) => {
-            if let Some(loc) = ctx.heap.location()
-                && error.trace.last() != Some(&loc)
-            {
-                error.trace.push(loc);
-            }
+            ctx.record_exception_frame(&mut error, span);
             ctx.pending = Some(error);
             NONE
         }
@@ -403,6 +465,10 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .try_into()
             .map(|bytes| Value::Float(f64::from_le_bytes(bytes)))
             .map_err(|_| Error::new("SystemError", "invalid float literal")),
+        4 if data.len() == 16 => Ok(Value::Complex(super::complex::Complex {
+            real: f64::from_le_bytes(data[..8].try_into().unwrap()),
+            imag: f64::from_le_bytes(data[8..].try_into().unwrap()),
+        })),
         _ => Err(Error::new("SystemError", "invalid literal kind")),
     };
     let value = value.map(|v| ctx.alloc(v));
@@ -417,13 +483,32 @@ pub(super) unsafe extern "C" fn imre_dyn_op(
     b: Id,
     c: Id,
 ) -> Id {
+    // SAFETY: legacy call sites pass the same handles, without an instruction position.
+    unsafe { imre_dyn_op_at(ctx, opcode, a, b, c, std::ptr::null()) }
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_op_at(
+    ctx: *mut Context,
+    opcode: *const c_char,
+    a: Id,
+    b: Id,
+    c: Id,
+    span: *const [u32; 4],
+) -> Id {
     // SAFETY: generated native code owns its context and supplies a static opcode.
     let (ctx, op) = unsafe { (&mut *ctx, cstr(opcode)) };
     if ctx.pending.is_some() && op != "take_error" {
         return NONE;
     }
+    let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
     let result = ctx.op(op, a, b, c);
-    finish(ctx, result)
+    if reraise && let Err(error) = result {
+        ctx.pending = Some(error);
+        return NONE;
+    }
+    // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
+    finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
 /// Preserve the native function ABI used by previously compiled modules.
@@ -459,24 +544,155 @@ pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
 ) -> Id {
     // SAFETY: all operands are generated from this context; code has the native function ABI.
     let ctx = unsafe { &mut *ctx };
-    let owner = ctx.scope_data(scope);
-    let class_cell = owner.class_cell;
-    let scope = if owner.class_body.is_some() && !annotation_scope {
-        owner.parent.unwrap_or(scope)
-    } else {
-        scope
-    };
-    let fields =
-        super::function_fields::FunctionFields::new(ctx, scope, name, qualname, doc, annotate);
-    let result = ctx.alloc(Value::Function {
-        fields,
+    let location = ctx.heap.current_location().unwrap_or(value::Location {
+        file: "<native>".into(),
+        line: 1,
+        span: None,
+    });
+    let code = ctx.prelinked_code(code, scope, name, parameters, location);
+    ctx.define_function(
         code,
         scope,
-        class_cell,
-        parameters,
+        name,
         defaults,
-    });
-    finish(ctx, Ok(result))
+        qualname,
+        doc,
+        annotate,
+        annotation_scope,
+    )
+}
+
+/// Attach the original generator suite to the code object before applying Python decorators.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_generator_body(
+    ctx: *mut Context,
+    function: Id,
+    source: *const c_char,
+    body_line: u32,
+) {
+    // SAFETY: the generated call provides the live context that owns the function.
+    let ctx = unsafe { &mut *ctx };
+    let Value::Function { code, .. } = *ctx.heap.get(function) else {
+        unreachable!("compiled Python function");
+    };
+    let Value::Code(code) = ctx.heap.get_mut(code) else {
+        unreachable!("compiled code object");
+    };
+    if matches!(code.body, value::Body::Native(_)) {
+        // SAFETY: the UTF-8 constant is embedded in the executable and outlives all code objects.
+        let source = unsafe { cstr(source) };
+        code.body = value::Body::PendingGenerator { source, body_line };
+    }
+}
+
+/// Static per-definition record emitted beside its native entry point.
+#[repr(C)]
+pub(super) struct PrelinkedSite {
+    entry: Code,
+    filename: *const c_char,
+    first_line: u32,
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
+    ctx: *mut Context,
+    site: *const PrelinkedSite,
+    scope: Id,
+    name: Id,
+    parameters: Id,
+    defaults: Id,
+    qualname: Id,
+    doc: Id,
+    annotate: Id,
+    annotation_scope: bool,
+) -> Id {
+    // SAFETY: the compiler supplies a live context and a distinct static record for this definition.
+    let (ctx, definition) = unsafe { (&mut *ctx, &*site) };
+    let key = site as usize;
+    let code = if let Some(&code) = ctx.native_code_objects.get(&key) {
+        code
+    } else {
+        // SAFETY: the filename is a nul-terminated constant in the native executable.
+        let file = unsafe { cstr(definition.filename) };
+        let code = ctx.prelinked_code(
+            definition.entry,
+            scope,
+            name,
+            parameters,
+            value::Location {
+                file: file.into(),
+                line: definition.first_line,
+                span: None,
+            },
+        );
+        ctx.native_code_objects.insert(key, code);
+        code
+    };
+    ctx.define_function(
+        code,
+        scope,
+        name,
+        defaults,
+        qualname,
+        doc,
+        annotate,
+        annotation_scope,
+    )
+}
+
+impl Context {
+    fn prelinked_code(
+        &mut self,
+        entry: Code,
+        scope: Id,
+        name: Id,
+        parameters: Id,
+        location: value::Location,
+    ) -> Id {
+        let filename = self.text(location.file);
+        let module_definition = self.scope_data(scope).parent.is_none();
+        self.alloc(Value::Code(value::CodeObject {
+            body: value::Body::Native(entry),
+            name,
+            parameters,
+            filename,
+            first_line: location.line,
+            module_definition,
+            coroutine: false,
+            nested: Vec::new(),
+        }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn define_function(
+        &mut self,
+        code: Id,
+        scope: Id,
+        name: Id,
+        defaults: Id,
+        qualname: Id,
+        doc: Id,
+        annotate: Id,
+        annotation_scope: bool,
+    ) -> Id {
+        let owner = self.scope_data(scope);
+        let class_cell = owner.class_cell;
+        let scope =
+            if owner.exec_locals.is_some() || (owner.class_body.is_some() && !annotation_scope) {
+                owner.parent.unwrap_or(scope)
+            } else {
+                scope
+            };
+        let fields =
+            super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
+        self.alloc(Value::Function {
+            fields,
+            code,
+            scope,
+            class_cell,
+            defaults,
+        })
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -493,6 +709,19 @@ pub(super) unsafe extern "C" fn imre_dyn_statement(
     file: *const c_char,
     line: u32,
 ) {
+    // SAFETY: older emitters supplied the same live roots and static file name.
+    unsafe { imre_dyn_statement_with_exception(ctx, live, len, file, line, NONE) };
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
+    ctx: *mut Context,
+    live: *const Id,
+    len: usize,
+    file: *const c_char,
+    line: u32,
+    caught: Id,
+) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
     let ctx = unsafe { &mut *ctx };
     let live = if len == 0 {
@@ -503,23 +732,36 @@ pub(super) unsafe extern "C" fn imre_dyn_statement(
     };
     // SAFETY: file names are static constants in the generated native program.
     let file = unsafe { cstr(file) };
-    ctx.heap.statement(
-        ctx.modules
-            .values()
-            .chain(ctx.classes.values())
-            .chain(ctx.builtins.values())
-            .chain(ctx.codec_entries.roots())
-            .copied()
-            .chain(ctx.contexts.iter().copied())
-            .chain(
-                ctx.pending
-                    .iter()
-                    .filter_map(|e| e.args.as_ref())
-                    .flatten()
-                    .copied(),
-            )
-            .chain([ctx.argv, ctx.sys_path, ctx.token_missing]),
+    ctx.checkpoint(
         live,
-        value::Location { file, line },
+        value::Location {
+            file: file.into(),
+            line,
+            span: None,
+        },
+        caught,
     );
+}
+
+impl Context {
+    pub(super) fn checkpoint(&mut self, live: &[Id], location: value::Location, caught: Id) {
+        self.heap.statement(
+            self.modules
+                .values()
+                .chain(self.classes.values())
+                .chain(self.logger_wrappers.values())
+                .chain(self.typing.roots())
+                .chain(self.builtins.values())
+                .chain(self.native_code_objects.values())
+                .chain(self.codec_entries.roots())
+                .copied()
+                .chain(self.contexts.iter().copied())
+                .chain(self.pending.iter().flat_map(Error::roots))
+                .chain(self.source_builtins)
+                .chain([self.argv, self.sys_path, self.token_missing]),
+            live,
+            location,
+            caught,
+        );
+    }
 }

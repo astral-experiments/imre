@@ -14,8 +14,6 @@ use super::super::{Int, Object, Storage, StorageCell, Str, Words, fail, files, o
 
 const DAY: i64 = 86_400;
 
-pub(in crate::objects) struct Clock(pub(in crate::objects) [i64; 5]);
-
 #[derive(Clone, Copy)]
 enum Period {
     Second,
@@ -153,13 +151,8 @@ impl Handler {
     fn calendar_delays(&self, now: i64) -> Result<(i64, i64, bool)> {
         let t = civil(now, self.utc)?;
         let at = self.clock.as_ref().map_or(DAY, |clock| {
-            // SAFETY: the handler retains this exact immutable time.
-            unsafe {
-                clock.0.with(|s| match s {
-                    Storage::ClockTime(Clock([h, m, s, _, _])) => (h * 60 + m) * 60 + s,
-                    _ => unreachable!(),
-                })
-            }
+            let [h, m, s, _, _] = super::super::calendar::clock_parts(clock);
+            (h * 60 + m) * 60 + s
         });
         let mut until = at - i64::from((t.tm_hour * 60 + t.tm_min) * 60 + t.tm_sec);
         let mut day = (t.tm_wday + 6) % 7;
@@ -346,99 +339,6 @@ impl Storage {
             Self::TimedFileHandler(h) => h,
             _ => fail("SystemError", "expected timed file handler"),
         }
-    }
-}
-
-/// # Safety
-/// All five integer fields are borrowed exact tagged words; tzinfo is None.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_clock_new(
-    h: usize,
-    m: usize,
-    s: usize,
-    us: usize,
-    _tzinfo: u8,
-    fold: usize,
-) -> *const Object {
-    let result = (|| {
-        let mut parts = [0i64; 5];
-        for (i, (value, (name, max))) in [h, m, s, us, fold]
-            .into_iter()
-            .zip([
-                ("hour", 23),
-                ("minute", 59),
-                ("second", 59),
-                ("microsecond", 999999),
-                ("fold", 1),
-            ])
-            .enumerate()
-        {
-            // SAFETY: the caller roots each exact integer until validation finishes.
-            let n = unsafe { Int::borrow(value) }
-                .big()
-                .to_i64()
-                .ok_or_else(|| {
-                    Error::new(
-                        Kind::OverflowError,
-                        "Python int too large to convert to C long",
-                    )
-                })?;
-            let n = i32::try_from(n).map_err(|_| {
-                Error::new(
-                    Kind::OverflowError,
-                    if n < 0 {
-                        "signed integer is less than minimum"
-                    } else {
-                        "signed integer is greater than maximum"
-                    },
-                )
-            })?;
-            if !(0..=max).contains(&n) {
-                let message = if name == "fold" {
-                    format!("fold must be either 0 or 1, not {n}")
-                } else {
-                    format!("{name} must be in 0..{max}, not {n}")
-                };
-                return Err(Error::new(Kind::ValueError, message));
-            }
-            parts[i] = i64::from(n);
-        }
-        Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::new(
-            Object(StorageCell::new(Storage::ClockTime(Clock(parts)))),
-        )))
-    })();
-    finish(result, std::ptr::null())
-}
-
-/// # Safety
-/// The caller roots the time and supplies an immediate field index in 0..5.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_clock_part(clock: *const Object, index: usize) -> usize {
-    // SAFETY: both the clock and the statically chosen index are exact and live.
-    unsafe {
-        object(clock).0.with(|s| match s {
-            Storage::ClockTime(c) => {
-                Int::small(c.0[Int::borrow(index).as_small().unwrap() as usize])
-                    .unwrap()
-                    .into_raw()
-            }
-            _ => unreachable!(),
-        })
-    }
-}
-
-/// # Safety
-/// Both inputs root immutable naive times; fold does not participate in ordering.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_clock_compare(a: *const Object, b: *const Object) -> i32 {
-    // SAFETY: neither time changes during these two shared reads.
-    unsafe {
-        object(a).0.with(|a| {
-            object(b).0.with(|b| match (a, b) {
-                (Storage::ClockTime(a), Storage::ClockTime(b)) => a.0[..4].cmp(&b.0[..4]) as i32,
-                _ => unreachable!(),
-            })
-        })
     }
 }
 

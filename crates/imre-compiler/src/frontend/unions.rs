@@ -412,7 +412,7 @@ impl Checker<'_> {
                 .definitions
                 .iter()
                 .enumerate()
-                .filter(|(id, record)| *id == class || record.bases.contains(&class))
+                .filter(|(id, _)| records.subclass(self.graph, *id, class))
                 .map(|(id, _)| InstanceType::Exact(records.instance(id)))
                 .collect());
         }
@@ -456,6 +456,12 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if let Some(Binding::Intrinsic(Intrinsic::WeakProxyClass { callable })) =
+            self.collection_binding(classes)
+        {
+            return Ok(self.weak_proxy_instance(value, callable));
+        }
+        let value = Self::weak_target(value);
         let classes = match self.instance_types(classes) {
             Ok(classes) => classes,
             Err(diagnostic) => {

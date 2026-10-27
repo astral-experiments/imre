@@ -180,10 +180,7 @@ impl Checker<'_> {
             inputs.push(self.coerce(argument.clone(), ty, at)?);
         }
         self.calls.insert(method.id);
-        Ok(Expr {
-            ty: method.returns,
-            kind: ExprKind::Call(method.id, ir::CallArgs::positional(inputs)),
-        })
+        Ok(self.call_value(&method, method.returns, ir::CallArgs::positional(inputs)))
     }
 
     /// `type(record)()` uses the default constructor of the actual fixed layout.

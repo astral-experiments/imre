@@ -340,6 +340,7 @@ pub(super) fn install_argument_slot(c: &mut Class, module: &SourceModule) {
         .into(),
         annotation,
         default: None,
+        weak_proxy: false,
         kw_only: false,
         repr: false,
         compare: false,

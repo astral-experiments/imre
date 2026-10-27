@@ -35,6 +35,7 @@
 mod dynamic;
 mod extensions;
 mod floats;
+mod format_grammar;
 mod shared;
 mod string_owner;
 use shared::Shared;
@@ -402,6 +403,8 @@ pub type Str = compact_str::CompactString;
 
 /// Immutable byte storage; native handles share ownership and expose no mutable view.
 pub type Bytes = Vec<u8>;
+/// CPython's variable-size bytes header, cached hash and trailing NUL also need to fit.
+pub(crate) const MAX_BYTES_LEN: usize = isize::MAX as usize - (4 * size_of::<usize>() + 1);
 /// All byte handles crossing the native ABI point into this strong owner.
 pub(crate) type BytesOwner = triomphe::Arc<Bytes>;
 
