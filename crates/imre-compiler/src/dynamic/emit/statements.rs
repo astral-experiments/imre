@@ -82,6 +82,19 @@ impl<'a> Visitor<'a> for ClosureNames {
             _ => visitor::walk_stmt(self, stmt),
         }
     }
+    fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+        let capture = match pattern {
+            ast::Pattern::MatchAs(p) => p.name.as_ref(),
+            ast::Pattern::MatchStar(p) => p.name.as_ref(),
+            ast::Pattern::MatchMapping(p) => p.rest.as_ref(),
+            _ => None,
+        };
+        if let Some(name) = capture {
+            self.locals.insert(name.to_string());
+        }
+        visitor::walk_pattern(self, pattern);
+    }
+
     fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
         let ast::ExceptHandler::ExceptHandler(handler_data) = handler;
         if let Some(name) = &handler_data.name {
@@ -311,6 +324,7 @@ impl Function<'_, '_> {
                     self.live.pop();
                     self.end(&format!("ret i64 {value}"));
                 }
+                ast::Stmt::Match(v) => self.match_statement(v),
                 ast::Stmt::If(v) => {
                     let done = self.name("b");
                     self.if_arm(&v.test, &v.body, &done);

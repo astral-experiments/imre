@@ -31,8 +31,77 @@ impl Context {
         Ok(result)
     }
 
+    /// Check the mapping and its length before evaluating the pattern's key expressions.
+    fn match_mapping(&mut self, subject: Id, minimum: Id) -> Result<Id> {
+        if self.dict_storage(subject).is_none()
+            && !matches!(self.heap.get(subject), Value::MappingProxy(_))
+        {
+            let Some(&mapping) = self.classes.get("collections.abc.Mapping") else {
+                return Ok(FALSE);
+            };
+            let class = self.exact_type(subject)?;
+            if !self.subclass(class, mapping) {
+                return Ok(FALSE);
+            }
+        }
+        if minimum == NONE {
+            return Ok(TRUE);
+        }
+        let size = builtins::call(self, "len", &[subject], &[])?;
+        self.op(">=", size, minimum, NONE)
+    }
+
+    /// A missing pattern key fails without invoking a defaultdict factory. Present `None`
+    /// values survive in the result tuple, alongside the other keys fetched before matching.
+    fn match_mapping_keys(&mut self, subject: Id, keys: Id) -> Result<Id> {
+        let Value::List(keys) = self.heap.get(keys) else {
+            unreachable!("compiled pattern keys")
+        };
+        let keys = keys.clone();
+        if keys.is_empty() {
+            return Ok(self.alloc(Value::Tuple(Vec::new())));
+        }
+        let get = self.lookup_attr(subject, "get")?;
+        self.heap.keep(get);
+        let seen = self.op("set", NONE, NONE, NONE)?;
+        self.heap.keep(seen);
+        let object = self.builtin("object");
+        let missing = self.instance(object, None);
+        self.heap.keep(missing);
+        let mut values = Vec::with_capacity(keys.len());
+        for key in keys {
+            if builtins::set_member(self, seen, key, false)? {
+                let repr = builtins::call(self, "repr", &[key], &[])?;
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "mapping pattern checks duplicate key ({})",
+                        self.str_value(repr)?
+                    ),
+                ));
+            }
+            builtins::set_add(self, seen, key)?;
+            let value = self.call(get, vec![key, missing], Vec::new())?;
+            if value == missing {
+                return Ok(NONE);
+            }
+            self.heap.keep(value);
+            values.push(value);
+        }
+        Ok(self.alloc(Value::Tuple(values)))
+    }
+
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "match_mapping" => self.match_mapping(a, b),
+            "match_mapping_keys" => self.match_mapping_keys(a, b),
+            "match_sequence_length"
+                if self.container_slot_accepts(a, "list")
+                    || self.container_slot_accepts(a, "tuple") =>
+            {
+                builtins::call(self, "len", &[a], &[])
+            }
+            "match_sequence_length" => Ok(NONE),
             "lookup" | "lookup_class_local" => {
                 let name = self.str_value(b)?.to_owned();
                 if op == "lookup_class_local" {
