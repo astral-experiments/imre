@@ -772,6 +772,12 @@ def report(text):
         if os.name == "posix":
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_recursive_repr.py":
+                for limit in (640, 4300, 0):
+                    compare(
+                        "-B", "-c", imports + f"arithmetic.integer_digit_limit({limit})",
+                        extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
+                    )
         if sys.platform == "linux":
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
