@@ -1171,7 +1171,9 @@ pub(super) struct Heap {
     weak: HashMap<Id, Vec<Id>>,
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
-    weak_edge_removed: bool,
+    collect_next_statement: bool,
+    // Weak handles to buffered output files returned by open().
+    pub(super) file_writers: Vec<Id>,
 }
 
 #[derive(Clone, Copy)]
@@ -1239,7 +1241,8 @@ impl Heap {
             next_collection: 4096,
             weak: HashMap::new(),
             has_weak_values: false,
-            weak_edge_removed: false,
+            collect_next_statement: false,
+            file_writers: Vec::new(),
         }
     }
 
@@ -1292,7 +1295,7 @@ impl Heap {
         self.weak.entry(target).or_default().insert(index, id);
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
-        self.weak_edge_removed = true;
+        self.collect_next_statement = true;
         id
     }
 
@@ -1341,7 +1344,7 @@ impl Heap {
             && !self.bound_in_active_frame(value)
         {
             // A function or a cell may own the last strong path to a captured value.
-            self.weak_edge_removed = true;
+            self.collect_next_statement = true;
         }
     }
 
@@ -1484,7 +1487,7 @@ impl Heap {
                         caller.swap_remove(index);
                     }
                 }
-                self.weak_edge_removed = true;
+                self.collect_next_statement = true;
             }
         }
         self.keep(value);
@@ -1586,6 +1589,17 @@ impl Heap {
         marked
     }
 
+    /// Collect an unbound writer after its exhausted loop drops the iterator root.
+    pub fn release_loop_files(&mut self) {
+        if self
+            .file_writers
+            .iter()
+            .any(|&id| !self.bound_in_active_frame(id))
+        {
+            self.collect_next_statement = true;
+        }
+    }
+
     pub fn statement(
         &mut self,
         globals: impl Iterator<Item = Id>,
@@ -1607,12 +1621,13 @@ impl Heap {
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
-        if (!self.has_weak_values || !std::mem::take(&mut self.weak_edge_removed))
+        if !std::mem::take(&mut self.collect_next_statement)
             && (self.slots.len() < self.next_collection || !self.free.is_empty())
         {
             return None;
         }
         let marked = self.marked(globals);
+        self.file_writers.retain(|&id| marked[id as usize]);
         self.interned.retain(|_, entry| marked[entry.id as usize]);
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.

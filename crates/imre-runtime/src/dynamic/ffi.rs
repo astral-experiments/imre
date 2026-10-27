@@ -321,6 +321,10 @@ impl Context {
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
             "more" => Ok(flag(self.iterator_has_item(a)?)),
+            "release_loop_files" => {
+                self.heap.release_loop_files();
+                Ok(NONE)
+            }
             "next" => self
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),

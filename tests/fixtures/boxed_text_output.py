@@ -1,4 +1,21 @@
 def exercise(path):
+    def buffered():
+        stream = open(path, "w")
+        stream.write("loop")
+        return stream
+
+    for keep in (False, True):
+        saved = []
+        for stream in [buffered()]:
+            if keep:
+                saved.append(stream)
+            stream = None
+        else:
+            with open(path, "rb") as reader:
+                assert reader.read() == (b"" if keep else b"loop")
+        if keep:
+            saved[0].close()
+
     sample = "Málaga 東京🧪e\u0301\n"
     with open(path, "w") as ready:
         alias = ready

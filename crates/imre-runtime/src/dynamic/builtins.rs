@@ -1338,6 +1338,7 @@ pub(super) fn call(
                 "w" | "wt" | "tw" => Some(1),
                 _ => None,
             };
+            let writing = mode.bytes().any(|b| matches!(b, b'w' | b'a' | b'x'));
             let file = match text_mode {
                 Some(mode) => crate::objects::TextFile::open(path, mode)
                     .map(Value::TextFile)
@@ -1346,7 +1347,13 @@ pub(super) fn call(
                     .and_then(super::stdlib::BinaryFile::into_value),
             };
             match file {
-                Ok(file) => Ok(ctx.alloc(file)),
+                Ok(file) => {
+                    let id = ctx.alloc(file);
+                    if writing {
+                        ctx.heap.file_writers.push(id);
+                    }
+                    Ok(id)
+                }
                 Err(error) => Err(ctx.with_open_filename(error, filename)?),
             }
         }
