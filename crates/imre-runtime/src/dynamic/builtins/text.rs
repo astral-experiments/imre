@@ -209,8 +209,10 @@ pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Resul
     ctx.items(obj)?
         .into_iter()
         .map(|id| {
-            u8::try_from(ctx.as_integer(id)?)
-                .map_err(|_| Error::new("ValueError", "bytes must be in range(0, 256)"))
+            ctx.as_int(id)?
+                .to_i64()
+                .and_then(|n| u8::try_from(n).ok())
+                .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))
         })
         .collect()
 }
