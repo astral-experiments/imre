@@ -29,6 +29,15 @@ def counter_keywords(owner: Counter[str]) -> dict[int, int]:
 
 def main() -> None:
     ordered = OrderedDict(seed=1)
+    plain: dict[str, int] = {"seed": 1}
+    try:
+        plain.fromkeys(iterable=[[3], [1]], value=9)  # ty: ignore[no-matching-overload]
+    except TypeError as error:
+        print(error)
+    through_dict: dict[str, int] = OrderedDict(seed=1)
+    through_view = through_dict.fromkeys(iterable=[3, 1, 3], value=9)
+    print(list(through_view))
+    print(through_view[3])
     keys_arg = [4, 5]
     order: list[int] = []
     from_positional = ordered.fromkeys(before(keys_arg, order), value=argument(keys_arg, order))

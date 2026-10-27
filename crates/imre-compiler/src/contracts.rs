@@ -499,6 +499,7 @@ impl Builtin {
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
+            | Self::DictIsOrdered
             | Self::DictSumValues
             | Self::Encode
             | Self::CsvLineNumber
