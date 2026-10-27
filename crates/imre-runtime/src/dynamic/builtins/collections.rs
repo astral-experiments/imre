@@ -398,8 +398,12 @@ pub(super) fn method(
     };
     if matches!(
         name,
-        "dict.pop" | "set.issuperset" | "frozenset.issuperset" | "frozenset.copy"
-            | "frozenset.__contains__" | "set.__contains__"
+        "dict.pop"
+            | "set.issuperset"
+            | "frozenset.issuperset"
+            | "frozenset.copy"
+            | "frozenset.__contains__"
+            | "set.__contains__"
     ) && !kwargs.is_empty()
     {
         return Err(type_error(format!("{name}() takes no keyword arguments")));

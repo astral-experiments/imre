@@ -67,6 +67,8 @@ def measure(tools, reference, blob, root):
         operation = "keyword predicates and exported lists"
         default = NativeDefaultMethod(tools, path, SOURCE, blob, ("imre", operation)).run(case)
         default["evidence"]["compiler_mode"] = "reachable" if tools.reachable_only else "ordinary"
+        if stderr := default["evidence"].get("stderr"):
+            default["evidence"]["stderr"] = stderr.replace(str(path), "<case>")
         if default["outcome"] == "pass":
             observations[key] = default
             continue
