@@ -189,6 +189,20 @@ def current():
 
     order = counts.keys()
     print(Counter.clear(counts), list(order), counts["absent"])
+    class Factory:
+        def __call__(self):
+            return []
+
+    factory = Factory()
+    assert defaultdict(factory).default_factory is factory
+    assert defaultdict(None).default_factory is None
+    try:
+        defaultdict(37)
+    except TypeError as error:
+        assert error.args == ("first argument must be callable or None",)
+    else:
+        raise AssertionError("a non-callable defaultdict factory was accepted")
+
     groups = defaultdict(list)
     saved = groups["key"]
     saved.append(7)

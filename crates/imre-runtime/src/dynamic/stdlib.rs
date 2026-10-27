@@ -1404,10 +1404,19 @@ pub(super) fn call(
             }
         }
         "functools._cached" => ctx.cached_function(argument(args, 0)?),
-        "collections.defaultdict" => ctx.alloc(Value::DefaultDict {
-            factory: args.first().copied().unwrap_or(NONE),
-            entries: Default::default(),
-        }),
+        "collections.defaultdict" => {
+            let factory = args.first().copied().unwrap_or(NONE);
+            if factory != NONE && !ctx.callable(factory) {
+                return Err(Error::new(
+                    "TypeError",
+                    "first argument must be callable or None",
+                ));
+            }
+            ctx.alloc(Value::DefaultDict {
+                factory,
+                entries: Default::default(),
+            })
+        }
         "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;
             let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) else {
