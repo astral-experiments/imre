@@ -178,6 +178,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::AstWalk(_)
+                | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
@@ -242,6 +243,7 @@ impl Context {
             self.heap.get(source),
             Value::Instance { .. }
                 | Value::CallableIterator(_)
+                | Value::Map { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -363,6 +365,13 @@ impl Context {
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
+            Value::Map { function, input } => {
+                let (function, input) = (*function, *input);
+                let Some(item) = self.next_result(input)? else {
+                    return Ok(None);
+                };
+                return self.call(function, vec![item], Vec::new()).map(Some);
+            }
             Value::Generator { code, .. } => {
                 let code = *code;
                 return match self.code_object(code).body {
@@ -422,6 +431,7 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk(_)
+                | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }

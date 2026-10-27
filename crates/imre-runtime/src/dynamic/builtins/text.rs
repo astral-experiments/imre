@@ -934,13 +934,13 @@ pub(super) fn method(
                 .collect::<Result<Vec<_>>>()?;
             Ok(ctx.text(parts.join(&source)))
         }
-        "lower" | "upper" => {
+        "capitalize" | "lower" | "upper" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
-            Ok(ctx.text(if name == "lower" {
-                source.to_lowercase()
-            } else {
-                source.to_uppercase()
+            Ok(ctx.text(match name {
+                "capitalize" => crate::objects::capitalize(&source)?.into_string(),
+                "lower" => source.to_lowercase(),
+                _ => source.to_uppercase(),
             }))
         }
         "removeprefix" | "removesuffix" => {

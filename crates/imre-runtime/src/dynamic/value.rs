@@ -170,6 +170,7 @@ impl Context {
             Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
+            Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
@@ -447,6 +448,10 @@ pub(super) enum Value {
         step: Id,
     },
     Repeat(crate::objects::Repeat<Id>),
+    Map {
+        function: Id,
+        input: Id,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -517,6 +522,7 @@ impl Value {
             Self::ClassMethod(callable) => visit.push(*callable),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
+            Self::Map { function, input } => visit.extend([*function, *input]),
             Self::Zip {
                 inputs, pending, ..
             } => {
