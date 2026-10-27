@@ -460,7 +460,8 @@ fn render_percent_integer(
         ctx.index_integer(value)
     };
     let integer = convert().map_err(|error| {
-        if error.kind == "TypeError" {
+        let ty = ctx.builtin("TypeError");
+        if ctx.raised_error_matches(&error, ty) {
             let required = if decimal {
                 "a real number"
             } else {

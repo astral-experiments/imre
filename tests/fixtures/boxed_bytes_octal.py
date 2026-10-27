@@ -17,6 +17,15 @@ class BrokenIndex:
         raise RuntimeError("index failed")
 
 
+class ConversionError(TypeError):
+    pass
+
+
+class FailingIndex:
+    def __index__(self):
+        raise ConversionError("index failed")
+
+
 def current():
     for value in range(256):
         expected = bytes((92, 48 + (value >> 6), 48 + ((value >> 3) & 7), 48 + (value & 7)))
@@ -32,6 +41,8 @@ def current():
         (b"%o", b"7", TypeError, "%o format: an integer is required, not bytes"),
         (b"%o", BadIndex(), TypeError, "%o format: an integer is required, not BadIndex"),
         (b"%o", BrokenIndex(), RuntimeError, "index failed"),
+        (b"%o", FailingIndex(), TypeError, "%o format: an integer is required, not FailingIndex"),
+        ("%#x", FailingIndex(), TypeError, "%x format: an integer is required, not FailingIndex"),
         (b"%o %o", (1,), TypeError, "not enough arguments for format string"),
         (b"%o", (1, 2), TypeError, "not all arguments converted during bytes formatting"),
         (b"%03", 8, ValueError, "incomplete format"),
