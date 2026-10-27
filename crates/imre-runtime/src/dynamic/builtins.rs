@@ -153,6 +153,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
     match name {
+        "float.__new__" => Some("float"),
         "int.__new__" => Some("int"),
         "str.__new__" => Some("str"),
         _ => None,

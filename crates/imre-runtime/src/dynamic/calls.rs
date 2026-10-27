@@ -687,7 +687,8 @@ impl Context {
                 return Ok(self.int(i64::from(lineno)));
             }
             Value::Native(class)
-                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float") =>
+                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float")
+                    && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(class)),
@@ -827,8 +828,10 @@ impl Context {
             {
                 return Ok(self.builtin(owner));
             }
-            Value::Native(class) if class == "int" && name == "__new__" => {
-                return Ok(self.builtin("int.__new__"));
+            Value::Native(class)
+                if matches!(class.as_str(), "int" | "float") && name == "__new__" =>
+            {
+                return Ok(self.builtin(&format!("{class}.__new__")));
             }
             Value::Super {
                 start,
@@ -1047,6 +1050,9 @@ impl Context {
                 }
                 if name == "__new__" && self.has_base(obj, "str") {
                     return Ok(self.builtin("str.__new__"));
+                }
+                if name == "__new__" && self.has_base(obj, "float") {
+                    return Ok(self.builtin("float.__new__"));
                 }
             }
             Value::NamedTuple {
@@ -1397,6 +1403,40 @@ impl Context {
         })
     }
 
+    /// Allocate a binary64 payload while retaining the requested float subclass.
+    ///
+    /// ```python
+    /// class Weight(float):
+    ///     pass
+    /// assert type(Weight("1.5")) is Weight
+    /// ```
+    pub(super) fn new_float(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&class, values)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "float.__new__(): not enough arguments",
+            ));
+        };
+        let base = self.builtin("float");
+        if !self.subclass(class, base) {
+            return Err(Error::new(
+                "TypeError",
+                "float.__new__ requires a float subtype",
+            ));
+        }
+        let value = builtins::call(self, "float", values, kwargs)?;
+        if class == base {
+            return Ok(value);
+        }
+        Ok(self.alloc(Value::Instance {
+            class,
+            fields: HashMap::new(),
+            scalar: Some(value),
+            dictionary: None,
+            memory_stream: None,
+        }))
+    }
+
     /// Allocate the immutable string or bytes payload while retaining the Python class.
     pub(super) fn new_string(
         &mut self,
@@ -1454,6 +1494,7 @@ impl Context {
                 Ok(result)
             }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
+            Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
                     || !name.contains('.')
@@ -1621,6 +1662,7 @@ impl Context {
                 let string_base = ["str", "bytes"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
+                let float_subclass = self.has_base(callable, "float");
                 let instance = if let Some(new) = new {
                     let allocate = self.bind_attribute(new, NONE, callable)?;
                     let positional = std::iter::once(callable)
@@ -1633,6 +1675,11 @@ impl Context {
                     instance
                 } else if let Some(kind) = string_base {
                     self.new_string(kind, callable, &args, &kwargs)?
+                } else if float_subclass {
+                    let positional = std::iter::once(callable)
+                        .chain(args.iter().copied())
+                        .collect::<Vec<_>>();
+                    self.new_float(&positional, &kwargs)?
                 } else {
                     let dictionary = self
                         .has_base(callable, "dict")
@@ -1645,6 +1692,7 @@ impl Context {
                     }
                 } else if new.is_none()
                     && string_base.is_none()
+                    && !float_subclass
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(
