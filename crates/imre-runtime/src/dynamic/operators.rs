@@ -584,6 +584,7 @@ impl Context {
             }
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
+            Value::PartialPlaceholder => "Placeholder".to_owned(),
             Value::None => "None".into(),
             Value::Ellipsis => "Ellipsis".into(),
             Value::NotImplemented => "NotImplemented".into(),

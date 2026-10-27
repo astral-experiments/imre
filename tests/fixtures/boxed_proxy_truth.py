@@ -1,6 +1,7 @@
 """Exercise higher-order truth and attribute operations used by request proxies."""
 
-from functools import partial
+import functools
+from functools import Placeholder, partial
 
 
 def current():
@@ -50,6 +51,26 @@ def current():
     first.keywords["a"] = 19
     print(first(), second())
     print(partial(getattr, first).func is getattr)
+    hole = partial(combine, Placeholder, 2)
+    nested_hole = partial(hole, Placeholder, 4)
+    print(Placeholder is functools.Placeholder, type(Placeholder).__name__, repr(Placeholder))
+    print(hole(1), nested_hole(3))
+    for function in (combine, hole):
+        try:
+            partial(function, Placeholder)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("accepted a trailing Placeholder")
+    try:
+        hole()
+    except TypeError as error:
+        print(str(error))
+    try:
+        partial(combine, value=Placeholder)
+    except TypeError as error:
+        print(str(error))
+
     class Bound:
         method = partial(combine, 1)
 
