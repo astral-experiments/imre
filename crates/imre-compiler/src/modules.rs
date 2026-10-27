@@ -30,9 +30,37 @@ pub(crate) type ModuleId = usize;
 
 const KEYWORD_SOURCE: &str = include_str!("../stdlib/keyword.py");
 
+/// Mode constants and operations from the target's POSIX stat provider.
+fn stat_mode_source() -> Option<&'static str> {
+    macro_rules! modes {
+        ($platform:literal) => {
+            concat!(
+                include_str!($platform),
+                "\n",
+                include_str!("../stdlib/stat/common.py")
+            )
+        };
+    }
+    match std::env::consts::OS {
+        "linux" => Some(modes!("../stdlib/stat/linux.py")),
+        "macos" => Some(modes!("../stdlib/stat/darwin.py")),
+        _ => None,
+    }
+}
+
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "stat" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            let modes = stat_mode_source()?;
+            Some((
+                "stat.py",
+                SOURCE.get_or_init(|| {
+                    format!("{modes}\n{}", include_str!("../stdlib/stat/boxed.py"))
+                }),
+            ))
+        }
         "zipimport" if cfg!(unix) => Some((
             "zipimport.py",
             concat!(
@@ -3235,6 +3263,7 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "stat" => stat_mode_source().map(|source| ("stat.py", source)),
             "_imre_socketserver_reader" => Some((
                 "_imre_socketserver_reader.py",
                 include_str!("../stdlib/_socketserver_reader_typed.py"),
@@ -3311,20 +3340,6 @@ impl<'a> Loader<'a> {
             self.modules[id].bundled = true;
             self.scan(id)?;
             self.bind_child(name, id, parent)?;
-            return Ok(id);
-        }
-        if name == "stat" {
-            self.reject_stdlib_shadow(name)?;
-            let prefix = if cfg!(target_os = "macos") {
-                include_str!("../stdlib/stat/darwin.py")
-            } else {
-                include_str!("../stdlib/stat/linux.py")
-            };
-            let source = format!("{prefix}\n{}", include_str!("../stdlib/stat/common.py"));
-            let path = self.root.join("stat.py");
-            let id = self.add(path.clone(), path, name.into(), false, &source)?;
-            self.modules[id].bundled = true;
-            self.scan(id)?;
             return Ok(id);
         }
         if !self.allow_imports {

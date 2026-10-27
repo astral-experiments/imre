@@ -40,5 +40,7 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-linux.json" 
 
 Use the platform Clang on macOS. Static integer expressions and direct boolean
 arguments are supported. Calls through an explicitly typed integer callable
-retain its integer argument contract; user-defined `__index__` objects and
-runtime module introspection are outside the supported surface.
+retain its integer argument contract. Runtime-loaded modules use the same
+target-specific modes and accept objects implementing `__index__`. Their
+callable adapters preserve binding when stored on a class. Frozen-loader
+introspection is outside this surface.

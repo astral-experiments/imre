@@ -197,6 +197,18 @@ ACCEPTED = {
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
     },
+    "boxed_stat_shadow": {
+        "main.py": (
+            "import sys\nsys.path = sys.path\n"
+            "from importlib import import_module\n"
+            "loaded = import_module(''.join(['st', 'at']))\n"
+            "import stat\nfrom stat import S_IRWXU\nassert loaded is stat\n"
+            "print(loaded.S_ISDIR(loaded.S_IFDIR), S_IRWXU)\n"
+        ),
+        "stat.py": "invalid syntax in a shadow of frozen stat!\n",
+        "stat/__init__.py": "invalid shadow package!\n",
+        "stat/S_IRWXU.py": "invalid shadow member!\n",
+    },
     "zip_source_spec": {
         "main.py": (
             "import sys\nimport zipimport\nfrom importlib import import_module\n"
@@ -378,6 +390,8 @@ def main() -> None:
                 checks += 1
 
         for name, files in ACCEPTED.items():
+            if name == "boxed_stat_shadow" and sys.platform not in ("linux", "darwin"):
+                continue
             case = temporary / name
             write_files(case, files)
             if name == "zip_source_spec":
