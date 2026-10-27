@@ -13,10 +13,10 @@ fn spelling(ctx: &Context, value: Id) -> bool {
 
 /// Resolve the special method on the type, preserving str and bytes subclass identity.
 pub(super) fn fspath(ctx: &mut Context, path: Id) -> Result<Id> {
-    path_arg(ctx, path, false)
+    path_arg(ctx, path, "expected str, bytes or os.PathLike object")
 }
 
-fn path_arg(ctx: &mut Context, path: Id, stat: bool) -> Result<Id> {
+fn path_arg(ctx: &mut Context, path: Id, expected: &str) -> Result<Id> {
     if spelling(ctx, path) {
         return Ok(path);
     }
@@ -36,15 +36,32 @@ fn path_arg(ctx: &mut Context, path: Id, stat: bool) -> Result<Id> {
             ),
         ));
     }
-    let expected = if stat {
-        "stat: path should be string, bytes, os.PathLike or integer"
-    } else {
-        "expected str, bytes or os.PathLike object"
-    };
     Err(Error::new(
         "TypeError",
         format!("{expected}, not {}", ctx.type_name(path)),
     ))
+}
+
+/// Normalize the filesystem spelling lexically, preserving raw bytes and returning a base str or bytes.
+fn normpath(ctx: &mut Context, path: Id) -> Result<Id> {
+    let path = path_arg(
+        ctx,
+        path,
+        "_path_normpath: path should be string, bytes or os.PathLike",
+    )?;
+    let value = ctx.heap.get(ctx.scalar_value(path));
+    let bytes = match value {
+        Value::Str(text) => text.as_bytes(),
+        Value::Bytes(bytes) => bytes,
+        _ => unreachable!("filesystem spelling"),
+    };
+    let normalized = crate::objects::posixpath::normalize(bytes, None)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    let result = match value {
+        Value::Str(_) => Value::Str(String::from_utf8(normalized).expect("whole UTF-8 components")),
+        _ => Value::Bytes(normalized),
+    };
+    Ok(ctx.alloc(result))
 }
 
 fn isfile(ctx: &mut Context, path: Id) -> Result<bool> {
@@ -71,7 +88,11 @@ fn isfile(ctx: &mut Context, path: Id) -> Result<bool> {
                 && stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFREG
         });
     }
-    let value = path_arg(ctx, path, true)?;
+    let value = path_arg(
+        ctx,
+        path,
+        "stat: path should be string, bytes, os.PathLike or integer",
+    )?;
     let path = match ctx.heap.get(ctx.scalar_value(value)) {
         Value::Str(text) => Path::new(text),
         Value::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
@@ -86,22 +107,26 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "posix.fspath" {
+    if let Some(function) = name.strip_prefix("posix.") {
         let count = args.len() + kwargs.len();
         if count > 1 {
             let kind = if args.is_empty() { "keyword " } else { "" };
             return Err(Error::new(
                 "TypeError",
-                format!("fspath() takes at most 1 {kind}argument ({count} given)"),
+                format!("{function}() takes at most 1 {kind}argument ({count} given)"),
             ));
         }
         let path = super::option(args, 0, kwargs, "path")?.ok_or_else(|| {
             Error::new(
                 "TypeError",
-                "fspath() missing required argument 'path' (pos 1)",
+                format!("{function}() missing required argument 'path' (pos 1)"),
             )
         })?;
-        return fspath(ctx, path);
+        return match function {
+            "fspath" => fspath(ctx, path),
+            "_path_normpath" => normpath(ctx, path),
+            _ => unreachable!("registered POSIX path builtin"),
+        };
     }
     let [path] = args else {
         return Err(Error::new("TypeError", "expected one path argument"));

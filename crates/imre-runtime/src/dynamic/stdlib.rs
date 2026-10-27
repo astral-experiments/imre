@@ -426,6 +426,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
+        ("posixpath", "normpath") | ("posix", "_path_normpath") => {
+            ctx.builtin("posix._path_normpath")
+        }
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
@@ -690,7 +693,9 @@ pub(super) fn call(
     if let Some(op) = name.strip_prefix("_imre_zipimport.") {
         return zipimport::call(ctx, op, args, kwargs);
     }
-    if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
+    if matches!(name, "posix.fspath" | "posix._path_normpath")
+        || name.starts_with("_imre_posixpath.")
+    {
         return posixpath::call(ctx, name, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
