@@ -232,7 +232,15 @@ fn format_exception(
             i += same;
         }
     }
-    let name = ctx.type_name(value);
+    let qualname = match ctx.heap.get(value) {
+        Value::Raised(error) => error
+            .class
+            .and_then(|class| ctx.own_class_attr(class, "__qualname__")),
+        _ => None,
+    };
+    let name = qualname
+        .and_then(|name| ctx.str_value(name).ok())
+        .unwrap_or_else(|| ctx.type_name(value));
     let text = match ctx.heap.get(value) {
         Value::Raised(error) if error.kind == "KeyError" => match error.args.as_deref() {
             Some([key]) => ctx.repr(*key),
