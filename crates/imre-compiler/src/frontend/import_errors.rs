@@ -18,7 +18,7 @@ impl Checker<'_> {
             .iter()
             .find(|d| d.id == kind)
             .map_or(kind, |d| d.base);
-        matches!(base, 41 | 42)
+        matches!(base, 41 | 42 | 71)
     }
 
     pub(super) fn boxable_value(&self, ty: Type) -> bool {
@@ -62,6 +62,8 @@ impl Checker<'_> {
                 &self.graph.modules[def.module].name
             };
             format!("{module}.{}", decl.name)
+        } else if kind == 71 {
+            "importlib.metadata.PackageNotFoundError".to_owned()
         } else if kind == 42 {
             "ModuleNotFoundError".to_owned()
         } else {

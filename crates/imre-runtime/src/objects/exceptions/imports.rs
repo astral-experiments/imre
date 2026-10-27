@@ -22,6 +22,21 @@ pub(super) struct Import {
 }
 
 impl Import {
+    /// CPython's PackageNotFoundError.name unpacks the current positional arguments.
+    pub(super) fn package_name(&self) -> Result<(WordKind, usize)> {
+        match self.args.len() {
+            1 => Ok(self.args.item(0)),
+            0 => Err(Error::new(
+                Kind::ValueError,
+                "not enough values to unpack (expected 1, got 0)",
+            )),
+            n => Err(Error::new(
+                Kind::ValueError,
+                format!("too many values to unpack (expected 1, got {n})"),
+            )),
+        }
+    }
+
     pub(super) fn message(&self) -> Rendered {
         if self.msg.kind.raw() == 3 {
             word_text(self.msg.kind, self.msg.word, false)
@@ -251,6 +266,10 @@ pub unsafe extern "C" fn imre_import_error_field(err: *const Object, field: u32)
             let (kind, word) = match field {
                 0 => (e.args.0.kind, e.args.0.word),
                 1 => (e.msg.kind, e.msg.word),
+                2 if s.exception().kind == Kind::PackageNotFoundError => match e.package_name() {
+                    Ok(name) => name,
+                    Err(err) => return err.returning(std::ptr::null()),
+                },
                 2..=4 => {
                     let x = &e.fields[field as usize - 2];
                     (x.kind, x.word)
