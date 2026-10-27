@@ -1216,6 +1216,16 @@ impl Context {
                         format!("can't concat {} to bytes", self.type_name(b)),
                     ));
                 }
+                (Value::ByteArray(x), Value::Bytes(y) | Value::ByteArray(y)) => {
+                    let bytes = crate::objects::concat_bytes(x, y)?;
+                    return Ok(self.alloc(Value::ByteArray(bytes)));
+                }
+                (Value::ByteArray(_), _) => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("can't concat {} to bytearray", self.type_name(b)),
+                    ));
+                }
                 (Value::List(x), Value::List(y)) => {
                     return Ok(self.alloc(Value::List([x.as_slice(), y.as_slice()].concat())));
                 }
@@ -1490,12 +1500,27 @@ impl Context {
         {
             return Ok(result);
         }
-        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
-            let extra = self.items(b)?;
-            let Value::List(values) = self.heap.get_mut(a) else {
+        if op == "+"
+            && let Value::ByteArray(left) = self.heap.get(a)
+            && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
+        {
+            if right.is_empty() {
+                return Ok(a);
+            }
+            // Reading the right-hand buffer exports it during the resize.
+            if a == b {
+                return Err(Self::exported_bytearray_error());
+            }
+            self.check_bytearray_resize(a)?;
+            let bytes = crate::objects::concat_bytes(left, right)?;
+            let Value::ByteArray(left) = self.heap.get_mut(a) else {
                 unreachable!()
             };
-            values.extend(extra);
+            *left = bytes;
+            return Ok(a);
+        }
+        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
+            builtins::call(self, "list.extend", &[a, b], &[])?;
             return Ok(a);
         }
         if op == "*"

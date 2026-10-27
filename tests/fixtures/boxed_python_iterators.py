@@ -78,6 +78,12 @@ def current():
         target.extend(12 // value for value in (3, 2, 0))
     except ZeroDivisionError:
         print(alias)
+    try:
+        target += (12 // value for value in (3, 2, 0))
+    except ZeroDivisionError:
+        print(target is alias, alias)
+    else:
+        raise AssertionError("lost in-place iterator exception")
     target.extend(alias)
     print(alias)
 
