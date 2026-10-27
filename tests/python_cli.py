@@ -445,6 +445,7 @@ def report(text):
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_re_split.py",
+            "boxed_re_findall_empty.py",
             "boxed_datetime.py",
             "boxed_email_dates.py",
             "boxed_time.py",
