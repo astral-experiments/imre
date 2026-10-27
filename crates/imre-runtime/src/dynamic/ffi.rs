@@ -580,14 +580,17 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .map(crate::Int::new)
             .map(Value::Int)
             .ok_or_else(|| Error::new("ValueError", "invalid integer literal")),
-        1 | 5 => {
+        1 | 5 | 6 => {
             let id = std::str::from_utf8(data)
                 .map(|text| {
                     if kind == 1 {
                         return ctx.heap.string_literal(text);
                     }
+                    if kind == 6 {
+                        return ctx.heap.code_name(text);
+                    }
                     for name in text.split('\0') {
-                        ctx.heap.string_literal(name);
+                        ctx.heap.code_name(name);
                     }
                     NONE
                 })

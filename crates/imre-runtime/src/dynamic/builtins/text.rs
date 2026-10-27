@@ -29,7 +29,12 @@ fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     Ok(())
 }
 
-fn decode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<String> {
+fn decode(
+    ctx: &mut Context,
+    id: Id,
+    encoding_id: Option<Id>,
+    errors: Option<Id>,
+) -> Result<String> {
     let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(id)) else {
         return Err(type_error("decoding requires bytes"));
     };
@@ -55,7 +60,9 @@ fn decode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) ->
             });
     }
     strict(ctx, errors)?;
-    Ok(codec.decode(bytes, None)?)
+    codec
+        .decode(bytes, None)
+        .map_err(|err| ctx.decode_error(err))
 }
 
 fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {

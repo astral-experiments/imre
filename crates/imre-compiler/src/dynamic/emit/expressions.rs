@@ -228,7 +228,7 @@ impl Function<'_, '_> {
         for key in &syntax.keywords {
             let value = self.expr(&key.value);
             if let Some(name) = &key.arg {
-                let name = self.text(name.as_str());
+                let name = self.code_name(name.as_str());
                 self.op("keyword", &[&kwargs, &name, &value]);
             } else {
                 self.op("keywords", &[&kwargs, &value]);

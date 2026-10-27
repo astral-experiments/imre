@@ -27,6 +27,20 @@ def current():
     del aliases
     assert intern(second) is second and sys._is_interned(second)
 
+    λglobal = 0
+    literal = "λglobal"
+    assert not sys._is_interned(literal)
+
+    def unused(πunused, *, φkeyword=None, **δextras):
+        return λglobal.ηattribute
+
+    for prefix, suffix in (("λ", "global"), ("π", "unused"), ("φ", "keyword"),
+                           ("δ", "extras"), ("η", "attribute")):
+        fresh = "".join((prefix, suffix))
+        assert intern(fresh) is not fresh
+    fresh = "".join(("ψ", "literal"))
+    assert not sys._is_interned("ψliteral") and intern(fresh) is fresh
+
     class Name(str):
         def __hash__(self):
             raise AssertionError("called subclass __hash__")

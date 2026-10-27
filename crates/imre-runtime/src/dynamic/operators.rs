@@ -720,6 +720,29 @@ impl Context {
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
+    pub(super) fn decode_message(&self, state: &super::value::DecodeState) -> Result<String> {
+        let Value::Bytes(data) = self.heap.get(state.object) else {
+            return Err(Error::new(
+                "TypeError",
+                "UnicodeError 'object' attribute must be a bytes",
+            ));
+        };
+        let start = state.start;
+        let location = if let Ok(index) = usize::try_from(start)
+            && let Some(byte) = data.get(index)
+            && state.end.checked_sub(1) == Some(start)
+        {
+            format!("byte 0x{byte:02x} in position {start}")
+        } else {
+            format!("bytes in position {start}-{}", state.end.wrapping_sub(1))
+        };
+        Ok(format!(
+            "'{}' codec can't decode {location}: {}",
+            self.display(state.encoding),
+            self.display(state.reason)
+        ))
+    }
+
     pub(super) fn repr(&self, id: Id) -> String {
         Self::render_containers(self, RenderRoot::Object(id), true, false, |_, _, _, _| {
             Ok(None)
@@ -788,11 +811,24 @@ impl Context {
         })
     }
 
+    /// Resolve repr on heap instances and exceptions that retain their Python class.
+    fn repr_slot(&self, id: Id) -> Option<(Id, Id)> {
+        let class = match self.heap.get(id) {
+            Value::Instance { class, .. }
+            | Value::Raised(Error {
+                class: Some(class), ..
+            }) => *class,
+            _ => return None,
+        };
+        self.class_attr(class, "__repr__").map(|slot| (class, slot))
+    }
+
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
-        let Some(hook) = self.bound_slot(id, "__repr__")? else {
+        let Some((class, slot)) = self.repr_slot(id) else {
             return Ok(None);
         };
+        let hook = self.bind_attribute(slot, id, class)?;
         let result = self.call(hook, Vec::new(), Vec::new())?;
         if self.str_value(result).is_err() {
             return Err(Error::new(
@@ -813,10 +849,7 @@ impl Context {
         work: &mut [FormatPart],
         ancestors: &[Id],
     ) -> Result<Option<String>> {
-        let Value::Instance { class, .. } = self.heap.get(id) else {
-            return Ok(None);
-        };
-        if self.class_attr(*class, "__repr__").is_none() {
+        if self.repr_slot(id).is_none() {
             return Ok(None);
         }
         let mark = self.heap.temporary_mark();
@@ -855,6 +888,10 @@ impl Context {
                 && let Value::Str(text) = self.heap.get(message)
             {
                 output.push_str(text);
+                output.extend(std::iter::repeat_n(')', closing));
+                break;
+            } else if let Some(state) = &error.decode {
+                output.push_str(&self.decode_message(state)?);
                 output.extend(std::iter::repeat_n(')', closing));
                 break;
             } else if let Some(super::os_error::Args::Python(fields)) = error.os_args.as_deref()
@@ -1579,6 +1616,9 @@ impl Context {
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        if matches!(self.heap.get(obj), Value::Deque(_)) {
+            return deque::IndexOp::Get.apply(self, obj, key, false);
+        }
         if let Some(value) = super::union::subscribe(self, obj, key) {
             return value;
         }
@@ -1724,6 +1764,11 @@ impl Context {
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        if matches!(self.heap.get(obj), Value::Deque(_)) {
+            return deque::IndexOp::Set(val)
+                .apply(self, obj, key, false)
+                .map(|_| ());
+        }
         if matches!(
             self.heap.get(obj),
             Value::Dict(_) | Value::DefaultDict { .. }
@@ -2470,6 +2515,11 @@ impl Context {
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        if matches!(self.heap.get(obj), Value::Deque(_)) {
+            return deque::IndexOp::Delete
+                .apply(self, obj, key, false)
+                .map(|_| ());
+        }
         if let Some(method) = self.bound_slot(obj, "__delitem__")? {
             self.call(method, vec![key], vec![])?;
             return Ok(());
