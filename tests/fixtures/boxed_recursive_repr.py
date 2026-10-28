@@ -145,3 +145,17 @@ def defaultdict_allocation():
     else:
         print("value", len(text), len(visits))
     print("retry", len(repr(value)), len(visits))
+
+
+def integer_allocation(wide):
+    value = -((1 << 4097) - 37) if wide else 23
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        text = str(value)
+    except MemoryError as error:
+        print("caught", error.args)
+    else:
+        print("value", len(text), text[:5], text[-5:])
+    text = str(value)
+    print("retry", len(text), text[:5], text[-5:])
