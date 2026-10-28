@@ -1,6 +1,6 @@
 //! Runtime type parameters and class-base aliases used by imported Python modules.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
@@ -132,14 +132,15 @@ pub(super) struct Alias {
 
 #[derive(Default)]
 pub(super) struct Registry {
-    aliases: VecDeque<Id>,
+    alias_caches: [Option<Id>; 2],
     overloads: HashMap<(String, String), Vec<(u32, Id)>>,
 }
 
 impl Registry {
     pub(super) fn roots(&self) -> impl Iterator<Item = &Id> {
-        self.aliases
+        self.alias_caches
             .iter()
+            .flatten()
             .chain(self.overloads.values().flatten().map(|(_, value)| value))
     }
 }
@@ -197,37 +198,30 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
     vars
 }
 
-fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Id {
-    if kind.is_typing_alias()
-        && let Some(pos) = ctx.typing.aliases.iter().position(|&id| {
-            let Value::GenericAlias(alias) = ctx.heap.get(id) else {
-                unreachable!()
-            };
-            let Value::Tuple(previous) = ctx.heap.get(alias.args) else {
-                unreachable!()
-            };
-            alias.kind == kind
-                && alias.origin == origin
-                && previous.len() == args.len()
-                && previous
-                    .iter()
-                    .zip(&args)
-                    .all(|(&left, &right)| ctx.equal(left, right))
-        })
-    {
-        let id = ctx.typing.aliases.remove(pos).unwrap();
-        ctx.typing.aliases.push_back(id);
-        return id;
-    }
+/// Typing retries the constructor without caching when building or comparing its key raises TypeError.
+fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Result<Id> {
     let args = ctx.alloc(Value::Tuple(args));
-    let value = allocate_alias(ctx, kind, origin, args);
-    if kind.is_typing_alias() {
-        if ctx.typing.aliases.len() == 128 {
-            ctx.typing.aliases.pop_front();
+    let (index, constructor) = match kind {
+        AliasKind::Generic => (0, "typing._GenericAlias"),
+        AliasKind::Callable => (1, "typing._CallableGenericAlias"),
+        _ => return Ok(allocate_alias(ctx, kind, origin, args)),
+    };
+    let cached = if let Some(id) = ctx.typing.alias_caches[index] {
+        id
+    } else {
+        let function = ctx.builtin(constructor);
+        let cache = ctx.cached_function(function);
+        ctx.typing.alias_caches[index] = Some(cache);
+        cache
+    };
+    let result = ctx.call(cached, vec![origin, args], Vec::new());
+    if let Err(error) = &result {
+        let type_error = ctx.builtin("TypeError");
+        if ctx.raised_error_matches(error, type_error) {
+            return Ok(allocate_alias(ctx, kind, origin, args));
         }
-        ctx.typing.aliases.push_back(value);
     }
-    value
+    result
 }
 
 fn allocate_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Id) -> Id {
@@ -464,9 +458,9 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                 }
             };
             let origin = named_class(ctx, "collections.abc", "Callable");
-            return Ok(alias(ctx, kind, origin, actual));
+            return alias(ctx, kind, origin, actual);
         }
-        Ok(alias(ctx, kind, target, args))
+        alias(ctx, kind, target, args)
     })())
 }
 
@@ -866,12 +860,18 @@ pub(super) fn call(
     }
     match (operation, args) {
         ("Any", _) => Err(Error::new("TypeError", "Any cannot be instantiated")),
-        ("_GenericAlias", [origin, parameters]) => {
-            let args = match ctx.heap.get(*parameters) {
-                Value::Tuple(items) => items.clone(),
-                _ => vec![*parameters],
+        ("_GenericAlias" | "_CallableGenericAlias", [origin, parameters]) => {
+            let args = if matches!(ctx.heap.get(*parameters), Value::Tuple(_)) {
+                *parameters
+            } else {
+                ctx.alloc(Value::Tuple(vec![*parameters]))
             };
-            Ok(alias(ctx, AliasKind::Generic, *origin, args))
+            let kind = if operation == "_CallableGenericAlias" {
+                AliasKind::Callable
+            } else {
+                AliasKind::Generic
+            };
+            Ok(allocate_alias(ctx, kind, *origin, args))
         }
         ("_LiteralGenericAlias", [origin, parameters]) => literal_alias(ctx, *origin, *parameters),
         ("_LiteralGenericAlias" | "_GenericAlias", _) => Err(Error::new(
