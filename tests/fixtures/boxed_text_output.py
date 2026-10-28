@@ -18,6 +18,9 @@ def exercise(path):
                 assert not saved[0].closed
                 saved[0].close()
 
+    with open(path, "rb") as reader:
+        assert ({0: buffered()}.clear(), reader.read()) == (None, b"loop")
+
     def observe_loop_exit(reader, saved, stop_early):
         for value in [None, buffered(saved)]:
             if value is None:
