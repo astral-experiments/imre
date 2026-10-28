@@ -258,6 +258,20 @@ def exercise(path):
         assert not stream.closed and (code, seen) == (7, b"")
         stream.close()
 
+    class WriterCheck:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __call__(self):
+            return self.stream.closed
+
+    with open(path, "rb") as reader:
+        assert (WriterCheck(buffered())(), reader.read()) == (False, b"loop")
+    with open(path, "rb") as reader:
+        saved = WriterCheck(buffered())
+        assert (saved(), reader.read()) == (False, b"")
+        saved.stream.close()
+
     def read_after(predicate, value, reader):
         yield predicate(truth_values(value)), reader.read()
 

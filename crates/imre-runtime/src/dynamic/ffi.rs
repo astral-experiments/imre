@@ -1228,7 +1228,7 @@ impl Context {
         self.finish_call_operands(mark, NONE);
     }
 
-    /// A temporary argument or bound receiver can own a writer only until its call returns.
+    /// A temporary argument, callable instance or bound receiver can own a writer until the call returns.
     pub(super) fn call_operands_own_writer(
         &self,
         function: Id,
@@ -1240,8 +1240,11 @@ impl Context {
                 .iter()
                 .chain(kwargs.iter().map(|(_, value)| value))
                 .any(|&value| self.heap.could_own_writer(value, true))
-                || matches!(self.heap.get(function), Value::Method { receiver, .. }
-                    if self.heap.could_own_writer(*receiver, true)))
+                || match self.heap.get(function) {
+                    Value::Method { receiver, .. } => self.heap.could_own_writer(*receiver, true),
+                    Value::Instance { .. } => self.heap.could_own_writer(function, true),
+                    _ => false,
+                })
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
