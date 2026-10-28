@@ -67,7 +67,7 @@ pub(crate) use logging::record::{brace_integer_field, percent_float_field, perce
 mod mappings;
 mod module_specs;
 mod namespaces;
-mod os;
+pub(crate) mod os;
 pub(crate) use os::os_separator;
 mod patchset;
 mod paths;

@@ -76,3 +76,91 @@ pub(super) fn change_environment(
     }
     Ok(NONE)
 }
+
+/// POSIX functions exported as the same builtins by both os and posix.
+pub(super) fn is_descriptor_function(name: &str) -> bool {
+    matches!(
+        name,
+        "pipe" | "close" | "get_blocking" | "set_blocking" | "get_inheritable" | "set_inheritable"
+    )
+}
+
+/// Convert an index argument before issuing the descriptor syscall.
+fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
+    ctx.index_integer(value)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+/// Run the shared descriptor operation after binding its Python arguments.
+pub(super) fn descriptor(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    use crate::objects::os as native;
+
+    if name == "close" {
+        let [Some(fd)] = super::builtins::bind_builtin_arguments("close", args, kwargs, ["fd"], 1)?
+        else {
+            unreachable!("fd is required")
+        };
+        native::close(c_int(ctx, fd)?)?;
+        return Ok(NONE);
+    }
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("posix.{name}() takes no keyword arguments"),
+        ));
+    }
+    if name == "pipe" {
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix.pipe() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        let mut result = Vec::new();
+        result
+            .try_reserve_exact(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for fd in native::pipe(libc::O_CLOEXEC)? {
+            result.push(ctx.int(i64::from(fd)));
+        }
+        return Ok(ctx.alloc(Value::Tuple(result)));
+    }
+    let flag = match name {
+        "get_blocking" | "set_blocking" => &native::BLOCKING,
+        "get_inheritable" | "set_inheritable" => &native::INHERITABLE,
+        _ => unreachable!(),
+    };
+    if name.starts_with("get_") {
+        let [fd] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.{name}() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        return Ok(super::builtins::boolean(flag.enabled(c_int(ctx, *fd)?)?));
+    }
+    let [fd, value] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name} expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let fd = c_int(ctx, *fd)?;
+    let enabled = if name == "set_blocking" {
+        ctx.truth(*value)?
+    } else {
+        c_int(ctx, *value)? != 0
+    };
+    flag.update(fd, enabled)?;
+    Ok(NONE)
+}

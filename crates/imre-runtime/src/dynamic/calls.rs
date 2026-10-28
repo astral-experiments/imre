@@ -791,12 +791,9 @@ impl Context {
                     || builtins::constructor_owner(name).is_some()
                     || matches!(
                         name.as_str(),
-                        "binascii.a2b_base64"
-                            | "binascii.b2a_base64"
-                            | "posix.fspath"
-                            | "posix._path_normpath"
-                            | "zlib.adler32"
+                        "binascii.a2b_base64" | "binascii.b2a_base64" | "zlib.adler32"
                     )
+                    || name.starts_with("posix.")
                     || name.starts_with("_weakref.")
                 {
                     "builtin_function_or_method"
@@ -1416,12 +1413,7 @@ impl Context {
                     return Ok(attribute);
                 }
             }
-            Value::Native(symbol)
-                if matches!(
-                    symbol.as_str(),
-                    "posix.fspath" | "posix._path_normpath" | "zlib.adler32"
-                ) =>
-            {
+            Value::Native(symbol) if symbol.starts_with("posix.") || symbol == "zlib.adler32" => {
                 let (module, function) = symbol.split_once('.').unwrap();
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function)),

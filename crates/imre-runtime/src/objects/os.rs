@@ -283,13 +283,13 @@ pub unsafe extern "C" fn imre_os_lseek(fd: usize, position: usize, whence: usize
 /// Close exactly once: retrying an interrupted close can close a reused fd.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_close(fd: usize) {
-    finish(
-        c_int(fd).and_then(|fd| {
-            // SAFETY: close accepts any descriptor number, including an invalid one.
-            checked(unsafe { libc::close(fd) }).map(|_| ())
-        }),
-        (),
-    );
+    finish(c_int(fd).and_then(close), ());
+}
+
+/// Close the descriptor once, including when the kernel reports an interrupt.
+pub(crate) fn close(fd: i32) -> Result<()> {
+    // SAFETY: close accepts any descriptor number, including an invalid one.
+    checked(unsafe { libc::close(fd) }).map(|_| ())
 }
 
 /// Duplicate the open file description with close-on-exec already set.
@@ -370,6 +370,19 @@ pub unsafe extern "C" fn imre_os_pipe2(out: *mut usize, flags: usize) {
 
 /// Initialize the caller's two tuple slots only after establishing the requested flags.
 unsafe fn make_pipe(out: *mut usize, flags: libc::c_int) -> Result<()> {
+    let fds = pipe(flags)?;
+    for (index, fd) in fds.into_iter().enumerate() {
+        // SAFETY: each initialized slot takes one immediate integer.
+        unsafe {
+            out.add(index)
+                .write(Int::from_usize(fd as usize).into_raw())
+        };
+    }
+    Ok(())
+}
+
+/// Return both descriptors after establishing the requested flags on each end.
+pub(crate) fn pipe(flags: libc::c_int) -> Result<[i32; 2]> {
     let mut fds = [-1; 2];
     // SAFETY: both pipe variants initialize the two writable int slots.
     let result = unsafe {
@@ -394,14 +407,7 @@ unsafe fn make_pipe(out: *mut usize, flags: libc::c_int) -> Result<()> {
         }
         return Err(error);
     }
-    for (index, fd) in fds.into_iter().enumerate() {
-        // SAFETY: each initialized slot takes one immediate integer.
-        unsafe {
-            out.add(index)
-                .write(Int::from_usize(fd as usize).into_raw())
-        };
-    }
-    Ok(())
+    Ok(fds)
 }
 
 #[unsafe(no_mangle)]
@@ -415,17 +421,17 @@ pub extern "C" fn imre_os_isatty(fd: usize) -> i32 {
     )
 }
 
-struct Flag {
+pub(crate) struct Flag {
     get: i32,
     set: i32,
     mask: i32,
 }
-const BLOCKING: Flag = Flag {
+pub(crate) const BLOCKING: Flag = Flag {
     get: libc::F_GETFL,
     set: libc::F_SETFL,
     mask: libc::O_NONBLOCK,
 };
-const INHERITABLE: Flag = Flag {
+pub(crate) const INHERITABLE: Flag = Flag {
     get: libc::F_GETFD,
     set: libc::F_SETFD,
     mask: libc::FD_CLOEXEC,
@@ -437,13 +443,13 @@ impl Flag {
         checked(unsafe { libc::fcntl(fd, self.get) })
     }
 
-    fn enabled(&self, fd: usize) -> Result<i32> {
-        Ok(i32::from(self.get(c_int(fd)?)? & self.mask == 0))
+    /// Read the Python-facing flag, which is the inverse of its kernel mask.
+    pub(crate) fn enabled(&self, fd: i32) -> Result<bool> {
+        Ok(self.get(fd)? & self.mask == 0)
     }
 
-    fn update(&self, fd: usize, enabled: usize) -> Result<()> {
-        let fd = c_int(fd)?;
-        let enabled = c_int(enabled)? != 0;
+    /// Change only this flag, preserving all unrelated descriptor or status flags.
+    pub(crate) fn update(&self, fd: i32, enabled: bool) -> Result<()> {
         let old = self.get(fd)?;
         let new = if enabled {
             old & !self.mask
@@ -461,20 +467,34 @@ impl Flag {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_get_blocking(fd: usize) -> i32 {
-    finish(BLOCKING.enabled(fd), 0)
+    finish(
+        c_int(fd).and_then(|fd| BLOCKING.enabled(fd)).map(i32::from),
+        0,
+    )
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_set_blocking(fd: usize, value: usize) {
-    finish(BLOCKING.update(fd, value), ());
+    finish(
+        c_int(fd).and_then(|fd| BLOCKING.update(fd, c_int(value)? != 0)),
+        (),
+    );
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_get_inheritable(fd: usize) -> i32 {
-    finish(INHERITABLE.enabled(fd), 0)
+    finish(
+        c_int(fd)
+            .and_then(|fd| INHERITABLE.enabled(fd))
+            .map(i32::from),
+        0,
+    )
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_set_inheritable(fd: usize, value: usize) {
-    finish(INHERITABLE.update(fd, value), ());
+    finish(
+        c_int(fd).and_then(|fd| INHERITABLE.update(fd, c_int(value)? != 0)),
+        (),
+    );
 }

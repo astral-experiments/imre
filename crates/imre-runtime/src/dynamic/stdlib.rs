@@ -471,6 +471,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
+        ("os" | "posix", name) if os::is_descriptor_function(name) => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
             ctx.builtin("posix._path_normpath")
         }
@@ -919,6 +922,11 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
+    }
+    if let Some(op) = name.strip_prefix("posix.")
+        && os::is_descriptor_function(op)
+    {
+        return os::descriptor(ctx, op, args, kwargs);
     }
     if matches!(name, "posix.putenv" | "posix.unsetenv") {
         return os::change_environment(ctx, name, args, kwargs);

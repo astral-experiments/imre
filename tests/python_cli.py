@@ -724,6 +724,7 @@ def report(text):
             "boxed_time.py",
             "boxed_codecs.py",
             "boxed_selector_wide_fds.py",
+            "boxed_pipe_flags.py",
             "boxed_urlsplit.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
