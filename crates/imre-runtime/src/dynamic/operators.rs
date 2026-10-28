@@ -980,6 +980,30 @@ impl Context {
         self.class_attr(class, name).map(|slot| (class, slot))
     }
 
+    /// Resolve inherited builtin container repr slots that can share the active worklist.
+    fn native_repr_storage(&self, object: Id) -> Option<(Id, bool)> {
+        let (_, slot) = self.format_slot(object, "__repr__")?;
+        let Value::Native(name) = self.heap.get(slot) else {
+            return None;
+        };
+        match name.as_str() {
+            "dict.__repr__" => self.dict_storage(object).map(|storage| (storage, false)),
+            "collections.defaultdict.__repr__" => self
+                .dict_storage(object)
+                .filter(|&storage| matches!(self.heap.get(storage), Value::DefaultDict { .. }))
+                .map(|storage| (storage, true)),
+            "list.__repr__" | "tuple.__repr__" => {
+                let storage = self.scalar_value(object);
+                matches!(
+                    (name.as_str(), self.heap.get(storage)),
+                    ("list.__repr__", Value::List(_)) | ("tuple.__repr__", Value::Tuple(_))
+                )
+                .then_some((storage, false))
+            }
+            _ => None,
+        }
+    }
+
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
         let Some((class, slot)) = self.format_slot(id, "__repr__") else {
@@ -1452,27 +1476,20 @@ impl Context {
                 }
                 Part::Suffix(suffix) => append_rendered_text(&mut output, &suffix)?,
                 Part::Value(id, repr) => {
-                    // An inherited native slot can share this worklist with its parent.
-                    let default_storage = if checked
-                        && repr
-                        && let Some((_, slot)) = ctx.format_slot(id, "__repr__")
-                        && ctx.builtins.get("collections.defaultdict.__repr__") == Some(&slot)
-                    {
-                        ctx.dict_storage(id).filter(|&storage| {
-                            matches!(ctx.heap.get(storage), Value::DefaultDict { .. })
-                        })
+                    let native_storage = if checked && repr {
+                        ctx.native_repr_storage(id)
                     } else {
                         None
                     };
                     if checked
                         && repr
-                        && default_storage.is_none()
+                        && native_storage.is_none()
                         && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
                     {
                         append_rendered_text(&mut output, &text)?;
                         continue;
                     }
-                    let storage = default_storage.unwrap_or(id);
+                    let (storage, with_factory) = native_storage.unwrap_or((id, true));
                     match ctx.heap.get(storage) {
                         Value::Union(union) => {
                             type_words += 24;
@@ -1695,12 +1712,12 @@ impl Context {
                             append_rendered_text(&mut output, &text)?;
                             continue;
                         }
-                        Value::List(_) => ("[", "]", "[...]", Part::Sequence(id, 0)),
+                        Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                         Value::Tuple(items) => (
                             "(",
                             if items.len() == 1 { ",)" } else { ")" },
                             "(...)",
-                            Part::Sequence(id, 0),
+                            Part::Sequence(storage, 0),
                         ),
                         Value::TupleGetterDoc => {
                             append_rendered_text(&mut output, super::namedtuple::DOC_REPR)?;
@@ -1741,9 +1758,11 @@ impl Context {
                                 Part::Value(argument, true),
                             )
                         }
-                        Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
+                        Value::Dict(_) => ("{", "}", "{...}", Part::Entries(storage, 0, true)),
                         Value::DefaultDict { .. } => {
-                            push_frame(&mut work, Part::DefaultDictFactory(id, output.len()))?;
+                            if with_factory {
+                                push_frame(&mut work, Part::DefaultDictFactory(id, output.len()))?;
+                            }
                             ("{", "}", "{...}", Part::Entries(storage, 0, true))
                         }
                         Value::Set { entries, frozen } => {
@@ -1777,7 +1796,7 @@ impl Context {
                         append_rendered_text(&mut output, placeholder)?;
                         continue;
                     }
-                    if matches!(ctx.heap.get(id), Value::List(_) | Value::Tuple(_))
+                    if matches!(ctx.heap.get(storage), Value::List(_) | Value::Tuple(_))
                         && sequence_budget.is_some_and(|limit| active.len() >= limit)
                     {
                         return Err(Error::new(
