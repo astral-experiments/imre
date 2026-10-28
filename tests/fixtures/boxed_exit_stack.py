@@ -1,7 +1,12 @@
-from contextlib import AbstractContextManager, ExitStack
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 from types import MethodType
 
 events = []
+
+with nullcontext(enter_result=events) as value:
+    assert value is events
+with nullcontext() as value:
+    assert value is None
 
 
 class Exit:
