@@ -1000,7 +1000,7 @@ impl Context {
 
     /// Freeze the declared field names or inherit the first named-tuple layout in the MRO.
     fn namedtuple_layout(
-        &self,
+        &mut self,
         bases: &[Id],
         ancestors: &[Id],
         scope: Id,
@@ -1010,12 +1010,12 @@ impl Context {
         }) {
             let annotations = self.scope_data(scope).names.get("__annotations__")?;
             let fields = self.dict_entries(*annotations)?;
-            return Some(
-                fields
-                    .iter()
-                    .filter_map(|&(key, _)| self.str_value(key).ok().map(str::to_owned))
-                    .collect(),
-            );
+            let named_fields: std::rc::Rc<[String]> = fields
+                .iter()
+                .filter_map(|&(key, _)| self.str_value(key).ok().map(str::to_owned))
+                .collect();
+            super::namedtuple::bind_fields(self, scope, &named_fields);
+            return Some(named_fields);
         }
         ancestors
             .iter()
@@ -1075,7 +1075,13 @@ impl Context {
             if let Value::Native(name) = self.heap.get(base)
                 && matches!(
                     name.as_str(),
-                    "typing.TypeVar" | "slice" | "NoneType" | "NotImplementedType" | "ellipsis"
+                    "typing.TypeVar"
+                        | "slice"
+                        | "NoneType"
+                        | "NotImplementedType"
+                        | "ellipsis"
+                        | super::namedtuple::GETTER
+                        | "member_descriptor"
                 )
             {
                 return Err(Error::new(

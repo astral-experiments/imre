@@ -31,6 +31,23 @@ def layout_read_allocation():
 
 
 def current():
+    Fields = namedtuple("Fields", "left right")
+    getter = Fields.right
+    assert getter.__get__((2, 3), tuple) == 3
+    assert getter.__get__(Fields(4, 5)) == 5
+
+    class Shadow(Fields):
+        left = "shadow"
+
+    shadow = Shadow(3, 4)
+    assert shadow.left == "shadow"
+    shadow.left = 8
+    assert shadow.left == 8 and Fields.left.__get__(shadow) == 3
+
+    getter.__doc__ = "right coordinate"
+    assert repr(getter) == "_tuplegetter(1, 'right coordinate')"
+    assert type(getter).__doc__.__get__(getter) == "right coordinate"
+
     Match = namedtuple("Match", "a b size")
     blocks = [(0, 0, 5), (6, 5, 0)]
     longest = Match(0, 0, 5)

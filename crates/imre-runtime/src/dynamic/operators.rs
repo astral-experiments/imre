@@ -1640,6 +1640,32 @@ impl Context {
                             "(...)",
                             Part::Sequence(id, 0),
                         ),
+                        Value::TupleGetterDoc => {
+                            append_rendered_text(&mut output, super::namedtuple::DOC_REPR)?;
+                            continue;
+                        }
+                        Value::TupleGetter { index, doc } => {
+                            use std::fmt::Write;
+                            if !enter_ancestor(&mut ancestors, id)? {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            push_frame(&mut active, id)?;
+                            output
+                                .try_reserve("_tuplegetter(-9223372036854775808, ".len())
+                                .map_err(render_allocation)?;
+                            write!(&mut output, "_tuplegetter({index}, ")
+                                .expect("the signed field position fits the reserved space");
+                            push_frame(&mut work, Part::Leave(id, ")"))?;
+                            if let Some(doc) = doc {
+                                push_frame(&mut work, Part::Value(*doc, true))?;
+                            } else {
+                                append_rendered_text(&mut output, "<NULL>")?;
+                            }
+                            continue;
+                        }
                         Value::ItemGetter(keys) => {
                             // Multi-key getters expose this same tuple through __reduce__.
                             let (argument, start, end) = match *ctx.itemgetter_keys(*keys) {
