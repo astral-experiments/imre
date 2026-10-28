@@ -118,21 +118,11 @@ fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]
         unreachable!()
     };
     ring.maxlen = maxlen;
-    clear(ctx, queue);
+    builtins::clear_container(ctx, queue);
     if let Some(source) = iterable {
         extend(ctx, queue, source, false)?;
     }
     Ok(())
-}
-
-/// Remove the ring's traced edges after detaching all its items.
-fn clear(ctx: &mut Context, queue: Id) {
-    let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
-        unreachable!()
-    };
-    for item in ring.take_items() {
-        ctx.heap.weak_edge_removed(item);
-    }
 }
 
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
@@ -513,7 +503,7 @@ pub(super) fn method(
     }
     match name {
         "clear" => {
-            clear(ctx, receiver);
+            builtins::clear_container(ctx, receiver);
             Ok(NONE)
         }
         "copy" | "__copy__" => {

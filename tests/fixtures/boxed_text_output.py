@@ -6,6 +6,21 @@ def exercise(path):
             saved.append(stream)
         return stream
 
+    from collections import deque
+
+    for make in (list, dict.fromkeys, deque):
+        for keep in (False, True):
+            saved = []
+            values = make([buffered(saved if keep else None)])
+            with open(path, "rb") as reader:
+                assert (values.clear(), reader.read()) == (None, b"" if keep else b"loop")
+            if saved:
+                assert not saved[0].closed
+                saved[0].close()
+
+    with open(path, "rb") as reader:
+        assert ({0: buffered()}.clear(), reader.read()) == (None, b"loop")
+
     def observe_loop_exit(reader, saved, stop_early):
         for value in [None, buffered(saved)]:
             if value is None:
