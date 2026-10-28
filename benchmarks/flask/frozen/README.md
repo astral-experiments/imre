@@ -24,6 +24,15 @@ Run `python3.14 benchmarks/flask/frozen/run.py --five-servers` to include stock 
 
 ## What runs
 
+The fork exposes a demo-local Python package. Application registration and typed views use these imports.
+
+```python
+from imre.flask import Flask, export_application
+from imre.flask.views import AppState, Request, Response
+```
+
+The runner stages [the package](overlay/imre/flask) in its work directory alongside Imre's Python helpers. A normal Imre installation does not include it. Registration uses the patched Flask class, and compiled handlers use the fork's concrete request and response types.
+
 The benchmark applies [modifications to existing package sources](upstream.patch) to the verified wheels, adds the [fork modules](overlay), and checks the resulting file digests. At registration, a real Flask application registers its views, Werkzeug binds the rules, and Jinja parses the template. The exporter builds a direct-call dispatch function from the registered views, method table and template program. The static server calls MarkupSafe's five-character escaping implementation and uses a frozen itsdangerous-compatible HMAC timestamp signer. The generated source graph for the recorded mixed benchmark is [pinned by hash](mixed-graph.json). The [application](examples/freeze_mixed.py) and [ordinary Python views](examples/mixed_views.py) remain small.
 
 The published mixed workload cycles through three health requests, three HTML greetings with escaping, UTF-8 and repeated query arguments, and three JSON requests containing signed integers up to 160 bits. Separate admissions check error handling, signed-cookie issuance, replay and tampering. A second [catalog application](examples/freeze_catalog.py) exercises different routes, template slots, state and methods, and reads and updates cookies issued by stock Flask. Admission checks that the traced native process owns both listening and accepted sockets and that it maps no libpython.

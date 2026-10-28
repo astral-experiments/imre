@@ -1,6 +1,5 @@
 import sys
-from flask import Flask
-from flask.frozen.export import export_application
+from imre.flask import Flask, export_application
 import mixed_views
 
 app = Flask("mixed", static_folder=None)

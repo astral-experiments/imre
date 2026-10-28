@@ -1,5 +1,4 @@
-from flask.frozen.state import AppState, json_ints
-from werkzeug.wrappers.frozen import Request, Response
+from imre.flask.views import AppState, Request, Response, json_ints
 
 
 def card(req: Request, capture: str, state: AppState) -> Response:

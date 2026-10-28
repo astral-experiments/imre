@@ -1,6 +1,5 @@
 import sys
-from flask import Flask
-from flask.frozen.export import export_application
+from imre.flask import Flask, export_application
 import catalog_views
 
 app = Flask("catalog", static_folder=None)
