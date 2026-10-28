@@ -78,7 +78,17 @@ def starred(rows):
         yield first, middle, last
 
 
+def stored(rows, box, cells):
+    for box.value, cells[0] in rows:
+        cells[1], box.value = box.value, cells[0]
+        yield cells[0], cells[1], box.value
+
+
 def current():
+    class Box:
+        pass
+
+    print(list(stored([(1, 2), (3, 4)], Box(), [0, 0])))
     print(list(unpacked([(1, [2, 3]), (4, (5, 6))])))
     print(list(starred([[1, 2], [3, 4, 5, 6]])))
     for target in ('*left, *right', '*left'):
