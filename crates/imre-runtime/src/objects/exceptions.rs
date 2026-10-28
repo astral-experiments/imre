@@ -1080,6 +1080,8 @@ impl Error {
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 /// Converts an internal Result at the ABI boundary, after storage borrows end.
+/// Inline the success path so callers can return the value directly.
+#[inline(always)]
 pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
     result.unwrap_or_else(|error| error.returning(sentinel))
 }

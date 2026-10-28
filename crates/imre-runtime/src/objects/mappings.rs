@@ -2985,6 +2985,7 @@ pub unsafe extern "C" fn imre_set_iter(value: *const Object) -> *const Object {
 }
 /// Pull one owned item (two owned words in dictionary-items mode). Release
 /// the Object storage borrow before a composed iterator can pull another cursor.
+#[inline]
 pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
     let mut adapter = None;
     // SAFETY: leaf cursor pulls cannot reenter. Only owners escape the borrow.
