@@ -816,6 +816,7 @@ def report(text):
             "boxed_structural_hooks.py",
             "boxed_list_pop.py",
             "boxed_sequence_repeat.py",
+            "boxed_sequence_order.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
