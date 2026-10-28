@@ -15,6 +15,11 @@ def current():
     print(marshal.loads(b"\xe9\x0e\x00\x00\x03trailing"), marshal.loads(b"i\xff\xff\xff\xff"))
     print(marshal.loads(b"\xf3\x03\x00\x00\x00j2\x00trailing") == b"j2\x00")
     print(marshal.loads(bytearray(b"i\xff\xff\xff\xff")))
+    class Record(bytes):
+        def __bytes__(self):
+            raise AssertionError("marshal must read the buffer directly")
+
+    print(marshal.loads(Record(b"i\xff\xff\xff\xff")))
     print(marshal.loads(b"\xec\x03\x00\x00\x00\x00\x00\x00\x00\x02\x00"))
     print(marshal.loads(b"l\xfd\xff\xff\xff\x01\x00\x00\x00\x02\x00trailing"))
     print(marshal.loads(b"N"), marshal.loads(b"T"), marshal.loads(b"F"))
@@ -35,7 +40,7 @@ def current():
             raise ValueError("flag")
 
     print(list(pickle.dumps(obj=5, protocol=Protocol())))
-    for data in (3, b"N"):
+    for data in (3, b"N", Record(b"N")):
         try:
             marshal.loads(data, allow_code=Flag())
         except (ValueError, TypeError) as error:
