@@ -2801,8 +2801,10 @@ impl Context {
             {
                 return self.complex_sum(op == "+", a, b);
             }
+            "+" if self.string_storage(a).is_some() && self.string_storage(b).is_some() => {
+                return self.concat_strings(a, b);
+            }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
-                (Value::Str(x), Value::Str(y)) => return Ok(self.text(format!("{x}{y}"))),
                 (Value::Bytes(x), Value::Bytes(y) | Value::ByteArray(y)) => {
                     if y.is_empty() {
                         return Ok(a);
