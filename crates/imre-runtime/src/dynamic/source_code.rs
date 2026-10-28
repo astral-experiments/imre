@@ -1840,6 +1840,7 @@ impl Context {
                 eval(self, branch)
             }
             Expr::Call(v) => {
+                let mark = self.heap.temporary_mark();
                 let f = if let Some(field) =
                     imre_ast::direct_method(v, &code.method_imports, code.private_names.as_deref())
                 {
@@ -1848,7 +1849,6 @@ impl Context {
                 } else {
                     eval(self, &v.func)?
                 };
-                let mark = self.heap.temporary_mark();
                 let args = v
                     .arguments
                     .args
@@ -1863,9 +1863,10 @@ impl Context {
                         .ok_or_else(|| unsupported("keyword unpack"))?;
                     kwargs.push((key.to_string(), eval(self, &item.value)?));
                 }
+                let owns_writer = self.call_operands_own_writer(f, &args, &kwargs);
                 let result = self.call(f, args, kwargs)?;
-                if self.consumes_truth_arguments(f) {
-                    self.discard_truth(mark);
+                if owns_writer || self.consumes_truth_arguments(f) {
+                    self.finish_call_operands(mark, result);
                 }
                 Ok(result)
             }

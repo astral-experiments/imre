@@ -103,6 +103,8 @@ impl Function<'_, '_> {
                 value
             }
             ast::Expr::Call(v) => {
+                // Allocate the argument root before evaluating the callable and its receiver.
+                let args = self.op("list", &[]);
                 let callable = if let Some(field) = imre_ast::direct_method(
                     v,
                     &self.source.method_imports,
@@ -114,7 +116,7 @@ impl Function<'_, '_> {
                 } else {
                     self.expr(&v.func)
                 };
-                let (args, kwargs) = self.arguments(&v.arguments);
+                let kwargs = self.arguments(&args, &v.arguments);
                 let span = self.expression_span(expr, &v.func, b'(');
                 self.op_at("call", &[&callable, &args, &kwargs], span)
             }
@@ -235,17 +237,16 @@ impl Function<'_, '_> {
         target
     }
 
-    pub(super) fn arguments(&mut self, syntax: &ast::Arguments) -> (String, String) {
-        let args = self.op("list", &[]);
+    pub(super) fn arguments(&mut self, args: &str, syntax: &ast::Arguments) -> String {
         let kwargs = self.op("dict", &[]);
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
             if let ast::Expr::Starred(s) = arg {
                 let value = self.expr(&s.value);
-                self.op("extend", &[&args, &value]);
+                self.op("extend", &[args, &value]);
             } else {
                 let value = self.expr(arg);
-                self.op("append", &[&args, &value]);
+                self.op("append", &[args, &value]);
             }
         }
         for key in &syntax.keywords {
@@ -257,7 +258,7 @@ impl Function<'_, '_> {
                 self.op("keywords", &[&kwargs, &value]);
             }
         }
-        (args, kwargs)
+        kwargs
     }
 
     fn format_parts(&mut self, elements: &[ast::InterpolatedStringElement]) -> String {

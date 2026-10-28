@@ -296,11 +296,12 @@ impl Context {
             "call" => {
                 let args = self.items(b)?;
                 let kwargs = self.keyword_args(c)?;
+                let owns_writer = self.call_operands_own_writer(a, &args, &kwargs);
                 let result = self.call(a, args, kwargs)?;
-                if self.consumes_truth_arguments(a)
+                if (owns_writer || self.consumes_truth_arguments(a))
                     && let Some(mark) = self.heap.argument_mark(b)
                 {
-                    self.discard_truth(mark);
+                    self.finish_call_operands(mark, result);
                 }
                 Ok(result)
             }
@@ -1224,7 +1225,28 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth(mark) {
+        self.finish_call_operands(mark, NONE);
+    }
+
+    /// A temporary argument or bound receiver can own a writer only until its call returns.
+    pub(super) fn call_operands_own_writer(
+        &self,
+        function: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> bool {
+        self.heap.has_file_writers()
+            && (args
+                .iter()
+                .chain(kwargs.iter().map(|(_, value)| value))
+                .any(|&value| self.heap.could_own_writer(value, true))
+                || matches!(self.heap.get(function), Value::Method { receiver, .. }
+                    if self.heap.could_own_writer(*receiver, true)))
+    }
+
+    /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
+    pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
+        if self.heap.discard_operands(mark, result) {
             self.collect_unreachable();
         }
     }
