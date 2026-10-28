@@ -1931,7 +1931,8 @@ impl Context {
                 return Ok(self.builtin("operator.itemgetter.__reduce__"));
             }
             Value::Native(class)
-                if (class == "range" && matches!(name, "__iter__" | "__reversed__"))
+                if (class == "range"
+                    && matches!(name, "count" | "index" | "__iter__" | "__reversed__"))
                     || (matches!(class.as_str(), "range_iterator" | "longrange_iterator")
                         && matches!(name, "__iter__" | "__next__" | "__length_hint__")) =>
             {

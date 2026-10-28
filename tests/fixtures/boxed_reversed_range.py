@@ -39,6 +39,12 @@ def current():
 
     check_receivers(range)
 
+    for needle in (True, 4.0, 3.5):
+        seq = range(0, 7, 2)
+        print(seq.count(needle), seq.index(needle) if needle in seq else None)
+    huge = range(-edge, edge, 2)
+    print(edge - 2 in huge, edge in huge, huge.count(1), huge.index(edge - 2))
+
 
 def check_receivers(native_range):
     class range:
