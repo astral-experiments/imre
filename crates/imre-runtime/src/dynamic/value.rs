@@ -1097,7 +1097,7 @@ pub(super) struct DictIterator {
     position: usize,
     reverse: bool,
     remaining: usize,
-    order_state: Option<(usize, usize)>,
+    order_state: Option<(usize, usize, usize)>,
 }
 
 impl DictIterator {
@@ -1106,7 +1106,7 @@ impl DictIterator {
         dict: Id,
         kind: DictViewKind,
         size: usize,
-        order_state: Option<(usize, usize)>,
+        order_state: Option<(usize, usize, usize)>,
         reverse_end: Option<usize>,
     ) -> Self {
         Self {
@@ -1161,7 +1161,17 @@ impl DictIterator {
                 "dictionary changed size during iteration",
             ));
         }
-        let entry = if self.reverse {
+        let entry = if self.order_state.is_some() {
+            let rank = if self.reverse {
+                self.position.checked_sub(1)
+            } else {
+                Some(self.position)
+            };
+            rank.filter(|&rank| rank < entries.len()).map(|rank| {
+                let (key, value) = entries[entries.ordered_dense(rank)];
+                (rank, key, value)
+            })
+        } else if self.reverse {
             entries.before(self.position)
         } else {
             entries.at(self.position)

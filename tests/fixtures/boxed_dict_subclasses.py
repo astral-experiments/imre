@@ -40,6 +40,12 @@ def ordered_dictionary():
     source["self"] = source
     assert repr(source) == "OrderedDict({'self': ...})"
 
+    moved = OrderedDict(a=1, b=2, c=3)
+    moved.move_to_end("a")
+    assert list(moved) == ["b", "c", "a"]
+    assert list(dict.keys(moved)) == ["a", "b", "c"]
+    assert moved.popitem(last=False) == ("b", 2)
+
 
     class ClearOnRepr:
         def __repr__(self):
