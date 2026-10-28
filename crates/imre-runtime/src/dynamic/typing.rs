@@ -1001,30 +1001,51 @@ impl Context {
     /// Freeze the declared field names or inherit the first named-tuple layout in the MRO.
     fn namedtuple_layout(
         &mut self,
+        name: &str,
         bases: &[Id],
         ancestors: &[Id],
         scope: Id,
-    ) -> Option<std::rc::Rc<[String]>> {
+    ) -> Result<Option<std::rc::Rc<[String]>>> {
         if bases.iter().any(|&base| {
             matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
         }) {
-            let annotations = self.scope_data(scope).names.get("__annotations__")?;
-            let fields = self.dict_entries(*annotations)?;
+            let fields = self.scope_data(scope).names.get("__annotations__")
+                .and_then(|&annotations| self.dict_entries(annotations))
+                .unwrap_or_default();
             let named_fields: std::rc::Rc<[String]> = fields
                 .iter()
                 .filter_map(|&(key, _)| self.str_value(key).ok().map(str::to_owned))
                 .collect();
+            let mut defaults = Vec::new();
+            for field in named_fields.iter() {
+                if !ruff_python_stdlib::identifiers::is_identifier(field) {
+                    return Err(Error::new("ValueError", format!("invalid named tuple field {field:?}")));
+                }
+                if let Some(value) = self.scope_name(scope, field) {
+                    defaults.push(value);
+                } else if !defaults.is_empty() {
+                    return Err(Error::new("TypeError", format!("non-default field {field} cannot follow default fields")));
+                }
+            }
+            let defaults = self.alloc(Value::Tuple(defaults));
+            super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
+            if self.scope_name(scope, "__repr__").is_none() {
+                let fields = named_fields.iter().map(|field| self.text(field)).collect();
+                let fields = self.alloc(Value::Tuple(fields));
+                let name = self.text(name);
+                super::namedtuple::bind_repr(self, scope, "typing", name, fields)?;
+            }
             super::namedtuple::bind_fields(self, scope, &named_fields);
-            return Some(named_fields);
+            return Ok(Some(named_fields));
         }
-        ancestors
+        Ok(ancestors
             .iter()
             .find_map(|&base| match self.heap.get(base) {
                 Value::Class {
                     namedtuple_fields, ..
                 } => namedtuple_fields.clone(),
                 _ => None,
-            })
+            }))
     }
 
     fn declared_slot_names(&mut self, scope: Id) -> Result<Option<std::rc::Rc<[String]>>> {
@@ -1098,7 +1119,7 @@ impl Context {
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
         let slot_names = self.declared_slot_names(scope)?;
-        let namedtuple_fields = self.namedtuple_layout(&bases, &ancestors, scope);
+        let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         let class = self.alloc(Value::Class {
             namedtuple_fields,
             name,

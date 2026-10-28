@@ -1,6 +1,7 @@
 """Stream annotations and special forms for the runtime typing module."""
 
 import typing as _typing
+from collections import _namedtuple_repr as _namedtuple_repr
 from functools import lru_cache
 from typing import Generic, TypeVar
 

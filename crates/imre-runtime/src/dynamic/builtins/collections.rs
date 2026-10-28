@@ -281,7 +281,7 @@ pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
 }
 
 fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
-    match ctx.heap.get(value) {
+    match ctx.tuple_backing(value) {
         Value::Weak(wr) if wr.kind != super::super::weakref::Kind::Reference => Some(value),
         Value::Weak(wr) => wr.target.and_then(|target| unhashable_part(ctx, target)),
         Value::Union(union) => unhashable_part(ctx, union.args),

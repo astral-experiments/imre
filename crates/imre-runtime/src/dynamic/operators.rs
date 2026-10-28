@@ -139,8 +139,22 @@ fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usiz
 }
 
 impl Context {
+    /// Expose a tuple subclass's stored positions even when its length differs from the named fields.
+    pub(super) fn tuple_backing(&self, value: Id) -> &Value {
+        let object = self.heap.get(value);
+        if let Value::Instance {
+            scalar: Some(storage),
+            ..
+        } = *object
+            && let tuple @ Value::Tuple(_) = self.heap.get(storage)
+        {
+            return tuple;
+        }
+        object
+    }
+
     pub(super) fn sequence(&self, id: Id) -> Option<Vec<Id>> {
-        match self.heap.get(id) {
+        match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some(v.clone())
             }
@@ -154,7 +168,7 @@ impl Context {
         }
     }
     fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
-        match self.heap.get(id) {
+        match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some((v.len(), v.get(index).copied()))
             }

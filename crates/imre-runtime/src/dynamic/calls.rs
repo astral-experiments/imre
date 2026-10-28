@@ -1530,8 +1530,10 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(class) if class == "tuple" && name == "__getitem__" => {
-                return Ok(self.builtin("tuple.__getitem__"));
+            Value::Native(class)
+                if class == "tuple" && matches!(name, "__new__" | "__getitem__") =>
+            {
+                return Ok(self.builtin(&format!("tuple.{name}")));
             }
             Value::Native(class) if matches!(class.as_str(), "map" | "filter") => match name {
                 "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
@@ -2886,6 +2888,23 @@ impl Context {
         }))
     }
 
+    /// Describe a receiver rejected by a builtin allocator.
+    pub(super) fn invalid_new_subtype(&self, kind: &str, class: Id) -> Error {
+        let message = match self.heap.get(class) {
+            Value::Class { name, .. } => {
+                format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
+            }
+            Value::Native(name) if builtins::is_builtin_type(name) => {
+                format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
+            }
+            _ => format!(
+                "{kind}.__new__(X): X is not a type object ({})",
+                self.type_name(class)
+            ),
+        };
+        Error::new("TypeError", message)
+    }
+
     /// Allocate the immutable string or bytes payload while retaining the Python class.
     pub(super) fn new_string(
         &mut self,
@@ -2896,19 +2915,7 @@ impl Context {
     ) -> Result<Id> {
         let base = self.builtin(kind);
         if !self.subclass(class, base) {
-            let message = match self.heap.get(class) {
-                Value::Class { name, .. } => {
-                    format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
-                }
-                Value::Native(name) if builtins::is_builtin_type(name) => {
-                    format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
-                }
-                _ => format!(
-                    "{kind}.__new__(X): X is not a type object ({})",
-                    self.type_name(class)
-                ),
-            };
-            return Err(Error::new("TypeError", message));
+            return Err(self.invalid_new_subtype(kind, class));
         }
         let text = builtins::call(self, kind, args, kwargs)?;
         if class == base {
@@ -2968,6 +2975,9 @@ impl Context {
                 wrapper_descriptor::descriptor_get(self, &args, &kwargs)
             }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
+            Value::Native(name) if name == "tuple.__new__" => {
+                super::namedtuple::allocate(self, &args, &kwargs)
+            }
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
@@ -3254,67 +3264,6 @@ impl Context {
                         "TypeError",
                         "Can't instantiate typing.Generic directly",
                     ));
-                }
-                if let Some(names) = self.namedtuple_fields(callable) {
-                    if args.len() > names.len() {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!("too many arguments to {name}"),
-                        ));
-                    }
-                    let mut fields: indexmap::IndexMap<_, _> =
-                        names.iter().cloned().zip(args.iter().copied()).collect();
-                    for (k, v) in &kwargs {
-                        if !names.contains(k) || fields.insert(k.clone(), *v).is_some() {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!("invalid argument {k:?} to {name}"),
-                            ));
-                        }
-                    }
-                    if fields.len() != names.len()
-                        && let Some(defaults) = self.find_in_mro(callable, |base| {
-                            let Value::Class { scope, .. } = *self.heap.get(base) else {
-                                return None;
-                            };
-                            self.scope_data(scope)
-                                .class_namespace
-                                .as_ref()?
-                                .namedtuple_defaults
-                        })
-                        && let Value::Tuple(defaults) = self.heap.get(defaults)
-                    {
-                        for (name, value) in names.iter().rev().zip(defaults.iter().rev()) {
-                            fields.entry(name.clone()).or_insert(*value);
-                        }
-                    }
-                    if fields.len() != names.len() {
-                        return Err(Error::new("TypeError", format!("missing field for {name}")));
-                    }
-                    let instance = self.alloc(Value::Instance {
-                        namespace: None,
-                        class: callable,
-                        fields,
-                        dictionary: None,
-                        scalar: None,
-                        property: None,
-                        weak_reference: None,
-                        memory_stream: None,
-                    });
-                    if let Some(init) = self.class_attr(callable, "__init__") {
-                        let init = self.bind_attribute(init, instance, callable)?;
-                        let result = self.call(init, args, kwargs)?;
-                        if result != NONE {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!(
-                                    "__init__() should return None, not '{}'",
-                                    self.type_name(result)
-                                ),
-                            ));
-                        }
-                    }
-                    return Ok(instance);
                 }
                 let new = self.class_attr(callable, "__new__").or_else(|| {
                     self.has_base(callable, "int")

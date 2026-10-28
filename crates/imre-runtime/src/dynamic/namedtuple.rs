@@ -323,6 +323,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
             ),
         ));
     }
+    let has_defaults = defaults.is_some_and(|id| id != NONE);
     let defaults = match defaults {
         Some(id) if id != NONE => collect(ctx, id)?,
         _ => Vec::new(),
@@ -356,11 +357,8 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let fields = ctx.alloc(Value::Tuple(field_ids));
     ctx.bind(scope, "_fields", fields);
     ctx.bind(scope, "__match_args__", fields);
-    let collections = ctx.module("collections")?;
     bind_fields(ctx, scope, &names);
-    let repr_factory = ctx.lookup_attr(collections, "_namedtuple_repr")?;
-    let repr = ctx.call(repr_factory, vec![name, fields], Vec::new())?;
-    ctx.bind(scope, "__repr__", repr);
+    bind_repr(ctx, scope, "collections", name, fields)?;
     let slots = ctx.alloc(Value::Tuple(Vec::new()));
     ctx.bind(scope, "__slots__", slots);
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
@@ -368,6 +366,8 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let make = ctx.builtin("_collections._make");
     let make = ctx.alloc(Value::ClassMethod(make));
     ctx.bind(scope, "_make", make);
+    let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
+    bind_new(ctx, scope, &typename, &names, defaults)?;
     let tuple = ctx.builtin("tuple");
     let class = ctx.allocate_class(typename, scope, vec![tuple])?;
     let Value::Class {
@@ -377,14 +377,139 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         unreachable!()
     };
     *namedtuple_fields = Some(names.into());
-    if !defaults.is_empty() {
-        let defaults = ctx.alloc(Value::Tuple(defaults));
-        let Value::Scope(scope) = ctx.heap.get_mut(scope) else {
-            unreachable!()
-        };
-        scope.class_namespace.as_mut().unwrap().namedtuple_defaults = Some(defaults);
-    }
     Ok(class)
+}
+
+/// Format the actual tuple payload against the declared field names.
+pub(super) fn bind_repr(
+    ctx: &mut Context,
+    scope: Id,
+    owner: &str,
+    name: Id,
+    fields: Id,
+) -> Result<()> {
+    let module = ctx.module(owner)?;
+    let factory = ctx.lookup_attr(module, "_namedtuple_repr")?;
+    let repr = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "__repr__", repr);
+    Ok(())
+}
+
+/// Assemble constructor source and documentation without aborting on an oversized field list.
+fn text_parts(parts: &[&str]) -> Result<String> {
+    let mut output = String::new();
+    for part in parts {
+        super::operators::append_rendered_text(&mut output, part)?;
+    }
+    Ok(output)
+}
+
+/// Give the generated function the declared parameter names and ordinary Python argument binding.
+pub(super) fn bind_new(
+    ctx: &mut Context,
+    scope: Id,
+    typename: &str,
+    names: &[String],
+    defaults: Option<Id>,
+) -> Result<()> {
+    let mut fields = String::new();
+    for name in names {
+        if !fields.is_empty() {
+            super::operators::append_rendered_text(&mut fields, ", ")?;
+        }
+        super::operators::append_rendered_text(&mut fields, name)?;
+    }
+    if names.len() == 1 {
+        super::operators::append_rendered_text(&mut fields, ",")?;
+    }
+    let new = ctx.builtin("tuple.__new__");
+    let allocate = ctx.text("_tuple_new");
+    let module = ctx.text("__name__");
+    let module_name = ctx.text(text_parts(&["namedtuple_", typename])?);
+    let builtins = ctx.text("__builtins__");
+    let empty = ctx.dict(Vec::new());
+    let globals = ctx.dict(vec![
+        (allocate, new),
+        (module, module_name),
+        (builtins, empty),
+    ]);
+    let source = ctx.text(text_parts(&[
+        "def __new__(_cls, ",
+        &fields,
+        "):\n    return _tuple_new(_cls, (",
+        &fields,
+        "))",
+    ])?);
+    ctx.exec_source(source, globals, None, None)?;
+    let new = ctx
+        .dict_named_item(globals, "__new__")
+        .expect("generated function");
+    ctx.heap.keep(new);
+    let key = ctx.text("__new__");
+    ctx.delete_item(globals, key)?;
+    let Value::Function { code, .. } = *ctx.heap.get(new) else {
+        unreachable!()
+    };
+    let lambda = ctx.text("<lambda>");
+    let Value::Code(code) = ctx.heap.get_mut(code) else {
+        unreachable!()
+    };
+    code.name = lambda;
+    code.qualname = lambda;
+    let qualname = ctx.text(text_parts(&[typename, ".__new__"])?);
+    let doc = ctx.text(text_parts(&[
+        "Create new instance of ",
+        typename,
+        "(",
+        &fields,
+        ")",
+    ])?);
+    ctx.set_attr(new, "__qualname__", qualname)?;
+    ctx.set_attr(new, "__doc__", doc)?;
+    if let Some(defaults) = defaults {
+        ctx.set_attr(new, "__defaults__", defaults)?;
+    }
+    let descriptor = super::static_method::construct(ctx, new)?;
+    ctx.bind(scope, "__new__", descriptor);
+    Ok(())
+}
+
+/// Allocate the requested tuple subtype from the iterable before invoking any initializer.
+pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&class, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "tuple.__new__(): not enough arguments",
+        ));
+    };
+    let tuple = ctx.builtin("tuple");
+    let names = ctx.namedtuple_fields(class);
+    if names.is_none() && !ctx.subclass(class, tuple) {
+        return Err(ctx.invalid_new_subtype("tuple", class));
+    }
+    let storage = builtins::call(ctx, "tuple", args, kwargs)?;
+    if class == tuple {
+        return Ok(storage);
+    }
+    let Value::Tuple(items) = ctx.heap.get(storage) else {
+        unreachable!()
+    };
+    let (fields, scalar) = if let Some(names) = names {
+        let fields = names.iter().cloned().zip(items.iter().copied()).collect();
+        (fields, (names.len() != items.len()).then_some(storage))
+    } else {
+        (Default::default(), Some(storage))
+    };
+    Ok(ctx.alloc(Value::Instance {
+        class,
+        fields,
+        scalar,
+        namespace: None,
+        dictionary: None,
+        property: None,
+        weak_reference: None,
+        memory_stream: None,
+    }))
 }
 
 /// Build the descriptor's actual receiver class from the iterable's positional values.
