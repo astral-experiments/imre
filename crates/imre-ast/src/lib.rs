@@ -23,7 +23,7 @@ impl Names {
         self.owners.get(&start).map(Name::as_str)
     }
 
-    /// A private definition keeps its source name for introspection.
+    /// Definitions and static attribute names expose their original spelling to introspection.
     pub fn definition<'a>(&'a self, name: &'a Identifier) -> &'a str {
         self.definitions
             .get(&name.start())
@@ -147,6 +147,12 @@ impl Transformer for Mangler<'_> {
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
             ast::Expr::Name(name) => self.rename(&mut name.id),
+            ast::Expr::Attribute(attr)
+                if attr.ctx == ast::ExprContext::Store
+                    && matches!(&*attr.value, ast::Expr::Name(name) if name.id.as_str() == "self") =>
+            {
+                self.definition(&mut attr.attr);
+            }
             ast::Expr::Attribute(attr) => self.rename(&mut attr.attr.id),
             _ => {}
         }

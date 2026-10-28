@@ -17,6 +17,9 @@ impl Context {
     }
 
     pub(super) fn lineage(&mut self, class: Id) -> Vec<Id> {
+        if let Some(mro) = self.stored_class_mro(class) {
+            return mro.to_vec();
+        }
         let mut lineage = vec![class];
         if let Value::Class { ancestors, .. } = self.heap.get(class) {
             lineage.extend(ancestors);
@@ -108,7 +111,7 @@ impl Context {
                 let cell = frame.class_cell.ok_or_else(|| {
                     Error::new("RuntimeError", "super(): __class__ cell not found")
                 })?;
-                let Value::ClassCell(Some(class)) = self.heap.get(cell) else {
+                let Value::Cell(Some(class)) = self.heap.get(cell) else {
                     return Err(Error::new("RuntimeError", "super(): empty __class__ cell"));
                 };
                 (*class, receiver)
@@ -193,6 +196,16 @@ impl Context {
             let after = lineage.iter().skip_while(|&&class| class != start).skip(1);
             let instance = if owner == receiver { NONE } else { receiver };
             for &class in after {
+                if name == "__init_subclass__"
+                    && matches!(self.heap.get(class), Value::Native(kind) if kind == "object")
+                {
+                    let callable = self.builtin("object.__init_subclass__");
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: owner,
+                        explicit: true,
+                    }));
+                }
                 if let Some(value) = self.own_class_attr(class, name) {
                     return self.bind_attribute(value, instance, owner);
                 }

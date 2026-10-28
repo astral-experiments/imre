@@ -7,7 +7,93 @@ use ruff_python_ast::visitor::{self, Visitor};
 
 use super::ClosureNames;
 
-const GENERATED: [&str; 3] = ["__module__", "__qualname__", "__doc__"];
+const GENERATED: [&str; 5] = [
+    "__module__",
+    "__qualname__",
+    "__doc__",
+    "__firstlineno__",
+    "__static_attributes__",
+];
+
+/// Metadata written by the class code before handing its namespace to the metaclass.
+#[derive(Default)]
+pub(super) struct Namespace<'a> {
+    pub(super) static_attributes: BTreeSet<&'a str>,
+    pub(super) class_dict_cell: bool,
+    pub(super) class_cell: bool,
+}
+
+pub(super) fn namespace<'a>(body: &'a [ast::Stmt], names: &'a imre_ast::Names) -> Namespace<'a> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Scope {
+        Class,
+        Function,
+        NestedClass,
+    }
+    struct Stores<'a> {
+        info: Namespace<'a>,
+        scope: Scope,
+        names: &'a imre_ast::Names,
+    }
+    impl<'a> Visitor<'a> for Stores<'a> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if self.scope == Scope::Class {
+                match stmt {
+                    ast::Stmt::FunctionDef(f) => {
+                        self.info.class_dict_cell |=
+                            !self.names.string_annotations || f.type_params.is_some();
+                        self.info.class_cell |=
+                            super::uses_class_cell(&super::Body::Statements(&f.body));
+                    }
+                    ast::Stmt::AnnAssign(a) if a.simple => {
+                        self.info.class_dict_cell |= !self.names.string_annotations
+                    }
+                    ast::Stmt::TypeAlias(_) => self.info.class_dict_cell = true,
+                    _ => {}
+                }
+            }
+            let child = match stmt {
+                ast::Stmt::FunctionDef(def) => Some((Scope::Function, def.body.as_slice())),
+                ast::Stmt::ClassDef(def) => Some((Scope::NestedClass, def.body.as_slice())),
+                _ => None,
+            };
+            if let Some((scope, body)) = child {
+                if self.scope != Scope::NestedClass {
+                    let parent = std::mem::replace(&mut self.scope, scope);
+                    self.visit_body(body);
+                    self.scope = parent;
+                }
+            } else {
+                visitor::walk_stmt(self, stmt);
+            }
+        }
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if self.scope != Scope::Class
+                && let ast::Expr::Attribute(attr) = expr
+                && attr.ctx == ast::ExprContext::Store
+                && matches!(&*attr.value, ast::Expr::Name(n) if n.id.as_str() == "self")
+            {
+                self.info
+                    .static_attributes
+                    .insert(self.names.definition(&attr.attr));
+            }
+            if self.scope == Scope::Class
+                && let ast::Expr::Lambda(lambda) = expr
+            {
+                self.info.class_cell |=
+                    super::uses_class_cell(&super::Body::Expression(&lambda.body));
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let mut stores = Stores {
+        info: Namespace::default(),
+        scope: Scope::Class,
+        names,
+    };
+    stores.visit_body(body);
+    stores.info
+}
 
 pub(super) fn capture(bindings: &mut ClosureNames, body: &[ast::Stmt], string_annotations: bool) {
     let mut uses = Uses::new(string_annotations);

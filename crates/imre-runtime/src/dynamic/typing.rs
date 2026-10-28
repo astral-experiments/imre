@@ -637,7 +637,7 @@ pub(super) fn class_parameters(
     bases: &[Id],
 ) -> Result<()> {
     if let Some(original) = original {
-        ctx.bind(scope, "__orig_bases__", original);
+        ctx.bind_class_local(scope, "__orig_bases__", original)?;
     }
     let Some(&generic) = ctx.classes.get("typing.Generic") else {
         return Ok(());
@@ -687,7 +687,7 @@ pub(super) fn class_parameters(
     } else {
         ctx.alloc(Value::Tuple(vars))
     };
-    ctx.bind(scope, "__parameters__", params);
+    ctx.bind_class_local(scope, "__parameters__", params)?;
     Ok(())
 }
 
@@ -985,6 +985,11 @@ impl Context {
             )),
             Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
             _ => {
+                if self.heap.get(value).instance_class() == Some(class)
+                    || self.class_metaclass(value) == Some(class)
+                {
+                    return Ok(true);
+                }
                 if let Some(check) = self.bound_slot(class, "__instancecheck__")? {
                     let result = self.call(check, vec![value], Vec::new())?;
                     return self.truth(result);
@@ -1097,6 +1102,12 @@ impl Context {
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
+        if let Some(hook) = self.scope_name(scope, "__init_subclass__")
+            && matches!(self.heap.get(hook), Value::Function { .. })
+        {
+            let hook = self.alloc(Value::ClassMethod(hook));
+            self.bind_local(scope, "__init_subclass__", hook);
+        }
         let slot_names = self.declared_slot_names(scope)?;
         let namedtuple_fields = self.namedtuple_layout(&bases, &ancestors, scope);
         let class = self.alloc(Value::Class {

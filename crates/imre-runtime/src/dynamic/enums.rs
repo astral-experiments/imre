@@ -221,11 +221,17 @@ impl Context {
         if !kwargs.is_empty() {
             return Err(Error::new("TypeError", "unexpected enum decorator keyword"));
         }
-        let lineage = self.linearized_bases(&[*base])?;
-        let Value::Class { ancestors, .. } = self.heap.get_mut(*class) else {
+        let Value::Class { scope, .. } = *self.heap.get(*class) else {
             return Err(Error::new("TypeError", "enum decorator requires a class"));
         };
-        *ancestors = lineage;
+        let mut order = vec![*class];
+        order.extend(self.lineage(*base));
+        let bases = self.alloc(Value::Tuple(vec![*base]));
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.class_namespace.as_mut().unwrap().bases = bases;
+        self.set_class_mro(*class, order);
         self.populate_enum(*class, Some(*base))?;
         Ok(*class)
     }

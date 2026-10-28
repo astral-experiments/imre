@@ -13,6 +13,7 @@ mod function_fields;
 mod importlib;
 mod iterators;
 mod mapping_abc;
+mod metaclasses;
 mod module_type;
 mod namedtuple;
 mod operators;
@@ -901,6 +902,7 @@ impl Context {
             is_abstract: false,
             is_comprehension: false,
             class_cell: None,
+            metaclass: None,
             class_namespace: None,
             first_argument: None,
             names: Default::default(),
@@ -984,10 +986,10 @@ impl Context {
         environment
     }
 
-    /// Expose the class's own unbound members through a fresh read-only proxy.
+    /// Materialize the dictionary shared by class mapping proxies and annotation cells.
     fn class_dictionary(&mut self, scope: Id) -> Id {
         let frame = self.scope_data(scope);
-        let dictionary = match frame
+        match frame
             .class_namespace
             .as_ref()
             .and_then(|class| class.dictionary)
@@ -1010,8 +1012,7 @@ impl Context {
                     .dictionary = Some(dictionary);
                 dictionary
             }
-        };
-        self.alloc(Value::MappingProxy(dictionary))
+        }
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
@@ -1047,6 +1048,13 @@ impl Context {
             return Ok(self.delete_item(locals, key).is_ok());
         }
         if let Some(namespace) = self.scope_data(scope).namespace {
+            if self.scope_data(scope).class_body.is_some() {
+                return match self.delete_item(namespace, key) {
+                    Ok(()) => Ok(true),
+                    Err(error) if self.is_builtin_error(&error, "KeyError") => Ok(false),
+                    Err(error) => Err(error),
+                };
+            }
             if self.scope_name(scope, name).is_none() {
                 return Ok(false);
             }
@@ -1161,16 +1169,17 @@ impl Context {
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
-            if let Some(id) = self.scope_name(scope, name) {
+            if let Some(id) = self.load_class_local(scope, name)? {
                 return Ok(id);
             }
+            let s = self.scope_data(scope);
             if s.class_body.is_none() && s.closure.declared.contains(name) {
                 return Err(self.missing_binding(origin, scope, name));
             }
             if name == "__class__"
                 && s.class_body.is_none()
                 && let Some(cell) = s.class_cell
-                && let Value::ClassCell(Some(class)) = self.heap.get(cell)
+                && let Value::Cell(Some(class)) = self.heap.get(cell)
             {
                 return Ok(*class);
             }

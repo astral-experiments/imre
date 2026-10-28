@@ -104,7 +104,7 @@ impl Function<'_, '_> {
             }
             ast::Expr::Call(v) => {
                 let callable = self.expr(&v.func);
-                let (args, kwargs) = self.arguments(&v.arguments);
+                let (args, kwargs) = self.arguments(&v.arguments, false);
                 let span = self.expression_span(expr, &v.func, b'(');
                 self.op_at("call", &[&callable, &args, &kwargs], span)
             }
@@ -225,7 +225,7 @@ impl Function<'_, '_> {
         target
     }
 
-    pub(super) fn arguments(&mut self, syntax: &ast::Arguments) -> (String, String) {
+    pub(super) fn arguments(&mut self, syntax: &ast::Arguments, class: bool) -> (String, String) {
         let args = self.op("list", &[]);
         let kwargs = self.op("dict", &[]);
         // Python evaluates starred positional arguments before the keyword arguments.
@@ -242,9 +242,15 @@ impl Function<'_, '_> {
             let value = self.expr(&key.value);
             if let Some(name) = &key.arg {
                 let name = self.code_name(name.as_str());
-                self.op("keyword", &[&kwargs, &name, &value]);
+                self.op(
+                    if class { "class_keyword" } else { "keyword" },
+                    &[&kwargs, &name, &value],
+                );
             } else {
-                self.op("keywords", &[&kwargs, &value]);
+                self.op(
+                    if class { "class_unpack" } else { "keywords" },
+                    &[&kwargs, &value],
+                );
             }
         }
         (args, kwargs)
