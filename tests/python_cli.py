@@ -69,8 +69,8 @@ def check_boxed_call_allocation(imre, run, flags):
                 0, expected, b"refused\n" if ordinal else b"",
             ), result
 
-    for bound in (False, True):
-        source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_list_pop as fixture; fixture.append_allocation({bound})"
+    for name, bound in (("append", False), ("append", True), ("insert", False), ("insert", True)):
+        source = import_path + f"import boxed_list_pop as fixture; fixture.growth_allocation({name!r}, {bound})"
         for size, expected in ((0, b"129 True True\nretry 130 True\n"), (2048, b"caught ()\n128 True False\nretry 129 True\n")):
             result = run(imre, "-B", "-c", source, extra={
                 "IMRE_ENCODED_FLAGS": flags,

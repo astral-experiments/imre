@@ -1315,7 +1315,7 @@ impl Context {
                     "__reduce__",
                 ]
             }
-            "list" => &["__repr__", "__init__", "append", "pop"],
+            "list" => &["__repr__", "__init__", "append", "insert", "pop"],
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
             "set" | "frozenset" | "bytearray" => &["__repr__"],
