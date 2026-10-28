@@ -8,6 +8,17 @@ fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
 
+/// Reserve the entire destination before copying either sequence's object references.
+fn concat_ids(left: &[Id], right: &[Id]) -> Result<Vec<Id>> {
+    let mut items = Vec::new();
+    items
+        .try_reserve_exact(left.len() + right.len())
+        .map_err(render_allocation)?;
+    items.extend_from_slice(left);
+    items.extend_from_slice(right);
+    Ok(items)
+}
+
 fn push_frame<T>(stack: &mut Vec<T>, value: T) -> Result<()> {
     stack.try_reserve(1).map_err(render_allocation)?;
     stack.push(value);
@@ -2890,12 +2901,7 @@ impl Context {
                 ),
             ));
         };
-        let mut items = Vec::new();
-        items
-            .try_reserve_exact(left.len() + right.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        items.extend_from_slice(left);
-        items.extend_from_slice(right);
+        let items = concat_ids(left, right)?;
         Ok(self.alloc(Value::List(items)))
     }
 
@@ -3066,7 +3072,14 @@ impl Context {
                     ));
                 }
                 (Value::Tuple(x), Value::Tuple(y)) => {
-                    return Ok(self.alloc(Value::Tuple([x.as_slice(), y.as_slice()].concat())));
+                    if x.is_empty() {
+                        return Ok(b);
+                    }
+                    if y.is_empty() {
+                        return Ok(a);
+                    }
+                    let items = concat_ids(x, y)?;
+                    return Ok(self.alloc(Value::Tuple(items)));
                 }
                 _ => {}
             },
