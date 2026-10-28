@@ -16,7 +16,7 @@ pub(super) fn fspath(ctx: &mut Context, path: Id) -> Result<Id> {
     path_arg(ctx, path, "expected str, bytes or os.PathLike object")
 }
 
-fn path_arg(ctx: &mut Context, path: Id, expected: &str) -> Result<Id> {
+pub(super) fn path_arg(ctx: &mut Context, path: Id, expected: &str) -> Result<Id> {
     if spelling(ctx, path) {
         return Ok(path);
     }

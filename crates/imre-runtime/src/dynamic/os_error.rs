@@ -260,13 +260,22 @@ impl Context {
     }
 
     /// Keep the Python pathname for a native open error with exactly one filename.
-    pub(super) fn with_open_filename(&mut self, mut error: Error, filename: Id) -> Result<Error> {
+    pub(super) fn with_open_filename(&mut self, error: Error, filename: Id) -> Result<Error> {
+        match error.os_args.as_deref() {
+            Some(Args::Native { source, .. })
+                if matches!(source.text_paths.as_ref(), Some([Some(_), None])) =>
+            {
+                self.with_errno_filename(error, filename)
+            }
+            _ => Ok(error),
+        }
+    }
+
+    /// Attach the filesystem-protocol result to a failed syscall without losing its Python identity.
+    pub(super) fn with_errno_filename(&mut self, mut error: Error, filename: Id) -> Result<Error> {
         let Some(Args::Native { source, .. }) = error.os_args.as_deref() else {
             return Ok(error);
         };
-        if !matches!(source.text_paths.as_ref(), Some([Some(_), None])) {
-            return Ok(error);
-        }
         let errno = self.int(source.errno);
         let mut description = String::new();
         append(&mut description, &source.description)?;
