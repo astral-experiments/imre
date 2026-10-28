@@ -17,6 +17,22 @@ class DrainingIndex:
         return 0
 
 
+def copy_allocation(module):
+    import copy
+
+    item = object()
+    values = [item] * 1024
+    copier = copy.copy if module else list.copy
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        copier(values)
+    except MemoryError as error:
+        print("caught", error.args)
+    result = copier(values)
+    print(len(values), len(result), result is not values, values[0] is item, result[-1] is item)
+
+
 def growth_allocation(name, bound):
     class Values(list):
         pass
