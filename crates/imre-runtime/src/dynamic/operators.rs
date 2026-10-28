@@ -2397,6 +2397,11 @@ impl Context {
             self.context_key(item)?;
             return Ok(bindings.contains_key(&item));
         }
+        if let Value::Range(range) = self.heap.get(container)
+            && matches!(self.heap.get(item), Value::Int(_) | Value::Bool(_))
+        {
+            return Ok(range.index_of(&self.as_int(item)?).is_some());
+        }
         let scalar = self.scalar_value(container);
         if let Value::Str(hay) = self.heap.get(scalar) {
             let needle = self.str_value(item).map_err(|_| {
