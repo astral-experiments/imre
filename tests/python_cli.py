@@ -130,6 +130,18 @@ print(sys.intern(value) is value, sys._is_interned(value))
         expected = (b"caught ()\n" if size else b"value " + digits) + b"retry " + digits
         assert (result.returncode, result.stdout, result.stderr) == (0, expected, b"refused\n" if size else b""), result
 
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_recursive_repr as fixture; fixture.exception_argument_allocation()"
+    # The public call owns one argument slot and builtin name. Converting the argument reuses both.
+    for size in (0, 3, 8):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "2",
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"True\nTrue\n", b""), result
+
+
+
 
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):

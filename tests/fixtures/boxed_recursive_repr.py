@@ -169,3 +169,12 @@ def integer_digit_limit(limit):
                 print(len(convert(value)))
             except ValueError as error:
                 print(error.args)
+
+
+def exception_argument_allocation():
+    original = " ".join(("saved", "string"))
+    problem = ValueError(original)
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    print(str(problem) is original)
+    print(str(problem) is original)
