@@ -445,13 +445,10 @@ fn ascii(s: &str) -> String {
     out
 }
 
-fn percent_args(ctx: &mut Context, rhs: Id) -> Result<std::vec::IntoIter<Id>> {
-    let values = match ctx.heap.get(rhs) {
-        Value::Tuple(values) | Value::NamedTuple { values, .. } => values.clone(),
-        Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
-            ctx.items(rhs)?
-        }
-        _ => vec![rhs],
+fn percent_args(ctx: &Context, rhs: Id) -> Result<std::vec::IntoIter<Id>> {
+    let values = match ctx.tuple_items(rhs)? {
+        Some(values) => values,
+        None => super::super::copy_ids(&[rhs])?,
     };
     Ok(values.into_iter())
 }
