@@ -8,6 +8,14 @@ def exercise(path):
 
     for keep in (False, True):
         saved = []
+        entries = {"writer": buffered(saved if keep else None), b"loop": 1, b"": 2}
+        with open(path, "rb") as reader:
+            del entries["writer"], entries[reader.read()]
+        assert (b"loop" in entries) == keep
+        if keep:
+            saved[0].close()
+
+        saved = []
         for stream in [buffered()]:
             if keep:
                 saved.append(stream)
