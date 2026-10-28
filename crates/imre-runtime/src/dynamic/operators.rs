@@ -4,6 +4,14 @@ use num_traits::Signed;
 
 use super::*;
 
+/// An inherited numeric wrapper converts its argument as a direct method call.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RepeatMode {
+    Sequence,
+    InPlace,
+    Wrapper,
+}
+
 fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
@@ -2655,34 +2663,78 @@ impl Context {
         Ok(())
     }
 
-    /// Returns the immutable sequence payload used by builtin repetition.
-    fn repeat_storage(&self, id: Id) -> Option<Id> {
-        if matches!(self.heap.get(id), Value::Bytes(_)) {
-            Some(id)
-        } else {
-            self.string_storage(id)
-        }
+    /// Locate builtin sequence storage without reading its elements before the multiplier runs.
+    fn repeat_storage(&self, object: Id) -> Option<Id> {
+        let storage = self.scalar_value(object);
+        matches!(
+            self.heap.get(storage),
+            Value::List(_) | Value::Tuple(_) | Value::Str(_) | Value::Bytes(_)
+        )
+        .then_some(storage)
     }
 
-    /// Uses the index protocol for either operand order.
-    fn repeat_immutable(&mut self, sequence: Id, multiplier: Id) -> Result<Id> {
-        let count = self.index_value(multiplier)?.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                format!(
-                    "can't multiply sequence by non-int of type '{}'",
-                    self.type_name(multiplier)
-                ),
-            )
-        })?;
-        Ok(match self.heap.get(sequence) {
+    /// Repeat the current contents after converting the multiplier through its index slot.
+    fn repeat_sequence(
+        &mut self,
+        owner: Id,
+        storage: Id,
+        multiplier: Id,
+        mode: RepeatMode,
+    ) -> Result<Id> {
+        let count = if mode == RepeatMode::Wrapper {
+            self.index_integer(multiplier)?
+        } else {
+            self.index_value(multiplier)?.ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "can't multiply sequence by non-int of type '{}'",
+                        self.type_name(multiplier)
+                    ),
+                )
+            })?
+        };
+        let n = count
+            .to_i64()
+            .and_then(|n| isize::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        self.type_name(multiplier)
+                    ),
+                )
+            })?;
+        Ok(match self.heap.get(storage) {
+            Value::List(items) if mode == RepeatMode::InPlace => {
+                if n <= 0 {
+                    builtins::clear_container(self, storage);
+                } else if n != 1 && !items.is_empty() {
+                    let repeated = repeat_values(items, n)?;
+                    let Value::List(items) = self.heap.get_mut(storage) else {
+                        unreachable!()
+                    };
+                    *items = repeated;
+                }
+                owner
+            }
+            Value::List(items) => {
+                let repeated = repeat_values(items, n)?;
+                self.alloc(Value::List(repeated))
+            }
+            Value::Tuple(items) if items.is_empty() || n == 1 => storage,
+            Value::Tuple(items) => {
+                let repeated = repeat_values(items, n)?;
+                self.alloc(Value::Tuple(repeated))
+            }
             Value::Bytes(data) => match crate::objects::repeat_bytes(data, &count)? {
                 Some(repeated) => self.alloc(Value::Bytes(repeated)),
-                None => sequence,
+                None => storage,
             },
-            Value::Str(_) if count.as_small() == Some(1) => sequence,
+            Value::Str(_) if n == 1 => storage,
             Value::Str(text) => self.text(crate::objects::repeat_str(text, &count)?.into_string()),
-            _ => unreachable!("immutable repetition payload"),
+            _ => unreachable!("sequence repetition payload"),
         })
     }
 
@@ -3083,31 +3135,42 @@ impl Context {
                 }
                 _ => {}
             },
-            "*" if let Some(sequence) = self.repeat_storage(a) => {
-                return self.repeat_immutable(sequence, b);
-            }
-            "*" if let Some(sequence) = self.repeat_storage(b) => {
-                return self.repeat_immutable(sequence, a);
+            "*" => {
+                let mut skipped_repeat = false;
+                for (owner, multiplier, left) in [(a, b, true), (b, a, false)] {
+                    let Some(storage) = self.repeat_storage(owner) else {
+                        continue;
+                    };
+                    let mode = if left
+                        && inplace
+                        && matches!(self.heap.get(storage), Value::List(_))
+                        && self.slot(owner, "__imul__").is_none()
+                    {
+                        RepeatMode::InPlace
+                    } else if self.slot(owner, "__mul__").is_none()
+                        && self.slot(owner, "__rmul__").is_none()
+                    {
+                        RepeatMode::Sequence
+                    } else {
+                        // A Python multiplication slot has already declined the operation.
+                        skipped_repeat = true;
+                        continue;
+                    };
+                    return self.repeat_sequence(owner, storage, multiplier, mode);
+                }
+                if skipped_repeat {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for *{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
             }
             _ => {}
-        }
-        if op == "*" {
-            let (sequence, count) = if matches!(self.heap.get(a), Value::List(_) | Value::Tuple(_))
-            {
-                (a, b)
-            } else {
-                (b, a)
-            };
-            if let Value::List(items) | Value::Tuple(items) = self.heap.get(sequence) {
-                let out = repeat_values(items, self.as_integer(count)?)?;
-                return Ok(
-                    self.alloc(if matches!(self.heap.get(sequence), Value::List(_)) {
-                        Value::List(out)
-                    } else {
-                        Value::Tuple(out)
-                    }),
-                );
-            }
         }
         if op == "@" {
             return Err(Error::new(
@@ -3309,6 +3372,19 @@ impl Context {
             return Ok(None);
         }
         let Some(method) = self.bound_slot(obj, name)? else {
+            // Overriding one multiplication method installs a numeric slot for both directions.
+            if let Some(peer) = match name {
+                "__mul__" => Some("__rmul__"),
+                "__rmul__" => Some("__mul__"),
+                _ => None,
+            } && self.slot(obj, peer).is_some()
+                && let Some(storage) = self.repeat_storage(obj)
+            {
+                return self
+                    .repeat_sequence(obj, storage, other, RepeatMode::Wrapper)
+                    .map(Some);
+            }
+
             if name == "__ne__"
                 && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
             {
@@ -3436,21 +3512,6 @@ impl Context {
             *left = bytes;
             return Ok(a);
         }
-        if op == "*"
-            && let Value::List(values) = self.heap.get(a)
-        {
-            let values = repeat_values(values, self.as_integer(b)?)?;
-            let Value::List(items) = self.heap.get_mut(a) else {
-                unreachable!()
-            };
-            if values.is_empty() && self.sorting_lists.contains(&a) {
-                // The allocated callback buffer records a mutation until the sort restores it.
-                items.clear();
-            } else {
-                *items = values;
-            }
-            return Ok(a);
-        }
         self.binary_operation(op, a, b, true)
     }
 
@@ -3523,7 +3584,7 @@ impl Context {
     }
 }
 
-fn repeat_values(values: &[Id], times: i64) -> Result<Vec<Id>> {
+fn repeat_values(values: &[Id], times: isize) -> Result<Vec<Id>> {
     if values.is_empty() || times <= 0 {
         return Ok(Vec::new());
     }
