@@ -27,6 +27,26 @@ class DictChild(dict):
 
 
 def current():
+    from collections.abc import Collection, Container, Iterable, Sized
+
+    class Protocol:
+        def __iter__(self):
+            return iter(())
+
+        def __len__(self):
+            return 0
+
+        def __contains__(self, item):
+            return False
+
+    for abc in (Iterable, Sized, Container, Collection):
+        assert issubclass(Protocol, abc) and isinstance(Protocol(), abc)
+    class NoIter(Protocol):
+        __iter__ = None
+
+    assert Iterable.__subclasshook__(NoIter) is NotImplemented
+    assert not issubclass(NoIter, Collection)
+
     from array import array
     from collections import deque
     from collections.abc import Iterator, MutableSequence, Sequence
