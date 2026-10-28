@@ -309,6 +309,25 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
     Err(type_error(format!("unsupported format string {spec:?}")))
 }
 
+/// Convert a brace or f-string field before rendering any nested format specification.
+pub(in super::super) fn format_conversion(ctx: &mut Context, value: Id, conv: char) -> Result<Id> {
+    Ok(match conv {
+        's' => super::call(ctx, "str", &[value], &[])?,
+        'r' => super::call(ctx, "repr", &[value], &[])?,
+        'a' => {
+            let repr = super::call(ctx, "repr", &[value], &[])?;
+            let text = ctx.str_value(repr)?;
+            if text.is_ascii() {
+                repr
+            } else {
+                let escaped = ascii(text);
+                ctx.text(escaped)
+            }
+        }
+        _ => return Err(Error::new("ValueError", "unknown format conversion")),
+    })
+}
+
 fn format_string(
     ctx: &mut Context,
     source: &str,
@@ -397,21 +416,7 @@ fn format_string(
                 }
             }
             if let Some(conv) = conversion_spec {
-                value = match conv {
-                    's' => super::call(ctx, "str", &[value], &[])?,
-                    'r' => super::call(ctx, "repr", &[value], &[])?,
-                    'a' => {
-                        let repr = super::call(ctx, "repr", &[value], &[])?;
-                        let text = ctx.str_value(repr)?;
-                        if text.is_ascii() {
-                            repr
-                        } else {
-                            let escaped = ascii(text);
-                            ctx.text(escaped)
-                        }
-                    }
-                    _ => return Err(Error::new("ValueError", "unknown format conversion")),
-                };
+                value = format_conversion(ctx, value, conv)?;
             }
             let spec = if format_spec.contains(['{', '}']) {
                 if nested {

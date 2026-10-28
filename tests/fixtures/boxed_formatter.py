@@ -16,6 +16,7 @@ class Child(Tagged):
 
 
 def current():
+    conversion_order()
     class Word:
         def __str__(self):
             return "label"
@@ -110,3 +111,23 @@ def current():
 
     label = Label()
     print("%s %r %a" % (label, label, label), "%5.3a" % label)
+
+
+def conversion_order():
+    events = []
+    class Value:
+        def __repr__(self):
+            events.append("repr")
+            return "猫"
+    class Broken:
+        def __repr__(self):
+            events.append("raise")
+            raise LookupError
+    def spec():
+        events.append("spec")
+        return ""
+    print(f"{Value()!r:{spec()}}", events)
+    try:
+        f"{Broken()!r:{spec()}}"
+    except LookupError:
+        print(events)
