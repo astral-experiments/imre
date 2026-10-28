@@ -444,6 +444,7 @@ impl Context {
                             | "StopIteration.__init__"
                             | "module.__init__"
                             | "int.to_bytes"
+                            | "list.append"
                             | "list.index"
                             | "list.pop"
                             | "list.clear"
