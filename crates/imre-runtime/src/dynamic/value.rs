@@ -1755,8 +1755,8 @@ impl Heap {
         }
     }
 
-    /// Discard the evaluated operand while preserving earlier arguments in the same statement.
-    pub(super) fn discard_truth(&mut self, mark: usize) -> bool {
+    /// Release an expression while preserving its result and earlier operands.
+    pub(super) fn discard_operands(&mut self, mark: usize, result: Id) -> bool {
         if self.file_writers.is_empty() {
             return false;
         }
@@ -1780,11 +1780,15 @@ impl Heap {
             return false;
         }
         self.release_temporaries_since(mark);
+        if result != NONE {
+            self.keep(result);
+        }
         self.file_writers.iter().any(|&writer| {
-            !self.active_binding_matches(|bound| {
-                let mut budget = 8;
-                self.keeps_writer(bound, writer, &mut budget)
-            })
+            writer != result
+                && !self.active_binding_matches(|bound| {
+                    let mut budget = 8;
+                    self.keeps_writer(bound, writer, &mut budget)
+                })
         })
     }
 

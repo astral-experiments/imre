@@ -315,14 +315,13 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let bases = if let Some(args) = v.arguments.as_deref() {
+                    let bases = self.op("list", &[]);
+                    if let Some(args) = v.arguments.as_deref() {
                         if !args.keywords.is_empty() {
                             self.unsupported("class keyword arguments");
                         }
-                        self.arguments(args).0
-                    } else {
-                        self.op("list", &[])
-                    };
+                        self.arguments(&bases, args);
+                    }
                     let init = self.define(
                         v.start(),
                         self.source.private_names.definition(&v.name),

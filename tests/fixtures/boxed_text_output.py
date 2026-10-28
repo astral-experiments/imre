@@ -240,6 +240,38 @@ def exercise(path):
     with open(path, "rb") as reader:
         assert (any(([buffered()], [True])[1]), reader.read()) == (True, b"loop")
 
+    def ignore(files):
+        return 7
+
+    def first(files):
+        return files[0]
+
+    with open(path, "rb") as reader:
+        assert (ignore([buffered()]), reader.read()) == (7, b"loop")
+    with open(path, "rb") as reader:
+        stream, seen = first([buffered()]), reader.read()
+        assert not stream.closed and seen == b""
+        stream.close()
+    with open(path, "rb") as reader:
+        owners = [buffered()]
+        stream, code, seen = owners[0], ignore(owners.pop()), reader.read()
+        assert not stream.closed and (code, seen) == (7, b"")
+        stream.close()
+
+    class WriterCheck:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __call__(self):
+            return self.stream.closed
+
+    with open(path, "rb") as reader:
+        assert (WriterCheck(buffered())(), reader.read()) == (False, b"loop")
+    with open(path, "rb") as reader:
+        saved = WriterCheck(buffered())
+        assert (saved(), reader.read()) == (False, b"")
+        saved.stream.close()
+
     def read_after(predicate, value, reader):
         yield predicate(truth_values(value)), reader.read()
 
