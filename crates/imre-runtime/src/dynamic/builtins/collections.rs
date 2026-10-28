@@ -551,7 +551,9 @@ pub(super) fn method(
 ) -> Result<Id> {
     if matches!(
         name,
-        "list.__init__"
+        "list.__add__"
+            | "list.__iadd__"
+            | "list.__init__"
             | "list.__repr__"
             | "tuple.__repr__"
             | "set.__repr__"
@@ -1067,6 +1069,24 @@ pub(super) fn builtin_slot(
         )));
     }
     let storage = ctx.scalar_value(object);
+    if matches!(method, "__add__" | "__iadd__") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "wrapper {method}() takes no keyword arguments"
+            )));
+        }
+        let [value] = rest else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                rest.len()
+            )));
+        };
+        if method == "__add__" {
+            return ctx.concat_list(storage, *value);
+        }
+        list_extend(ctx, storage, *value)?;
+        return Ok(object);
+    }
     if method == "__repr__" {
         if !kwargs.is_empty() {
             return Err(type_error("wrapper __repr__() takes no keyword arguments"));

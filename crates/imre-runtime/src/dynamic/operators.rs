@@ -2870,8 +2870,14 @@ impl Context {
         matches!(self.heap.get(storage), Value::List(_)).then_some(storage)
     }
 
+    /// A Python override participates in numeric addition before list concatenation.
+    fn list_overrides_add(&self, object: Id) -> bool {
+        self.slot(object, "__add__")
+            .is_some_and(|slot| self.builtins.get("list.__add__") != Some(&slot))
+    }
+
     /// Concatenate the two reference arrays without invoking either operand's iterator.
-    fn concat_list(&mut self, storage: Id, other: Id) -> Result<Id> {
+    pub(super) fn concat_list(&mut self, storage: Id, other: Id) -> Result<Id> {
         let Value::List(left) = self.heap.get(storage) else {
             unreachable!("list payload")
         };
@@ -3018,7 +3024,7 @@ impl Context {
                     builtins::call(self, "list.extend", &[storage, b], &[])?;
                     return Ok(a);
                 }
-                if self.slot(a, "__add__").is_some() {
+                if self.list_overrides_add(a) {
                     // A Python __add__ disables the native sequence-concatenation fallback.
                     return Err(Error::new(
                         "TypeError",
@@ -3281,14 +3287,15 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 
 impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+        // Without a Python addition hook, list concatenation waits for the reflected operand.
+        if name == "__add__"
+            && self.list_storage(obj).is_some()
+            && !self.list_overrides_add(obj)
+            && self.slot(obj, "__radd__").is_none()
+        {
+            return Ok(None);
+        }
         let Some(method) = self.bound_slot(obj, name)? else {
-            // Defining __radd__ installs a numeric slot that also calls inherited list.__add__.
-            if name == "__add__"
-                && let Some(storage) = self.list_storage(obj)
-                && self.slot(obj, "__radd__").is_some()
-            {
-                return self.concat_list(storage, other).map(Some);
-            }
             if name == "__ne__"
                 && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
             {
@@ -3414,15 +3421,6 @@ impl Context {
                 unreachable!()
             };
             *left = bytes;
-            return Ok(a);
-        }
-        // A list subclass inherits a numeric __iadd__ that runs before reflected addition.
-        if op == "+"
-            && let Some(storage) = self.list_storage(a)
-            && storage != a
-            && self.slot(a, "__iadd__").is_none()
-        {
-            builtins::call(self, "list.extend", &[storage, b], &[])?;
             return Ok(a);
         }
         if op == "*"

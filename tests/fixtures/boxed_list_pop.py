@@ -70,6 +70,20 @@ def current():
         def __iter__(self):
             return iter((9,))
 
+    class Right(Source):
+        def __radd__(self, other):
+            raise AssertionError("direct list descriptors do not use reflected addition")
+
+    left = Source([1])
+    right = Right([2])
+    assert type(list.__add__).__name__ == "wrapper_descriptor"
+    assert Source.__add__ is list.__add__
+    combined = list.__add__(left, right)
+    assert type(combined) is list and combined == [1, 2]
+    add = list.__iadd__.__get__(left, Source)
+    assert add.__self__ is left
+    assert add(right) is left and left == [1, 9]
+    assert left.__iadd__(left) is left and left == [1, 9, 1, 9]
     items = Source([1, 2])
     items.extend(items)
     items.extend(Source())
