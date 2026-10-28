@@ -296,11 +296,8 @@ impl Context {
             "call" => {
                 let args = self.items(b)?;
                 let kwargs = self.keyword_args(c)?;
-                let owns_writer = self.call_operands_own_writer(a, &args, &kwargs);
                 let result = self.call(a, args, kwargs)?;
-                if (owns_writer || self.consumes_truth_arguments(a))
-                    && let Some(mark) = self.heap.argument_mark(b)
-                {
+                if let Some(mark) = self.heap.argument_mark(b) {
                     self.finish_call_operands(mark, result);
                 }
                 Ok(result)
@@ -1228,36 +1225,11 @@ impl Context {
         self.finish_call_operands(mark, NONE);
     }
 
-    /// A temporary argument, callable instance or bound receiver can own a writer until the call returns.
-    pub(super) fn call_operands_own_writer(
-        &self,
-        function: Id,
-        args: &[Id],
-        kwargs: &[(String, Id)],
-    ) -> bool {
-        self.heap.has_file_writers()
-            && (args
-                .iter()
-                .chain(kwargs.iter().map(|(_, value)| value))
-                .any(|&value| self.heap.could_own_writer(value, true))
-                || match self.heap.get(function) {
-                    Value::Method { receiver, .. } => self.heap.could_own_writer(*receiver, true),
-                    Value::Instance { .. } => self.heap.could_own_writer(function, true),
-                    _ => false,
-                })
-    }
-
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
     pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
         if self.heap.discard_operands(mark, result) {
             self.collect_unreachable();
         }
-    }
-
-    /// These builtins return a boolean and release their evaluated arguments before the next operand.
-    pub(super) fn consumes_truth_arguments(&self, callable: Id) -> bool {
-        self.heap.has_file_writers()
-            && matches!(self.heap.get(callable), Value::Native(name) if matches!(name.as_str(), "bool" | "all" | "any"))
     }
 
     /// Sweep using the active frames and the context's roots before running callbacks.

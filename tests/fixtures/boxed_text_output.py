@@ -287,6 +287,17 @@ def exercise(path):
         assert (saved(), reader.read()) == (False, b"")
         saved.stream.close()
 
+    def fill(owners):
+        owners.append(buffered())
+        return 1
+
+    with open(path, "rb") as reader:
+        assert (fill([]), reader.read()) == (1, b"loop")
+    with open(path, "rb") as reader:
+        saved = []
+        assert (fill(saved), reader.read()) == (1, b"")
+        saved[0].close()
+
     def read_after(predicate, value, reader):
         yield predicate(truth_values(value)), reader.read()
 

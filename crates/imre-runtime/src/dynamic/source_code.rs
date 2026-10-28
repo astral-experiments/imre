@@ -1863,11 +1863,8 @@ impl Context {
                         .ok_or_else(|| unsupported("keyword unpack"))?;
                     kwargs.push((key.to_string(), eval(self, &item.value)?));
                 }
-                let owns_writer = self.call_operands_own_writer(f, &args, &kwargs);
                 let result = self.call(f, args, kwargs)?;
-                if owns_writer || self.consumes_truth_arguments(f) {
-                    self.finish_call_operands(mark, result);
-                }
+                self.finish_call_operands(mark, result);
                 Ok(result)
             }
             _ => Err(unsupported(format!(
