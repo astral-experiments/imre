@@ -2,6 +2,32 @@ use num_bigint::Sign;
 
 use super::*;
 
+pub(super) fn bit_length(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (&receiver, args) = args
+        .split_first()
+        .ok_or_else(|| type_error("unbound method int.bit_length() needs an argument"))?;
+    let value = ctx.as_int(receiver).map_err(|_| {
+        type_error(format!(
+            "descriptor 'bit_length' for 'int' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        ))
+    })?;
+    if !kwargs.is_empty() {
+        return Err(type_error("int.bit_length() takes no keyword arguments"));
+    }
+    if !args.is_empty() {
+        return Err(type_error(format!(
+            "int.bit_length() takes no arguments ({} given)",
+            args.len()
+        )));
+    }
+    let bits = value.as_small().map_or_else(
+        || value.big().bits(),
+        |n| u64::from(u64::BITS - n.unsigned_abs().leading_zeros()),
+    );
+    Ok(ctx.alloc(Value::Int(crate::Int::from_usize(bits as usize))))
+}
+
 pub(super) fn to_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (&receiver, args) = args
         .split_first()
