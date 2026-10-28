@@ -1863,9 +1863,8 @@ impl Context {
                         .ok_or_else(|| unsupported("keyword unpack"))?;
                     kwargs.push((key.to_string(), eval(self, &item.value)?));
                 }
-                let operand = args.first().copied();
                 let result = self.call(f, args, kwargs)?;
-                if self.consumes_truth_arguments(f, operand) {
+                if self.consumes_truth_arguments(f) {
                     self.discard_truth(mark);
                 }
                 Ok(result)

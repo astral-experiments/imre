@@ -229,6 +229,14 @@ def exercise(path):
         yield value
         writer.close()
 
+    def exhausted_writer():
+        if False:
+            yield None
+        return buffered()
+
+    with open(path, "rb") as reader:
+        assert (any(exhausted_writer()), reader.read()) == (False, b"loop")
+
     def read_after(predicate, value, reader):
         yield predicate(truth_values(value)), reader.read()
 

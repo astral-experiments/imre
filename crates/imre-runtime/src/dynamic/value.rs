@@ -1491,7 +1491,7 @@ impl Heap {
         })
     }
 
-    /// Look for a short path through named containers before tracing the whole heap.
+    /// A short strong path proves the writer survives. A miss falls back to a full heap trace.
     fn keeps_writer(&self, bound: Id, writer: Id, budget: &mut usize) -> bool {
         if *budget == 0 {
             return false;
@@ -1773,7 +1773,10 @@ impl Heap {
         }
         self.release_temporaries_since(mark);
         self.file_writers.iter().any(|&writer| {
-            !self.active_binding_matches(|bound| self.keeps_writer(bound, writer, &mut 8))
+            !self.active_binding_matches(|bound| {
+                let mut budget = 8;
+                self.keeps_writer(bound, writer, &mut budget)
+            })
         })
     }
 
