@@ -10,6 +10,24 @@ fn flag(v: bool) -> Id {
 }
 
 impl Context {
+    /// Call with packed operands and drop their temporary roots after a successful return.
+    fn call_packed(
+        &mut self,
+        callable: Id,
+        arguments: Id,
+        keywords: Id,
+        mark: Option<usize>,
+    ) -> Result<Id> {
+        let args = self.items(arguments)?;
+        let kwargs = self.keyword_args(keywords)?;
+        let result = self.call(callable, args, kwargs)?;
+        // Older compiled modules identify the boundary by their fresh argument list.
+        if let Some(mark) = mark.or_else(|| self.heap.argument_mark(arguments)) {
+            self.finish_call_operands(mark, result);
+        }
+        Ok(result)
+    }
+
     /// Instantiate exception classes used by raise and its explicit cause.
     fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
         let base = self.builtin("BaseException");
@@ -293,15 +311,7 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "call" => {
-                let args = self.items(b)?;
-                let kwargs = self.keyword_args(c)?;
-                let result = self.call(a, args, kwargs)?;
-                if let Some(mark) = self.heap.argument_mark(b) {
-                    self.finish_call_operands(mark, result);
-                }
-                Ok(result)
-            }
+            "call" => self.call_packed(a, b, c, None),
             "class" => self.class(a, b, c),
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
@@ -741,6 +751,25 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     }
     // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
     finish_at(ctx, result, unsafe { span.as_ref() })
+}
+
+/// Invoke a compiled call using the root mark taken before its operands were evaluated.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    args: Id,
+    kwargs: Id,
+    mark: usize,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: the generated caller owns the context and supplies a null or static position.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.call_packed(callable, args, kwargs, Some(mark));
+    finish_at(ctx, result, span)
 }
 
 /// Preserve the native function ABI used by previously compiled modules.

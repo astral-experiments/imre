@@ -25,6 +25,7 @@ declare void @imre_dyn_discard_truth(ptr, i64)
 declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
+declare i64 @imre_dyn_call_at(ptr, i64, i64, i64, i64, ptr)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
@@ -520,11 +521,25 @@ impl Function<'_, '_> {
     }
 
     fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
+        let mark = self.temporary_mark();
         let args = self.op("list", &[]);
         for value in values {
             self.op("append", &[&args, value]);
         }
         let kwargs = self.op("dict", &[]);
-        self.op("call", &[callable, &args, &kwargs])
+        self.call_at(callable, &args, &kwargs, &mark, None)
+    }
+
+    /// Pass the caller's temporary root boundary and optional traceback position.
+    fn call_at(
+        &mut self,
+        callable: &str,
+        args: &str,
+        kwargs: &str,
+        mark: &str,
+        span: Option<[usize; 4]>,
+    ) -> String {
+        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        self.checked(&format!("call i64 @imre_dyn_call_at(ptr %ctx, i64 {callable}, i64 {args}, i64 {kwargs}, i64 {mark}, ptr {position})"))
     }
 }
