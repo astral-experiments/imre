@@ -69,6 +69,7 @@ fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
 
 struct Encoder {
     ascii: bool,
+    allow_nan: bool,
     sort_keys: bool,
     item_separator: String,
     key_separator: String,
@@ -102,6 +103,7 @@ pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Resul
     };
     let mut encoder = Encoder {
         ascii: ctx.optional_truth(option("ensure_ascii"), true)?,
+        allow_nan: ctx.optional_truth(option("allow_nan"), true)?,
         sort_keys: ctx.optional_truth(option("sort_keys"), false)?,
         item_separator,
         key_separator,
@@ -119,7 +121,10 @@ impl Encoder {
             Value::None => self.output.push_str("null"),
             Value::Bool(value) => self.output.push_str(if *value { "true" } else { "false" }),
             Value::Int(value) => write!(self.output, "{value}").unwrap(),
-            Value::Float(value) => self.output.push_str(&float_text(*value)),
+            Value::Float(value) => {
+                self.output
+                    .push_str(&float_text(ctx, id, *value, self.allow_nan)?)
+            }
             Value::Str(value) => write_json_string(&mut self.output, value, self.ascii)?,
             _ => {
                 if self.active.len() >= 512 {
@@ -194,7 +199,8 @@ impl Encoder {
                 Value::Str(s) => write_json_string(&mut self.output, s, self.ascii)?,
                 Value::Int(n) => write_json_string(&mut self.output, &n.to_string(), self.ascii)?,
                 Value::Float(n) => {
-                    write_json_string(&mut self.output, &float_text(*n), self.ascii)?
+                    let text = float_text(ctx, key, *n, self.allow_nan)?;
+                    write_json_string(&mut self.output, &text, self.ascii)?
                 }
                 Value::None => self.output.push_str("\"null\""),
                 Value::Bool(v) => self
@@ -210,14 +216,27 @@ impl Encoder {
     }
 }
 
-fn float_text(value: f64) -> Str {
-    if value.is_nan() {
+/// Spell nonfinite values as JSON extensions unless strict encoding rejects them.
+fn float_text(ctx: &mut Context, id: Id, value: f64, allow_nan: bool) -> Result<Str> {
+    if value.is_finite() {
+        return Ok(crate::floats::render(value));
+    }
+    if !allow_nan {
+        let repr = ctx.builtin("repr");
+        let text = ctx.call(repr, vec![id], Vec::new())?;
+        return Err(Error::new(
+            "ValueError",
+            format!(
+                "Out of range float values are not JSON compliant: {}",
+                ctx.str_value(text)?
+            ),
+        ));
+    }
+    Ok(if value.is_nan() {
         "NaN".into()
     } else if value == f64::INFINITY {
         "Infinity".into()
-    } else if value == f64::NEG_INFINITY {
-        "-Infinity".into()
     } else {
-        crate::floats::render(value)
-    }
+        "-Infinity".into()
+    })
 }

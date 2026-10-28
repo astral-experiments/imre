@@ -1288,7 +1288,14 @@ pub(super) fn call(
         "json.loads" => (1, &["s"]),
         "json.dumps" => (
             1,
-            &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
+            &[
+                "obj",
+                "default",
+                "ensure_ascii",
+                "allow_nan",
+                "sort_keys",
+                "separators",
+            ],
         ),
         "hashlib.sha1" | "hashlib.sha256" => (1, &["data", "usedforsecurity"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),

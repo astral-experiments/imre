@@ -1005,6 +1005,12 @@ print(json.dumps({Label("status"): [Code.ok, DecimalKey(1.25)]}, **options))
 print(json.dumps({Code.ok: Label("ok"), DecimalKey(2.5): Code.ok}, **options))
 nan = json.loads("NaN")
 print(nan == nan, nan <= 1, [nan] == [nan])
+print(json.dumps([1.25], allow_nan=False), json.dumps({nan: nan}, allow_nan=True))
+for obj in ([nan], {float("-inf"): 0}):
+    try:
+        json.dumps(obj, allow_nan=False)
+    except ValueError as err:
+        print(str(err))
 defaults = {"present": None}
 print(defaults.setdefault("missing"), defaults.setdefault("present", 1), len(defaults))
 cache = (Ellipsis, Ellipsis)
