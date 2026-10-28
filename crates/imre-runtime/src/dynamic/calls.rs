@@ -611,11 +611,11 @@ impl Context {
             _ => false,
         }
     }
-    pub(super) fn namedtuple_fields(&self, class: Id) -> Option<Vec<String>> {
+    pub(super) fn namedtuple_fields(&self, class: Id) -> Option<std::rc::Rc<[String]>> {
         match self.heap.get(class) {
             Value::Class {
                 namedtuple_fields, ..
-            } => namedtuple_fields.as_deref().map(<[String]>::to_vec),
+            } => namedtuple_fields.clone(),
             _ => None,
         }
     }

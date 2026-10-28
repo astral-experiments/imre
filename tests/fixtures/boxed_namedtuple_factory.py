@@ -15,6 +15,21 @@ class BrokenBlock:
         raise LookupError("error after the last field")
 
 
+def layout_read_allocation():
+    import os
+
+    # Match the allocation size recognized by the boxed-call malloc wrapper.
+    field = "f" * (113 * 8)
+    row = namedtuple("Row", (field, "kept"))(7, 9)
+    marker = {}
+    os.putenv("IMRE_TEST_GETTER_ALLOCATION", "1")
+    marker[0] = 1
+    text = repr(row)
+    os.unsetenv("IMRE_TEST_GETTER_ALLOCATION")
+    assert text == f"Row({field}=7, kept=9)"
+    print(row.kept)
+
+
 def current():
     Match = namedtuple("Match", "a b size")
     blocks = [(0, 0, 5), (6, 5, 0)]
