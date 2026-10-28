@@ -299,6 +299,8 @@ impl Context {
             Value::MappingProxy(_) => "mappingproxy",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
+            Value::TupleGetter { .. } => "_tuplegetter",
+            Value::TupleGetterDoc => "member_descriptor",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
             Value::Cell(_) => "cell",
@@ -662,6 +664,13 @@ pub(super) enum Value {
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
+    /// A tuple field position and the descriptor’s writable docstring.
+    TupleGetter {
+        index: i64,
+        doc: Option<Id>,
+    },
+    /// The writable document member of the native tuple descriptor type.
+    TupleGetterDoc,
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -829,6 +838,7 @@ impl Value {
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
+            Self::TupleGetter { doc, .. } => visit.extend(doc),
             Self::ItemGetter(keys) => visit.push(*keys),
             Self::Map {
                 function, inputs, ..
@@ -1073,6 +1083,7 @@ impl Value {
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
+            | Self::TupleGetterDoc
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)

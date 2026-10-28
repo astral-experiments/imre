@@ -391,7 +391,11 @@ impl Context {
     fn native_data_descriptor(&self, descriptor: Id) -> bool {
         matches!(
             self.heap.get(descriptor),
-            Value::Property(_) | Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_)
+            Value::Property(_)
+                | Value::TupleGetter { .. }
+                | Value::TupleGetterDoc
+                | Value::GetSetDescriptor { .. }
+                | Value::WeakrefDescriptor(_)
         )
     }
 
@@ -435,6 +439,10 @@ impl Context {
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
+                Value::TupleGetterDoc => return super::namedtuple::document(self, receiver),
+                Value::TupleGetter { index, .. } => {
+                    return super::namedtuple::read_field(self, *index, receiver);
+                }
                 Value::Property(property) => return property.read(self, receiver),
                 Value::WeakrefDescriptor(owner) => return self.weakref_list(*owner, receiver),
                 Value::GetSetDescriptor { get, .. } => {
@@ -642,6 +650,11 @@ impl Context {
             _ => None,
         }
     }
+    /// Check whether an inline value is an immutable tuple position.
+    fn has_namedtuple_field(&self, class: Id, name: &str) -> bool {
+        matches!(self.heap.get(class), Value::Class { namedtuple_fields: Some(names), .. } if names.iter().any(|field| field == name))
+    }
+
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
         Some(match self.heap.get(obj) {
             Value::None
@@ -692,6 +705,8 @@ impl Context {
             Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
             Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
+            Value::TupleGetter { .. } => super::namedtuple::GETTER,
+            Value::TupleGetterDoc => "member_descriptor",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
@@ -734,9 +749,11 @@ impl Context {
                             | "method-wrapper"
                             | "wrapper_descriptor"
                             | "getset_descriptor"
+                            | "member_descriptor"
                             | "mappingproxy"
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
+                            | super::namedtuple::GETTER
                             | "operator.itemgetter"
                             | "collections.defaultdict"
                             | "array.array"
@@ -894,6 +911,8 @@ impl Context {
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
+            | (super::namedtuple::GETTER, Value::TupleGetter { .. })
+            | ("member_descriptor", Value::TupleGetterDoc)
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
@@ -1139,7 +1158,13 @@ impl Context {
             if name == "__dict__" && member.is_none() && layout.dictionary {
                 return Ok(self.instance_dictionary(obj, class));
             }
-            let inline = inline.filter(|_| !layout.declared_slot);
+            if let Some(member) = member
+                && self.native_data_descriptor(member)
+            {
+                return self.bind_attribute(member, obj, class);
+            }
+            let inline =
+                inline.filter(|_| !layout.declared_slot && !self.has_namedtuple_field(class, name));
             let field = if inline.is_some()
                 || namespace.is_none()
                 || member.is_some_and(|member| self.data_descriptor(member))
@@ -1288,6 +1313,17 @@ impl Context {
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
+            Value::TupleGetterDoc => match name {
+                "__name__" => return Ok(self.text("__doc__")),
+                "__qualname__" => return Ok(self.text("_tuplegetter.__doc__")),
+                "__doc__" => return Ok(NONE),
+                "__objclass__" => return Ok(self.builtin(super::namedtuple::GETTER)),
+                _ => {}
+            },
+            Value::Native(class) if class == "member_descriptor" && name == "__module__" => {
+                return Ok(self.text("builtins"));
+            }
+            Value::TupleGetter { doc, .. } if name == "__doc__" => return Ok(doc.unwrap_or(NONE)),
             Value::WeakrefDescriptor(owner) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text("__weakref__")),
@@ -1450,17 +1486,28 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | super::namedtuple::GETTER
                         | super::deque::CLASS
                         | super::deque::ITERATOR
                         | super::deque::REVERSE_ITERATOR
                 ) =>
             {
                 let (module, short) = class.rsplit_once('.').unwrap();
+                if class == super::namedtuple::GETTER
+                    && let Some(value) = super::namedtuple::class_attribute(self, obj, name)
+                {
+                    return Ok(value);
+                }
                 match name {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(short));
                     }
                     "__module__" => return Ok(self.text(module)),
+                    _ if class == super::namedtuple::GETTER
+                        && super::namedtuple::GETTER_METHODS.contains(&name) =>
+                    {
+                        return Ok(self.builtin(&format!("{class}.{name}")));
+                    }
                     _ if class == super::deque::CLASS && super::deque::METHODS.contains(&name) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
@@ -1791,6 +1838,12 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("slice.{name}")));
             }
+            Value::Native(class)
+                if class == super::namedtuple::GETTER
+                    && super::namedtuple::GETTER_METHODS.contains(&name) =>
+            {
+                return Ok(self.builtin(&format!("{}.{name}", super::namedtuple::GETTER)));
+            }
             Value::Native(class) if class == "operator.itemgetter" && name == "__reduce__" => {
                 return Ok(self.builtin("operator.itemgetter.__reduce__"));
             }
@@ -1997,6 +2050,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
+            return super::namedtuple::set_document(self, obj, None).map(|_| ());
+        }
         if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, None);
             return Ok(());
@@ -2016,6 +2072,12 @@ impl Context {
             && self.data_descriptor(descriptor)
         {
             match *self.heap.get(descriptor) {
+                Value::TupleGetterDoc => {
+                    return super::namedtuple::set_document(self, obj, None).map(|_| ());
+                }
+                Value::TupleGetter { .. } => {
+                    return Err(Error::new("AttributeError", "can't delete attribute"));
+                }
                 Value::Property(property) => return property.remove(self, obj),
                 Value::WeakrefDescriptor(owner) => return Err(self.readonly_weakref(owner)),
                 Value::GetSetDescriptor { set: Some(set), .. } => {
@@ -2157,12 +2219,6 @@ impl Context {
                 Err(error)
             }
             Value::Instance { class, .. } if self.builtins.get("object") != Some(&class) => {
-                if self
-                    .namedtuple_fields(class)
-                    .is_some_and(|fields| fields.iter().any(|field| field == name))
-                {
-                    return Err(Error::new("AttributeError", "can't delete attribute"));
-                }
                 let layout = self.instance_layout(class, name);
                 if name == "__dict__" && member.is_none() {
                     if !layout.dictionary {
@@ -2179,7 +2235,9 @@ impl Context {
                 {
                     return self.update_dictionary_field(obj, storage, name, None);
                 }
-                if layout.declared_slot && !layout.active_slot {
+                if (layout.declared_slot && !layout.active_slot)
+                    || self.has_namedtuple_field(class, name)
+                {
                     return Err(self.missing_attribute(obj, name));
                 }
                 let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
@@ -2446,6 +2504,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
+            return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
+        }
         if name == "__callback__"
             && self.slot(obj, name).is_none()
             && self.heap.get(obj).weak_reference().is_some()
@@ -2547,6 +2608,12 @@ impl Context {
                     format!("attribute '{name}' of '{owner}' objects is not writable"),
                 ));
             }
+            if matches!(self.heap.get(descriptor), Value::TupleGetterDoc) {
+                return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
+            }
+            if matches!(self.heap.get(descriptor), Value::TupleGetter { .. }) {
+                return Err(Error::new("AttributeError", "can't set attribute"));
+            }
             if let Some(setter) = self.slot(descriptor, "__set__") {
                 self.call(setter, vec![descriptor, obj, value], Vec::new())?;
                 return Ok(());
@@ -2555,13 +2622,6 @@ impl Context {
                 "AttributeError",
                 format!("attribute {name:?} cannot be set"),
             ));
-        }
-        if let Value::Instance { class, .. } = self.heap.get(obj)
-            && self
-                .namedtuple_fields(*class)
-                .is_some_and(|fields| fields.iter().any(|field| field == name))
-        {
-            return Err(Error::new("AttributeError", "can't set attribute"));
         }
         if self.update_syntax_member(obj, name, value) {
             return Ok(());
@@ -2658,8 +2718,7 @@ impl Context {
             }
             if !layout.active_slot {
                 let storage = namespace.or_else(|| {
-                    layout
-                        .declared_slot
+                    (layout.declared_slot || self.has_namedtuple_field(class, name))
                         .then(|| self.instance_dictionary(obj, class))
                 });
                 if let Some(storage) = storage {

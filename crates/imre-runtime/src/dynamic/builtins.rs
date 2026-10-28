@@ -330,6 +330,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             iter.kind
         }
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
+        Value::TupleGetterDoc if super::namedtuple::GETTER_METHODS.contains(&attr) => {
+            "member_descriptor"
+        }
+        Value::TupleGetter { .. } if super::namedtuple::GETTER_METHODS.contains(&attr) => {
+            super::namedtuple::GETTER
+        }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",

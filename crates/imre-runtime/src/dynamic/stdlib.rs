@@ -338,6 +338,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_ordered_dict_repr"
             | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
+        ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
@@ -871,6 +872,15 @@ pub(super) fn call(
     }
     if name == "collections.namedtuple" {
         return super::namedtuple::factory(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("member_descriptor.") {
+        return super::namedtuple::doc_method(ctx, method, args, kwargs);
+    }
+    if name == super::namedtuple::GETTER {
+        return super::namedtuple::new_getter(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("collections._tuplegetter.") {
+        return super::namedtuple::getter_method(ctx, method, args, kwargs);
     }
     if name == "_collections._make" {
         return super::namedtuple::make(ctx, args, kwargs);
