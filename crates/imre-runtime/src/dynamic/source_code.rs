@@ -14,7 +14,7 @@ pub(super) struct Program {
     pub filename: Rc<str>,
     pub name: String,
     doc: Option<ruff_text_size::TextRange>,
-    strings: HashMap<ruff_text_size::TextRange, Id>,
+    literals: HashMap<ruff_text_size::TextRange, Id>,
     pub(super) string_roots: Id,
     first_line: u32,
     generator: bool,
@@ -88,7 +88,8 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    fn constant(&mut self, literal: &'a ast::ExprStringLiteral) -> Result<()> {
+    /// Share equal text constants across nested code objects.
+    fn string_constant(&mut self, literal: &'a ast::ExprStringLiteral) -> Result<()> {
         let text = literal.value.to_str();
         let id = if let Some(&id) = self.shared.get(text) {
             id
@@ -103,10 +104,15 @@ impl<'a> CompiledStrings<'a, '_> {
             self.shared.insert(text, id);
             id
         };
+        self.constant(literal.range(), id)
+    }
+
+    /// Root a literal for later evaluation at its source position.
+    fn constant(&mut self, range: ruff_text_size::TextRange, id: Id) -> Result<()> {
         self.constants
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        self.constants.insert(literal.range(), id);
+        self.constants.insert(range, id);
         self.keep(id)
     }
 
@@ -119,7 +125,13 @@ impl<'a> CompiledStrings<'a, '_> {
                 ast::Expr::Attribute(attr) => {
                     self.heap.code_name(attr.attr.as_str());
                 }
-                ast::Expr::StringLiteral(literal) => self.constant(literal)?,
+                ast::Expr::StringLiteral(literal) => self.string_constant(literal)?,
+                ast::Expr::BytesLiteral(literal) => {
+                    let id = self
+                        .heap
+                        .alloc(Value::Bytes(literal.value.bytes().collect()));
+                    self.constant(literal.range(), id)?;
+                }
                 _ => {}
             }
             ast::visitor::walk_expr(&mut self, expr);
@@ -146,7 +158,7 @@ impl Program {
         let mut strings = CompiledStrings {
             heap,
             shared,
-            constants: &mut self.strings,
+            constants: &mut self.literals,
             roots: Vec::new(),
             pending: Vec::new(),
             exhausted: false,
@@ -201,7 +213,7 @@ impl Program {
             filename,
             name: name.to_owned(),
             doc: None,
-            strings: HashMap::new(),
+            literals: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
             generator: false,
@@ -598,7 +610,7 @@ impl Context {
         let filename = self.text(program.filename.as_ref());
         let doc = program
             .doc
-            .and_then(|range| program.strings.get(&range).copied())
+            .and_then(|range| program.literals.get(&range).copied())
             .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
             name,
@@ -1464,7 +1476,7 @@ impl Context {
                 }
                 self.lookup(scope, name)
             }
-            Expr::StringLiteral(v) => Ok(code.strings[&v.range()]),
+            Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {
