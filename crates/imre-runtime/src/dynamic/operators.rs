@@ -994,6 +994,27 @@ impl Context {
         self.class_attr(class, name).map(|slot| (class, slot))
     }
 
+    /// Write a set's type name or cycle marker and return the closer for a nonempty body.
+    fn begin_set_repr(
+        &self,
+        output: &mut String,
+        object: Id,
+        wrapped: bool,
+        empty: bool,
+        recursive: bool,
+    ) -> Result<Option<&'static str>> {
+        if empty || recursive {
+            append_rendered_text(output, self.type_name(object))?;
+            append_rendered_text(output, if recursive { "(...)" } else { "()" })?;
+            return Ok(None);
+        }
+        if wrapped {
+            append_rendered_text(output, self.type_name(object))?;
+            append_rendered_text(output, "(")?;
+        }
+        Ok(Some(if wrapped { "})" } else { "}" }))
+    }
+
     /// Resolve inherited builtin container repr slots that can share the active worklist.
     fn native_repr_storage(&self, object: Id) -> Option<(Id, bool)> {
         let (_, slot) = self.format_slot(object, "__repr__")?;
@@ -1006,11 +1027,14 @@ impl Context {
                 .dict_storage(object)
                 .filter(|&storage| matches!(self.heap.get(storage), Value::DefaultDict { .. }))
                 .map(|storage| (storage, true)),
-            "list.__repr__" | "tuple.__repr__" => {
+            "list.__repr__" | "tuple.__repr__" | "set.__repr__" | "frozenset.__repr__" => {
                 let storage = self.scalar_value(object);
                 matches!(
                     (name.as_str(), self.heap.get(storage)),
-                    ("list.__repr__", Value::List(_)) | ("tuple.__repr__", Value::Tuple(_))
+                    ("list.__repr__", Value::List(_))
+                        | ("tuple.__repr__", Value::Tuple(_))
+                        | ("set.__repr__", Value::Set { frozen: false, .. })
+                        | ("frozenset.__repr__", Value::Set { frozen: true, .. })
                 )
                 .then_some((storage, false))
             }
@@ -1246,27 +1270,17 @@ impl Context {
             } => {
                 let (open, end, cycle, contents) = match ctx.heap.get(storage) {
                     Value::Set { entries, frozen } => {
-                        let name = ctx.type_name(object);
-                        let recursive = ancestors.contains(&object);
-                        if recursive || entries.is_empty() {
-                            append_rendered_text(&mut output, name)?;
-                            append_rendered_text(
-                                &mut output,
-                                if recursive { "(...)" } else { "()" },
-                            )?;
+                        let Some(end) = ctx.begin_set_repr(
+                            &mut output,
+                            object,
+                            *frozen || object != storage,
+                            entries.is_empty(),
+                            ancestors.contains(&object),
+                        )?
+                        else {
                             return Ok(output);
-                        }
-                        let wrapped = *frozen || object != storage;
-                        if wrapped {
-                            append_rendered_text(&mut output, name)?;
-                            append_rendered_text(&mut output, "(")?;
-                        }
-                        (
-                            "{",
-                            if wrapped { "})" } else { "}" },
-                            "set(...)",
-                            Part::set_members(entries)?,
-                        )
+                        };
+                        ("{", end, "set(...)", Part::set_members(entries)?)
                     }
                     Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                     Value::Tuple(items) => (
@@ -1780,23 +1794,17 @@ impl Context {
                             ("{", "}", "{...}", Part::Entries(storage, 0, true))
                         }
                         Value::Set { entries, frozen } => {
-                            if entries.is_empty() {
-                                append_rendered_text(
-                                    &mut output,
-                                    if *frozen { "frozenset()" } else { "set()" },
-                                )?;
+                            let Some(end) = ctx.begin_set_repr(
+                                &mut output,
+                                id,
+                                *frozen || id != storage,
+                                entries.is_empty(),
+                                ancestors.contains(&id),
+                            )?
+                            else {
                                 continue;
-                            }
-                            (
-                                if *frozen { "frozenset({" } else { "{" },
-                                if *frozen { "})" } else { "}" },
-                                if *frozen {
-                                    "frozenset(...)"
-                                } else {
-                                    "set(...)"
-                                },
-                                Part::Entries(id, 0, false),
-                            )
+                            };
+                            ("{", end, "set(...)", Part::Entries(storage, 0, false))
                         }
                         _ => {
                             append_rendered_text(
@@ -1824,7 +1832,7 @@ impl Context {
                     match contents {
                         Part::Entries(_, _, false) if checked => {
                             // CPython renders a snapshot so a hook can mutate the original set.
-                            let Value::Set { entries, .. } = ctx.heap.get(id) else {
+                            let Value::Set { entries, .. } = ctx.heap.get(storage) else {
                                 unreachable!()
                             };
                             push_frame(&mut work, Part::set_members(entries)?)?;

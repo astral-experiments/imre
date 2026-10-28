@@ -1,4 +1,12 @@
 def current():
+    class F(frozenset):
+        pass
+
+    nested = F()
+    for _ in range(1200):
+        nested = F((nested,))
+    assert len(repr(nested)) == 6003
+
     class NestedDict(dict):
         pass
     class NestedList(list):
