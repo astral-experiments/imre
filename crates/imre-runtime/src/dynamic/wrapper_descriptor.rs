@@ -123,6 +123,11 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
+            "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
+            "__text_signature__" if matches!(self.name, "__add__" | "__iadd__") => {
+                ctx.text("($self, value, /)")
+            }
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
                     ("append", "__doc__") => "Append object to the end of the list.",
