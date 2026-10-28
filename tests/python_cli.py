@@ -1013,6 +1013,23 @@ try:
 except KeyError as err:
     print(str(err))
 print(json.dumps({"ok": True}, **options))
+from io import StringIO
+stream = StringIO()
+print(json.dump(fp=stream, obj={"a": [1, 2]}), stream.getvalue())
+stream = StringIO()
+try:
+    json.dump([1, object()], stream)
+except TypeError:
+    print(stream.getvalue())
+class StreamItems(list):
+    def __iter__(self):
+        yield 1
+        raise LookupError("iterator stopped")
+stream = StringIO()
+try:
+    json.dump(StreamItems([1]), stream)
+except LookupError as err:
+    print(str(err), stream.getvalue())
 print(json.dumps({"z": Extra(), "a": json.loads("1.25")}, **options))
 print(repr(json.dumps({"items": [1, {}]}, indent=2)))
 print(repr(json.dumps([Extra()], indent="--", **options)))

@@ -75,11 +75,18 @@ struct Encoder {
     item_separator: String,
     key_separator: String,
     default: Option<Id>,
+    stream: Option<Id>,
     active: HashSet<Id>,
     output: String,
 }
 
-pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Result<String> {
+/// Encode to an owned string or write fragments to a Python text stream.
+pub(super) fn encode(
+    ctx: &mut Context,
+    id: Id,
+    kwargs: &[(String, Id)],
+    stream: Option<Id>,
+) -> Result<Id> {
     let option = |name| {
         kwargs
             .iter()
@@ -88,7 +95,7 @@ pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Resul
     };
     let indent = match option("indent") {
         None | Some(NONE) => None,
-        Some(_) if ctx.str_value(id).is_ok() => None,
+        Some(_) if stream.is_none() && ctx.str_value(id).is_ok() => None,
         Some(unit) => {
             let unit = if ctx.str_value(unit).is_ok() {
                 unit
@@ -126,14 +133,33 @@ pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Resul
         item_separator,
         key_separator,
         default: option("default").filter(|v| *v != NONE),
+        stream,
         active: HashSet::new(),
         output: String::new(),
     };
     encoder.value(ctx, id, 0)?;
-    Ok(encoder.output)
+    Ok(if stream.is_some() {
+        NONE
+    } else {
+        ctx.text(encoder.output)
+    })
 }
 
 impl Encoder {
+    /// Deliver each completed fragment before running later user code.
+    fn emit(&mut self, ctx: &mut Context) -> Result<()> {
+        if let Some(stream) = self.stream
+            && !self.output.is_empty()
+        {
+            let roots = ctx.heap.temporary_mark();
+            let chunk = ctx.text(std::mem::take(&mut self.output));
+            let write = ctx.lookup_attr(stream, "write")?;
+            ctx.call(write, vec![chunk], Vec::new())?;
+            ctx.heap.release_temporaries_since(roots);
+        }
+        Ok(())
+    }
+
     fn value(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
         match ctx.heap.get(ctx.scalar_value(id)) {
             Value::None => self.output.push_str("null"),
@@ -154,17 +180,24 @@ impl Encoder {
                 let roots = ctx.heap.temporary_mark();
                 ctx.heap.reserve_temporaries(1)?;
                 ctx.heap.keep(id);
-                let contents = if matches!(ctx.heap.get(id), Value::Instance { .. })
-                    && (ctx.builtin_slot_accepts(id, "list")
-                        || ctx.builtin_slot_accepts(id, "tuple"))
-                {
-                    Self::snapshot(ctx, id)?
-                } else {
-                    id
-                };
+                self.emit(ctx)?;
+                let sequence =
+                    ctx.builtin_slot_accepts(id, "list") || ctx.builtin_slot_accepts(id, "tuple");
+                let streaming =
+                    self.stream.is_some() && (sequence || ctx.dict_entries(id).is_some());
+                let contents =
+                    if !streaming && sequence && matches!(ctx.heap.get(id), Value::Instance { .. })
+                    {
+                        Self::snapshot(ctx, id)?
+                    } else {
+                        id
+                    };
                 // Materialize subclass iteration before detecting a repeated container. A
                 // second call may return an empty sequence and end the recursion itself.
                 let empty = match ctx.heap.get(contents) {
+                    _ if streaming => {
+                        (!ctx.truth(id)?).then_some(if sequence { "[]" } else { "{}" })
+                    }
                     Value::List(items)
                     | Value::Tuple(items)
                     | Value::NamedTuple { values: items, .. }
@@ -178,12 +211,14 @@ impl Encoder {
                 if let Some(empty) = empty {
                     self.output.push_str(empty);
                     ctx.heap.release_temporaries_since(roots);
-                    return Ok(());
+                    return self.emit(ctx);
                 }
                 if !self.active.insert(id) {
                     return Err(Error::new("ValueError", "Circular reference detected"));
                 }
                 match ctx.heap.get(contents) {
+                    _ if streaming && sequence => self.stream_array(ctx, id, depth)?,
+                    _ if streaming => self.stream_object(ctx, id, depth)?,
                     Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => {
                         self.output.push('[');
                         let mut i = 0;
@@ -196,7 +231,7 @@ impl Encoder {
                             self.value(ctx, item, depth + 1)?;
                             i += 1;
                         }
-                        self.close(']', i != 0, depth)?;
+                        self.close(ctx, ']', i != 0, depth)?;
                     }
                     Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
                         self.object(ctx, super::super::copy_ids(entries)?, depth)?;
@@ -223,7 +258,7 @@ impl Encoder {
                 ctx.heap.release_temporaries_since(roots);
             }
         }
-        Ok(())
+        self.emit(ctx)
     }
 
     /// Write a separator and the indentation before a sequence item or object member.
@@ -235,9 +270,16 @@ impl Encoder {
     }
 
     /// Align a nonempty container's closing delimiter with its opening level.
-    fn close(&mut self, delimiter: char, nonempty: bool, depth: usize) -> Result<()> {
+    fn close(
+        &mut self,
+        ctx: &mut Context,
+        delimiter: char,
+        nonempty: bool,
+        depth: usize,
+    ) -> Result<()> {
         if nonempty {
             self.newline(depth)?;
+            self.emit(ctx)?;
         }
         self.output.push(delimiter);
         Ok(())
@@ -271,7 +313,7 @@ impl Encoder {
         for (i, (key, value)) in entries.into_iter().enumerate() {
             self.member(ctx, i, key, value, depth + 1)?;
         }
-        self.close('}', nonempty, depth)
+        self.close(ctx, '}', nonempty, depth)
     }
 
     /// Materialize a subclass iterator while keeping previously yielded values alive.
@@ -307,7 +349,55 @@ impl Encoder {
             self.member(ctx, i, key, value, depth + 1)?;
             i += 1;
         }
-        self.close('}', i != 0, depth)
+        self.close(ctx, '}', i != 0, depth)
+    }
+
+    /// Pull the next item only after its predecessor has reached the stream.
+    fn stream_array(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
+        let iter = ctx.iterator(id)?;
+        self.output.push('[');
+        let mut i = 0;
+        loop {
+            let roots = ctx.heap.temporary_mark();
+            let Some(item) = ctx.next_item(iter)? else {
+                break;
+            };
+            ctx.heap.reserve_temporaries(1)?;
+            ctx.heap.keep(item);
+            self.separator(i, depth + 1)?;
+            self.value(ctx, item, depth + 1)?;
+            ctx.heap.release_temporaries_since(roots);
+            i += 1;
+        }
+        self.close(ctx, ']', i != 0, depth)
+    }
+
+    /// Stream mapping items as they arrive, materializing them only for a requested sort.
+    fn stream_object(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
+        self.output.push('{');
+        self.emit(ctx)?;
+        let method = ctx.lookup_attr(id, "items")?;
+        let mut items = ctx.call(method, Vec::new(), Vec::new())?;
+        if self.sort_keys {
+            let sorted = ctx.builtin("sorted");
+            items = ctx.call(sorted, vec![items], Vec::new())?;
+        }
+        let iter = ctx.iterator(items)?;
+        let mut i = 0;
+        loop {
+            let roots = ctx.heap.temporary_mark();
+            let Some(pair) = ctx.next_item(iter)? else {
+                break;
+            };
+            let values = ctx.unpack_items(pair, 2, None)?;
+            ctx.heap.reserve_temporaries(2)?;
+            ctx.heap.keep(values[0]);
+            ctx.heap.keep(values[1]);
+            self.member(ctx, i, values[0], values[1], depth + 1)?;
+            ctx.heap.release_temporaries_since(roots);
+            i += 1;
+        }
+        self.close(ctx, '}', i != 0, depth)
     }
 
     /// Write an object member after any sorting and pair validation.
@@ -320,6 +410,7 @@ impl Encoder {
         depth: usize,
     ) -> Result<()> {
         self.separator(i, depth)?;
+        let before_key = self.output.len();
         match ctx.heap.get(ctx.scalar_value(key)) {
             Value::Str(s) => write_json_string(&mut self.output, s, self.ascii)?,
             Value::Int(n) => write_json_string(&mut self.output, &n.to_string(), self.ascii)?,
@@ -333,7 +424,15 @@ impl Encoder {
                 .push_str(if *v { "\"true\"" } else { "\"false\"" }),
             _ => return Err(Error::new("TypeError", "unsupported JSON object key")),
         }
+        if self.stream.is_some() && before_key != 0 {
+            // A rejected key doesn't write the pending separator.
+            let encoded = self.output.split_off(before_key);
+            self.emit(ctx)?;
+            self.output = encoded;
+        }
+        self.emit(ctx)?;
         self.output.push_str(&self.key_separator);
+        self.emit(ctx)?;
         self.value(ctx, value, depth)
     }
 }

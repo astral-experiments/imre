@@ -536,7 +536,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
-        | ("json", "dumps" | "loads")
+        | ("json", "dump" | "dumps" | "loads")
         | ("random", "random")
         | ("codecs", "lookup" | "register_error" | "lookup_error")
         | ("marshal", "loads")
@@ -1281,23 +1281,23 @@ pub(super) fn call(
         name,
         "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode"
     );
+    const JSON_DUMP_KEYWORDS: &[&str] = &[
+        "fp",
+        "obj",
+        "default",
+        "ensure_ascii",
+        "allow_nan",
+        "indent",
+        "sort_keys",
+        "separators",
+    ];
     let (max_args, keywords): (usize, &[&str]) = match name {
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.loads" => (1, &["s"]),
-        "json.dumps" => (
-            1,
-            &[
-                "obj",
-                "default",
-                "ensure_ascii",
-                "allow_nan",
-                "indent",
-                "sort_keys",
-                "separators",
-            ],
-        ),
+        "json.dump" => (2, JSON_DUMP_KEYWORDS),
+        "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
         "hashlib.sha1" | "hashlib.sha256" => (1, &["data", "usedforsecurity"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
@@ -1555,15 +1555,25 @@ pub(super) fn call(
             })?;
             json::loads(ctx, input)?
         }
-        "json.dumps" => {
+        "json.dump" | "json.dumps" => {
+            let function = name.strip_prefix("json.").unwrap();
             let input = option(args, 0, kwargs, "obj")?.ok_or_else(|| {
                 Error::new(
                     "TypeError",
-                    "dumps() missing 1 required positional argument: 'obj'",
+                    format!("{function}() missing 1 required positional argument: 'obj'"),
                 )
             })?;
-            let text = json::dumps(ctx, input, kwargs)?;
-            ctx.text(text)
+            let stream = if function == "dump" {
+                Some(option(args, 1, kwargs, "fp")?.ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        "dump() missing 1 required positional argument: 'fp'",
+                    )
+                })?)
+            } else {
+                None
+            };
+            json::encode(ctx, input, kwargs, stream)?
         }
         "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools.lru_cache" => {
