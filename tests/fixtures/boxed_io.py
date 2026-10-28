@@ -212,6 +212,20 @@ def exercise(path):
         print(repr(target), repr(bytearray(b"'")), io.DEFAULT_BUFFER_SIZE)
 
     target = bytearray(b"ab")
+
+    class Last:
+        def __index__(self):
+            return -1
+
+    class Replacement:
+        def __index__(self):
+            target.extend(b"cd")
+            return ord("x")
+
+    target[Last()] = Replacement()
+    print(bytes(target))
+
+    target = bytearray(b"ab")
     visited = []
     for item in target:
         visited.append(item)
