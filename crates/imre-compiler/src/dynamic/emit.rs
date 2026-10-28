@@ -279,7 +279,10 @@ struct Function<'a, 'p> {
 #[derive(Clone)]
 enum Cleanup {
     With(String),
-    Finally(std::rc::Rc<[ast::Stmt]>),
+    Finally {
+        body: std::rc::Rc<[ast::Stmt]>,
+        loop_depth: usize,
+    },
 }
 
 struct LoopTarget {
