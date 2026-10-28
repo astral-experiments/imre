@@ -1,6 +1,17 @@
 //! Mapping ABC class identities, virtual dictionary registration, and inherited operations.
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+/// Return the raw methods used by each structural collection ABC.
+fn structural_methods(name: &str) -> Option<&'static [&'static str]> {
+    match name {
+        "Iterable" => Some(&["__iter__"]),
+        "Sized" => Some(&["__len__"]),
+        "Container" => Some(&["__contains__"]),
+        "Collection" => Some(&["__len__", "__iter__", "__contains__"]),
+        _ => None,
+    }
+}
+
 /// Allocate the real class objects with their CPython direct bases and C3 lineage.
 pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     let key = format!("collections.abc.{name}");
@@ -33,6 +44,11 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     ctx.bind(scope, "__module__", module);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
+    if structural_methods(name).is_some() {
+        let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
+        let hook = ctx.alloc(Value::ClassMethod(function));
+        ctx.bind(scope, "__subclasshook__", hook);
+    }
     for &method in abstract_methods {
         let function = ctx.builtin(&format!("abc.abstract.{name}.{method}"));
         ctx.bind(scope, method, function);
@@ -141,6 +157,33 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(owner) = name
+        .strip_prefix("hook.")
+        .and_then(|n| n.strip_suffix(".__subclasshook__"))
+    {
+        let Some((&receiver, args)) = args.split_first() else {
+            return Err(Error::new("TypeError", "unbound subclass hook"));
+        };
+        let candidate = match (args, kwargs) {
+            ([candidate], []) => *candidate,
+            ([], [(key, candidate)]) if key == "C" => *candidate,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{owner}.__subclasshook__() expects one class"),
+                ));
+            }
+        };
+        if receiver != class(ctx, owner)? {
+            return Ok(super::value::NOT_IMPLEMENTED);
+        }
+        let methods = structural_methods(owner).expect("registered structural hook");
+        let mut names = [NONE; 3];
+        for (slot, &method) in names.iter_mut().zip(methods) {
+            *slot = ctx.text(method);
+        }
+        return ctx.abc_check_methods(candidate, &names[..methods.len()]);
+    }
     if name == "register" {
         return register(ctx, args, kwargs);
     }
