@@ -50,6 +50,14 @@ def current():
     assert tuple(Shift(2, 3)) == (3, 5)
     assert tuple(Shift._make((2, 3))) == (2, 3)
     assert Foreign(9) == 9
+    class Tagged(tuple):
+        def __init__(self, values, *, tag):
+            self.tag = tag
+
+    tagged = Tagged((1, 2), tag="set by init")
+    assert tagged == (1, 2) and tagged.tag == "set by init"
+    assert tuple.__new__(Tagged, (3,), tag="unused") == (3,)
+
     short = tuple.__new__(Fields, (7,))
     assert {short: "one"}[(7,)] == "one" and short.left == 7
     try:

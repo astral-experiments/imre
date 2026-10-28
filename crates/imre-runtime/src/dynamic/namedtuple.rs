@@ -487,7 +487,15 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
     if names.is_none() && !ctx.subclass(class, tuple) {
         return Err(ctx.invalid_new_subtype("tuple", class));
     }
-    let storage = builtins::call(ctx, "tuple", args, kwargs)?;
+    if !kwargs.is_empty()
+        && (class == tuple
+            || ctx.class_attr(class, "__init__").is_none_or(|init| {
+                matches!(ctx.heap.get(init), Value::Native(name) if name == "object.__init__")
+            }))
+    {
+        return Err(Error::new("TypeError", "tuple() takes no keyword arguments"));
+    }
+    let storage = builtins::call(ctx, "tuple", args, &[])?;
     if class == tuple {
         return Ok(storage);
     }

@@ -3295,14 +3295,15 @@ impl Context {
                     ));
                 }
                 let new = self.class_attr(callable, "__new__").or_else(|| {
-                    self.has_base(callable, "int")
-                        .then(|| self.builtin("int.__new__"))
+                    [("int", "int.__new__"), ("tuple", "tuple.__new__")]
+                        .into_iter()
+                        .find(|(base, _)| self.has_base(callable, base))
+                        .map(|(_, new)| self.builtin(new))
                 });
                 let string_base = ["str", "bytes"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
-                let tuple_subclass = self.has_base(callable, "tuple");
                 let collection_kind = ["set", "frozenset", "bytearray"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
@@ -3337,8 +3338,6 @@ impl Context {
                     };
                     let storage = if self.has_base(callable, "list") {
                         Some(self.alloc(Value::List(Vec::new())))
-                    } else if tuple_subclass {
-                        Some(builtins::call(self, "tuple", &args, &kwargs)?)
                     } else if let Some(kind) = collection_kind {
                         let custom_init = self.class_attr(callable, "__init__").is_some();
                         let items = if kind != "frozenset" && custom_init {
@@ -3373,7 +3372,6 @@ impl Context {
                 } else if new.is_none()
                     && string_base.is_none()
                     && !float_subclass
-                    && !tuple_subclass
                     && collection_kind.is_none()
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
