@@ -397,13 +397,21 @@ fn format_string(
                 }
             }
             if let Some(conv) = conversion_spec {
-                let s = match conv {
-                    's' => ctx.display(value),
-                    'r' => ctx.repr(value),
-                    'a' => ascii(&ctx.repr(value)),
+                value = match conv {
+                    's' => super::call(ctx, "str", &[value], &[])?,
+                    'r' => super::call(ctx, "repr", &[value], &[])?,
+                    'a' => {
+                        let repr = super::call(ctx, "repr", &[value], &[])?;
+                        let text = ctx.str_value(repr)?;
+                        if text.is_ascii() {
+                            repr
+                        } else {
+                            let escaped = ascii(text);
+                            ctx.text(escaped)
+                        }
+                    }
                     _ => return Err(Error::new("ValueError", "unknown format conversion")),
                 };
-                value = ctx.text(s);
             }
             let spec = if format_spec.contains(['{', '}']) {
                 if nested {

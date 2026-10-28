@@ -16,6 +16,16 @@ class Child(Tagged):
 
 
 def current():
+    class Word:
+        def __str__(self):
+            return "label"
+
+        def __repr__(self):
+            return "café"
+
+    word = Word()
+    assert "{!s}/{!r}/{!a}".format(word, word, word) == r"label/café/caf\xe9"
+
     wrapper = classmethod(len)
     assert wrapper.__func__ is len and wrapper.__wrapped__ is len
     assert type(Child.native) is type(Child.owner)
