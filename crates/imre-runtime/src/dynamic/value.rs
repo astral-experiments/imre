@@ -1800,6 +1800,15 @@ impl Heap {
         self.frames.last().unwrap().active
     }
 
+    /// Use the caller's exception when no lexical handler encloses this operation.
+    pub(super) fn caught_exception(&self, caught: Id) -> Id {
+        if caught == NONE {
+            self.frames.last().unwrap().inherited
+        } else {
+            caught
+        }
+    }
+
     pub fn replace_active(&mut self, exception: Id) -> Id {
         std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
     }
@@ -1936,12 +1945,9 @@ impl Heap {
         location: Location,
         caught: Id,
     ) -> Option<Vec<(Id, Id)>> {
+        let active = self.caught_exception(caught);
         let frame = self.frames.last_mut().unwrap();
-        frame.active = if caught == NONE {
-            frame.inherited
-        } else {
-            caught
-        };
+        frame.active = active;
         if let Some(id) = frame.object
             && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
         {

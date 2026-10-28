@@ -279,10 +279,15 @@ struct Function<'a, 'p> {
 
 #[derive(Clone)]
 enum Cleanup {
-    With(String),
+    With {
+        exit: String,
+        caught: String,
+    },
+    ExceptionName(String),
     Finally {
         body: std::rc::Rc<[ast::Stmt]>,
         loop_depth: usize,
+        caught_depth: usize,
     },
 }
 

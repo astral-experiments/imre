@@ -855,21 +855,37 @@ impl Function<'_, '_> {
             }
             if let Some(name) = &h.name {
                 self.bind(name.as_str(), &exc);
+                let failed = self.name("b");
+                let outer = std::mem::replace(&mut self.error, failed.clone());
+                self.exits
+                    .push((Cleanup::ExceptionName(name.to_string()), outer.clone()));
+                self.statements(&h.body);
+                self.exits.pop();
+                self.error = outer;
+                if !self.terminated {
+                    self.clear_exception_name(name.as_str());
+                }
+                self.jump(&done);
+                self.label(&failed);
+                let error = self.op("take_error", &[]);
+                self.clear_exception_name(name.as_str());
+                self.raise(&error, None, true);
+            } else {
+                self.statements(&h.body);
+                self.jump(&done);
             }
-            self.statements(&h.body);
-            if !self.terminated
-                && let Some(name) = &h.name
-            {
-                let name = self.code_name(name.as_str());
-                self.op("clearname", &[&self.scope.clone(), &name]);
-            }
-            self.jump(&done);
             self.label(&next);
         }
         self.raise(&exc, None, true);
         self.caught.pop();
         self.live.pop();
         self.label(&done);
+    }
+
+    /// Remove a handler's binding even if it was changed or deleted by its body.
+    fn clear_exception_name(&mut self, name: &str) {
+        let name = self.code_name(name);
+        self.op("clearname", &[&self.scope.clone(), &name]);
     }
 
     /// Run the same cleanup for normal fallthrough, a pending exception and nonlocal exits.
@@ -881,6 +897,7 @@ impl Function<'_, '_> {
             Cleanup::Finally {
                 body: stmt.finalbody.as_slice().into(),
                 loop_depth: self.loops.len(),
+                caught_depth: self.caught.len(),
             },
             outer.clone(),
         ));
@@ -920,13 +937,20 @@ impl Function<'_, '_> {
             let (cleanup, outer) = &active[index];
             let previous = std::mem::replace(&mut self.error, outer.clone());
             match cleanup {
-                Cleanup::With(exit) => {
-                    self.invoke(exit, &["0", "0", "0"]);
+                Cleanup::With { exit, caught } => {
+                    self.op("exit_context", &[exit, "0", caught]);
                 }
-                Cleanup::Finally { body, loop_depth } => {
-                    // The finally suite can only target loops that enclose the try.
+                Cleanup::ExceptionName(name) => self.clear_exception_name(name),
+                Cleanup::Finally {
+                    body,
+                    loop_depth,
+                    caught_depth,
+                } => {
+                    // Loops and handlers entered inside the try do not enclose its finally.
                     let protected_loops = self.loops.split_off(*loop_depth);
+                    let protected_handlers = self.caught.split_off(*caught_depth);
                     self.statements(body);
+                    self.caught.extend(protected_handlers);
                     self.loops.extend(protected_loops);
                 }
             }
@@ -947,8 +971,14 @@ impl Function<'_, '_> {
         let handler = self.name("b");
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.error, handler.clone());
-        self.exits
-            .push((Cleanup::With(exit.clone()), outer.clone()));
+        let caught = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+        self.exits.push((
+            Cleanup::With {
+                exit: exit.clone(),
+                caught: caught.clone(),
+            },
+            outer.clone(),
+        ));
         self.live.push(exit.clone());
         if let Some(target) = &item.optional_vars {
             self.assign(target, &value);
@@ -958,12 +988,12 @@ impl Function<'_, '_> {
         self.exits.pop();
         self.error = outer;
         if !self.terminated {
-            self.invoke(&exit, &["0", "0", "0"]);
+            self.op("exit_context", &[&exit, "0", &caught]);
             self.jump(&done);
         }
         self.label(&handler);
         let exc = self.op("take_error", &[]);
-        let result = self.op("exit_exception", &[&exit, &exc]);
+        let result = self.op("exit_context", &[&exit, &exc]);
         let suppress = self.truth(&result);
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);
