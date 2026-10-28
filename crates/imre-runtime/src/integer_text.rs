@@ -189,7 +189,7 @@ pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
     }
 }
 
-fn output_limit_message(limit: u32) -> crate::Result<Str> {
+pub(super) fn output_limit_message(limit: u32) -> crate::Result<Str> {
     const PREFIX: &str = "Exceeds the limit (";
     const SUFFIX: &str = " digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit";
     let mut buffer = itoa::Buffer::new();
