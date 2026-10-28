@@ -70,6 +70,7 @@ fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
 struct Encoder {
     ascii: bool,
     allow_nan: bool,
+    indent: Option<String>,
     sort_keys: bool,
     item_separator: String,
     key_separator: String,
@@ -85,8 +86,24 @@ pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Resul
             .find(|(key, _)| key == name)
             .map(|(_, value)| *value)
     };
+    let indent = match option("indent") {
+        None | Some(NONE) => None,
+        Some(_) if ctx.str_value(id).is_ok() => None,
+        Some(unit) => {
+            let unit = if ctx.str_value(unit).is_ok() {
+                unit
+            } else {
+                let space = ctx.text(" ");
+                ctx.binary("*", space, unit)?
+            };
+            Some(ctx.str_value(unit)?.to_owned())
+        }
+    };
     let (item_separator, key_separator) = match option("separators") {
-        None | Some(NONE) => (", ".to_owned(), ": ".to_owned()),
+        None | Some(NONE) => (
+            (if indent.is_some() { "," } else { ", " }).to_owned(),
+            ": ".to_owned(),
+        ),
         Some(separators) => {
             let parts = ctx.items(separators)?;
             let [item, key] = parts.as_slice() else {
@@ -104,6 +121,7 @@ pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Resul
     let mut encoder = Encoder {
         ascii: ctx.optional_truth(option("ensure_ascii"), true)?,
         allow_nan: ctx.optional_truth(option("allow_nan"), true)?,
+        indent,
         sort_keys: ctx.optional_truth(option("sort_keys"), false)?,
         item_separator,
         key_separator,
@@ -111,12 +129,12 @@ pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Resul
         active: HashSet::new(),
         output: String::new(),
     };
-    encoder.value(ctx, id)?;
+    encoder.value(ctx, id, 0)?;
     Ok(encoder.output)
 }
 
 impl Encoder {
-    fn value(&mut self, ctx: &mut Context, id: Id) -> Result<()> {
+    fn value(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
         match ctx.heap.get(ctx.scalar_value(id)) {
             Value::None => self.output.push_str("null"),
             Value::Bool(value) => self.output.push_str(if *value { "true" } else { "false" }),
@@ -174,21 +192,19 @@ impl Encoder {
                         | Value::NamedTuple { values: items, .. } = ctx.heap.get(contents)
                         {
                             let Some(&item) = items.get(i) else { break };
-                            if i != 0 {
-                                self.output.push_str(&self.item_separator);
-                            }
-                            self.value(ctx, item)?;
+                            self.separator(i, depth + 1)?;
+                            self.value(ctx, item, depth + 1)?;
                             i += 1;
                         }
-                        self.output.push(']');
+                        self.close(']', i != 0, depth)?;
                     }
                     Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                        self.object(ctx, super::super::copy_ids(entries)?)?;
+                        self.object(ctx, super::super::copy_ids(entries)?, depth)?;
                     }
                     Value::Instance {
                         dictionary: Some(_),
                         ..
-                    } => self.subclass_object(ctx, id)?,
+                    } => self.subclass_object(ctx, id, depth)?,
                     _ => {
                         let default = self.default.ok_or_else(|| {
                             Error::new(
@@ -200,7 +216,7 @@ impl Encoder {
                             )
                         })?;
                         let result = ctx.call(default, vec![id], Vec::new())?;
-                        self.value(ctx, result)?;
+                        self.value(ctx, result, depth)?;
                     }
                 }
                 self.active.remove(&id);
@@ -210,7 +226,36 @@ impl Encoder {
         Ok(())
     }
 
-    fn object(&mut self, ctx: &mut Context, mut entries: Vec<(Id, Id)>) -> Result<()> {
+    /// Write a separator and the indentation before a sequence item or object member.
+    fn separator(&mut self, i: usize, depth: usize) -> Result<()> {
+        if i != 0 {
+            self.output.push_str(&self.item_separator);
+        }
+        self.newline(depth)
+    }
+
+    /// Align a nonempty container's closing delimiter with its opening level.
+    fn close(&mut self, delimiter: char, nonempty: bool, depth: usize) -> Result<()> {
+        if nonempty {
+            self.newline(depth)?;
+        }
+        self.output.push(delimiter);
+        Ok(())
+    }
+
+    fn newline(&mut self, depth: usize) -> Result<()> {
+        if let Some(indent) = &self.indent {
+            crate::objects::JsonIndent::Text(indent).write_newline(&mut self.output, depth)?;
+        }
+        Ok(())
+    }
+
+    fn object(
+        &mut self,
+        ctx: &mut Context,
+        mut entries: Vec<(Id, Id)>,
+        depth: usize,
+    ) -> Result<()> {
         // Encoding a nested subclass can call Python and clear the original mapping.
         ctx.heap
             .reserve_temporaries(entries.len().saturating_mul(2))?;
@@ -222,11 +267,11 @@ impl Encoder {
             super::builtins::sort_values(ctx, &mut entries, false, |(key, _)| key)?;
         }
         self.output.push('{');
+        let nonempty = !entries.is_empty();
         for (i, (key, value)) in entries.into_iter().enumerate() {
-            self.member(ctx, i, key, value)?;
+            self.member(ctx, i, key, value, depth + 1)?;
         }
-        self.output.push('}');
-        Ok(())
+        self.close('}', nonempty, depth)
     }
 
     /// Materialize a subclass iterator while keeping previously yielded values alive.
@@ -238,7 +283,7 @@ impl Encoder {
     }
 
     /// Read a dict subclass through its items method and sort the returned pairs when requested.
-    fn subclass_object(&mut self, ctx: &mut Context, id: Id) -> Result<()> {
+    fn subclass_object(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
         let method = ctx.lookup_attr(id, "items")?;
         let result = ctx.call(method, Vec::new(), Vec::new())?;
         let items = if matches!(ctx.heap.get(result), Value::List(_)) {
@@ -259,18 +304,22 @@ impl Encoder {
             let Some(&[key, value]) = values.as_deref() else {
                 return Err(Error::new("ValueError", "items must return 2-tuples"));
             };
-            self.member(ctx, i, key, value)?;
+            self.member(ctx, i, key, value, depth + 1)?;
             i += 1;
         }
-        self.output.push('}');
-        Ok(())
+        self.close('}', i != 0, depth)
     }
 
     /// Write an object member after any sorting and pair validation.
-    fn member(&mut self, ctx: &mut Context, i: usize, key: Id, value: Id) -> Result<()> {
-        if i != 0 {
-            self.output.push_str(&self.item_separator);
-        }
+    fn member(
+        &mut self,
+        ctx: &mut Context,
+        i: usize,
+        key: Id,
+        value: Id,
+        depth: usize,
+    ) -> Result<()> {
+        self.separator(i, depth)?;
         match ctx.heap.get(ctx.scalar_value(key)) {
             Value::Str(s) => write_json_string(&mut self.output, s, self.ascii)?,
             Value::Int(n) => write_json_string(&mut self.output, &n.to_string(), self.ascii)?,
@@ -285,7 +334,7 @@ impl Encoder {
             _ => return Err(Error::new("TypeError", "unsupported JSON object key")),
         }
         self.output.push_str(&self.key_separator);
-        self.value(ctx, value)
+        self.value(ctx, value, depth)
     }
 }
 

@@ -53,9 +53,36 @@ type Separator<'a, T> = Result<T, InvalidSeparator<'a>>;
 type Separators<'a, T> = (Separator<'a, T>, Separator<'a, T>);
 
 #[derive(Clone, Copy)]
-enum Indent<'a> {
+pub(crate) enum Indent<'a> {
     Spaces(usize),
     Text(&'a str),
+}
+
+impl Indent<'_> {
+    /// Append the newline and indentation for one JSON container level.
+    pub(crate) fn write_newline(self, output: &mut String, depth: usize) -> Result<(), Error> {
+        let width = match self {
+            Indent::Spaces(width) => width,
+            Indent::Text(text) => text.len(),
+        };
+        let count = width
+            .checked_mul(depth)
+            .and_then(|count| count.checked_add(1))
+            .filter(|&count| count <= isize::MAX as usize)
+            .ok_or_else(|| Error::new(Kind::MemoryError, "JSON indentation is too large"))?;
+        reserve_output(output, count)?;
+        output.push('\n');
+        match self {
+            Indent::Spaces(_) => output.extend(std::iter::repeat_n(' ', count - 1)),
+            Indent::Text(text) if !text.is_empty() => {
+                for _ in 0..depth {
+                    output.push_str(text);
+                }
+            }
+            Indent::Text(_) => {}
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -335,28 +362,7 @@ impl Encoder<'_> {
     }
 
     fn newline(&mut self, depth: usize) -> Result<(), Error> {
-        let indent = self.indent.unwrap();
-        let width = match indent {
-            Indent::Spaces(width) => width,
-            Indent::Text(text) => text.len(),
-        };
-        let count = width
-            .checked_mul(depth)
-            .and_then(|count| count.checked_add(1))
-            .filter(|&count| count <= isize::MAX as usize)
-            .ok_or_else(|| Error::new(Kind::MemoryError, "JSON indentation is too large"))?;
-        self.reserve(count)?;
-        self.output.push('\n');
-        match indent {
-            Indent::Spaces(_) => self.output.extend(std::iter::repeat_n(' ', count - 1)),
-            Indent::Text(text) if !text.is_empty() => {
-                for _ in 0..depth {
-                    self.output.push_str(text);
-                }
-            }
-            Indent::Text(_) => {}
-        }
-        Ok(())
+        self.indent.unwrap().write_newline(&mut self.output, depth)
     }
 
     fn begin(&mut self, delimiter: char, depth: usize) -> Result<(), Error> {
