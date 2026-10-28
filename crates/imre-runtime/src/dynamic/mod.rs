@@ -1193,6 +1193,27 @@ impl Context {
         }
         Err(self.missing_binding(origin, scope, name))
     }
+    /// Resolve the factory in the mapping payload of an exact or derived defaultdict.
+    fn defaultdict_factory(&self, object: Id) -> Option<Id> {
+        let Value::DefaultDict { factory, .. } = self.heap.get(self.dict_storage(object)?) else {
+            return None;
+        };
+        Some(*factory)
+    }
+
+    /// Replace the factory without exposing it through the subclass instance dictionary.
+    fn replace_defaultdict_factory(&mut self, object: Id, value: Id) -> bool {
+        let Some(storage) = self.dict_storage(object) else {
+            return false;
+        };
+        let Value::DefaultDict { factory, .. } = self.heap.get_mut(storage) else {
+            return false;
+        };
+        let old = std::mem::replace(factory, value);
+        self.heap.weak_edge_removed(old);
+        true
+    }
+
     fn builtin(&mut self, name: &str) -> Id {
         if let Some(&value) = self.builtins.get(name) {
             return value;
@@ -1206,6 +1227,10 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
+            "collections.defaultdict" => {
+                self.builtin("dict");
+                &["__init__", "__missing__", "copy", "__copy__", "__reduce__"]
+            }
             "list" => &["__repr__", "__init__", "append"],
             "tuple" => &["__repr__", "__getitem__"],
             "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],

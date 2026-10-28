@@ -156,6 +156,16 @@ def current():
     clone["a"] += 1
     assert type(clone) is Counter and clone["missing"] == 0 and counts["a"] == 3
     groups = defaultdict(list)
+    class SlottedFactory(defaultdict):
+        __slots__ = ("default_factory",)
+
+    slotted = SlottedFactory(list)
+    assert not hasattr(slotted, "default_factory")
+    slotted.default_factory = tuple
+    assert slotted.default_factory is tuple and slotted["first"] == []
+    del slotted.default_factory
+    assert not hasattr(slotted, "default_factory") and slotted["second"] == []
+
     child = groups["present"]
     clone = copy(groups)
     assert type(clone) is defaultdict and clone.default_factory is list
@@ -220,6 +230,15 @@ def current():
     print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
 
     groups["visits"].append(1)
+    class WithFactory(defaultdict):
+        pass
+
+    derived = WithFactory(list)
+    assert derived.default_factory is list
+    derived["first"].append(2)
+    assert derived["first"] == [2]
+    assert WithFactory().default_factory is None
+
     plain_copy = dict.copy(groups)
     other = groups.copy()
     other["visits"].append(2)
