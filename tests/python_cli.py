@@ -65,6 +65,18 @@ def check_boxed_call_allocation(imre, root, run):
                 0, expected, b"refused\n" if ordinal else b"",
             ), result
 
+    for bound in (False, True):
+        source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_list_pop as fixture; fixture.append_allocation({bound})"
+        for size, expected in ((0, b"129 True True\nretry 130 True\n"), (2048, b"caught ()\n128 True False\nretry 129 True\n")):
+            result = run(imre, "-B", "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_CALL_SIZE": str(size),
+                "IMRE_TEST_GETTER_ALLOCATION": "1",
+            })
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if size else b"",
+            ), result
+
     source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_source_exec as fixture; fixture.decode_allocation()"
     for ordinal, output in ((0, b"compiled\n7\n"), (1, b"caught ()\n7\n")):
         result = run(imre, "-B", "-c", source, extra={

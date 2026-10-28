@@ -17,6 +17,30 @@ class DrainingIndex:
         return 0
 
 
+def append_allocation(bound):
+    class Values(list):
+        pass
+
+    values = Values()
+    first = object()
+    last = object()
+    for _ in range(128):
+        list.append(values, first)
+    append = values.append if bound else list.append
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        if bound:
+            append(last)
+        else:
+            append(values, last)
+    except MemoryError as error:
+        print("caught", error.args)
+    print(len(values), values[0] is first, values[-1] is last)
+    list.append(values, last)
+    print("retry", len(values), values[-1] is last)
+
+
 def current():
     class Values(list):
         def append(self, item):

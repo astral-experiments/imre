@@ -556,7 +556,11 @@ pub(super) fn method(
                         args.len()
                     )));
                 };
-                list_items_mut(ctx, receiver)?.push(*value);
+                let items = list_items_mut(ctx, receiver)?;
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                items.push(*value);
                 Ok(NONE)
             }
             "index" => list_index(ctx, receiver, args, kwargs),
