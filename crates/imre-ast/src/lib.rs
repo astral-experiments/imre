@@ -1,4 +1,6 @@
-//! Apply Python's lexical class-name mangling before lowering boxed modules.
+//! Python AST operations shared by the compiler and boxed runtime.
+
+pub mod boolean;
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};

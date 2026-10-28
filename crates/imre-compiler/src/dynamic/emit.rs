@@ -440,25 +440,16 @@ impl Function<'_, '_> {
         ));
     }
 
-    /// A condition leaves only its truth value live in the selected branch.
-    fn truth_expr(&mut self, expr: &ast::Expr) -> String {
-        let mark = self.temporary_mark();
-        let value = self.expr(expr);
-        let condition = self.truth(&value);
-        self.discard_truth(&mark);
-        condition
-    }
-
     fn select(
         &mut self,
-        condition: &str,
+        condition: &ast::Expr,
         on_true: impl FnOnce(&mut Self) -> String,
         on_false: impl FnOnce(&mut Self) -> String,
     ) -> String {
         let yes = self.name("b");
         let no = self.name("b");
         let done = self.name("b");
-        self.branch(condition, &yes, &no);
+        self.branch_expr(condition, &yes, &no);
         self.label(&yes);
         let left = on_true(self);
         let left_block = self.block.clone();
