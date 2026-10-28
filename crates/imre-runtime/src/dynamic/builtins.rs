@@ -331,7 +331,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             iter.kind
         }
-        Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
+        Value::Slice(_) if matches!(attr, "indices" | "__hash__" | "__reduce__") => "slice",
         Value::TupleGetterDoc if super::namedtuple::GETTER_METHODS.contains(&attr) => {
             "member_descriptor"
         }
@@ -820,12 +820,18 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    if name == "object.__hash__" {
+    if let Some(owner @ ("object" | "slice")) = name.strip_suffix(".__hash__") {
         let Some((&receiver, rest)) = args.split_first() else {
-            return Err(type_error(
-                "descriptor '__hash__' of 'object' object needs an argument",
-            ));
+            return Err(type_error(format!(
+                "descriptor '__hash__' of '{owner}' object needs an argument"
+            )));
         };
+        if owner == "slice" && !matches!(ctx.heap.get(receiver), Value::Slice(_)) {
+            return Err(type_error(format!(
+                "descriptor '__hash__' requires a 'slice' object but received a '{}'",
+                ctx.type_name(receiver)
+            )));
+        }
         if !kwargs.is_empty() {
             return Err(type_error("wrapper __hash__() takes no keyword arguments"));
         }
@@ -835,7 +841,12 @@ pub(super) fn call(
                 rest.len()
             )));
         }
-        return Ok(ctx.int(Context::identity_hash(receiver)));
+        let hash = if owner == "slice" {
+            ctx.dictionary_hash(receiver)?
+        } else {
+            Context::identity_hash(receiver)
+        };
+        return Ok(ctx.int(hash));
     }
     if name == "object.__init__" {
         if args.len() != 1 || !kwargs.is_empty() {
