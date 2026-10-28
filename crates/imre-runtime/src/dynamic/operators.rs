@@ -59,7 +59,11 @@ fn close_parens(out: &mut String, count: usize) -> Result<()> {
 
 enum RenderRoot<'a> {
     Object(Id),
-    BuiltinContainer { object: Id, storage: Id },
+    BuiltinContainer {
+        object: Id,
+        storage: Id,
+        with_factory: bool,
+    },
     Exception(&'a Error),
 }
 
@@ -76,6 +80,7 @@ enum FormatPart {
     Sequence(Id, usize),
     Entries(Id, usize, bool),
     DefaultDictFactory(Id, usize),
+    DefaultDictName(Id, usize),
     DefaultDictEnd(String),
     SetMembers(Vec<Id>, usize),
     Fields(Id, usize),
@@ -108,6 +113,7 @@ impl FormatPart {
             | Self::Sequence(id, _)
             | Self::Entries(id, _, _)
             | Self::DefaultDictFactory(id, _)
+            | Self::DefaultDictName(id, _)
             | Self::Fields(id, _)
             | Self::Leave(id, _)
             | Self::ContextEnd(id) => heap.keep(*id),
@@ -926,7 +932,30 @@ impl Context {
         object: Id,
         storage: Id,
     ) -> Result<String> {
-        self.checked_render(RenderRoot::BuiltinContainer { object, storage }, true)
+        self.checked_render(
+            RenderRoot::BuiltinContainer {
+                object,
+                storage,
+                with_factory: false,
+            },
+            true,
+        )
+    }
+
+    /// Render the native defaultdict slot while looking up hooks on its live children.
+    pub(super) fn checked_defaultdict_slot_repr(
+        &mut self,
+        object: Id,
+        storage: Id,
+    ) -> Result<String> {
+        self.checked_render(
+            RenderRoot::BuiltinContainer {
+                object,
+                storage,
+                with_factory: true,
+            },
+            true,
+        )
     }
 
     fn checked_render(&mut self, root: RenderRoot<'_>, quoted: bool) -> Result<String> {
@@ -956,8 +985,14 @@ impl Context {
         let Some((class, slot)) = self.format_slot(id, "__repr__") else {
             return Ok(None);
         };
-        let hook = self.bind_attribute(slot, id, class)?;
-        let result = self.call(hook, Vec::new(), Vec::new())?;
+        let result = if matches!(self.heap.get(slot), Value::Native(symbol)
+            if super::wrapper_descriptor::Wrapper::lookup(symbol).is_some())
+        {
+            self.call(slot, vec![id], Vec::new())?
+        } else {
+            let hook = self.bind_attribute(slot, id, class)?;
+            self.call(hook, Vec::new(), Vec::new())?
+        };
         if self.str_value(result).is_err() {
             return Err(Error::new(
                 "TypeError",
@@ -1166,7 +1201,11 @@ impl Context {
         }
         match root {
             RenderRoot::Object(id) => push_frame(&mut work, Part::Value(id, quoted))?,
-            RenderRoot::BuiltinContainer { object, storage } => {
+            RenderRoot::BuiltinContainer {
+                object,
+                storage,
+                with_factory,
+            } => {
                 let (open, end, cycle, contents) = match ctx.heap.get(storage) {
                     Value::Set { entries, frozen } => {
                         let name = ctx.type_name(object);
@@ -1203,14 +1242,17 @@ impl Context {
                     }
                     _ => unreachable!("native container repr slot"),
                 };
-                if !enter_ancestor(&mut ancestors, object)? {
-                    append_rendered_text(&mut output, cycle)?;
-                    return Ok(output);
+                if with_factory {
+                    push_frame(&mut work, Part::DefaultDictFactory(object, 0))?;
                 }
-                append_rendered_text(&mut output, open)?;
-                push_frame(&mut active, object)?;
-                push_frame(&mut work, Part::Leave(object, end))?;
-                push_frame(&mut work, contents)?;
+                if enter_ancestor(&mut ancestors, object)? {
+                    append_rendered_text(&mut output, open)?;
+                    push_frame(&mut active, object)?;
+                    push_frame(&mut work, Part::Leave(object, end))?;
+                    push_frame(&mut work, contents)?;
+                } else {
+                    append_rendered_text(&mut output, cycle)?;
+                }
             }
             RenderRoot::Exception(error) => {
                 ctx.render_exception(error, quoted, checked, &mut output, &mut work)?;
@@ -1344,14 +1386,12 @@ impl Context {
                 }
                 Part::DefaultDictFactory(id, start) => {
                     // A key or value repr may have replaced the factory while rendering the table.
-                    let Value::DefaultDict { factory, .. } = *ctx.heap.get(id) else {
-                        unreachable!()
-                    };
+                    let factory = ctx.defaultdict_factory(id).expect("defaultdict storage");
                     let mut contents = String::new();
                     append_rendered_text(&mut contents, &output[start..])?;
                     output.truncate(start);
-                    append_rendered_text(&mut output, "defaultdict(")?;
                     push_frame(&mut work, Part::DefaultDictEnd(contents))?;
+                    push_frame(&mut work, Part::DefaultDictName(id, start))?;
                     if enter_ancestor(&mut ancestors, factory)? {
                         push_frame(&mut active, factory)?;
                         push_frame(&mut work, Part::Leave(factory, ""))?;
@@ -1359,6 +1399,14 @@ impl Context {
                     } else {
                         append_rendered_text(&mut output, "...")?;
                     }
+                }
+                Part::DefaultDictName(id, start) => {
+                    let name = ctx.type_name(id);
+                    output
+                        .try_reserve(name.len().saturating_add(1))
+                        .map_err(render_allocation)?;
+                    output.insert(start, '(');
+                    output.insert_str(start, name);
                 }
                 Part::DefaultDictEnd(contents) => {
                     append_rendered_text(&mut output, ", ")?;
@@ -1404,14 +1452,28 @@ impl Context {
                 }
                 Part::Suffix(suffix) => append_rendered_text(&mut output, &suffix)?,
                 Part::Value(id, repr) => {
+                    // An inherited native slot can share this worklist with its parent.
+                    let default_storage = if checked
+                        && repr
+                        && let Some((_, slot)) = ctx.format_slot(id, "__repr__")
+                        && ctx.builtins.get("collections.defaultdict.__repr__") == Some(&slot)
+                    {
+                        ctx.dict_storage(id).filter(|&storage| {
+                            matches!(ctx.heap.get(storage), Value::DefaultDict { .. })
+                        })
+                    } else {
+                        None
+                    };
                     if checked
                         && repr
+                        && default_storage.is_none()
                         && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
                     {
                         append_rendered_text(&mut output, &text)?;
                         continue;
                     }
-                    match ctx.heap.get(id) {
+                    let storage = default_storage.unwrap_or(id);
+                    match ctx.heap.get(storage) {
                         Value::Union(union) => {
                             type_words += 24;
                             if type_words > type_budget {
@@ -1627,7 +1689,7 @@ impl Context {
                         }
                         _ => {}
                     }
-                    let (start, end, placeholder, contents) = match ctx.heap.get(id) {
+                    let (start, end, placeholder, contents) = match ctx.heap.get(storage) {
                         Value::Int(value) => {
                             let text = rendered_integer(value)?;
                             append_rendered_text(&mut output, &text)?;
@@ -1682,7 +1744,7 @@ impl Context {
                         Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
                         Value::DefaultDict { .. } => {
                             push_frame(&mut work, Part::DefaultDictFactory(id, output.len()))?;
-                            ("{", "}", "{...}", Part::Entries(id, 0, true))
+                            ("{", "}", "{...}", Part::Entries(storage, 0, true))
                         }
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {

@@ -436,7 +436,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "frozenset"
         }
         Value::DefaultDict { .. }
-            if matches!(attr, "copy" | "__copy__" | "__missing__" | "__reduce__") =>
+            if matches!(
+                attr,
+                "copy" | "__copy__" | "__missing__" | "__repr__" | "__reduce__"
+            ) =>
         {
             "collections.defaultdict"
         }
