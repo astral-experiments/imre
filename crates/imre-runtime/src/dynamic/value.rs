@@ -500,6 +500,7 @@ pub(super) struct Scope {
     pub is_abstract: bool,
     pub is_comprehension: bool,
     pub class_cell: Option<Id>,
+    pub metaclass: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
@@ -608,7 +609,6 @@ pub(super) enum Value {
     },
     Scope(Scope),
     Cell(Option<Id>),
-    ClassCell(Option<Id>),
     Super {
         start: Id,
         receiver: Id,
@@ -894,6 +894,7 @@ impl Value {
             Self::Scope(scope) => {
                 visit.extend(scope.closure.cells.values().copied());
                 visit.extend(scope.class_cell);
+                visit.extend(scope.metaclass);
                 if let Some(state) = &scope.enum_namespace {
                     visit.extend(state.generator);
                     visit.extend(&state.history);
@@ -913,7 +914,6 @@ impl Value {
                 }
                 visit.extend(scope.names.values());
             }
-            Self::ClassCell(class) => visit.extend(class),
             Self::Super {
                 start,
                 receiver,

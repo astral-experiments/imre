@@ -315,13 +315,11 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let bases = if let Some(args) = v.arguments.as_deref() {
-                        if !args.keywords.is_empty() {
-                            self.unsupported("class keyword arguments");
-                        }
-                        self.arguments(args).0
+                    let (bases, keywords) = if let Some(args) = v.arguments.as_deref() {
+                        let (bases, keywords) = self.arguments(args, true);
+                        (bases, (!args.keywords.is_empty()).then_some(keywords))
                     } else {
-                        self.op("list", &[])
+                        (self.op("list", &[]), None)
                     };
                     let init = self.define(
                         v.start(),
@@ -330,8 +328,12 @@ impl Function<'_, '_> {
                         None,
                         Body::Namespace(&v.body),
                     );
-                    let name = self.code_name(self.source.private_names.definition(&v.name));
-                    let class = self.op("class", &[&name, &bases, &init]);
+                    let class = if let Some(keywords) = keywords {
+                        self.op("class_keywords", &[&bases, &keywords, &init])
+                    } else {
+                        let name = self.code_name(self.source.private_names.definition(&v.name));
+                        self.op("class", &[&name, &bases, &init])
+                    };
                     self.decorated(&v.name, &decorators, class);
                 }
                 ast::Stmt::Return(v) => {
@@ -558,6 +560,10 @@ impl Function<'_, '_> {
                 closure_names.visit_body(stmts)
             }
             Body::Namespace(stmts) => {
+                let namespace = class_metadata::namespace(stmts, &self.source.private_names);
+                signature["class_static_attributes"] = json!(namespace.static_attributes);
+                signature["namespace_class_cell"] = json!(namespace.class_cell);
+                signature["namespace_dict_cell"] = json!(namespace.class_dict_cell);
                 let mut bindings = ClosureNames::default();
                 bindings.visit_body(stmts);
                 class_metadata::capture(&mut bindings, stmts, self.source.string_annotations);

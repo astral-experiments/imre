@@ -37,6 +37,9 @@ impl Context {
         class: Id,
         mut lookup: impl FnMut(Id) -> Option<T>,
     ) -> Option<T> {
+        if let Some(mro) = self.stored_class_mro(class) {
+            return mro.iter().copied().find_map(lookup);
+        }
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return lookup(class);
         };
@@ -81,6 +84,7 @@ impl Context {
                         | "str"
                         | "property"
                         | "module"
+                        | "type"
                         | weakref::REFERENCE_TYPE
                 ) || (name == "__repr__"
                     && matches!(kind.as_str(), "set" | "frozenset" | "bytes" | "bytearray")) =>
@@ -361,7 +365,10 @@ impl Context {
             Value::Raised(Error {
                 class: Some(class), ..
             }) if matches!(name, "__dir__" | "__str__") => *class,
-            _ => return Ok(None),
+            _ => match self.class_metaclass(object) {
+                Some(meta) => meta,
+                None => return Ok(None),
+            },
         };
         self.class_attr(class, name)
             .map(|slot| self.bind_attribute(slot, object, class))
@@ -447,6 +454,7 @@ impl Context {
                     matches!(
                         name.as_str(),
                         "ast.AST.__init__"
+                            | "type.mro"
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
@@ -783,6 +791,9 @@ impl Context {
                 self.module("io")?;
                 Ok(self.builtins["_io.TextIOWrapper"])
             }
+            Value::Class { scope, .. } if self.scope_data(*scope).metaclass.is_some() => {
+                Ok(self.scope_data(*scope).metaclass.unwrap())
+            }
             Value::Instance { class, .. }
             | Value::Module {
                 constructor: Some(class),
@@ -838,7 +849,11 @@ impl Context {
         {
             return true;
         }
-        if let Some(actual) = self.heap.get(value).instance_class()
+        if let Some(actual) = self
+            .heap
+            .get(value)
+            .instance_class()
+            .or_else(|| self.class_metaclass(value))
             && self.subclass(actual, class)
         {
             return true;
@@ -1103,6 +1118,16 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if name == "mro" && self.builtin_type_name(obj) == Some("type") {
+            let class = self.builtin("type");
+            let default = self.builtin("type.mro");
+            if let Some(value) = self.class_attr(obj, name) {
+                return self.bind_attribute(value, NONE, obj);
+            }
+            let meta = self.class_metaclass(obj).unwrap_or(class);
+            let value = self.class_attr(meta, name).unwrap_or(default);
+            return self.bind_attribute(value, obj, meta);
+        }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
@@ -1518,9 +1543,12 @@ impl Context {
                 return Ok(self.builtin(owner));
             }
             Value::Native(class)
-                if matches!(class.as_str(), "int" | "float") && name == "__new__" =>
+                if matches!(class.as_str(), "int" | "float" | "type") && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
+            }
+            Value::Native(class) if class == "type" && name == "__prepare__" => {
+                return Ok(self.builtin("type.__prepare__"));
             }
             Value::Super {
                 start,
@@ -1836,7 +1864,11 @@ impl Context {
                 ..
             } => {
                 if name == "__dict__" {
-                    return Ok(self.class_dictionary(scope));
+                    let dictionary = self.class_dictionary(scope);
+                    return Ok(self.alloc(Value::MappingProxy(dictionary)));
+                }
+                if name == "__class__" {
+                    return self.exact_type(obj);
                 }
                 if name == "__annotations__"
                     && let Some(thunks) = self
@@ -1863,6 +1895,11 @@ impl Context {
                     frame.class_namespace.as_mut().unwrap().annotation_thunks = None;
                     return Ok(mapping);
                 }
+                if name == "__annotations__" && self.own_class_attr(obj, name).is_none() {
+                    let mapping = self.dict(Vec::new());
+                    self.bind_local(scope, name, mapping);
+                    return Ok(mapping);
+                }
                 if name == "__name__" {
                     let assigned = self
                         .scope_data(scope)
@@ -1873,6 +1910,11 @@ impl Context {
                 }
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
+                }
+                if let Some(meta) = self.scope_data(scope).metaclass
+                    && let Some(value) = self.class_attr(meta, name)
+                {
+                    return self.bind_attribute(value, obj, meta);
                 }
                 if name == "register"
                     && (super::mapping_abc::is_abc_class(self, obj) || self.is_bundled_abc(obj))
@@ -2902,6 +2944,7 @@ impl Context {
                                 | "range_iterator"
                                 | "longrange_iterator"
                                 | "module"
+                                | "type"
                                 | "slice"
                                 | "function"
                                 | "method"
@@ -3137,6 +3180,16 @@ impl Context {
                         "TypeError",
                         "cannot create 'typing.Union' instances",
                     ));
+                }
+                if let Some(meta) = self.scope_data(scope).metaclass
+                    && let Some(function) = self.class_attr(meta, "__call__")
+                {
+                    let method = self.bind_attribute(function, callable, meta)?;
+                    return self.call(method, args, kwargs);
+                }
+                let type_class = self.builtin("type");
+                if self.direct_subclass(callable, type_class) {
+                    return self.construct_type(callable, args, kwargs);
                 }
                 if self.scope_data(scope).is_abstract {
                     return Err(self.abstract_class_error(scope, &name)?);
@@ -3513,9 +3566,32 @@ impl Context {
         }
     }
 
-    pub(super) fn class(&mut self, name: Id, bases: Id, body: Id) -> Result<Id> {
+    pub(super) fn class(
+        &mut self,
+        name: Id,
+        bases: Id,
+        body: Id,
+        keywords: &[(String, Id)],
+    ) -> Result<Id> {
+        let name_object = name;
         let name = self.str_value(name)?.to_owned();
         let (original, bases) = super::typing::resolve_bases(self, bases)?;
+        let mut keywords = keywords.to_vec();
+        let explicit = keywords
+            .iter()
+            .position(|(key, _)| key == "metaclass")
+            .map(|index| keywords.remove(index).1);
+        let meta = self.select_metaclass(explicit, &bases)?;
+        let ordinary = meta == self.builtin("type");
+        let prepared = if ordinary {
+            None
+        } else {
+            let bases = self.alloc(Value::Tuple(bases.clone()));
+            Some((
+                bases,
+                self.prepare_type_namespace(meta, name_object, bases, &keywords)?,
+            ))
+        };
         let Value::Function {
             scope: parent,
             code,
@@ -3528,6 +3604,12 @@ impl Context {
         struct ClassBindings {
             #[serde(default)]
             scope_nonlocals: std::collections::HashSet<String>,
+            #[serde(default)]
+            class_static_attributes: Vec<String>,
+            #[serde(default)]
+            namespace_class_cell: bool,
+            #[serde(default)]
+            namespace_dict_cell: bool,
         }
         let parameters = self.code_object(code).parameters;
         let bindings: ClassBindings = serde_json::from_str(self.str_value(parameters)?)
@@ -3536,7 +3618,7 @@ impl Context {
         let scope = self.scope(&module, Some(parent));
         let enum_namespace = self.enum_namespace(&bases);
         let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
-        let cell = self.alloc(Value::ClassCell(None));
+        let cell = self.alloc(Value::Cell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -3544,42 +3626,65 @@ impl Context {
         body_scope.closure.nonlocals = bindings.scope_nonlocals;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
+        body_scope.namespace = prepared.map(|(_, namespace)| namespace);
         let mut globals = parent;
         while let Some(outer) = self.scope_data(globals).parent {
             globals = outer;
         }
-        let module_name = if let Some(exec_globals) = self.scope_data(globals).exec_globals {
+        let module_name = if prepared.is_some() {
+            self.lookup(scope, "__name__")?
+        } else if let Some(exec_globals) = self.scope_data(globals).exec_globals {
             self.source_global(exec_globals, "__name__")?
         } else {
             self.scope_name(globals, "__name__")
                 .unwrap_or_else(|| self.text("builtins"))
         };
-        self.bind(scope, "__module__", module_name);
+        self.bind_source_name(scope, "__module__", module_name)?;
         if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
-            self.bind(scope, "__qualname__", qualname);
+            self.bind_source_name(scope, "__qualname__", qualname)?;
         }
-        let annotations = self.dict(Vec::new());
-        self.bind_local(scope, "__annotations__", annotations);
+        let first_line = self.int(i64::from(self.code_object(code).first_line));
+        self.bind_source_name(scope, "__firstlineno__", first_line)?;
+        if prepared.is_none() {
+            let annotations = self.dict(Vec::new());
+            self.bind_class_local(scope, "__annotations__", annotations)?;
+        }
         self.execute(code, scope, FrameOwner::Function(body))?;
+        let attributes = bindings
+            .class_static_attributes
+            .into_iter()
+            .map(|key| self.text(key))
+            .collect();
+        let attributes = self.alloc(Value::Tuple(attributes));
+        self.bind_source_name(scope, "__static_attributes__", attributes)?;
+        if let Some((_, namespace)) = prepared {
+            if bindings.namespace_dict_cell {
+                let dictionary_cell = self.alloc(Value::Cell(Some(namespace)));
+                self.bind_source_name(scope, "__classdictcell__", dictionary_cell)?;
+            }
+            if bindings.namespace_class_cell {
+                self.bind_source_name(scope, "__classcell__", cell)?;
+            }
+        }
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             frame.globals.clear();
             frame.closure.nonlocals.clear();
         }
-        if self.scope_name(scope, "__qualname__").is_none() {
+        if prepared.is_none() && self.scope_name(scope, "__qualname__").is_none() {
             let qualname = self.text(&name);
-            self.bind_local(scope, "__qualname__", qualname);
+            self.bind_class_local(scope, "__qualname__", qualname)?;
         }
-        if self.scope_name(scope, "__module__").is_none() {
+        if prepared.is_none() && self.scope_name(scope, "__module__").is_none() {
             let namespace = self.module_globals(parent);
             if let Some(name) = self.dict_named_item(namespace, "__name__") {
-                self.bind_local(scope, "__module__", name);
+                self.bind_class_local(scope, "__module__", name)?;
             }
         }
         // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.
         if let Some(&protocol) = self.classes.get("typing.Protocol")
             && bases.iter().any(|&base| self.subclass(base, protocol))
         {
-            self.bind(
+            self.bind_class_local(
                 scope,
                 "_is_protocol",
                 if bases.contains(&protocol) {
@@ -3587,28 +3692,65 @@ impl Context {
                 } else {
                     FALSE
                 },
-            );
+            )?;
         }
         super::typing::class_parameters(self, scope, original, &bases)?;
+        if let Some((bases, namespace)) = prepared {
+            let class = self.call(meta, vec![name_object, bases, namespace], keywords)?;
+            if let Some(thunks) = self
+                .scope_data(scope)
+                .class_namespace
+                .as_ref()
+                .and_then(|ns| ns.annotation_thunks)
+                && let Value::Class {
+                    scope: result_scope,
+                    ..
+                } = *self.heap.get(class)
+                && self
+                    .scope_name(scope, "__annotations__")
+                    .is_some_and(|mapping| {
+                        self.own_class_attr(class, "__annotations__") == Some(mapping)
+                    })
+            {
+                let Value::Scope(result) = self.heap.get_mut(result_scope) else {
+                    unreachable!()
+                };
+                result.class_namespace.as_mut().unwrap().annotation_thunks = Some(thunks);
+            }
+            if bindings.namespace_class_cell && self.builtin_type_name(class) == Some("type") {
+                self.check_class_cell(cell, class, &name)?;
+            }
+            return Ok(class);
+        }
         let class = self.allocate_class(name.clone(), scope, bases)?;
+        self.complete_type_cells(class, scope)?;
+        self.heap.replace_cell(cell, Some(class));
+        self.finish_class(class, name, scope, enum_kind, &keywords)
+    }
+
+    pub(super) fn finish_class(
+        &mut self,
+        class: Id,
+        name: String,
+        scope: Id,
+        enum_kind: Option<super::enums::auto::EnumKind>,
+        keywords: &[(String, Id)],
+    ) -> Result<Id> {
         self.install_weakref_descriptor(class, scope);
-        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
-        let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
-            unreachable!()
-        };
         // The class body can read the enclosing module's docstring before the
         // type supplies a default for an undocumented class.
-        let has_doc_slot = class_scope
+        let has_doc_slot = self
+            .scope_data(scope)
             .class_namespace
             .as_deref()
             .and_then(|namespace| namespace.slot_names.as_deref())
             .is_some_and(|slots| slots.iter().any(|slot| slot == "__doc__"));
-        if !has_doc_slot {
-            class_scope
-                .names
-                .entry("__doc__".to_owned())
-                .or_insert(NONE);
+        if !has_doc_slot && self.scope_name(scope, "__doc__").is_none() {
+            self.bind_local(scope, "__doc__", NONE);
         }
+        let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
         let members = class_scope
             .class_body
             .take()
@@ -3632,6 +3774,7 @@ impl Context {
                 self.call(set_name, vec![value, class, name], Vec::new())?;
             }
         }
+        self.init_subclass(class, keywords)?;
         self.init_abstract_class(class, &name, scope)?;
         self.classes.insert(name, class);
         if let Some(kind) = enum_kind {

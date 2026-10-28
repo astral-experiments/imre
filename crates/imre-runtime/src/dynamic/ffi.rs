@@ -130,7 +130,7 @@ impl Context {
             "lookup" | "lookup_class_local" => {
                 let name = self.str_value(b)?.to_owned();
                 if op == "lookup_class_local" {
-                    if let Some(value) = self.scope_name(a, &name) {
+                    if let Some(value) = self.load_class_local(a, &name)? {
                         return Ok(value);
                     }
                     return self.lookup(self.root_scope(a), &name);
@@ -201,12 +201,17 @@ impl Context {
                 self.delete_item(a, b)?;
                 Ok(NONE)
             }
-            "put" | "keyword" => {
-                if op == "keyword" && self.contains(b, a)? {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("duplicate keyword {}", self.display(b)),
-                    ));
+            "put" | "keyword" | "class_keyword" => {
+                if op != "put" && self.contains(b, a)? {
+                    let name = self.display(b);
+                    let message = if op == "class_keyword" {
+                        format!(
+                            "__build_class__() got multiple values for keyword argument '{name}'"
+                        )
+                    } else {
+                        format!("duplicate keyword {name}")
+                    };
+                    return Err(Error::new("TypeError", message));
                 }
                 self.put_item(a, b, c)?;
                 Ok(c)
@@ -235,16 +240,25 @@ impl Context {
                 }
                 Ok(a)
             }
-            "update" | "keywords" => {
+            "update" | "keywords" | "class_unpack" => {
                 let mapping = self.for_each_mapping_item(
                     b,
                     a,
                     super::calls::MappingOperation::Unpack,
                     |ctx, key, val, hash| {
-                        if op == "keywords" {
+                        if op != "update" {
                             ctx.str_value(key)
                                 .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
-                            ctx.op("keyword", a, key, val)?;
+                            ctx.op(
+                                if op == "class_unpack" {
+                                    "class_keyword"
+                                } else {
+                                    "keyword"
+                                },
+                                a,
+                                key,
+                                val,
+                            )?;
                         } else {
                             ctx.set_dictionary_key(a, key, val, hash, true)?;
                         }
@@ -293,7 +307,12 @@ impl Context {
                 }
                 Ok(result)
             }
-            "class" => self.class(a, b, c),
+            "class" => self.class(a, b, c, &[]),
+            "class_keywords" => {
+                let name = self.lookup_attr(c, "__name__")?;
+                let keywords = self.keyword_args(b)?;
+                self.class(name, a, c, &keywords)
+            }
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
                     return Err(Error::new("SystemError", "invalid coroutine definition"));
@@ -305,6 +324,12 @@ impl Context {
                 Ok(a)
             }
             "annotate" | "annotate_deferred" => {
+                if self.scope_data(a).class_body.is_some()
+                    && self.scope_name(a, "__annotations__").is_none()
+                {
+                    let mapping = self.dict(Vec::new());
+                    self.bind_class_local(a, "__annotations__", mapping)?;
+                }
                 if let Some(mapping) = self.scope_name(a, "__annotations__") {
                     if op == "annotate_deferred" {
                         let thunks = if let Some(dict) = self

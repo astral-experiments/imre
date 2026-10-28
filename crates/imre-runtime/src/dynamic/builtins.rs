@@ -204,7 +204,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(owner, "float" | "int" | "str") || is_exception(owner)).then_some(owner)
+    (matches!(owner, "float" | "int" | "str" | "type") || is_exception(owner)).then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -822,6 +822,25 @@ pub(super) fn call(
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
+    if name == "object.__init_subclass__" {
+        let Some((&class, rest)) = args.split_first() else {
+            return Err(type_error("unbound __init_subclass__"));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "{}.__init_subclass__() takes no keyword arguments",
+                ctx.class_name(class)
+            )));
+        }
+        if !rest.is_empty() {
+            return Err(type_error(format!(
+                "{}.__init_subclass__() takes no arguments ({} given)",
+                ctx.class_name(class),
+                rest.len()
+            )));
+        }
+        return Ok(NONE);
+    }
     if name == "object.__init__" {
         if args.len() != 1 || !kwargs.is_empty() {
             return Err(type_error(
@@ -833,6 +852,41 @@ pub(super) fn call(
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
             "module" => ctx.module_method(method, args, kwargs),
+            "type" if method == "__prepare__" => Ok(ctx.dict(Vec::new())),
+            "type" if method == "mro" => {
+                let Some((&class, rest)) = args.split_first() else {
+                    return Err(type_error("unbound method type.mro() needs an argument"));
+                };
+                if ctx.builtin_type_name(class) != Some("type") {
+                    return Err(type_error(format!(
+                        "descriptor 'mro' for 'type' objects doesn't apply to a '{}' object",
+                        ctx.type_name(class)
+                    )));
+                }
+                if !kwargs.is_empty() {
+                    return Err(type_error("type.mro() takes no keyword arguments"));
+                }
+                if !rest.is_empty() {
+                    return Err(type_error(format!(
+                        "type.mro() takes no arguments ({} given)",
+                        rest.len()
+                    )));
+                }
+                let order = ctx.default_type_mro(class)?;
+                Ok(ctx.alloc(Value::List(order)))
+            }
+            "type" if method == "__new__" => {
+                let Some((&meta, args)) = args.split_first() else {
+                    return Err(type_error("type.__new__(): not enough arguments"));
+                };
+                let [name, bases, namespace] = args else {
+                    return Err(type_error(format!(
+                        "type.__new__() takes exactly 3 arguments ({} given)",
+                        args.len()
+                    )));
+                };
+                ctx.new_type(meta, *name, *bases, *namespace, kwargs)
+            }
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
@@ -950,15 +1004,12 @@ pub(super) fn call(
             Ok(ctx.instance(class, None))
         }
         "type" => {
+            if args.len() == 3 {
+                let meta = ctx.builtin("type");
+                return ctx.construct_type(meta, args.to_vec(), kwargs.to_vec());
+            }
             let [object] = args else {
-                return Err(if args.len() == 3 {
-                    Error::new(
-                        "NotImplementedError",
-                        "dynamic class construction with type() is unsupported",
-                    )
-                } else {
-                    type_error("type() takes 1 or 3 arguments")
-                });
+                return Err(type_error("type() takes 1 or 3 arguments"));
             };
             if !kwargs.is_empty() {
                 return Err(type_error("type() takes no keyword arguments"));

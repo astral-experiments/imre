@@ -29,6 +29,8 @@ mod caller_cache;
 mod calls;
 mod chainmap;
 mod class_data;
+mod class_keywords;
+pub(crate) use class_keywords::check_class_keywords;
 mod closed_calls;
 mod cmp_keys;
 mod codecs;

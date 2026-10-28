@@ -290,6 +290,8 @@ impl Session {
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
+        crate::frontend::check_class_keywords(source, &parsed.syntax().body)
+            .map_err(|error| format!("{path}:{error}"))?;
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         // The parser has already checked Python indentation; file inputs additionally
         // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.

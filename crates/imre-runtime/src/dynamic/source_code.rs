@@ -866,19 +866,7 @@ impl Context {
             || !matches!(self.heap.get(globals), Value::Dict(_)))
         .then_some(effective_locals);
         if let Some(locals) = locals
-            && !matches!(
-                self.heap.get(locals),
-                Value::Dict(_)
-                    | Value::DefaultDict { .. }
-                    | Value::Context(_)
-                    | Value::List(_)
-                    | Value::Tuple(_)
-                    | Value::NamedTuple { .. }
-                    | Value::Str(_)
-                    | Value::Bytes(_)
-                    | Value::Range(_)
-            )
-            && self.slot(locals, "__getitem__").is_none()
+            && !self.supports_mapping_items(locals)
         {
             return Err(Error::new(
                 "TypeError",
@@ -1125,6 +1113,12 @@ impl Context {
 
     pub(super) fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
         let scope = self.binding_scope(scope, name);
+        if self.scope_data(scope).class_body.is_some()
+            && let Some(namespace) = self.scope_data(scope).namespace
+        {
+            let key = self.text(name);
+            return self.put_item(namespace, key, value);
+        }
         if let Some(locals) = self.scope_data(scope).exec_locals {
             if matches!(self.heap.get(locals), Value::List(_)) {
                 return Err(Error::new(
@@ -1162,6 +1156,24 @@ impl Context {
             _ => return self.get_item(locals, key),
         };
         Err(Error::new("TypeError", indices))
+    }
+
+    /// Class preparation and exec both accept objects that support item lookup.
+    pub(super) fn supports_mapping_items(&self, value: Id) -> bool {
+        self.dict_storage(value).is_some()
+            || matches!(
+                self.heap.get(value),
+                Value::Context(_)
+                    | Value::List(_)
+                    | Value::Tuple(_)
+                    | Value::NamedTuple { .. }
+                    | Value::Str(_)
+                    | Value::Bytes(_)
+                    | Value::Range(_)
+                    | Value::MappingProxy(_)
+                    | Value::ByteArray(_)
+            )
+            || self.slot(value, "__getitem__").is_some()
     }
 
     fn source_step(
