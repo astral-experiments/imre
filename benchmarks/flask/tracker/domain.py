@@ -100,4 +100,3 @@ def detail(uid: int, ident: str) -> list[Issue]:
 
 def context(issue: Issue) -> dict[str, str]:
     return {"id": str(issue.id), "title": issue.title, "body": issue.body, "status": issue.status}
-

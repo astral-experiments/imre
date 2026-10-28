@@ -1,0 +1,1075 @@
+{
+  "host": {
+    "cpu": "AMD EPYC-Milan Processor",
+    "filesystem": "ext4",
+    "compiler_source": "1cc948ed",
+    "optimization": "O3"
+  },
+  "build": {
+    "python": "3.14.5",
+    "sqlite_version": "3.45.1",
+    "storage_contract_sha256": "e1d8306f40f890f246776d745f6ae3d069830be248b784e73445f5ceb9d36827",
+    "dynamic_dispatch_call_sites": 0,
+    "sqlite_extension_call_sites": 1,
+    "wheels": {
+      "blinker-1.9.0-py3-none-any.whl": "ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc",
+      "click-8.4.2-py3-none-any.whl": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+      "flask-3.1.3-py3-none-any.whl": "f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c",
+      "itsdangerous-2.2.0-py3-none-any.whl": "c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef",
+      "jinja2-3.1.6-py3-none-any.whl": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+      "markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl": "457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97",
+      "werkzeug-3.1.8-py3-none-any.whl": "63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50"
+    },
+    "compiler_sha256": "afc34b658b81f2b5ce542ccf664ff439affca05d64c98c0b086a7068ac3a10ab",
+    "runtime_sha256": "0831ecfa66682b229e5325a69e77eeaa2ee2740da06f3cddaab87ad086fa08b1",
+    "native_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+    "llvm_sha256": "c8228e98d295527bae837d8fe6e71e74e36c3ec2c470557a074447f610d0830b",
+    "source_sha256": {
+      "domain.py": "18500f51fb22cfc251e0230f29c288dec204f34842e57049bf43016a7a38a1e6",
+      "flask/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "flask/frozen/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "flask/frozen/application.py": "cfc4e1af4cabb509873d016db4490872338841273ccd0786150df23a242af09d",
+      "flask/frozen/state.py": "43640f8db7f3fe49ffc516717b727590dbf17d694a31cc05dbdb7cb57360e236",
+      "frozen_views.py": "062bd4a45588428b7476fb77909e6b480f25ced8883e83f88e0ce85da89ee2a2",
+      "itsdangerous/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "itsdangerous/frozen.py": "e034dd117acbb69e48365abbcd972687da798a514e8c6273a89e72470a625ad2",
+      "jinja2/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "jinja2/textprogram.py": "0be0c9a01d531fe10c6f2371b1ae6ab45db450f9dab0a69acb34ad1b7eace1ee",
+      "markupsafe/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "markupsafe/_native.py": "2ad2ae52443ea24df52ceff575f5e3d9b25d8a9b6a2275c77e2e5c6a95ddc3fa",
+      "serve.py": "de88ad6a4e572dacffa6b4cb384ab4ce666b26ccbb91feb715bbead814880c7f",
+      "tracker_db.py": "a67a39b337e4670d61aa0c436d12109fa50974536aad9810d5b55f837be02d5d",
+      "tracker_table.py": "169fc7248df11cbeb4c24c0b88249d8e55fb28f44ea3c310b2078cd54a683bd3",
+      "werkzeug/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "werkzeug/frozen_serving.py": "5f0873ca3184c4548a4ce81436b4d69ad6aa1512ae4db578b90bedf0f6f5c815",
+      "werkzeug/routing/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "werkzeug/routing/frozen.py": "e2fbafde0225844426886a8d73ee6b8702afd0dd440acf1fbd6e328ecf997db8",
+      "werkzeug/wrappers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "werkzeug/wrappers/frozen.py": "2768ca4b7c887fe666ae3269e4e2811a323c1d114e13ef5dbaa6bb6ab8e60471"
+    },
+    "native_admission": {
+      "socket": {
+        "server_pid": 2161402,
+        "checked_pids": [
+          2161402
+        ],
+        "binary_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+        "sockets": {
+          "listener": {
+            "inode": "155026987",
+            "owner_pids": [
+              2161402
+            ]
+          },
+          "connection": {
+            "inode": "155026988",
+            "owner_pids": [
+              2161402
+            ]
+          }
+        }
+      },
+      "trace": {
+        "sha256": "96ecbfac42a61c7b4c88318b993fcd7569bffd1e060fcc3b97c3f216ae684f86",
+        "exec_pids": [
+          2161402
+        ],
+        "worker_events": [],
+        "mmap_count": 26,
+        "libpython_mappings": 0
+      },
+      "sqlite_mapped": true
+    }
+  },
+  "run": {
+    "version": 1,
+    "server_cpu": 18,
+    "client_cpus": [
+      20,
+      21
+    ],
+    "concurrency": 4,
+    "rounds": 5,
+    "cycles_per_client": 100,
+    "warmup_cycles_per_client": 1,
+    "page_limit": 50,
+    "body_hashing": "Canonical JSON with login nonces normalized; original bytes for HTML.",
+    "seed_db_sha256": "998539deef60b2989dc9964198749e4e9ac9ac03a40ba391a0e8b32fb2f017f1",
+    "admission": {
+      "stock-cpython": {
+        "http": {
+          "anonymous read": {
+            "status": 401,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "b196a89b305568f3881f865dbac2fcfa3dbe5668280b2d6175cbce95ec11c8df"
+          },
+          "anonymous write": {
+            "status": 401,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "b196a89b305568f3881f865dbac2fcfa3dbe5668280b2d6175cbce95ec11c8df"
+          },
+          "invalid credential": {
+            "status": 401,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "b196a89b305568f3881f865dbac2fcfa3dbe5668280b2d6175cbce95ec11c8df"
+          },
+          "alice login": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": true,
+            "body_sha256": "a95da1ca792e060227a14737a5b6dde28fc3480d35d9fa2ce4c2fee03108d773"
+          },
+          "bob login": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": true,
+            "body_sha256": "a95da1ca792e060227a14737a5b6dde28fc3480d35d9fa2ce4c2fee03108d773"
+          },
+          "alice fresh login": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": true,
+            "body_sha256": "a95da1ca792e060227a14737a5b6dde28fc3480d35d9fa2ce4c2fee03108d773"
+          },
+          "missing csrf": {
+            "status": 403,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "0a0340d7cee225f642b6080c31e99ceacf819d1f914dd659c9a950af36c75cad"
+          },
+          "foreign csrf": {
+            "status": 403,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "0a0340d7cee225f642b6080c31e99ceacf819d1f914dd659c9a950af36c75cad"
+          },
+          "old csrf": {
+            "status": 403,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "0a0340d7cee225f642b6080c31e99ceacf819d1f914dd659c9a950af36c75cad"
+          },
+          "tampered signature": {
+            "status": 401,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "b196a89b305568f3881f865dbac2fcfa3dbe5668280b2d6175cbce95ec11c8df"
+          },
+          "malformed create": {
+            "status": 400,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "067b54b10f9034fdaa6ee1ea34518b5d7369f4b5a8d813f0fcc6890fa201826e"
+          },
+          "empty owner list": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "9bf40c18a4b22428c00ae5ddb17ff9e721207f22ebe705fd7dffdfd150749e3b",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "create issue": {
+            "status": 201,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "037c9214eef74cc3887f3a4f085b4e17d76280dafd273b0ee160c09c4ba1cfd4"
+          },
+          "open JSON": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "6b31161cfc24d5224577fd6a077c51db9a7757283dca5f6982e70fa80388b43b",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "open list HTML": {
+            "status": 200,
+            "media": "text/html",
+            "set_cookie": false,
+            "body_sha256": "aa6d6ae540a3f660a66f3057fa5720c56094473f5ff02a88439481a132cf4073",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "detail HTML": {
+            "status": 200,
+            "media": "text/html",
+            "set_cookie": false,
+            "body_sha256": "0035a19aee0f90fc3b8fca884a0a26b6e46eab81511481c540370af9c3ba31f5",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "private owner JSON": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "9bf40c18a4b22428c00ae5ddb17ff9e721207f22ebe705fd7dffdfd150749e3b",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "private detail": {
+            "status": 404,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "66f6c330d2f03bf748033d7d2ae3ea81f69f3e3d6bccc3642a419efd9651b2ae"
+          },
+          "private update": {
+            "status": 404,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "66f6c330d2f03bf748033d7d2ae3ea81f69f3e3d6bccc3642a419efd9651b2ae"
+          },
+          "invalid update": {
+            "status": 400,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "067b54b10f9034fdaa6ee1ea34518b5d7369f4b5a8d813f0fcc6890fa201826e"
+          },
+          "update without csrf": {
+            "status": 403,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "0a0340d7cee225f642b6080c31e99ceacf819d1f914dd659c9a950af36c75cad"
+          },
+          "close issue": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "037c9214eef74cc3887f3a4f085b4e17d76280dafd273b0ee160c09c4ba1cfd4"
+          },
+          "empty open filter": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "9bf40c18a4b22428c00ae5ddb17ff9e721207f22ebe705fd7dffdfd150749e3b",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "empty open HTML": {
+            "status": 200,
+            "media": "text/html",
+            "set_cookie": false,
+            "body_sha256": "f6df340773331a412350419e0111239750bfdf4502b558d60a3e16a98e184c10",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "signed session after restart": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "24a4c5208b55a3e8fc19e4c60c4ca49634b84a993b1748a6d98ac2ba2607fb42",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "fresh login after restart": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": true,
+            "body_sha256": "a95da1ca792e060227a14737a5b6dde28fc3480d35d9fa2ce4c2fee03108d773"
+          },
+          "persistent HTML after restart": {
+            "status": 200,
+            "media": "text/html",
+            "set_cookie": false,
+            "body_sha256": "4e5653cd411dc68e9336d06392abc2660ce9e1d316eb1f434e16d5542aa35c90",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "reopen after restart": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "037c9214eef74cc3887f3a4f085b4e17d76280dafd273b0ee160c09c4ba1cfd4"
+          }
+        },
+        "initial_process": {
+          "pid": 2161417,
+          "executable": "python3.14",
+          "exe_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+          "listener_inode": "155026995",
+          "libpython_mapped": false
+        },
+        "restarted_process": {
+          "pid": 2161424,
+          "executable": "python3.14",
+          "exe_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+          "listener_inode": "155027024",
+          "libpython_mapped": false
+        },
+        "issue_id": 1,
+        "persisted_rows": 1,
+        "final_db_content_sha256": "8dc66cc2a8392d7fae2797a4e2190e13166f2c0184a9a3a2394098e357d17f55"
+      },
+      "frozen-imre": {
+        "http": {
+          "anonymous read": {
+            "status": 401,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "b196a89b305568f3881f865dbac2fcfa3dbe5668280b2d6175cbce95ec11c8df"
+          },
+          "anonymous write": {
+            "status": 401,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "b196a89b305568f3881f865dbac2fcfa3dbe5668280b2d6175cbce95ec11c8df"
+          },
+          "invalid credential": {
+            "status": 401,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "b196a89b305568f3881f865dbac2fcfa3dbe5668280b2d6175cbce95ec11c8df"
+          },
+          "alice login": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": true,
+            "body_sha256": "a95da1ca792e060227a14737a5b6dde28fc3480d35d9fa2ce4c2fee03108d773"
+          },
+          "bob login": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": true,
+            "body_sha256": "a95da1ca792e060227a14737a5b6dde28fc3480d35d9fa2ce4c2fee03108d773"
+          },
+          "alice fresh login": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": true,
+            "body_sha256": "a95da1ca792e060227a14737a5b6dde28fc3480d35d9fa2ce4c2fee03108d773"
+          },
+          "missing csrf": {
+            "status": 403,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "0a0340d7cee225f642b6080c31e99ceacf819d1f914dd659c9a950af36c75cad"
+          },
+          "foreign csrf": {
+            "status": 403,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "0a0340d7cee225f642b6080c31e99ceacf819d1f914dd659c9a950af36c75cad"
+          },
+          "old csrf": {
+            "status": 403,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "0a0340d7cee225f642b6080c31e99ceacf819d1f914dd659c9a950af36c75cad"
+          },
+          "tampered signature": {
+            "status": 401,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "b196a89b305568f3881f865dbac2fcfa3dbe5668280b2d6175cbce95ec11c8df"
+          },
+          "malformed create": {
+            "status": 400,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "067b54b10f9034fdaa6ee1ea34518b5d7369f4b5a8d813f0fcc6890fa201826e"
+          },
+          "empty owner list": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "9bf40c18a4b22428c00ae5ddb17ff9e721207f22ebe705fd7dffdfd150749e3b",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "create issue": {
+            "status": 201,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "037c9214eef74cc3887f3a4f085b4e17d76280dafd273b0ee160c09c4ba1cfd4"
+          },
+          "open JSON": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "6b31161cfc24d5224577fd6a077c51db9a7757283dca5f6982e70fa80388b43b",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "open list HTML": {
+            "status": 200,
+            "media": "text/html",
+            "set_cookie": false,
+            "body_sha256": "aa6d6ae540a3f660a66f3057fa5720c56094473f5ff02a88439481a132cf4073",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "detail HTML": {
+            "status": 200,
+            "media": "text/html",
+            "set_cookie": false,
+            "body_sha256": "0035a19aee0f90fc3b8fca884a0a26b6e46eab81511481c540370af9c3ba31f5",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "private owner JSON": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "9bf40c18a4b22428c00ae5ddb17ff9e721207f22ebe705fd7dffdfd150749e3b",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "private detail": {
+            "status": 404,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "66f6c330d2f03bf748033d7d2ae3ea81f69f3e3d6bccc3642a419efd9651b2ae"
+          },
+          "private update": {
+            "status": 404,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "66f6c330d2f03bf748033d7d2ae3ea81f69f3e3d6bccc3642a419efd9651b2ae"
+          },
+          "invalid update": {
+            "status": 400,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "067b54b10f9034fdaa6ee1ea34518b5d7369f4b5a8d813f0fcc6890fa201826e"
+          },
+          "update without csrf": {
+            "status": 403,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "0a0340d7cee225f642b6080c31e99ceacf819d1f914dd659c9a950af36c75cad"
+          },
+          "close issue": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "037c9214eef74cc3887f3a4f085b4e17d76280dafd273b0ee160c09c4ba1cfd4"
+          },
+          "empty open filter": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "9bf40c18a4b22428c00ae5ddb17ff9e721207f22ebe705fd7dffdfd150749e3b",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "empty open HTML": {
+            "status": 200,
+            "media": "text/html",
+            "set_cookie": false,
+            "body_sha256": "f6df340773331a412350419e0111239750bfdf4502b558d60a3e16a98e184c10",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "signed session after restart": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "24a4c5208b55a3e8fc19e4c60c4ca49634b84a993b1748a6d98ac2ba2607fb42",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "fresh login after restart": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": true,
+            "body_sha256": "a95da1ca792e060227a14737a5b6dde28fc3480d35d9fa2ce4c2fee03108d773"
+          },
+          "persistent HTML after restart": {
+            "status": 200,
+            "media": "text/html",
+            "set_cookie": false,
+            "body_sha256": "4e5653cd411dc68e9336d06392abc2660ce9e1d316eb1f434e16d5542aa35c90",
+            "vary": [
+              "cookie"
+            ]
+          },
+          "reopen after restart": {
+            "status": 200,
+            "media": "application/json",
+            "set_cookie": false,
+            "body_sha256": "037c9214eef74cc3887f3a4f085b4e17d76280dafd273b0ee160c09c4ba1cfd4"
+          }
+        },
+        "initial_process": {
+          "pid": 2161433,
+          "executable": "server-O3",
+          "exe_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+          "listener_inode": "155027031",
+          "libpython_mapped": false
+        },
+        "restarted_process": {
+          "pid": 2161457,
+          "executable": "server-O3",
+          "exe_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+          "listener_inode": "155027057",
+          "libpython_mapped": false
+        },
+        "issue_id": 1,
+        "persisted_rows": 1,
+        "final_db_content_sha256": "8dc66cc2a8392d7fae2797a4e2190e13166f2c0184a9a3a2394098e357d17f55"
+      }
+    },
+    "trials": [
+      {
+        "process": {
+          "pid": 2161458,
+          "executable": "python3.14",
+          "exe_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+          "listener_inode": "155027065",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 15.897871783934534,
+        "requests_per_s": 125.80300226229551,
+        "server_cpu_s": 4.26,
+        "client_cpu_s": 1.6480976340000002,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 27.777604,
+          "p95_ms": 76.002584
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 40.575065,
+            "p95_ms": 95.961951
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 27.007513,
+            "p95_ms": 73.985893
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 6.638686,
+            "p95_ms": 12.008348
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 27.783721,
+            "p95_ms": 61.469895
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 41.0483125,
+            "p95_ms": 82.151002
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "stock-cpython",
+        "round": 1
+      },
+      {
+        "process": {
+          "pid": 2161941,
+          "executable": "server-O3",
+          "exe_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+          "listener_inode": "155048553",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 12.054111628094688,
+        "requests_per_s": 165.918490031117,
+        "server_cpu_s": 1.96,
+        "client_cpu_s": 1.6707302780000002,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 23.450841,
+          "p95_ms": 50.471892
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 32.172404,
+            "p95_ms": 56.548643
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 15.245015,
+            "p95_ms": 36.263873
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 15.2127845,
+            "p95_ms": 44.679135
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 15.948576,
+            "p95_ms": 40.266287
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 27.4388,
+            "p95_ms": 59.755535
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "frozen-imre",
+        "round": 1
+      },
+      {
+        "process": {
+          "pid": 2162230,
+          "executable": "server-O3",
+          "exe_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+          "listener_inode": "155053665",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 10.304387647192925,
+        "requests_per_s": 194.0920769362584,
+        "server_cpu_s": 1.53,
+        "client_cpu_s": 1.4034850429999999,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 22.293516,
+          "p95_ms": 38.276143
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 25.1631885,
+            "p95_ms": 39.934902
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 15.744765,
+            "p95_ms": 29.654347
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 12.8852915,
+            "p95_ms": 28.386717
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 13.349586,
+            "p95_ms": 30.080887
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 27.681658,
+            "p95_ms": 44.635363
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "frozen-imre",
+        "round": 2
+      },
+      {
+        "process": {
+          "pid": 2162256,
+          "executable": "python3.14",
+          "exe_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+          "listener_inode": "155057745",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 13.071635989006609,
+        "requests_per_s": 153.0030366269396,
+        "server_cpu_s": 3.65,
+        "client_cpu_s": 1.3264945299999997,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 26.066803,
+          "p95_ms": 54.443045
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 36.792489,
+            "p95_ms": 56.834776
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 24.5701885,
+            "p95_ms": 44.877315
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 6.839711,
+            "p95_ms": 8.172164
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 27.0973155,
+            "p95_ms": 46.988739
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 37.6783585,
+            "p95_ms": 59.801877
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "stock-cpython",
+        "round": 2
+      },
+      {
+        "process": {
+          "pid": 2162576,
+          "executable": "python3.14",
+          "exe_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+          "listener_inode": "155062850",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 13.201249347999692,
+        "requests_per_s": 151.50081233054266,
+        "server_cpu_s": 3.6999999999999997,
+        "client_cpu_s": 1.3589779479999997,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 25.628643,
+          "p95_ms": 54.719773
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 37.667152,
+            "p95_ms": 59.582365
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 25.1801255,
+            "p95_ms": 45.952918
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 6.518916,
+            "p95_ms": 8.296476
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 26.1734575,
+            "p95_ms": 46.701747
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 36.6208615,
+            "p95_ms": 61.761001
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "stock-cpython",
+        "round": 3
+      },
+      {
+        "process": {
+          "pid": 2162766,
+          "executable": "server-O3",
+          "exe_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+          "listener_inode": "155065905",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 13.105588990962133,
+        "requests_per_s": 152.60664754397826,
+        "server_cpu_s": 1.76,
+        "client_cpu_s": 1.6503972840000003,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 24.040663,
+          "p95_ms": 61.913335
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 32.741172,
+            "p95_ms": 66.01734
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 16.049154,
+            "p95_ms": 51.191925
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 14.521988,
+            "p95_ms": 57.755647
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 17.289053,
+            "p95_ms": 41.438856
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 31.591049,
+            "p95_ms": 72.470902
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "frozen-imre",
+        "round": 3
+      },
+      {
+        "process": {
+          "pid": 2163018,
+          "executable": "server-O3",
+          "exe_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+          "listener_inode": "155072032",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 11.55882903188467,
+        "requests_per_s": 173.02790745351993,
+        "server_cpu_s": 1.83,
+        "client_cpu_s": 1.4887114409999995,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 23.176132,
+          "p95_ms": 46.108966
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 26.1696205,
+            "p95_ms": 50.663387
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 17.652262,
+            "p95_ms": 40.391684
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 16.2669045,
+            "p95_ms": 34.639197
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 14.2047755,
+            "p95_ms": 35.680642
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 31.9004085,
+            "p95_ms": 53.066361
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "frozen-imre",
+        "round": 4
+      },
+      {
+        "process": {
+          "pid": 2163506,
+          "executable": "python3.14",
+          "exe_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+          "listener_inode": "155077143",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 13.281698169186711,
+        "requests_per_s": 150.58315394035696,
+        "server_cpu_s": 3.7500000000000004,
+        "client_cpu_s": 1.2287114849999998,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 25.7914885,
+          "p95_ms": 55.84693
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 37.788159,
+            "p95_ms": 63.810673
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 25.4985615,
+            "p95_ms": 50.281064
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 6.6703145,
+            "p95_ms": 9.081503
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 26.6236495,
+            "p95_ms": 48.187779
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 36.019119,
+            "p95_ms": 60.246751
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "stock-cpython",
+        "round": 4
+      },
+      {
+        "process": {
+          "pid": 2163965,
+          "executable": "python3.14",
+          "exe_sha256": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+          "listener_inode": "155083274",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 12.731381812831387,
+        "requests_per_s": 157.09213888977,
+        "server_cpu_s": 3.62,
+        "client_cpu_s": 1.3158046390000013,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 25.3651665,
+          "p95_ms": 52.663046
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 36.3924895,
+            "p95_ms": 56.389787
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 25.582627,
+            "p95_ms": 46.569529
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 6.650441,
+            "p95_ms": 8.513743
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 25.189439,
+            "p95_ms": 45.223533
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 36.417266,
+            "p95_ms": 56.904669
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "stock-cpython",
+        "round": 5
+      },
+      {
+        "process": {
+          "pid": 2164317,
+          "executable": "server-O3",
+          "exe_sha256": "cdbbea84b9eaa0558781ef98ede0f7673ac43ceb01874b8fdea0ef2f5b1e2f44",
+          "listener_inode": "155094521",
+          "libpython_mapped": false
+        },
+        "requests": 2000,
+        "elapsed_s": 10.801661055069417,
+        "requests_per_s": 185.1567078251695,
+        "server_cpu_s": 1.74,
+        "client_cpu_s": 1.3178716339999994,
+        "latency": {
+          "count": 2000,
+          "p50_ms": 21.6225095,
+          "p95_ms": 46.026807
+        },
+        "operations": {
+          "create": {
+            "count": 400,
+            "p50_ms": 34.505133,
+            "p95_ms": 53.76657
+          },
+          "detail": {
+            "count": 400,
+            "p50_ms": 12.511327,
+            "p95_ms": 34.05204
+          },
+          "filter_html": {
+            "count": 400,
+            "p50_ms": 12.1591735,
+            "p95_ms": 25.572341
+          },
+          "filter_json": {
+            "count": 400,
+            "p50_ms": 23.357987,
+            "p95_ms": 39.707849
+          },
+          "update": {
+            "count": 400,
+            "p50_ms": 23.752817,
+            "p95_ms": 44.427644
+          }
+        },
+        "final_rows": 404,
+        "final_page_rows": {
+          "alice": 50,
+          "bob": 50
+        },
+        "final_db_content_sha256": "5d2ebfc9c148aadfaf8d295582df489577df55555fbac3c92c2af83c4f052213",
+        "server": "frozen-imre",
+        "round": 5
+      }
+    ]
+  }
+}
