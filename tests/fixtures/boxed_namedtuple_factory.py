@@ -134,3 +134,14 @@ def current():
     print(value.a, calls)
     value = Initialized._make((4, 5, 6))
     print(type(value) is Initialized, calls)
+
+    class Positional(tuple):
+        pass
+
+    class Remapped(Match):
+        def __iter__(self):
+            return iter((31, 47, 59))
+
+    for pair in (Positional((1, 2, 3)), Remapped(1, 2, 3)):
+        print("%s/%s/%s" % pair, b"%o/%o/%o" % pair, tuple(iter(pair)))
+    print(repr(Remapped(1, 2, 3)))

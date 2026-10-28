@@ -817,6 +817,26 @@ impl Context {
         Ok(unpacked)
     }
 
+    /// Read positional tuple storage without calling a subclass's sequence slots.
+    fn tuple_items(&self, id: Id) -> Result<Option<Vec<Id>>> {
+        if let Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
+            self.heap.get(self.scalar_value(id))
+        {
+            return copy_ids(items).map(Some);
+        }
+        if let Value::Instance { class, fields, .. } = self.heap.get(id)
+            && let Some(names) = self.namedtuple_fields(*class)
+        {
+            let mut items = Vec::new();
+            items
+                .try_reserve_exact(names.len())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            items.extend(names.iter().map(|name| fields[name]));
+            return Ok(Some(items));
+        }
+        Ok(None)
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
@@ -864,19 +884,10 @@ impl Context {
         if let Value::MappingProxy(dict) = *self.heap.get(id) {
             return self.items(dict);
         }
-        if let Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
-            self.heap.get(self.scalar_value(id))
-        {
+        if let Value::List(items) = self.heap.get(self.scalar_value(id)) {
             return copy_ids(items);
         }
-        if let Value::Instance { class, fields, .. } = self.heap.get(id)
-            && let Some(names) = self.namedtuple_fields(*class)
-        {
-            let mut items = Vec::new();
-            items
-                .try_reserve_exact(names.len())
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            items.extend(names.iter().map(|name| fields[name]));
+        if let Some(items) = self.tuple_items(id)? {
             return Ok(items);
         }
         match self.heap.get(id).clone() {
