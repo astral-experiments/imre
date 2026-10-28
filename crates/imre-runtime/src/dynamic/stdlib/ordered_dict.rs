@@ -66,7 +66,13 @@ pub(super) fn call(
             let items = if ctx.stored_entries(storage).is_empty() {
                 String::new()
             } else {
-                ctx.checked_container_slot_repr(owner, storage)?
+                ctx.repr_ancestors
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                ctx.repr_ancestors.push(owner);
+                let copy = super::super::builtins::copy_dict(ctx, owner, storage);
+                ctx.repr_ancestors.pop();
+                ctx.checked_container_slot_repr(owner, copy?)?
             };
             let class = ctx.exact_type(owner)?;
             Ok(ctx.text(format!("{}({items})", ctx.class_name(class))))
