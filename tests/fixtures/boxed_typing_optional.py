@@ -3,6 +3,26 @@ import typing
 
 
 def current():
+    from typing import Callable, Final, Generic, TypeVar
+
+    parameter = TypeVar("parameter")
+
+    class Container(Generic[parameter]):
+        pass
+
+    first, second = [], []
+    for left, right in (
+        (Final[first], Final[second]),
+        (Container[first], Container[second]),
+        (Callable[[first], int], Callable[[second], int]),
+    ):
+        assert left is not right
+        assert left.__args__[0] is first
+        assert right.__args__[0] is second
+    assert Final[int] is Final[int]
+    assert Container[int] is Container[int]
+    assert Callable[[int], int] is Callable[[int], int]
+
     from typing import Final, assert_never
 
     label: Final = "fixed"
