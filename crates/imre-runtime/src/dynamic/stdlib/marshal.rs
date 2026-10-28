@@ -48,19 +48,6 @@ fn read_long(data: &[u8]) -> Result<Int> {
     ))
 }
 
-fn buffer(ctx: &Context, input: Id) -> Result<&[u8]> {
-    match ctx.heap.get(input) {
-        Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
-        _ => Err(Error::new(
-            "TypeError",
-            format!(
-                "a bytes-like object is required, not '{}'",
-                ctx.type_name(input)
-            ),
-        )),
-    }
-}
-
 /// Read one scalar from CPython's marshal format and ignore trailing bytes.
 pub(super) fn loads(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [input] = args else {
@@ -80,10 +67,10 @@ pub(super) fn loads(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
                 format!("loads() got an unexpected keyword argument '{key}'"),
             ));
         }
-        buffer(ctx, *input)?;
+        ctx.bytes_like(*input)?;
         allow_code = ctx.truth_with_buffer_export(*input, *value)?;
     }
-    let data = buffer(ctx, *input)?;
+    let data = ctx.bytes_like(*input)?;
     let (&tag, data) = data
         .split_first()
         .ok_or_else(|| Error::new("EOFError", "EOF read where object expected"))?;
