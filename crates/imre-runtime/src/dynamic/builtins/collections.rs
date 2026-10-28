@@ -562,8 +562,9 @@ pub(super) fn method(
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
-    if let Some(method @ ("append" | "clear" | "copy" | "index" | "pop" | "reverse" | "sort")) =
-        name.strip_prefix("list.")
+    if let Some(
+        method @ ("append" | "clear" | "copy" | "index" | "insert" | "pop" | "reverse" | "sort"),
+    ) = name.strip_prefix("list.")
     {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(
@@ -596,6 +597,30 @@ pub(super) fn method(
                 Ok(NONE)
             }
             "index" => list_index(ctx, receiver, args, kwargs),
+            "insert" => {
+                if !kwargs.is_empty() {
+                    return Err(type_error("list.insert() takes no keyword arguments"));
+                }
+                let [index, value] = args else {
+                    return Err(type_error(format!(
+                        "insert expected 2 arguments, got {}",
+                        args.len()
+                    )));
+                };
+                let index = list_position_arg(ctx, *index)?;
+                let items = list_items_mut(ctx, receiver)?;
+                let len = items.len() as i64;
+                let index = if index < 0 {
+                    (len + index).max(0)
+                } else {
+                    index.min(len)
+                };
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                items.insert(index as usize, *value);
+                Ok(NONE)
+            }
             "pop" => list_pop(ctx, receiver, args, kwargs),
             "sort" => list_sort(ctx, receiver, args, kwargs),
             _ => {
@@ -812,19 +837,6 @@ pub(super) fn method(
                     items.push(item);
                 }
             }
-            Ok(NONE)
-        }
-        "list.insert" => {
-            arity(name, args, 2, 2)?;
-            let index = ctx.as_integer(args[0])?;
-            let items = list_items_mut(ctx, receiver)?;
-            let len = items.len() as i64;
-            let index = if index < 0 {
-                (len + index).max(0)
-            } else {
-                index.min(len)
-            };
-            items.insert(index as usize, args[1]);
             Ok(NONE)
         }
         "frozenset.__contains__" | "set.__contains__" => {
@@ -1072,18 +1084,23 @@ pub(super) fn builtin_slot(
     Ok(NONE)
 }
 
+/// Convert a list method's positional index before reading the list's current length.
+fn list_position_arg(ctx: &mut Context, value: Id) -> Result<i64> {
+    ctx.index_integer(value)?.to_i64().ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
 fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error("list.pop() takes no keyword arguments"));
     }
     let index = match args {
         [] => -1,
-        [index] => ctx.index_integer(*index)?.to_i64().ok_or_else(|| {
-            Error::new(
-                "OverflowError",
-                "Python int too large to convert to C ssize_t",
-            )
-        })?,
+        [index] => list_position_arg(ctx, *index)?,
         _ => {
             return Err(type_error(format!(
                 "pop expected at most 1 argument, got {}",

@@ -17,7 +17,7 @@ class DrainingIndex:
         return 0
 
 
-def append_allocation(bound):
+def growth_allocation(name, bound):
     class Values(list):
         pass
 
@@ -26,18 +26,26 @@ def append_allocation(bound):
     last = object()
     for _ in range(128):
         list.append(values, first)
-    append = values.append if bound else list.append
+    grow = getattr(values if bound else list, name)
     marker = {}
     marker["start formatter allocation probe 2332"] = 1
     try:
-        if bound:
-            append(last)
+        if name == "append":
+            if bound:
+                grow(last)
+            else:
+                grow(values, last)
+        elif bound:
+            grow(128, last)
         else:
-            append(values, last)
+            grow(values, 128, last)
     except MemoryError as error:
         print("caught", error.args)
     print(len(values), values[0] is first, values[-1] is last)
-    list.append(values, last)
+    if name == "append":
+        values.append(last)
+    else:
+        values.insert(128, last)
     print("retry", len(values), values[-1] is last)
 
 
@@ -91,6 +99,10 @@ def current():
                 print(items.pop(*args, **kwargs), items)
             except (TypeError, IndexError, OverflowError) as error:
                 print(str(error), items)
+
+    items = [1, 2]
+    items.insert(Index(items, -1), 3)
+    assert items == [1, 2, 3, 'from __index__']
 
     items = []
     print(items.pop(Index(items, 0)), items)

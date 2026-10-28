@@ -29,6 +29,7 @@ impl BuiltinDescriptor {
         }
         let method = match symbol {
             "list.append" => Some("append"),
+            "list.insert" => Some("insert"),
             "list.pop" => Some("pop"),
             _ => None,
         };
