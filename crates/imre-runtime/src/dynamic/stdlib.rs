@@ -662,6 +662,27 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "collections.defaultdict" {
+        let factory = args.first().copied().unwrap_or(NONE);
+        if factory != NONE && !ctx.callable(factory) {
+            return Err(Error::new(
+                "TypeError",
+                "first argument must be callable or None",
+            ));
+        }
+        if args.len() > 2 {
+            return Err(Error::new(
+                "TypeError",
+                format!("dict expected at most 1 argument, got {}", args.len() - 1),
+            ));
+        }
+        let dict = ctx.alloc(Value::DefaultDict {
+            factory,
+            entries: Default::default(),
+        });
+        builtins::update_dict(ctx, dict, args.get(1).copied(), kwargs)?;
+        return Ok(dict);
+    }
     if matches!(name, "sys.intern" | "sys._is_interned") {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1200,7 +1221,6 @@ pub(super) fn call(
         | "struct.calcsize"
         | "_string.formatter_parser"
         | "_string.formatter_field_name_split"
-        | "collections.defaultdict"
         | "collections.defaultdict.copy"
         | "collections.defaultdict.__copy__"
         | "collections.defaultdict.__reduce__"
@@ -1455,19 +1475,6 @@ pub(super) fn call(
             }
         }
         "functools._cached" => ctx.cached_function(argument(args, 0)?),
-        "collections.defaultdict" => {
-            let factory = args.first().copied().unwrap_or(NONE);
-            if factory != NONE && !ctx.callable(factory) {
-                return Err(Error::new(
-                    "TypeError",
-                    "first argument must be callable or None",
-                ));
-            }
-            ctx.alloc(Value::DefaultDict {
-                factory,
-                entries: Default::default(),
-            })
-        }
         "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;
             let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) else {
