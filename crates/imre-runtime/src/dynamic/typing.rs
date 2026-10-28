@@ -60,29 +60,30 @@ impl AliasKind {
     }
 }
 
-/// Render a type used in a generic alias or a union.
-pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
-    match ctx.heap.get(id) {
-        Value::Ellipsis => "...".to_owned(),
-        Value::Native(name) => name.clone(),
+/// Append a type argument's special spelling if it has one.
+pub(super) fn append_type_label(ctx: &Context, id: Id, out: &mut String) -> Result<bool> {
+    use super::operators::append_rendered_text;
+
+    let label = match ctx.heap.get(id) {
+        Value::Ellipsis => "...",
+        Value::Native(name) => name,
         Value::Class { name, scope, .. } => {
             let class_name = |attr| {
                 ctx.own_class_attr(id, attr)
                     .and_then(|id| ctx.str_value(id).ok())
             };
             let module = class_name("__module__").unwrap_or(&ctx.scope_data(*scope).module);
-            let qualname = class_name("__qualname__").unwrap_or(name);
-            if module == "builtins" {
-                qualname.to_owned()
-            } else {
-                format!("{module}.{qualname}")
+            if module != "builtins" {
+                append_rendered_text(out, module)?;
+                append_rendered_text(out, ".")?;
             }
+            class_name("__qualname__").unwrap_or(name)
         }
-        Value::Instance { .. } if ctx.module_value("typing", "Final") == Some(id) => {
-            "typing.Final".to_owned()
-        }
-        _ => ctx.repr(id),
-    }
+        Value::Instance { .. } if ctx.module_value("typing", "Final") == Some(id) => "typing.Final",
+        _ => return Ok(false),
+    };
+    append_rendered_text(out, label)?;
+    Ok(true)
 }
 
 impl Alias {
@@ -96,29 +97,6 @@ impl Alias {
             (a, b) if a == b => Some((self.args, other.args)),
             _ => None,
         }
-    }
-
-    pub(super) fn repr(&self, ctx: &Context) -> String {
-        let Value::Tuple(args) = ctx.heap.get(self.args) else {
-            unreachable!()
-        };
-        let mut args: Vec<_> = args.iter().map(|&id| type_repr(ctx, id)).collect();
-        let origin = match self.kind {
-            AliasKind::Callable => "typing.Callable".to_owned(),
-            AliasKind::Literal(_) => "typing.Literal".to_owned(),
-            _ => type_repr(ctx, self.origin),
-        };
-        let params = if matches!(self.kind, AliasKind::Callable | AliasKind::AbcCallable)
-            && args.first().is_none_or(|arg| arg != "...")
-        {
-            let result = args.pop().expect("a callable has a result");
-            format!("[{}], {result}", args.join(", "))
-        } else if args.is_empty() {
-            "()".to_owned()
-        } else {
-            args.join(", ")
-        };
-        format!("{origin}[{params}]")
     }
 }
 
@@ -336,10 +314,12 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         && matches!(alias.kind, AliasKind::Literal(_))
         && matches!(ctx.heap.get(alias.parameters), Value::Tuple(params) if params.is_empty())
     {
-        return Some(Err(Error::new(
-            "TypeError",
-            format!("{} is not a generic class", alias.repr(ctx)),
-        )));
+        return Some(ctx.checked_format(target, true).and_then(|name| {
+            Err(Error::new(
+                "TypeError",
+                format!("{name} is not a generic class"),
+            ))
+        }));
     }
     if matches!(ctx.heap.get(target), Value::Class { .. })
         && ctx.class_attr(target, "__class_getitem__").is_some()
@@ -585,7 +565,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     {
         return Err(Error::new(
             "TypeError",
-            format!("Cannot subclass {}", alias.repr(ctx)),
+            format!("Cannot subclass {}", ctx.checked_format(id, true)?),
         ));
     }
     let mut result = vec![origin];
