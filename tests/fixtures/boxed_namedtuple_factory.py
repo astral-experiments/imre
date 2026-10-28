@@ -63,3 +63,31 @@ def current():
     sentinel = []
     defaults = namedtuple("Row", "name value", defaults=[sentinel])
     print(defaults("hello").value is sentinel, defaults._field_defaults["value"] is sentinel)
+
+    events = []
+
+    class Field:
+        def __str__(self):
+            events.append("converted")
+            return "first"
+
+    def fields():
+        yield Field()
+        if not events:
+            raise RuntimeError("field was not converted")
+        yield "second"
+
+    print(namedtuple("Ordered", fields())._fields, events)
+
+    class BadField:
+        def __str__(self):
+            raise ValueError("conversion failed")
+
+    def broken_fields():
+        yield BadField()
+        raise RuntimeError("iterator advanced")
+
+    try:
+        namedtuple("Broken", broken_fields())
+    except ValueError as error:
+        print(str(error))
