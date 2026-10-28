@@ -1281,7 +1281,14 @@ impl Context {
             "dict" => builtins::DICT_METHODS,
             "collections.defaultdict" => {
                 self.builtin("dict");
-                &["__init__", "__missing__", "copy", "__copy__", "__reduce__"]
+                &[
+                    "__init__",
+                    "__missing__",
+                    "__repr__",
+                    "copy",
+                    "__copy__",
+                    "__reduce__",
+                ]
             }
             "list" => &["__repr__", "__init__", "append"],
             "tuple" => &["__repr__", "__getitem__"],

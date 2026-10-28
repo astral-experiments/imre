@@ -664,6 +664,40 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "collections.defaultdict.__repr__" {
+        let Some((&object, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "descriptor '__repr__' of 'collections.defaultdict' object needs an argument",
+            ));
+        };
+        let Some(storage) = ctx
+            .dict_storage(object)
+            .filter(|&storage| matches!(ctx.heap.get(storage), Value::DefaultDict { .. }))
+        else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__repr__' requires a 'collections.defaultdict' object but received a '{}'",
+                    ctx.type_name(object)
+                ),
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "wrapper __repr__() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", args.len()),
+            ));
+        }
+        let text = ctx.checked_defaultdict_slot_repr(object, storage)?;
+        return Ok(ctx.text(text));
+    }
     if matches!(
         name,
         "collections.defaultdict" | "collections.defaultdict.__init__"

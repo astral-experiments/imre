@@ -53,9 +53,8 @@ impl Context {
             }
             Value::Native(kind) if kind == "collections.defaultdict" => {
                 let owner = match name {
-                    "__init__" | "__missing__" | "copy" | "__copy__" | "__reduce__" => {
-                        kind.as_str()
-                    }
+                    "__init__" | "__missing__" | "__repr__" | "copy" | "__copy__"
+                    | "__reduce__" => kind.as_str(),
                     _ => "dict",
                 };
                 self.builtins.get(&format!("{owner}.{name}")).copied()

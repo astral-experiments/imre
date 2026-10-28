@@ -151,6 +151,22 @@ def mapping_patterns():
 def current():
     from collections import defaultdict
 
+    class Display(defaultdict):
+        pass
+    display = Display(list, a=2)
+    assert repr(display) == display.__repr__() == defaultdict.__repr__(display)
+    assert repr(display) == "Display(<class 'list'>, {'a': 2})"
+    assert dict.__repr__(display) == "{'a': 2}"
+    slot = defaultdict.__repr__
+    assert slot.__objclass__ is defaultdict
+    assert slot.__get__(display, Display)() == repr(display)
+    assert type(slot) is type(dict.__repr__)
+    assert type(display.__repr__) is type({}.__repr__)
+    deep = None
+    for _ in range(160):
+        deep = Display(None, child=deep)
+    assert len(repr(deep)) == len("None") + 160 * len("Display(None, {'child': })")
+
     entries = defaultdict(list, [("saved", 2)], extra=3, saved=5)
     assert entries == {"saved": 5, "extra": 3}
     assert entries["missing"] == []

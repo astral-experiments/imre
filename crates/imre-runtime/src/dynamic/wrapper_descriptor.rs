@@ -15,6 +15,7 @@ impl Wrapper {
             "bytes.__repr__" => ("bytes", "__repr__"),
             "bytearray.__repr__" => ("bytearray", "__repr__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
             "list.__repr__" => ("list", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "set.__repr__" => ("set", "__repr__"),
@@ -36,6 +37,7 @@ impl Wrapper {
         let accepts = match self.owner {
             "object" => true,
             "dict" => ctx.dict_storage(receiver).is_some(),
+            "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             "str" | "bytes" | "bytearray" | "list" | "tuple" | "set" | "frozenset" => {
                 ctx.builtin_slot_accepts(receiver, self.owner)
             }
