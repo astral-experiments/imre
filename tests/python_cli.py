@@ -993,6 +993,15 @@ except KeyError as err:
 print(json.dumps({"ok": True}, **options))
 print(json.dumps({"z": Extra(), "a": json.loads("1.25")}, **options))
 print(json.dumps({2: False, json.loads("0.5"): True}, sort_keys=True))
+from enum import IntEnum
+class Code(IntEnum):
+    ok = 4
+class Label(str):
+    pass
+class DecimalKey(float):
+    pass
+print(json.dumps({Label("status"): [Code.ok, DecimalKey(1.25)]}, **options))
+print(json.dumps({Code.ok: Label("ok"), DecimalKey(2.5): Code.ok}, **options))
 nan = json.loads("NaN")
 print(nan == nan, nan <= 1, [nan] == [nan])
 defaults = {"present": None}
