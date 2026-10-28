@@ -2,7 +2,7 @@
 
 The [existing comparison harness](../comparison/compare.py) accepts the frozen O3 executable as its Imre candidate. It stages the seven pinned wheels afresh for stock Flask on CPython and checks their hashes. Node and Bun run the same [JavaScript control](../comparison/control.mjs). Rust runs the [locked Hyper implementation](../comparison/rust). All five receive identical requests from the Go client.
 
-Install Node and Bun on `PATH` alongside the [frozen benchmark prerequisites](README.md). The recorded run used Node 24.22.1 and Bun 1.4.2. From the checkout, run the five-server comparison.
+Install Node and Bun with JSON reviver `context.source` support on `PATH` alongside the [frozen benchmark prerequisites](README.md). The recorded run used Node 24.22.1 and Bun 1.4.2. From the checkout, run the five-server comparison.
 
 ```sh
 python3.14 benchmarks/flask/frozen/run.py --five-servers

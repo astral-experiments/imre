@@ -111,6 +111,17 @@ def main():
     for program in programs:
         if shutil.which(program) is None:
             parser.error(f"{program} is required")
+    if args.five_servers:
+        # The JSON control must recover the digits before its Number rounds them.
+        probe = (
+            "const digits = JSON.parse('9007199254740993', (_, v, c) => c?.source);"
+            "process.exit(digits === '9007199254740993' ? 0 : 1)"
+        )
+        for js in ("node", "bun"):
+            if subprocess.run([js, "-e", probe]).returncode:
+                parser.error(
+                    f"{js} needs JSON.parse reviver context.source for exact integers"
+                )
     available = sorted(os.sched_getaffinity(0))
     server = available[0] if args.server_cpu is None else args.server_cpu
     other_cpus = [str(n) for n in available if n != server]
