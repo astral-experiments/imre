@@ -361,17 +361,22 @@ pub(in super::super) fn set_member(
     } else {
         value
     };
-    Ok(ctx.find_dictionary_key(set, value, None)?.1.is_some())
+    Ok(ctx
+        .find_dictionary_key(ctx.scalar_value(set), value, None)?
+        .1
+        .is_some())
 }
 
 pub(in super::super) fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result<()> {
-    ctx.set_dictionary_key(set, value, NONE, None, false)?;
+    ctx.set_dictionary_key(ctx.scalar_value(set), value, NONE, None, false)?;
     Ok(())
 }
 
 pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
-    if matches!(ctx.heap.get(source), Value::Set { .. }) {
-        return merge_set(ctx, target, source);
+    let target = ctx.scalar_value(target);
+    let storage = ctx.scalar_value(source);
+    if matches!(ctx.heap.get(storage), Value::Set { .. }) {
+        return merge_set(ctx, target, storage);
     }
     let iterator = ctx.iterator(source)?;
     while let Some(item) = ctx.next_item(iterator)? {
