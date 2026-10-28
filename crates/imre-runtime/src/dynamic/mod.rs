@@ -772,24 +772,41 @@ impl Context {
     /// Consume the values required by an assignment, probing one extra item for fixed targets.
     fn unpack_items(&mut self, value: Id, count: usize, star: Option<usize>) -> Result<Vec<Id>> {
         let required = count - usize::from(star.is_some());
+        let prefix = star.unwrap_or(count);
         let iter = self.iterator(value)?;
-        let mut unpacked = Vec::with_capacity(count);
-        for i in 0..required {
-            unpacked.push(self.next_item(iter)?.ok_or_else(|| {
-                let qualifier = if star.is_some() { "at least " } else { "" };
-                Error::new(
-                    "ValueError",
-                    format!(
-                        "not enough values to unpack (expected {qualifier}{required}, got {i})"
-                    ),
-                )
-            })?);
+        let mut unpacked = Vec::new();
+        unpacked
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let too_short = |got| {
+            let qualifier = if star.is_some() { "at least " } else { "" };
+            Error::new(
+                "ValueError",
+                format!("not enough values to unpack (expected {qualifier}{required}, got {got})"),
+            )
+        };
+        for i in 0..prefix {
+            unpacked.push(self.next_item(iter)?.ok_or_else(|| too_short(i))?);
         }
         if let Some(star) = star {
-            while let Some(item) = self.next_item(iter)? {
-                unpacked.push(item);
+            let tail = self.iterator(iter)?;
+            let default = self.int(8);
+            let hint = self.length_hint(iter, Some(default))?;
+            let mut rest = Vec::new();
+            rest.try_reserve_exact(self.as_integer(hint)? as usize)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            while let Some(item) = self.next_item(tail)? {
+                rest.try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                rest.push(item);
             }
-            self.group_starred_items(&mut unpacked, star, required - star);
+            let tail_start = rest
+                .len()
+                .checked_sub(required - star)
+                .ok_or_else(|| too_short(star + rest.len()))?;
+            unpacked.push(NONE);
+            unpacked.extend(rest.drain(tail_start..));
+            unpacked[star] = self.alloc(Value::List(rest));
         } else if self.next_item(iter)?.is_some() {
             let size = match self.heap.get(value) {
                 Value::List(items) | Value::Tuple(items) => Some(items.len()),
@@ -803,13 +820,6 @@ impl Context {
             ));
         }
         Ok(unpacked)
-    }
-
-    /// Replace the middle of a checked unpacking result with a fresh list.
-    fn group_starred_items(&mut self, items: &mut Vec<Id>, star: usize, trailing: usize) {
-        let end = items.len() - trailing;
-        let middle = items.drain(star..end).collect();
-        items.insert(star, self.alloc(Value::List(middle)));
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {

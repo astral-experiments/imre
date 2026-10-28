@@ -98,6 +98,21 @@ def unpacked(rows):
         yield left, middle, right
 
 
+class RestartTail:
+    def __init__(self):
+        self.calls = 0
+        self.stream = iter((1, 2, 3))
+
+    def __iter__(self):
+        self.calls += 1
+        if self.calls == 1:
+            return self
+        return iter([7, 8])
+
+    def __next__(self):
+        return next(self.stream)
+
+
 def starred(rows):
     for first, *rest in rows:
         *middle, last = rest
@@ -143,6 +158,9 @@ def current():
     assert pulls == ["outer"]
     assert next(values) == 1 and pulls == ["outer", 1]
     print(list(byte_chunks()))
+    prefix, *tail, final = RestartTail()
+    assert (prefix, tail, final) == (1, [7], 8)
+    assert list(starred([RestartTail()])) == [(1, [7], 8)]
     assert list(values) == [2] and pulls == ["outer", 1, 2]
 
     trace = []
