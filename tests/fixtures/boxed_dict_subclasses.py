@@ -156,6 +156,26 @@ def current():
     assert entries["missing"] == []
     assert defaultdict(default_factory=1) == {"default_factory": 1}
 
+    from collections import OrderedDict
+
+    class Key:
+        def __hash__(self):
+            if self.fail:
+                raise LookupError("iterator hash")
+            return 17
+
+    key = Key()
+    key.fail = False
+    cursor = iter(OrderedDict([(key, 10)]))
+    key.fail = True
+    try:
+        next(cursor)
+    except LookupError as error:
+        assert str(error) == "iterator hash"
+    else:
+        raise AssertionError("missing hash exception")
+    assert next(cursor, None) is None
+
     from collections import Counter, defaultdict
     from collections import _count_elements
     from _collections import _count_elements as native_count

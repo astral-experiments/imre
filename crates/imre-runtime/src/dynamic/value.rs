@@ -1131,8 +1131,62 @@ impl DictIterator {
             .map_or(0, |_| self.remaining as i64)
     }
 
-    /// Check the live size before each pull, including the one that reaches exhaustion.
-    pub(super) fn next(&mut self, ctx: &mut Context) -> Result<Option<Id>> {
+    /// Advance the cursor before a value lookup can call back into the iterator.
+    pub(super) fn next(mut self, ctx: &mut Context, owner: Id) -> Result<Option<Id>> {
+        let entry = self.next_entry(ctx, owner);
+        *ctx.heap.get_mut(owner) = Value::DictIterator(self);
+        let Some((storage, key, mut value)) = entry? else {
+            return Ok(None);
+        };
+        if self.order_state.is_some() && !matches!(self.kind, DictViewKind::Keys) {
+            let index = match Self::ordered_index(ctx, storage, key) {
+                Ok(index) => index,
+                Err(error) => {
+                    self.dict = None;
+                    *ctx.heap.get_mut(owner) = Value::DictIterator(self);
+                    return Err(error);
+                }
+            };
+            value = ctx.stored_entries(storage)[index].1;
+        }
+        Ok(Some(match self.kind {
+            DictViewKind::Keys => key,
+            DictViewKind::Values => value,
+            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
+        }))
+    }
+
+    /// Resolve the retained key through the dictionary, including user hash and equality hooks.
+    fn ordered_index(ctx: &mut Context, storage: Id, key: Id) -> Result<usize> {
+        let (_, index) = ctx.find_dictionary_key(storage, key, None)?;
+        index.ok_or_else(|| ctx.lookup_error("KeyError", key))
+    }
+
+    /// Read a logical order rank or a plain dictionary slot, in the cursor's direction.
+    fn entry_at(
+        &self,
+        entries: &super::dictionary::Entries,
+        position: usize,
+    ) -> Option<(usize, Id, Id)> {
+        if self.order_state.is_some() {
+            let rank = if self.reverse {
+                position.checked_sub(1)
+            } else {
+                Some(position)
+            };
+            rank.filter(|&rank| rank < entries.len()).map(|rank| {
+                let (key, value) = entries[entries.ordered_dense(rank)];
+                (rank, key, value)
+            })
+        } else if self.reverse {
+            entries.before(position)
+        } else {
+            entries.at(position)
+        }
+    }
+
+    /// Check the live table before advancing. Ordered cursors look their resident key up again.
+    fn next_entry(&mut self, ctx: &mut Context, owner: Id) -> Result<Option<(Id, Id, Id)>> {
         let Some(dict) = self.dict else {
             return Ok(None);
         };
@@ -1161,22 +1215,8 @@ impl DictIterator {
                 "dictionary changed size during iteration",
             ));
         }
-        let entry = if self.order_state.is_some() {
-            let rank = if self.reverse {
-                self.position.checked_sub(1)
-            } else {
-                Some(self.position)
-            };
-            rank.filter(|&rank| rank < entries.len()).map(|rank| {
-                let (key, value) = entries[entries.ordered_dense(rank)];
-                (rank, key, value)
-            })
-        } else if self.reverse {
-            entries.before(self.position)
-        } else {
-            entries.at(self.position)
-        };
-        let Some((position, key, value)) = entry else {
+        let entry = self.entry_at(entries, self.position);
+        let Some((position, mut key, value)) = entry else {
             self.dict = None;
             return Ok(None);
         };
@@ -1187,13 +1227,31 @@ impl DictIterator {
                 "dictionary keys changed during iteration",
             ));
         }
+        if self.order_state.is_some() {
+            if let Err(error) = Self::ordered_index(ctx, storage, key) {
+                self.dict = None;
+                return Err(error);
+            }
+            // Hashing can advance this same iterator. It returns the key now at
+            // the cursor, then advances from the entry selected before hashing.
+            let Value::DictIterator(live) = ctx.heap.get(owner) else {
+                unreachable!()
+            };
+            if live.position != self.position || live.dict != self.dict {
+                let entries = ctx.stored_entries(storage);
+                let current = live.entry_at(entries, live.position);
+                let Some((_, current_key, _)) =
+                    current.filter(|_| live.dict.is_some() && live.remaining != 0)
+                else {
+                    self.dict = None;
+                    return Ok(None);
+                };
+                key = current_key;
+            }
+        }
         self.position = if self.reverse { position } else { position + 1 };
         self.remaining = self.remaining.saturating_sub(1);
-        Ok(Some(match self.kind {
-            DictViewKind::Keys => key,
-            DictViewKind::Values => value,
-            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
-        }))
+        Ok(Some((storage, key, value)))
     }
 }
 
