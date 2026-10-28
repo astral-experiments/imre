@@ -129,3 +129,27 @@ for early in (False, True):
     except KeyError:
         exit_after_handler(early, log)
     print(log)
+
+def buffered(path, saved):
+    stream = open(path, "wb")
+    stream.write(b"pending")
+    if saved is not None:
+        saved.append(stream)
+    return stream
+
+def discard_return(path, saved, again):
+    for _ in range(1):
+        try:
+            return buffered(path, saved)
+        finally:
+            if again:
+                continue
+            break
+    with open(path, "rb") as reader:
+        return reader.read()
+
+for again in (False, True):
+    assert discard_return("finally-return.bin", None, again) == b"pending"
+    saved = []
+    assert discard_return("finally-return.bin", saved, again) == b""
+    saved[0].close()

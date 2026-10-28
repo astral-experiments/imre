@@ -284,6 +284,7 @@ enum Cleanup {
         caught: String,
     },
     ExceptionName(String),
+    PendingReturn(String),
     Finally {
         body: std::rc::Rc<[ast::Stmt]>,
         loop_depth: usize,
