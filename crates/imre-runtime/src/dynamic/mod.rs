@@ -1636,7 +1636,12 @@ impl Context {
                 }
             }
             "ast" => stdlib::ast::install(self, scope),
-            "selectors" => stdlib::readiness::initialize(self, scope),
+            "selectors" => {
+                if let Err(error) = stdlib::readiness::initialize(self, scope) {
+                    self.modules.remove(name);
+                    return Err(error);
+                }
+            }
             "sys" => {
                 for (name, original, stderr) in [
                     ("stdout", "__stdout__", false),

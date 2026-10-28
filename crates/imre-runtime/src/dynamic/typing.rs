@@ -1033,7 +1033,7 @@ impl Context {
                 let fields = named_fields.iter().map(|field| self.text(field)).collect();
                 let fields = self.alloc(Value::Tuple(fields));
                 let name = self.text(name);
-                super::namedtuple::bind_repr(self, scope, "typing", name, fields)?;
+                super::namedtuple::bind_repr(self, scope, name, fields)?;
             }
             super::namedtuple::bind_fields(self, scope, &named_fields);
             return Ok(Some(named_fields));

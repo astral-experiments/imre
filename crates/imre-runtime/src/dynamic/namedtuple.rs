@@ -358,7 +358,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     ctx.bind(scope, "_fields", fields);
     ctx.bind(scope, "__match_args__", fields);
     bind_fields(ctx, scope, &names);
-    bind_repr(ctx, scope, "collections", name, fields)?;
+    bind_repr(ctx, scope, name, fields)?;
     let slots = ctx.alloc(Value::Tuple(Vec::new()));
     ctx.bind(scope, "__slots__", slots);
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
@@ -381,14 +381,8 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
 }
 
 /// Format the actual tuple payload against the declared field names.
-pub(super) fn bind_repr(
-    ctx: &mut Context,
-    scope: Id,
-    owner: &str,
-    name: Id,
-    fields: Id,
-) -> Result<()> {
-    let module = ctx.module(owner)?;
+pub(super) fn bind_repr(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+    let module = ctx.module("collections")?;
     let factory = ctx.lookup_attr(module, "_namedtuple_repr")?;
     let repr = ctx.call(factory, vec![name, fields], Vec::new())?;
     ctx.bind(scope, "__repr__", repr);

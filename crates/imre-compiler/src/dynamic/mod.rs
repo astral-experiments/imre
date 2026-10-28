@@ -519,6 +519,14 @@ pub(crate) fn compile(
             }
         }
     }
+    // Native modules can construct named tuples even without a source-level collections import.
+    if !seen.contains("collections") {
+        sources.push((
+            "collections".into(),
+            Path::new(bundled_root).join("collections/__init__.py"),
+            include_str!("../../stdlib/collections/namedtuple_repr.py").into(),
+        ));
+    }
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
     for name in ["platform", "stat", "zipimport"] {
         if !seen.contains(name)

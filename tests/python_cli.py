@@ -351,6 +351,7 @@ def main():
                 expected.stderr,
             )
 
+        compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
         compare(
             "-IB", "-c", "import sys; sys.path; m = __import__(sys.argv[1]); "
             "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
