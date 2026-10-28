@@ -3557,26 +3557,33 @@ impl Context {
                 }
                 Ok(value)
             }
-            Value::Instance { .. } => {
-                // Binding a descriptor can call Python before it returns its target.
-                let exhausted = stacker::remaining_stack()
-                    .map_or(self.slot_depth >= 128, |remaining| remaining < 64 * 1024);
-                if exhausted {
-                    return Err(Error::new(
-                        "RecursionError",
-                        "maximum recursion depth exceeded while calling a Python object",
-                    ));
-                }
-                self.slot_depth += 1;
-                let result = self.call_instance(callable, args, kwargs);
-                self.slot_depth -= 1;
-                result
-            }
+            // Binding a descriptor can call Python before it returns its target.
+            Value::Instance { .. } => self.with_slot_depth(
+                "maximum recursion depth exceeded while calling a Python object",
+                |ctx| ctx.call_instance(callable, args, kwargs),
+            ),
             _ => Err(Error::new(
                 "TypeError",
                 format!("'{}' object is not callable", self.type_name(callable)),
             )),
         }
+    }
+
+    /// Guard nested native slots that can recurse without entering a Python frame.
+    pub(super) fn with_slot_depth<T>(
+        &mut self,
+        message: &'static str,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if stacker::remaining_stack()
+            .map_or(self.slot_depth >= 128, |remaining| remaining < 64 * 1024)
+        {
+            return Err(Error::new("RecursionError", message));
+        }
+        self.slot_depth += 1;
+        let result = operation(self);
+        self.slot_depth -= 1;
+        result
     }
 
     fn call_instance(

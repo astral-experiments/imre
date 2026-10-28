@@ -196,7 +196,7 @@ fn sort_list_items(
     Ok(())
 }
 
-fn sort_values<T: Copy>(
+pub(in super::super) fn sort_values<T: Copy>(
     ctx: &mut Context,
     values: &mut [T],
     reverse: bool,

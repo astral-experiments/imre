@@ -813,23 +813,33 @@ impl Context {
             }
         }
     }
-    pub(super) fn compare(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
-        let unsupported = || {
-            Error::new(
-                "TypeError",
-                format!(
-                    "'{op}' not supported between instances of '{}' and '{}'",
-                    self.type_name(a),
-                    self.type_name(b)
-                ),
-            )
-        };
-        let (a, b) = (self.scalar_value(a), self.scalar_value(b));
-        let int_float = |integer, float| {
+    /// Identify operands that share the native list or tuple comparison slot.
+    fn same_sequence_family(&self, a: Id, b: Id) -> bool {
+        ["list", "tuple"].into_iter().any(|family| {
+            self.builtin_slot_accepts(a, family) && self.builtin_slot_accepts(b, family)
+        })
+    }
+
+    /// Report an ordering operation declined by both operands.
+    fn unsupported_order(&self, op: &str, a: Id, b: Id) -> Error {
+        Error::new(
+            "TypeError",
+            format!(
+                "'{op}' not supported between instances of '{}' and '{}'",
+                self.type_name(a),
+                self.type_name(b)
+            ),
+        )
+    }
+
+    /// Return the scalar ordering or the comparison result of the first unequal elements.
+    fn order(&mut self, op: &str, original_a: Id, original_b: Id) -> Result<Id> {
+        let (a, b) = (self.scalar_value(original_a), self.scalar_value(original_b));
+        let int_float = |integer, float| -> Result<Option<Ordering>> {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
             Ok((order != 2).then(|| order.cmp(&0)))
         };
-        match (self.heap.get(a), self.heap.get(b)) {
+        let ordering = match (self.heap.get(a), self.heap.get(b)) {
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => {
                 Ok(Some(self.as_int(a)?.cmp(&self.as_int(b)?)))
             }
@@ -848,23 +858,50 @@ impl Context {
                 Ok(Some(x.cmp(y)))
             }
             _ => {
-                if matches!(self.heap.get(a), Value::List(_))
-                    != matches!(self.heap.get(b), Value::List(_))
-                {
-                    return Err(unsupported());
+                if !self.same_sequence_family(a, b) {
+                    return Err(self.unsupported_order(op, original_a, original_b));
                 }
-                if let (Some(x), Some(y)) = (self.sequence(a), self.sequence(b)) {
-                    for (&i, &j) in x.iter().zip(&y) {
-                        if !self.checked_equal(i, j)? {
-                            return self.compare(op, i, j);
+                let mut i = 0;
+                let mark = self.heap.temporary_mark();
+                loop {
+                    let (_, left) = self.sequence_at(a, i).expect("sequence operand");
+                    let (_, right) = self.sequence_at(b, i).expect("sequence operand");
+                    let (Some(left), Some(right)) = (left, right) else {
+                        break;
+                    };
+                    if left != right {
+                        self.heap.reserve_temporaries(2)?;
+                        self.heap.keep(left);
+                        self.heap.keep(right);
+                        let equal = self.checked_equal(left, right)?;
+                        self.heap.release_temporaries_since(mark);
+                        if !equal {
+                            break;
                         }
                     }
-                    Ok(Some(x.len().cmp(&y.len())))
-                } else {
-                    Err(unsupported())
+                    i += 1;
                 }
+                // Equality can resize either list or replace the pair that compares unequal.
+                let (left_len, left) = self.sequence_at(a, i).expect("sequence operand");
+                let (right_len, right) = self.sequence_at(b, i).expect("sequence operand");
+                if let (Some(left), Some(right)) = (left, right) {
+                    self.heap.reserve_temporaries(2)?;
+                    self.heap.keep(left);
+                    self.heap.keep(right);
+                    return self.with_slot_depth("maximum comparison depth exceeded", |ctx| {
+                        ctx.binary(op, left, right)
+                    });
+                }
+                Ok(Some(left_len.cmp(&right_len)))
             }
-        }
+        }?;
+        Ok(builtins::boolean(ordering.is_some_and(|order| match op {
+            "<" => order.is_lt(),
+            "<=" => order.is_le(),
+            ">" => order.is_gt(),
+            ">=" => order.is_ge(),
+            _ => unreachable!("ordering operator"),
+        })))
     }
     pub(super) fn display(&self, id: Id) -> String {
         Self::render_containers(
@@ -3057,17 +3094,7 @@ impl Context {
             "is not" => return Ok(truth(a != b)),
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
-            "<" | "<=" | ">" | ">=" => {
-                let Some(c) = self.compare(op, a, b)? else {
-                    return Ok(FALSE);
-                };
-                return Ok(truth(match op {
-                    "<" => c.is_lt(),
-                    "<=" => c.is_le(),
-                    ">" => c.is_gt(),
-                    _ => c.is_ge(),
-                }));
-            }
+            "<" | "<=" | ">" | ">=" => return self.order(op, a, b),
             "+" | "-"
                 if matches!(self.heap.get(a), Value::Complex(_))
                     || matches!(self.heap.get(b), Value::Complex(_)) =>
@@ -3396,6 +3423,24 @@ impl Context {
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
 
+    /// Call a sequence subclass override or its inherited native comparison.
+    fn sequence_compare_slot(&mut self, name: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        if self.slot(a, name).is_some() {
+            return self.operator_slot(a, name, b);
+        }
+        let value = match name {
+            "__eq__" | "__ne__" => {
+                builtins::boolean(self.checked_equal_impl(a, b, false)? == (name == "__eq__"))
+            }
+            "__lt__" => self.order("<", a, b)?,
+            "__le__" => self.order("<=", a, b)?,
+            "__gt__" => self.order(">", a, b)?,
+            "__ge__" => self.order(">=", a, b)?,
+            _ => unreachable!("rich comparison slot"),
+        };
+        Ok(Some(value))
+    }
+
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
         if matches!(op, "==" | "!=")
             && matches!(self.heap.get(a), Value::Deque(_))
@@ -3454,6 +3499,26 @@ impl Context {
         let (ac, bc) = (class(a), class(b));
         if ac.is_none() && bc.is_none() {
             return Ok(None);
+        }
+        if inplace.is_empty() && self.same_sequence_family(a, b) {
+            let ac = self.exact_type(a)?;
+            let bc = self.exact_type(b)?;
+            // The proper subtype's reflected slot has priority, even when it is inherited.
+            let slots = if ac != bc && self.direct_subclass(bc, ac) {
+                [(right, b, a), (left, a, b)]
+            } else {
+                [(left, a, b), (right, b, a)]
+            };
+            for (name, left, right) in slots {
+                if let Some(result) = self.sequence_compare_slot(name, left, right)? {
+                    return Ok(Some(result));
+                }
+            }
+            return match op {
+                "==" => Ok(Some(builtins::boolean(a == b))),
+                "!=" => Ok(Some(builtins::boolean(a != b))),
+                _ => Err(self.unsupported_order(op, a, b)),
+            };
         }
         if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
             && let Some(&decimal) = self.classes.get("decimal.Decimal")

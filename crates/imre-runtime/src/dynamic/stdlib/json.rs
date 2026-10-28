@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
@@ -176,7 +175,7 @@ impl Encoder {
     }
 
     fn object(&mut self, ctx: &mut Context, mut entries: Vec<(Id, Id)>) -> Result<()> {
-        if self.default.is_some() {
+        if self.default.is_some() || self.sort_keys {
             // A callback can remove an entry while the encoder still holds its key and value.
             for &(key, value) in &entries {
                 ctx.heap.keep(key);
@@ -184,18 +183,7 @@ impl Encoder {
             }
         }
         if self.sort_keys {
-            let mut error = None;
-            entries.sort_by(|(a, _), (b, _)| {
-                ctx.compare("<", *a, *b)
-                    .unwrap_or_else(|e| {
-                        error.get_or_insert(e);
-                        None
-                    })
-                    .unwrap_or(Ordering::Equal)
-            });
-            if let Some(error) = error {
-                return Err(error);
-            }
+            super::builtins::sort_values(ctx, &mut entries, false, |(key, _)| key)?;
         }
         self.output.push('{');
         for (i, (key, value)) in entries.into_iter().enumerate() {
