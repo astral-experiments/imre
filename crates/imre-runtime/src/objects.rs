@@ -63,6 +63,7 @@ mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source};
 pub(crate) mod locks;
 pub(crate) mod logging;
+pub(crate) use logging::formatter::brace_string_field;
 pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
 mod mappings;
 mod module_specs;
