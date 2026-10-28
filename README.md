@@ -24,9 +24,7 @@ for 12 fresh processes pinned to one AMD EPYC Milan CPU.
 </p>
 
 The frozen Flask app compiles its routes and Jinja template ahead of time.
-Node.js, Bun and Rust/Hyper implement the same routes directly. Eight clients
-open a fresh connection for each request to a server pinned to one CPU.
-[Workload, measurements and longer-run timeouts](benchmarks/flask/comparison/README.md#frozen-flask-mixed-http)
+Node.js, Bun and Rust/Hyper implement the same routes directly.
 
 ## Hello, world!
 
