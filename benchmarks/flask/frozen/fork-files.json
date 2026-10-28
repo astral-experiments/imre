@@ -1,0 +1,18 @@
+{
+  "flask/app.py": "fc401366f3e07215e0d3521ae0aab978f22ced9da621b1310aaae5d7c2b5aae5",
+  "flask/frozen/application.py": "28f97f3cb561c6d3827f02b512140ff8b298f51a903a578cb5dbd2c9fdd328d0",
+  "flask/frozen/export.py": "89edcfa7f08b95b7fa488d09b4e7c336dd3945c225714b6eeababbef12bd6f06",
+  "flask/frozen/state.py": "e6fb457b134f1baa9528c0db76e9682e10b2560cee0380016bca297bf36a098e",
+  "flask/sessions.py": "3179458fe3bf730f30727ac3ade3c9bac5fe6209e6a448571e335551b532162a",
+  "itsdangerous/frozen.py": "e034dd117acbb69e48365abbcd972687da798a514e8c6273a89e72470a625ad2",
+  "itsdangerous/timed.py": "5eb21d6249299930eace35d524cca87d7241cf7a31b1c5166cda32271b3251a4",
+  "jinja2/environment.py": "aadd9506227b3430e9b6771f9e6886290d293498c4f2ae979af8ca08303fb4c7",
+  "jinja2/textprogram.py": "0be0c9a01d531fe10c6f2371b1ae6ab45db450f9dab0a69acb34ad1b7eace1ee",
+  "markupsafe/_native.py": "2ad2ae52443ea24df52ceff575f5e3d9b25d8a9b6a2275c77e2e5c6a95ddc3fa",
+  "werkzeug/frozen_serving.py": "5f0873ca3184c4548a4ce81436b4d69ad6aa1512ae4db578b90bedf0f6f5c815",
+  "werkzeug/routing/frozen.py": "e2fbafde0225844426886a8d73ee6b8702afd0dd440acf1fbd6e328ecf997db8",
+  "werkzeug/routing/map.py": "95097afc993a4c49f9397c0bc25514f1720764832464b54bec5c20ec2e9ab0c4",
+  "werkzeug/wrappers/frozen.py": "b84722edd0baad6915a3b72edbe4bdfe42e224b3a9b0549065b90ffb6c5ffcc4",
+  "werkzeug/wrappers/request.py": "b43fda39ef18dc306767baf5e6f39996c69736e1ebe4585fa44f9d7af8c26d51",
+  "werkzeug/wrappers/response.py": "bb11bd48c5da866d5278f693a101c65d1e41210cec666b6eee27f8cc3ea97941"
+}

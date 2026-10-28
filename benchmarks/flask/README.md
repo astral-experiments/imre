@@ -17,7 +17,7 @@ This gate checks whether a standalone Imre executable can serve the unchanged Fl
 
 The checked-in oracle records status, content type and length, allowed methods, cookie presence, body and its SHA-256 from a prior CPython 3.14.5 TCP session. The client opens real HTTP connections.
 
-The [HTTP performance comparison](comparison/README.md) records throughput and latency for CPython and route-equivalent Node, Bun and Rust controls.
+The [HTTP performance comparison](comparison/README.md) records throughput and latency for CPython and route-equivalent Node, Bun and Rust controls. A separate [frozen Flask benchmark](frozen/README.md) builds a typed deployment from a pinned fork and compares it with the Rust server.
 
 ## Reproduce
 
