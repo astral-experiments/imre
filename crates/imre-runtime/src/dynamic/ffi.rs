@@ -159,8 +159,7 @@ impl Context {
                 }
                 let name = self.str_value(b)?.to_owned();
                 let value = self.enum_assignment(scope, &name, c)?;
-                let replaced = self.replacing_writer(scope, &name, value);
-                self.bind_source_name(scope, &name, value)?;
+                let replaced = self.store_source_name(scope, &name, value)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
                     Ok(flag(replaced))
                 } else {
@@ -1167,7 +1166,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 
 impl Context {
     /// Check the old binding without calling a Python mapping's lookup hook.
-    fn replacing_writer(&self, scope: Id, name: &str, value: Id) -> bool {
+    pub(super) fn replacing_writer(&self, scope: Id, name: &str, value: Id) -> bool {
         if !self.heap.has_file_writers() {
             return false;
         }
