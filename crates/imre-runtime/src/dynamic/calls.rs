@@ -78,6 +78,7 @@ impl Context {
                         | "list"
                         | "tuple"
                         | "int"
+                        | "bytes"
                         | "str"
                         | "property"
                         | "module"
@@ -460,6 +461,10 @@ impl Context {
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "module.__init__"
+                            | "bytes.decode"
+                            | "bytes.rfind"
+                            | "bytes.rsplit"
+                            | "bytes.rstrip"
                             | "int.to_bytes"
                             | "list.append"
                             | "list.index"
@@ -1704,9 +1709,6 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
-            Value::Native(class) if class == "bytes" && name == "__mod__" => {
-                return Ok(self.builtin("bytes.__mod__"));
-            }
             Value::Bytes(_) if name == "maketrans" => return Ok(self.builtin("bytes.maketrans")),
             Value::ByteArray(_) if name == "maketrans" => {
                 return Ok(self.builtin("bytearray.maketrans"));
@@ -1762,6 +1764,7 @@ impl Context {
                     || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
+                    || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "int" && name == "to_bytes")
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>

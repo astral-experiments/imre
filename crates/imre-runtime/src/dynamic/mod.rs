@@ -1206,9 +1206,10 @@ impl Context {
             "dict" => builtins::DICT_METHODS,
             "list" => &["__repr__", "__init__", "append"],
             "tuple" => &["__repr__", "__getitem__"],
-            "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],
+            "set" | "frozenset" | "bytearray" => &["__repr__"],
             "property" => property::METHODS,
             "int" => &["to_bytes"],
+            "bytes" => builtins::BYTES_METHODS,
             "str" => {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
