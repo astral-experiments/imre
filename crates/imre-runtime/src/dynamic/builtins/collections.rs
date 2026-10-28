@@ -732,16 +732,7 @@ pub(super) fn method(
         }
         "dict.__getitem__" => {
             arity(name, args, 1, 1)?;
-            match ctx.get_item(receiver, args[0]) {
-                Err(error) if error.kind == "KeyError" => {
-                    if let Some(hook) = ctx.bound_slot(object, "__missing__")? {
-                        ctx.call(hook, vec![args[0]], Vec::new())
-                    } else {
-                        Err(error)
-                    }
-                }
-                result => result,
-            }
+            ctx.dictionary_item(object, args[0])
         }
         "dict.__setitem__" => {
             arity(name, args, 2, 2)?;

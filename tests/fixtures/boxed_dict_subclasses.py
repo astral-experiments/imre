@@ -579,6 +579,7 @@ def current():
     key = Colliding()
     print({key: 13}[key])
     declined_key_equality()
+    missing_key_errors()
 
 
 def fromkeys_construction():
@@ -629,3 +630,26 @@ def declined_key_equality():
         assert right not in container
         assert calls == [("left", "right"), ("right", "left")]
         calls.clear()
+
+
+def missing_key_errors():
+    calls = []
+
+    class Defaults(dict):
+        def __missing__(self, key):
+            calls.append(key)
+            return 12
+
+    class BadHash:
+        def __hash__(self):
+            raise KeyError("hash failed")
+
+    table = Defaults()
+    try:
+        table[BadHash()]
+    except KeyError as error:
+        assert error.args == ("hash failed",)
+    else:
+        raise AssertionError("lookup suppressed a hashing exception")
+    assert table["absent"] == 12
+    assert calls == ["absent"]
