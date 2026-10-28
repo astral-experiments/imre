@@ -413,9 +413,48 @@ pub(super) fn format_specifier(
     spec: &str,
     integer_name: &str,
 ) -> Result<String> {
-    if spec.is_empty() {
-        return display(value);
+    format_field(Field::Native(value), spec, integer_name)
+}
+
+enum Field<'a> {
+    Native(&'a OwnedWord),
+    Text(&'a str),
+}
+
+/// Format boxed text without copying it into a native string owner first.
+pub(crate) fn brace_string_field(value: &str, spec: &str) -> Result<String> {
+    format_field(Field::Text(value), spec, "str")
+}
+
+/// Read a decimal width or precision with the interpreter's Unicode digit table.
+fn field_size(tail: &mut &str) -> Result<Option<usize>> {
+    let mut value = None;
+    while let Some(ch) = tail.chars().next() {
+        let Some(digit) = crate::integer_text::decimal_digit(ch) else {
+            break;
+        };
+        let n = value
+            .unwrap_or(0_isize)
+            .checked_mul(10)
+            .and_then(|n| n.checked_add(isize::from(digit)))
+            .ok_or_else(|| error("Too many decimal digits in format string"))?;
+        value = Some(n);
+        *tail = &tail[ch.len_utf8()..];
     }
+    Ok(value.map(|n| n as usize))
+}
+
+fn format_field(value: Field<'_>, spec: &str, type_name: &str) -> Result<String> {
+    if spec.is_empty() {
+        return match value {
+            Field::Native(word) => display(word),
+            Field::Text(text) => pad_field(text, 0, ' ', '<', 0),
+        };
+    }
+    let kind = match value {
+        Field::Native(word) => word.kind.raw(),
+        Field::Text(_) => 3,
+    };
     let mut tail = spec;
     let mut align = None;
     let mut fill = ' ';
@@ -434,7 +473,7 @@ pub(super) fn format_specifier(
     if sign.is_some() {
         tail = &tail[1..];
     }
-    let negative_zero = value.kind.raw() == 2 && tail.starts_with('z');
+    let negative_zero = (kind == 2 || matches!(value, Field::Text(_))) && tail.starts_with('z');
     if negative_zero {
         tail = &tail[1..];
     }
@@ -448,36 +487,32 @@ pub(super) fn format_specifier(
             fill = '0';
         }
         if align.is_none() {
-            align = Some(if value.kind.raw() == 3 { '<' } else { '=' });
+            align = Some(if kind == 3 { '<' } else { '=' });
         }
     }
-    let size = tail.bytes().take_while(u8::is_ascii_digit).count();
-    let width = if size == 0 {
-        0
-    } else {
-        tail[..size]
-            .parse::<isize>()
-            .map_err(|_| error("Too many decimal digits in format string"))? as usize
-    };
-    tail = &tail[size..];
+    let width = field_size(&mut tail)?.unwrap_or(0);
     let group = tail.chars().next().filter(|c| ",_".contains(*c));
     if group.is_some() {
         tail = &tail[1..];
     }
+    if group.is_some_and(|g| tail.starts_with(if g == ',' { '_' } else { ',' })) {
+        return Err(error("Cannot specify both ',' and '_'."));
+    }
     let precision = if let Some(rest) = tail.strip_prefix('.') {
-        let n = rest.bytes().take_while(u8::is_ascii_digit).count();
-        if n == 0 {
-            return Err(error("Format specifier missing precision"));
+        tail = rest;
+        let n =
+            field_size(&mut tail)?.ok_or_else(|| error("Format specifier missing precision"))?;
+        if matches!(value, Field::Text(_)) && (tail.starts_with(',') || tail.starts_with('_')) {
+            tail = &tail[1..];
         }
-        tail = &rest[n..];
-        Some(&rest[..n])
+        Some(n)
     } else {
         None
     };
-    let numeric = matches!(value.kind.raw(), 1 | 2 | 7);
+    let numeric = matches!(kind, 1 | 2 | 7);
     let c = match tail {
         "" => {
-            if value.kind.raw() == 7 {
+            if kind == 7 {
                 if precision.is_some() { 'g' } else { 's' }
             } else if numeric {
                 'd'
@@ -486,12 +521,50 @@ pub(super) fn format_specifier(
             }
         }
         _ if tail.chars().count() == 1 => tail.chars().next().unwrap(),
-        _ if value.kind.raw() == 2 => {
+        _ if kind == 2 || matches!(value, Field::Text(_)) => {
             return Err(error(format!(
-                "Invalid format specifier '{spec}' for object of type '{integer_name}'"
+                "Invalid format specifier '{spec}' for object of type '{type_name}'"
             )));
         }
         _ => return Err(error(format!("Invalid format specifier '{spec}'"))),
+    };
+    let value = match value {
+        Field::Native(word) => word,
+        Field::Text(text) => {
+            if let Some(group) = group {
+                return Err(error(format!("Cannot specify '{group}' with '{c}'.")));
+            }
+            if c != 's' {
+                let code = if c.is_ascii() {
+                    c.to_string()
+                } else {
+                    format!("\\x{:x}", c as u32)
+                };
+                return Err(error(format!(
+                    "Unknown format code '{code}' for object of type 'str'"
+                )));
+            }
+            if let Some(message) = match (sign, negative_zero, alternate, align) {
+                (Some(' '), _, _, _) => Some("Space not allowed in string format specifier"),
+                (Some(_), _, _, _) => Some("Sign not allowed in string format specifier"),
+                (_, true, _, _) => {
+                    Some("Negative zero coercion (z) not allowed in string format specifier")
+                }
+                (_, _, true, _) => {
+                    Some("Alternate form (#) not allowed in string format specifier")
+                }
+                (_, _, _, Some('=')) => {
+                    Some("'=' alignment not allowed in string format specifier")
+                }
+                _ => None,
+            } {
+                return Err(error(message));
+            }
+            let end = precision
+                .and_then(|n| text.char_indices().nth(n))
+                .map_or(text.len(), |(i, _)| i);
+            return pad_field(&text[..end], width, fill, align.unwrap_or('<'), 0);
+        }
     };
     let integer = value.kind.raw() == 2;
     let integer_code = matches!(c, 'b' | 'o' | 'd' | 'x' | 'X' | 'n' | 'c');
@@ -530,7 +603,7 @@ pub(super) fn format_specifier(
         }
     } else if integer && !"eEfFgG%".contains(c) {
         return Err(error(format!(
-            "Unknown format code '{c}' for object of type '{integer_name}'"
+            "Unknown format code '{c}' for object of type '{type_name}'"
         )));
     }
     let flags = format!(
@@ -633,8 +706,18 @@ pub(super) fn format_specifier(
             }
         }
     }
+    pad_field(
+        &s,
+        width,
+        fill,
+        align.unwrap_or(if numeric { '>' } else { '<' }),
+        head,
+    )
+}
+
+/// Apply checked byte allocation and Unicode character padding to a formatted field.
+fn pad_field(s: &str, width: usize, fill: char, align: char, head: usize) -> Result<String> {
     let count = width.saturating_sub(s.chars().count());
-    let align = align.unwrap_or(if numeric { '>' } else { '<' });
     let (left, right) = match align {
         '<' => (0, count),
         '^' => (count / 2, count - count / 2),

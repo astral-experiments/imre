@@ -289,8 +289,8 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
         }
         return ctx.checked_format(value, false);
     }
-    if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
-        return Ok(ctx.display(value));
+    if let Value::Str(text) = ctx.heap.get(value) {
+        return Ok(crate::objects::brace_string_field(text, spec)?);
     }
     if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
         let number = float_operand(ctx, value)?

@@ -49,3 +49,7 @@ def current():
             str.__new__(*args)
         except TypeError as error:
             print(str(error))
+
+    # Width and precision count Unicode characters, including in nested replacement fields.
+    for spec in (">5", "^5s", "5", "λ<5.1s", "░^𝟞.٢s", "05s"):
+        print(format("猫a", spec), f"{"猫a":{spec}}", "{:{}}".format("猫a", spec))
