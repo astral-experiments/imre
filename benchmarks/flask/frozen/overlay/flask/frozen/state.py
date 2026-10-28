@@ -23,6 +23,7 @@ class AppState:
         return Response(200, "text/html; charset=utf-8", text.encode("utf-8"))
 
     def session(self, req: Request) -> dict[str, int]:
+        req.session_accessed = True
         token = req.cookie_value(self.cookie_name)
         if token:
             try:

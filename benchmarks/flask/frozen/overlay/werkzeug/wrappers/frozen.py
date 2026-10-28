@@ -10,9 +10,11 @@ class Request:
     query: str
     media: str
     cookie: str
+    session_accessed: bool
     body: bytes
 
     def __init__(self, method: str, target: str, media: str, cookie: str, body: bytes) -> None:
+        self.session_accessed = False
         self.method = method
         parts = target.partition("?")
         self.path = unquote(parts[0])
@@ -46,6 +48,7 @@ class Response:
     body: bytes
     allow: str
     cookie: str
+    vary_cookie: bool
 
     def __init__(self, status: int, content_type: str, body: bytes) -> None:
         self.status = status
@@ -53,13 +56,16 @@ class Response:
         self.body = body
         self.allow = ""
         self.cookie = ""
+        self.vary_cookie = False
 
     def wire(self, reason: str, head: bool) -> bytes:
         headers = ("HTTP/1.1 " + str(self.status) + " " + reason + "\r\nContent-Type: "
                    + self.content_type + "\r\nContent-Length: " + str(len(self.body))
                    + "\r\nConnection: close\r\n")
         if self.cookie:
-            headers += "Set-Cookie: " + self.cookie + "\r\nVary: Cookie\r\n"
+            headers += "Set-Cookie: " + self.cookie + "\r\n"
+        if self.cookie or self.vary_cookie:
+            headers += "Vary: Cookie\r\n"
         if self.allow:
             headers += "Allow: " + self.allow + "\r\n"
         prefix = (headers + "\r\n").encode("ascii")

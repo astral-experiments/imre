@@ -4,6 +4,7 @@ from pathlib import Path
 from shutil import copyfile
 from http import HTTPStatus
 import inspect
+import keyword
 
 from flask.sessions import FrozenCookieSessionInterface, SecureCookieSessionInterface
 from werkzeug.exceptions import default_exceptions
@@ -16,7 +17,7 @@ MODULES = (
 )
 
 
-def export_application(app, templates, target):
+def export_application(app, templates, target, *, modules=()):
     """Write the checked app graph into a new directory, excluding dynamic initializers."""
     app.freeze_routes()
     _, bound = app.url_map._frozen
@@ -55,6 +56,12 @@ def export_application(app, templates, target):
         copyfile(inspect.getfile(func), target / (func.__module__ + ".py"))
         code.append(f"from {func.__module__} import {func.__name__} as view_{n}")
         branches.extend([f"        if index == {n}:", f"            return view_{n}(req, capture, self.state)"])
+    for source in map(Path, modules):
+        if source.suffix != ".py" or not source.stem.isidentifier() or keyword.iskeyword(source.stem) or source.stem in {"serve", "__init__", "__main__"}:
+            raise ValueError(f"expected a top-level application module: {source}")
+        if (target / source.name).exists() or (target / source.stem).is_dir():
+            raise ValueError(f"duplicate application module: {source.name}")
+        copyfile(source, target / source.name)
     code += ["", "class BoundApp(Application):",
              "    def view(self, index: int, req: Request, capture: str) -> Response:", *branches,
              '        raise ValueError("unregistered view")', "", "def main() -> None:",

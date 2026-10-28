@@ -32,12 +32,14 @@ class Application:
         index, capture = self.rules.match(req.method, req.path)
         if index >= 0 and not (req.method == "OPTIONS" and self.automatic_options[index]):
             try:
-                return self.view(index, req, capture)
+                out = self.view(index, req, capture)
             except KeyError as exc:
                 print("KeyError: " + str(exc), file=sys.stderr)
-                return self.error(500)
+                out = self.error(500)
             except ValueError:
-                return self.error(400)
+                out = self.error(400)
+            out.vary_cookie = req.session_accessed
+            return out
         allowed: list[str] = []
         for method in self.methods:
             other, _ = self.rules.match(method, req.path)

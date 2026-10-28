@@ -2,7 +2,7 @@ diff --git a/flask/app.py b/flask/app.py
 index cc326db..ac766d8 100644
 --- a/flask/app.py
 +++ b/flask/app.py
-@@ -280,0 +281,34 @@ class Flask(App):
+@@ -280,0 +281,36 @@ class Flask(App):
 +    def freeze_routes(self) -> None:
 +        """Finish registration and index the Werkzeug rules for concrete method/path lookup."""
 +        from .sessions import FrozenCookieSessionInterface
@@ -30,7 +30,9 @@ index cc326db..ac766d8 100644
 +        def adapt(view):
 +            def invoke(**captures):
 +                value = next(iter(captures.values()), "")
-+                result = view(request_ctx.request.freeze(), value, state)
++                req = request_ctx.request.freeze()
++                result = view(req, value, state)
++                result.vary_cookie = req.session_accessed
 +                return self.response_class.from_frozen(result)
 +            return invoke
 +
@@ -180,7 +182,7 @@ diff --git a/werkzeug/wrappers/response.py b/werkzeug/wrappers/response.py
 index 4707292..10e4aae 100644
 --- a/werkzeug/wrappers/response.py
 +++ b/werkzeug/wrappers/response.py
-@@ -178,0 +179,11 @@ class Response(_SansIOResponse):
+@@ -178,0 +179,12 @@ class Response(_SansIOResponse):
 +    @classmethod
 +    def from_frozen(cls, result):
 +        """Construct a WSGI response from the same concrete result used by the native server."""
@@ -189,6 +191,7 @@ index 4707292..10e4aae 100644
 +            response.headers["Allow"] = result.allow
 +        if result.cookie:
 +            response.headers["Set-Cookie"] = result.cookie
++        if result.cookie or result.vary_cookie:
 +            response.vary.add("Cookie")
 +        return response
 +
