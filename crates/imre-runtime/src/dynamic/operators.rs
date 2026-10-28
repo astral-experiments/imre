@@ -12,6 +12,9 @@ enum RenderRoot<'a> {
 
 enum FormatPart {
     Value(Id, bool),
+    TypeArgument(Id, bool),
+    TypeList(Id, usize, usize),
+    TypeEnd(Id, &'static str, bool),
     Text(&'static str),
     SyntaxMessage(Id),
     SyntaxEnd(Id),
@@ -44,6 +47,9 @@ impl FormatPart {
     fn keep_alive(&mut self, heap: &mut Heap) {
         match self {
             Self::Value(id, _)
+            | Self::TypeArgument(id, _)
+            | Self::TypeList(id, _, _)
+            | Self::TypeEnd(id, _, _)
             | Self::SyntaxMessage(id)
             | Self::SyntaxEnd(id)
             | Self::Sequence(id, _)
@@ -1160,11 +1166,50 @@ impl Context {
         let sequence_budget = stack_words.map(|words| words / SEQUENCE_FRAME_WORDS);
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
+        // Pinned CPython 3.14 uses 192 native bytes per nested builtin alias with
+        // an exact list of arguments. A Literal or Final adds three Python frames
+        // and 1,264 native bytes when formatting the same nesting on x86-64.
+        let type_budget = stack_words.unwrap_or(1024 * 1024);
+        let mut type_words = 0usize;
+        let mut typing_frames = 0usize;
         while let Some(part) = work.pop() {
             match part {
                 Part::Closing(count) => output.extend(std::iter::repeat_n(')', count)),
                 Part::Text(text) => output.push_str(text),
                 Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::TypeEnd(_, end, python) => {
+                    type_words -= if python { 158 } else { 24 };
+                    if python {
+                        typing_frames -= 3;
+                    }
+                    output.push_str(end);
+                }
+                Part::TypeArgument(id, direct_list) => {
+                    if direct_list && let Value::List(items) = ctx.heap.get(id) {
+                        output.push('[');
+                        work.push(Part::Text("]"));
+                        work.push(Part::TypeList(id, 0, items.len()));
+                    } else if let Some(label) = typing::type_label(&ctx, id) {
+                        output.push_str(&label);
+                    } else {
+                        work.push(Part::Value(id, true));
+                    }
+                }
+                Part::TypeList(id, index, len) => {
+                    if index < len {
+                        let Value::List(items) = ctx.heap.get(id) else {
+                            unreachable!()
+                        };
+                        let item = *items
+                            .get(index)
+                            .ok_or_else(|| Error::new("IndexError", "list index out of range"))?;
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::TypeList(id, index + 1, len));
+                        work.push(Part::TypeArgument(item, false));
+                    }
+                }
                 Part::NamedTupleEnd => {
                     namedtuple_depth -= 1;
                     output.push(')');
@@ -1292,6 +1337,80 @@ impl Context {
                         continue;
                     }
                     match ctx.heap.get(id) {
+                        Value::Union(union) => {
+                            type_words += 24;
+                            if type_words > type_budget {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            let Value::Tuple(args) = ctx.heap.get(union.args) else {
+                                unreachable!()
+                            };
+                            work.try_reserve(args.len().saturating_mul(2).saturating_add(1))
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            work.push(Part::TypeEnd(id, "", false));
+                            for (index, &arg) in args.iter().enumerate().rev() {
+                                work.push(if ctx.builtins.get("NoneType") == Some(&arg) {
+                                    Part::Text("None")
+                                } else {
+                                    Part::TypeArgument(arg, false)
+                                });
+                                if index != 0 {
+                                    work.push(Part::Text(" | "));
+                                }
+                            }
+                            continue;
+                        }
+                        Value::GenericAlias(alias) => {
+                            use typing::AliasKind;
+                            let python = alias.kind.is_typing_alias()
+                                || matches!(alias.kind, AliasKind::Literal(_));
+                            if python {
+                                ctx.check_call_depth(typing_frames + 2)?;
+                                typing_frames += 3;
+                            }
+                            type_words += if python { 158 } else { 24 };
+                            if type_words > type_budget {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            let Value::Tuple(args) = ctx.heap.get(alias.args) else {
+                                unreachable!()
+                            };
+                            work.try_reserve(args.len().saturating_mul(2).saturating_add(6))
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            work.push(Part::TypeEnd(id, "]", python));
+                            let callable =
+                                matches!(alias.kind, AliasKind::Callable | AliasKind::AbcCallable)
+                                    && args.first().is_some_and(|&arg| {
+                                        !matches!(ctx.heap.get(arg), Value::Ellipsis)
+                                    });
+                            if args.is_empty() {
+                                work.push(Part::Text("()"));
+                            }
+                            for (index, &arg) in args.iter().enumerate().rev() {
+                                work.push(Part::TypeArgument(
+                                    arg,
+                                    alias.kind == AliasKind::Builtin,
+                                ));
+                                if callable && index + 1 == args.len() {
+                                    work.push(Part::Text("], "));
+                                } else if index != 0 {
+                                    work.push(Part::Text(", "));
+                                }
+                            }
+                            work.push(Part::Text(if callable { "[[" } else { "[" }));
+                            work.push(match alias.kind {
+                                AliasKind::Callable => Part::Text("typing.Callable"),
+                                AliasKind::Literal(_) => Part::Text("typing.Literal"),
+                                _ => Part::TypeArgument(alias.origin, false),
+                            });
+                            continue;
+                        }
                         Value::Raised(error) => {
                             if !repr
                                 && let Some(fields) = error
@@ -1756,8 +1875,7 @@ impl Context {
                 }
                 .to_owned()
             }),
-            Value::GenericAlias(alias) => alias.repr(self),
-            Value::Union(union) => super::union::repr(self, *union),
+            Value::GenericAlias(_) | Value::Union(_) => self.repr(id),
             Value::Class { name, scope, .. } if self.scope_data(*scope).module == "typing" => {
                 format!("<class 'typing.{name}'>")
             }
