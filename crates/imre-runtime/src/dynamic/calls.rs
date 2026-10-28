@@ -51,6 +51,15 @@ impl Context {
             Value::Native(kind) if name == "__hash__" && kind == "object" => {
                 self.builtins.get("object.__hash__").copied()
             }
+            Value::Native(kind) if kind == "collections.defaultdict" => {
+                let owner = match name {
+                    "__init__" | "__missing__" | "copy" | "__copy__" | "__reduce__" => {
+                        kind.as_str()
+                    }
+                    _ => "dict",
+                };
+                self.builtins.get(&format!("{owner}.{name}")).copied()
+            }
             Value::Native(kind) if builtins::is_enum_base(kind) => {
                 self.builtins.get(&format!("enum.Enum.{name}")).copied()
             }
@@ -480,6 +489,7 @@ impl Context {
                         .is_some_and(|method| {
                             method != "__new__" && weakref::REFERENCE_METHODS.contains(&method)
                         })
+                        || name.starts_with("collections.defaultdict.")
                         || name.starts_with("property.")
                         || name.starts_with("dict.")
                         || name.starts_with("abc.")
@@ -525,6 +535,12 @@ impl Context {
             }
             // Without a Python class member, object.__class__ is a data descriptor.
             (None, _) if name == "__class__" => Ok(class),
+            (None, _)
+                if self.exposes_defaultdict_factory(object, name)
+                    && let Some(factory) = self.defaultdict_factory(object) =>
+            {
+                Ok(factory)
+            }
             (None, _)
                 if name == "__callback__"
                     && let Some(wr) = self.heap.get(object).weak_reference() =>
@@ -1612,8 +1628,11 @@ impl Context {
                 }
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
-            Value::Native(class) if class == "collections.defaultdict" && name == "__missing__" => {
-                return Ok(self.builtin("collections.defaultdict.__missing__"));
+            Value::Native(class)
+                if class == "collections.defaultdict"
+                    && let Some(member) = self.own_class_attr(obj, name) =>
+            {
+                return Ok(member);
             }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),
@@ -2006,6 +2025,12 @@ impl Context {
         }
         let exception_member = self.exception_member(obj, name);
         let member = self.writable_attribute_member(obj, name);
+        if member.is_none()
+            && self.exposes_defaultdict_factory(obj, name)
+            && self.replace_defaultdict_factory(obj, NONE)
+        {
+            return Ok(());
+        }
         if name == "__callback__"
             && member.is_none()
             && self.heap.get(obj).weak_reference().is_some()
@@ -2264,6 +2289,12 @@ impl Context {
             return None;
         }
         Some(member)
+    }
+
+    /// A declared instance slot shadows the mapping's inherited factory member.
+    fn exposes_defaultdict_factory(&self, obj: Id, name: &str) -> bool {
+        name == "default_factory"
+            && !matches!(*self.heap.get(obj), Value::Instance { class, .. } if self.instance_layout(class, name).active_slot)
     }
 
     /// Move ordinary fields out of the inline storage while keeping declared slots in place.
@@ -2637,6 +2668,12 @@ impl Context {
         {
             return self.update_exception_field(obj, name, Some(value));
         }
+        if member.is_none()
+            && self.exposes_defaultdict_factory(obj, name)
+            && self.replace_defaultdict_factory(obj, value)
+        {
+            return Ok(());
+        }
         self.check_instance_field(obj, name)?;
         if let Value::Instance {
             class, namespace, ..
@@ -2669,10 +2706,6 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
-            Value::DefaultDict { factory, .. } if name == "default_factory" => {
-                let old = std::mem::replace(factory, value);
-                self.heap.weak_edge_removed(old);
-            }
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
@@ -3254,9 +3287,15 @@ impl Context {
                         .collect::<Vec<_>>();
                     self.new_float(&positional, &kwargs)?
                 } else {
-                    let dictionary = self
-                        .has_base(callable, "dict")
-                        .then(|| self.dict(Vec::new()));
+                    let dictionary = if self.has_base(callable, "collections.defaultdict") {
+                        Some(self.alloc(Value::DefaultDict {
+                            factory: NONE,
+                            entries: Default::default(),
+                        }))
+                    } else {
+                        self.has_base(callable, "dict")
+                            .then(|| self.dict(Vec::new()))
+                    };
                     let storage = if self.has_base(callable, "list") {
                         Some(self.alloc(Value::List(Vec::new())))
                     } else if tuple_subclass {
