@@ -53,9 +53,15 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
         Value::Class { .. } | Value::Native(_) => object,
-        Value::Instance { class, fields, .. } => {
+        Value::Instance {
+            class,
+            fields,
+            namespace,
+            ..
+        } => {
             let class = *class;
-            if !fields.contains_key("__dict__")
+            if namespace.is_none()
+                && !fields.contains_key("__dict__")
                 && ctx.class_attr(class, "__dict__").is_none()
                 && ctx.class_attr(class, "__getattribute__").is_none()
             {
@@ -63,7 +69,10 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             } else {
                 match ctx.lookup_attr(object, "__dict__") {
                     Ok(dict) => {
-                        if let Some(entries) = ctx.dict_entries(dict) {
+                        if let Some(entries) = ctx
+                            .dict_storage(dict)
+                            .and_then(|storage| ctx.dict_entries(storage))
+                        {
                             keys.extend(entries.iter().map(|&(key, _)| key));
                         }
                     }
