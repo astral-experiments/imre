@@ -279,6 +279,11 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "values",
 ];
 
+pub(super) const LIST_METHODS: &[&str] = &[
+    "__init__", "__repr__", "append", "clear", "copy", "count", "extend", "index", "insert", "pop",
+    "remove", "reverse", "sort",
+];
+
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
     "__repr__",
@@ -395,24 +400,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
-        Value::List(_)
-            if matches!(
-                attr,
-                "append"
-                    | "clear"
-                    | "copy"
-                    | "extend"
-                    | "index"
-                    | "insert"
-                    | "pop"
-                    | "reverse"
-                    | "sort"
-                    | "__init__"
-                    | "__repr__"
-            ) =>
-        {
-            "list"
-        }
+        Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
         Value::Set { frozen: false, .. }
             if matches!(

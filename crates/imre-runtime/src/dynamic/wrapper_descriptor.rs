@@ -11,6 +11,7 @@ pub(super) struct BuiltinDescriptor {
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
         let slots = match symbol.split_once('.') {
+            Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
@@ -21,23 +22,7 @@ impl BuiltinDescriptor {
             return Some(Self {
                 owner,
                 name,
-                method: matches!(
-                    name,
-                    "count" | "index" | "__reversed__" | "indices" | "__reduce__"
-                ),
-            });
-        }
-        let method = match symbol {
-            "list.append" => Some("append"),
-            "list.insert" => Some("insert"),
-            "list.pop" => Some("pop"),
-            _ => None,
-        };
-        if let Some(name) = method {
-            return Some(Self {
-                owner: "list",
-                name,
-                method: true,
+                method: !name.starts_with("__") || matches!(name, "__reversed__" | "__reduce__"),
             });
         }
         let (owner, name) = match symbol {
@@ -48,11 +33,9 @@ impl BuiltinDescriptor {
             "bytearray.__repr__" => ("bytearray", "__repr__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
-            "list.__repr__" => ("list", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "set.__repr__" => ("set", "__repr__"),
             "frozenset.__repr__" => ("frozenset", "__repr__"),
-            "list.__init__" => ("list", "__init__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),

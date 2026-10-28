@@ -70,6 +70,22 @@ def current():
     take = list.pop.__get__(values, Values)
     assert add(7) is None and take() == 7
 
+    for name in ('clear', 'copy', 'count', 'extend', 'index', 'insert', 'remove', 'reverse', 'sort'):
+        method = getattr(Values, name)
+        assert method is getattr(list, name) and method.__objclass__ is list
+        assert method.__get__(values, Values).__self__ is values
+
+    class ClearOnMatch:
+        def __eq__(self, other):
+            values.clear()
+            return True
+
+    for method in (list.count, list.remove):
+        values.clear()
+        values.extend((ClearOnMatch(), 1))
+        result = method(values, object())
+        assert result == (1 if method is list.count else None) and not values
+
     class Wrong:
         push = list.append
 

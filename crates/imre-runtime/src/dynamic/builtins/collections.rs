@@ -562,9 +562,8 @@ pub(super) fn method(
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
-    if let Some(
-        method @ ("append" | "clear" | "copy" | "index" | "insert" | "pop" | "reverse" | "sort"),
-    ) = name.strip_prefix("list.")
+    if let Some(method) = name.strip_prefix("list.")
+        && LIST_METHODS.contains(&method)
     {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(
@@ -578,25 +577,54 @@ pub(super) fn method(
                 ctx.type_name(receiver)
             )));
         }
+        let one_arg = || {
+            if !kwargs.is_empty() {
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
+            }
+            match args {
+                [value] => Ok(*value),
+                _ => Err(type_error(format!(
+                    "{name}() takes exactly one argument ({} given)",
+                    args.len()
+                ))),
+            }
+        };
         return match method {
             "append" => {
-                if !kwargs.is_empty() {
-                    return Err(type_error(format!("{name}() takes no keyword arguments")));
-                }
-                let [value] = args else {
-                    return Err(type_error(format!(
-                        "{name}() takes exactly one argument ({} given)",
-                        args.len()
-                    )));
-                };
+                let value = one_arg()?;
                 let items = list_items_mut(ctx, receiver)?;
                 items
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
-                items.push(*value);
+                items.push(value);
                 Ok(NONE)
             }
             "index" => list_index(ctx, receiver, args, kwargs),
+            "extend" => {
+                list_extend(ctx, receiver, one_arg()?)?;
+                Ok(NONE)
+            }
+            "count" => {
+                let value = one_arg()?;
+                let mut count = 0;
+                let mut start = 0;
+                while let Some(i) = find_list_item(ctx, receiver, value, start..i64::MAX)? {
+                    count += 1;
+                    start = i + 1;
+                }
+                Ok(ctx.int(count))
+            }
+            "remove" => {
+                let i = find_list_item(ctx, receiver, one_arg()?, 0..i64::MAX)?
+                    .ok_or_else(|| Error::new("ValueError", "list.remove(x): x not in list"))?
+                    as usize;
+                let items = list_items_mut(ctx, receiver)?;
+                if i < items.len() {
+                    let removed = items.remove(i);
+                    ctx.heap.weak_edge_removed(removed);
+                }
+                Ok(NONE)
+            }
             "insert" => {
                 if !kwargs.is_empty() {
                     return Err(type_error("list.insert() takes no keyword arguments"));
@@ -680,8 +708,6 @@ pub(super) fn method(
                 ))
             }
         })?
-    } else if name.starts_with("list.") {
-        ctx.scalar_value(object)
     } else {
         object
     };
@@ -810,43 +836,6 @@ pub(super) fn method(
         "dict.update" | "dict.__init__" => {
             arity(name, args, 0, 1)?;
             update(ctx, receiver, args.first().copied(), kwargs)?;
-            Ok(NONE)
-        }
-        "list.extend" => {
-            arity(name, args, 1, 1)?;
-            // Self-extension snapshots the destination, including a list subclass's payload.
-            let source = if ctx.scalar_value(args[0]) == receiver {
-                receiver
-            } else {
-                args[0]
-            };
-            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(source) {
-                let added = super::super::copy_ids(items)?;
-                let items = list_items_mut(ctx, receiver)?;
-                items
-                    .try_reserve(added.len())
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                items.extend(added);
-            } else {
-                let iterator = ctx.iterator(source)?;
-                ctx.heap.keep(iterator);
-                let default = ctx.int(8);
-                let hint = ctx.length_hint(source, Some(default))?;
-                let hint = ctx.as_integer(hint)? as usize;
-                let items = list_items_mut(ctx, receiver)?;
-                if hint <= isize::MAX as usize - items.len() {
-                    items
-                        .try_reserve(hint)
-                        .map_err(|_| Error::new("MemoryError", ""))?;
-                }
-                while let Some(item) = ctx.next_item(iterator)? {
-                    let items = list_items_mut(ctx, receiver)?;
-                    items
-                        .try_reserve(1)
-                        .map_err(|_| Error::new("MemoryError", ""))?;
-                    items.push(item);
-                }
-            }
             Ok(NONE)
         }
         "frozenset.__contains__" | "set.__contains__" => {
@@ -985,7 +974,19 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             i
         }
     });
-    for i in start..stop {
+    find_list_item(ctx, receiver, needle, start..stop)?
+        .map(|i| ctx.int(i))
+        .ok_or_else(|| Error::new("ValueError", "list.index(x): x not in list"))
+}
+
+/// Locate the next match in a live list. Equality callbacks may resize or clear it.
+fn find_list_item(
+    ctx: &mut Context,
+    receiver: Id,
+    needle: Id,
+    positions: std::ops::Range<i64>,
+) -> Result<Option<i64>> {
+    for i in positions {
         let Value::List(items) = ctx.heap.get(receiver) else {
             unreachable!()
         };
@@ -1003,9 +1004,47 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
                 continue;
             }
         }
-        return Ok(ctx.int(i));
+        return Ok(Some(i));
     }
-    Err(Error::new("ValueError", "list.index(x): x not in list"))
+    Ok(None)
+}
+
+/// Extend the list from a concrete sequence or consume the source iterator in order.
+fn list_extend(ctx: &mut Context, receiver: Id, source: Id) -> Result<()> {
+    // Self-extension snapshots the destination, including a list subclass's payload.
+    let source = if ctx.scalar_value(source) == receiver {
+        receiver
+    } else {
+        source
+    };
+    if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(source) {
+        let added = super::super::copy_ids(items)?;
+        let items = list_items_mut(ctx, receiver)?;
+        items
+            .try_reserve(added.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        items.extend(added);
+    } else {
+        let iterator = ctx.iterator(source)?;
+        ctx.heap.keep(iterator);
+        let default = ctx.int(8);
+        let hint = ctx.length_hint(source, Some(default))?;
+        let hint = ctx.as_integer(hint)? as usize;
+        let items = list_items_mut(ctx, receiver)?;
+        if hint <= isize::MAX as usize - items.len() {
+            items
+                .try_reserve(hint)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        while let Some(item) = ctx.next_item(iterator)? {
+            let items = list_items_mut(ctx, receiver)?;
+            items
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            items.push(item);
+        }
+    }
+    Ok(())
 }
 
 /// Call a builtin slot on the receiver’s native payload, bypassing its override.
