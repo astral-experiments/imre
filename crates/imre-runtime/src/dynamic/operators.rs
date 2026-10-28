@@ -4,6 +4,36 @@ use num_traits::Signed;
 
 use super::*;
 
+fn render_allocation(_: std::collections::TryReserveError) -> Error {
+    Error::new("MemoryError", "")
+}
+
+fn push_frame<T>(stack: &mut Vec<T>, value: T) -> Result<()> {
+    stack.try_reserve(1).map_err(render_allocation)?;
+    stack.push(value);
+    Ok(())
+}
+
+fn enter_ancestor(seen: &mut std::collections::HashSet<Id>, id: Id) -> Result<bool> {
+    if seen.contains(&id) {
+        return Ok(false);
+    }
+    seen.try_reserve(1).map_err(render_allocation)?;
+    Ok(seen.insert(id))
+}
+
+pub(super) fn append_rendered_text(out: &mut String, text: &str) -> Result<()> {
+    out.try_reserve(text.len()).map_err(render_allocation)?;
+    out.push_str(text);
+    Ok(())
+}
+
+fn close_parens(out: &mut String, count: usize) -> Result<()> {
+    out.try_reserve(count).map_err(render_allocation)?;
+    out.extend(std::iter::repeat_n(')', count));
+    Ok(())
+}
+
 enum RenderRoot<'a> {
     Object(Id),
     BuiltinContainer { object: Id, storage: Id },
@@ -912,14 +942,6 @@ impl Context {
     }
 
     /// Keep pending children alive while a hook mutates and reenters its container.
-    fn push_format_text(output: &mut String, text: &str) -> Result<()> {
-        output
-            .try_reserve(text.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        output.push_str(text);
-        Ok(())
-    }
-
     fn element_format(
         &mut self,
         id: Id,
@@ -932,6 +954,11 @@ impl Context {
         {
             return Ok(None);
         }
+        self.repr_ancestors
+            .try_reserve(ancestors.len())
+            .map_err(render_allocation)?;
+        self.heap
+            .reserve_temporaries(work.len().saturating_add(1))?;
         let mark = self.heap.temporary_mark();
         let depth = self.repr_ancestors.len();
         self.heap.keep(id);
@@ -946,9 +973,9 @@ impl Context {
         };
         let result = converted.and_then(|value| {
             value
-                .map(|id| {
+                .map(|s| {
                     let mut text = String::new();
-                    Self::push_format_text(&mut text, self.str_value(id)?)?;
+                    append_rendered_text(&mut text, self.str_value(s)?)?;
                     Ok(text)
                 })
                 .transpose()
@@ -972,16 +999,16 @@ impl Context {
         let mut seen = std::collections::HashSet::new();
         loop {
             if repr {
-                output.push_str(error.kind.rsplit('.').next().unwrap_or(&error.kind));
+                append_rendered_text(output, error.kind.rsplit('.').next().unwrap_or(&error.kind))?;
             } else if let Some(message) =
                 error.trace.as_ref().and_then(|trace| trace.import_message)
                 && let Value::Str(text) = self.heap.get(message)
             {
-                output.push_str(text);
-                output.extend(std::iter::repeat_n(')', closing));
+                append_rendered_text(output, text)?;
+                close_parens(output, closing)?;
                 break;
             } else if let Some(state) = &error.decode {
-                output.push_str(&self.decode_message(state)?);
+                append_rendered_text(output, &self.decode_message(state)?)?;
                 output.extend(std::iter::repeat_n(')', closing));
                 break;
             } else if let Some(super::os_error::Args::Python(fields)) = error.os_args.as_deref()
@@ -989,12 +1016,15 @@ impl Context {
             {
                 work.try_reserve(9)
                     .map_err(|_| Error::new("MemoryError", ""))?;
-                work.push(Part::Closing(closing));
+                push_frame(work, Part::Closing(closing))?;
                 for part in fragments.into_iter().rev().flatten() {
-                    work.push(match part {
-                        super::os_error::Fragment::Text(text) => Part::Text(text),
-                        super::os_error::Fragment::Value(id, repr) => Part::Value(id, repr),
-                    });
+                    push_frame(
+                        work,
+                        match part {
+                            super::os_error::Fragment::Text(text) => Part::Text(text),
+                            super::os_error::Fragment::Value(id, repr) => Part::Value(id, repr),
+                        },
+                    )?;
                 }
                 break;
             } else if matches!(
@@ -1005,14 +1035,14 @@ impl Context {
                 .as_ref()
                 .is_some_and(|trace| trace.source_syntax.is_some())
             {
-                output.push_str(&error.message);
-                output.extend(std::iter::repeat_n(')', closing));
+                append_rendered_text(output, &error.message)?;
+                close_parens(output, closing)?;
                 break;
             }
             let args = self.exception_arguments(error);
             if let Some([arg]) = args {
                 if repr {
-                    output.push('(');
+                    append_rendered_text(output, "(")?;
                     closing += 1;
                 }
                 repr |= self.is_builtin_error(error, "KeyError");
@@ -1025,11 +1055,11 @@ impl Context {
                             .as_ref()
                             .is_some_and(|trace| trace.source_syntax.is_some())
                     {
-                        work.push(Part::Closing(closing));
-                        work.push(Part::Value(*arg, false));
+                        push_frame(work, Part::Closing(closing))?;
+                        push_frame(work, Part::Value(*arg, false))?;
                         break;
                     }
-                    if !seen.insert(*arg) {
+                    if !enter_ancestor(&mut seen, *arg)? {
                         let op = if repr { "repr" } else { "str" };
                         return Err(Error::new(
                             "RecursionError",
@@ -1041,32 +1071,38 @@ impl Context {
                     error = next;
                     continue;
                 }
-                work.push(Part::Closing(closing));
-                work.push(Part::Value(*arg, repr));
+                push_frame(work, Part::Closing(closing))?;
+                push_frame(work, Part::Value(*arg, repr))?;
             } else if let Some(tuple) = error.args {
-                work.push(Part::Closing(closing));
+                push_frame(work, Part::Closing(closing))?;
                 if repr || args.is_some_and(|items| !items.is_empty()) {
-                    work.push(Part::Value(tuple, true));
+                    push_frame(work, Part::Value(tuple, true))?;
                 }
             } else {
                 if repr {
-                    output.push('(');
+                    append_rendered_text(output, "(")?;
                     if let Some(super::os_error::Args::Native { source: os, .. }) =
                         error.os_args.as_deref()
                     {
-                        output.push_str(&format!(
-                            "{}, {}",
-                            os.errno,
-                            crate::objects::exceptions::string_repr(&os.description)
-                        ));
+                        append_rendered_text(
+                            output,
+                            &format!(
+                                "{}, {}",
+                                os.errno,
+                                crate::objects::exceptions::string_repr(&os.description)
+                            ),
+                        )?;
                     } else if !error.message.is_empty() {
-                        output.push_str(&crate::objects::exceptions::string_repr(&error.message));
+                        append_rendered_text(
+                            output,
+                            &crate::objects::exceptions::string_repr(&error.message),
+                        )?;
                     }
-                    output.push(')');
+                    append_rendered_text(output, ")")?;
                 } else {
-                    output.push_str(&error.message);
+                    append_rendered_text(output, &error.message)?;
                 }
-                output.extend(std::iter::repeat_n(')', closing));
+                close_parens(output, closing)?;
             }
             break;
         }
@@ -1092,54 +1128,60 @@ impl Context {
         let mut work = Vec::new();
         let mut active = Vec::new();
         let mut syntax = std::collections::HashSet::new();
-        let mut ancestors: std::collections::HashSet<Id> = if checked {
-            ctx.repr_ancestors.iter().copied().collect()
-        } else {
-            Default::default()
-        };
+        let mut ancestors = std::collections::HashSet::new();
+        if checked {
+            ancestors
+                .try_reserve(ctx.repr_ancestors.len())
+                .map_err(render_allocation)?;
+            ancestors.extend(ctx.repr_ancestors.iter().copied());
+        }
         match root {
-            RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
+            RenderRoot::Object(id) => push_frame(&mut work, Part::Value(id, quoted))?,
             RenderRoot::BuiltinContainer { object, storage } => {
                 let (open, end, cycle, contents) = match ctx.heap.get(storage) {
                     Value::Set { entries, frozen } => {
                         let name = ctx.type_name(object);
-                        if ancestors.contains(&object) {
-                            return Ok(format!("{name}(...)"));
-                        }
-                        if entries.is_empty() {
-                            return Ok(format!("{name}()"));
+                        let recursive = ancestors.contains(&object);
+                        if recursive || entries.is_empty() {
+                            append_rendered_text(&mut output, name)?;
+                            append_rendered_text(
+                                &mut output,
+                                if recursive { "(...)" } else { "()" },
+                            )?;
+                            return Ok(output);
                         }
                         let wrapped = *frozen || object != storage;
                         if wrapped {
-                            output.push_str(name);
-                            output.push('(');
+                            append_rendered_text(&mut output, name)?;
+                            append_rendered_text(&mut output, "(")?;
                         }
                         (
-                            '{',
+                            "{",
                             if wrapped { "})" } else { "}" },
                             "set(...)",
                             Part::set_members(entries)?,
                         )
                     }
-                    Value::List(_) => ('[', "]", "[...]", Part::Sequence(storage, 0)),
+                    Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                     Value::Tuple(items) => (
-                        '(',
+                        "(",
                         if items.len() == 1 { ",)" } else { ")" },
                         "(...)",
                         Part::Sequence(storage, 0),
                     ),
                     Value::Dict(_) | Value::DefaultDict { .. } => {
-                        ('{', "}", "{...}", Part::Entries(storage, 0, true))
+                        ("{", "}", "{...}", Part::Entries(storage, 0, true))
                     }
                     _ => unreachable!("native container repr slot"),
                 };
-                if !ancestors.insert(object) {
-                    return Ok(cycle.to_owned());
+                if !enter_ancestor(&mut ancestors, object)? {
+                    append_rendered_text(&mut output, cycle)?;
+                    return Ok(output);
                 }
-                output.push(open);
-                active.push(object);
-                work.push(Part::Leave(object, end));
-                work.push(contents);
+                append_rendered_text(&mut output, open)?;
+                push_frame(&mut active, object)?;
+                push_frame(&mut work, Part::Leave(object, end))?;
+                push_frame(&mut work, contents)?;
             }
             RenderRoot::Exception(error) => {
                 ctx.render_exception(error, quoted, checked, &mut output, &mut work)?;
@@ -1162,22 +1204,29 @@ impl Context {
         let mut namedtuple_depth = 0usize;
         while let Some(part) = work.pop() {
             match part {
-                Part::Closing(count) => output.extend(std::iter::repeat_n(')', count)),
-                Part::Text(text) => output.push_str(text),
-                Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::Closing(count) => close_parens(&mut output, count)?,
+                Part::Text(text) => append_rendered_text(&mut output, text)?,
+                Part::ContextEnd(id) => {
+                    use std::fmt::Write;
+                    output
+                        .try_reserve(7 + 2 * std::mem::size_of::<Id>())
+                        .map_err(render_allocation)?;
+                    write!(&mut output, " at {id:#x}>")
+                        .expect("the hexadecimal object ID fits the reserved space");
+                }
                 Part::NamedTupleEnd => {
                     namedtuple_depth -= 1;
-                    output.push(')');
+                    append_rendered_text(&mut output, ")")?;
                 }
                 Part::SliceEnd => {
                     slice_depth -= 1;
-                    output.push(')');
+                    append_rendered_text(&mut output, ")")?;
                 }
                 Part::Leave(id, end) => {
                     ancestors.remove(&id);
                     let last = active.pop();
                     debug_assert_eq!(last, Some(id));
-                    output.push_str(end);
+                    append_rendered_text(&mut output, end)?;
                 }
                 Part::Sequence(id, index) => {
                     let item = match ctx.heap.get(id) {
@@ -1187,10 +1236,10 @@ impl Context {
                     };
                     if let Some(&item) = item {
                         if index != 0 {
-                            output.push_str(", ");
+                            append_rendered_text(&mut output, ", ")?;
                         }
-                        work.push(Part::Sequence(id, index + 1));
-                        work.push(Part::Value(item, true));
+                        push_frame(&mut work, Part::Sequence(id, index + 1))?;
+                        push_frame(&mut work, Part::Value(item, true))?;
                     }
                 }
                 Part::Fields(id, index) => {
@@ -1202,26 +1251,29 @@ impl Context {
                     };
                     if let Some(name) = names.get(index) {
                         if index != 0 {
-                            output.push_str(", ");
+                            append_rendered_text(&mut output, ", ")?;
                         }
-                        output.push_str(name);
-                        output.push('=');
-                        work.push(Part::Fields(id, index + 1));
-                        work.push(Part::Value(
-                            *fields
-                                .get(name)
-                                .ok_or_else(|| Error::new("AttributeError", name.clone()))?,
-                            true,
-                        ));
+                        append_rendered_text(&mut output, name)?;
+                        append_rendered_text(&mut output, "=")?;
+                        push_frame(&mut work, Part::Fields(id, index + 1))?;
+                        push_frame(
+                            &mut work,
+                            Part::Value(
+                                *fields
+                                    .get(name)
+                                    .ok_or_else(|| Error::new("AttributeError", name.clone()))?,
+                                true,
+                            ),
+                        )?;
                     }
                 }
                 Part::SetMembers(members, index) => {
                     if let Some(&member) = members.get(index) {
                         if index != 0 {
-                            output.push_str(", ");
+                            append_rendered_text(&mut output, ", ")?;
                         }
-                        work.push(Part::SetMembers(members, index + 1));
-                        work.push(Part::Value(member, true));
+                        push_frame(&mut work, Part::SetMembers(members, index + 1))?;
+                        push_frame(&mut work, Part::Value(member, true))?;
                     }
                 }
                 Part::DefaultDictFactory(id, start) => {
@@ -1229,21 +1281,23 @@ impl Context {
                     let Value::DefaultDict { factory, .. } = *ctx.heap.get(id) else {
                         unreachable!()
                     };
-                    let contents = output.split_off(start);
-                    output.push_str("defaultdict(");
-                    work.push(Part::DefaultDictEnd(contents));
-                    if ancestors.insert(factory) {
-                        active.push(factory);
-                        work.push(Part::Leave(factory, ""));
-                        work.push(Part::Value(factory, true));
+                    let mut contents = String::new();
+                    append_rendered_text(&mut contents, &output[start..])?;
+                    output.truncate(start);
+                    append_rendered_text(&mut output, "defaultdict(")?;
+                    push_frame(&mut work, Part::DefaultDictEnd(contents))?;
+                    if enter_ancestor(&mut ancestors, factory)? {
+                        push_frame(&mut active, factory)?;
+                        push_frame(&mut work, Part::Leave(factory, ""))?;
+                        push_frame(&mut work, Part::Value(factory, true))?;
                     } else {
-                        output.push_str("...");
+                        append_rendered_text(&mut output, "...")?;
                     }
                 }
                 Part::DefaultDictEnd(contents) => {
-                    output.push_str(", ");
-                    output.push_str(&contents);
-                    output.push(')');
+                    append_rendered_text(&mut output, ", ")?;
+                    append_rendered_text(&mut output, &contents)?;
+                    append_rendered_text(&mut output, ")")?;
                 }
                 Part::Entries(id, index, include_values) => {
                     let entry = match ctx.heap.get(id) {
@@ -1257,38 +1311,38 @@ impl Context {
                     };
                     if let Some((position, key, value)) = entry {
                         if index != 0 {
-                            output.push_str(", ");
+                            append_rendered_text(&mut output, ", ")?;
                         }
-                        work.push(Part::Entries(id, position + 1, include_values));
+                        push_frame(&mut work, Part::Entries(id, position + 1, include_values))?;
                         if include_values {
-                            work.push(Part::Value(value, true));
-                            work.push(Part::Text(": "));
+                            push_frame(&mut work, Part::Value(value, true))?;
+                            push_frame(&mut work, Part::Text(": "))?;
                         }
-                        work.push(Part::Value(key, true));
+                        push_frame(&mut work, Part::Value(key, true))?;
                     }
                 }
                 Part::SyntaxMessage(id) => {
                     if let Some(text) = element_repr(&mut ctx, id, false, &mut work, &active)? {
-                        Self::push_format_text(&mut output, &text)?;
+                        append_rendered_text(&mut output, &text)?;
                     } else if let Some(storage) = ctx.string_storage(id) {
                         let Value::Str(message) = ctx.heap.get(storage) else {
                             unreachable!()
                         };
-                        Self::push_format_text(&mut output, message)?;
+                        append_rendered_text(&mut output, message)?;
                     } else {
-                        work.push(Part::Value(id, false));
+                        push_frame(&mut work, Part::Value(id, false))?;
                     }
                 }
                 Part::SyntaxEnd(id) => {
                     syntax.remove(&id);
                 }
-                Part::Suffix(suffix) => Self::push_format_text(&mut output, &suffix)?,
+                Part::Suffix(suffix) => append_rendered_text(&mut output, &suffix)?,
                 Part::Value(id, repr) => {
                     if checked
                         && repr
                         && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
                     {
-                        output.push_str(&text);
+                        append_rendered_text(&mut output, &text)?;
                         continue;
                     }
                     match ctx.heap.get(id) {
@@ -1304,16 +1358,16 @@ impl Context {
                                     .map_err(|_| Error::new("MemoryError", ""))?;
                                 work.try_reserve(3)
                                     .map_err(|_| Error::new("MemoryError", ""))?;
-                                if !syntax.insert(id) {
+                                if !enter_ancestor(&mut syntax, id)? {
                                     return Err(Error::new(
                                         "RecursionError",
                                         "maximum recursion depth exceeded while getting the str of an object",
                                     ));
                                 }
                                 let suffix = ctx.syntax_suffix(fields[1].get(), fields[2].get())?;
-                                work.push(Part::SyntaxEnd(id));
-                                work.push(Part::Suffix(suffix));
-                                work.push(Part::SyntaxMessage(fields[0].get()));
+                                push_frame(&mut work, Part::SyntaxEnd(id))?;
+                                push_frame(&mut work, Part::Suffix(suffix))?;
+                                push_frame(&mut work, Part::SyntaxMessage(fields[0].get()))?;
                                 continue;
                             }
                             if !repr
@@ -1321,12 +1375,12 @@ impl Context {
                                     error.os_args.as_deref()
                                 && fields.fragments().is_some()
                             {
-                                if !ancestors.insert(id) {
-                                    output.push_str("...");
+                                if !enter_ancestor(&mut ancestors, id)? {
+                                    append_rendered_text(&mut output, "...")?;
                                     continue;
                                 }
-                                active.push(id);
-                                work.push(Part::Leave(id, ""));
+                                push_frame(&mut active, id)?;
+                                push_frame(&mut work, Part::Leave(id, ""))?;
                             }
                             ctx.render_exception(error, repr, checked, &mut output, &mut work)?;
                             continue;
@@ -1336,36 +1390,36 @@ impl Context {
                             constructor: Some(_),
                             ..
                         } => {
-                            if !ancestors.insert(id) {
+                            if !enter_ancestor(&mut ancestors, id)? {
                                 if checked {
                                     return Err(Error::new(
                                         "RecursionError",
                                         "maximum recursion depth exceeded",
                                     ));
                                 }
-                                output.push_str("<module ...>");
+                                append_rendered_text(&mut output, "<module ...>")?;
                                 continue;
                             }
-                            active.push(id);
-                            output.push_str("<module ");
-                            work.push(Part::Leave(id, ">"));
+                            push_frame(&mut active, id)?;
+                            append_rendered_text(&mut output, "<module ")?;
+                            push_frame(&mut work, Part::Leave(id, ">"))?;
                             if let Some(file) =
                                 ctx.scope_name(*scope, "__file__").filter(|&id| id != NONE)
                             {
-                                work.push(Part::Value(file, true));
-                                work.push(Part::Text(" from "));
+                                push_frame(&mut work, Part::Value(file, true))?;
+                                push_frame(&mut work, Part::Text(" from "))?;
                             } else if let Some(loader) = ctx
                                 .scope_name(*scope, "__loader__")
                                 .filter(|&id| id != NONE)
                             {
-                                work.push(Part::Text(")"));
-                                work.push(Part::Value(loader, true));
-                                work.push(Part::Text(" ("));
+                                push_frame(&mut work, Part::Text(")"))?;
+                                push_frame(&mut work, Part::Value(loader, true))?;
+                                push_frame(&mut work, Part::Text(" ("))?;
                             }
                             if let Some(name) = ctx.scope_name(*scope, "__name__") {
-                                work.push(Part::Value(name, true));
+                                push_frame(&mut work, Part::Value(name, true))?;
                             } else {
-                                work.push(Part::Text("'?'"));
+                                push_frame(&mut work, Part::Text("'?'"))?;
                             }
                             continue;
                         }
@@ -1377,9 +1431,9 @@ impl Context {
                                 ));
                             }
                             slice_depth += 1;
-                            output.push_str("slice(");
-                            work.push(Part::SliceEnd);
-                            work.push(Part::Sequence(id, 0));
+                            append_rendered_text(&mut output, "slice(")?;
+                            push_frame(&mut work, Part::SliceEnd)?;
+                            push_frame(&mut work, Part::Sequence(id, 0))?;
                             continue;
                         }
                         Value::Instance {
@@ -1387,7 +1441,7 @@ impl Context {
                             dictionary: Some(backing),
                             ..
                         } if ctx.enum_member(id).is_none() => {
-                            work.push(Part::Value(*backing, repr));
+                            push_frame(&mut work, Part::Value(*backing, repr))?;
                             continue;
                         }
                         Value::Instance { class, fields, .. }
@@ -1402,30 +1456,33 @@ impl Context {
                                 ctx.check_call_depth(namedtuple_depth)?;
                             }
                             namedtuple_depth += 1;
-                            output.push_str(name);
-                            output.push('(');
-                            work.push(Part::NamedTupleEnd);
-                            work.push(Part::Fields(id, 0));
+                            append_rendered_text(&mut output, name)?;
+                            append_rendered_text(&mut output, "(")?;
+                            push_frame(&mut work, Part::NamedTupleEnd)?;
+                            push_frame(&mut work, Part::Fields(id, 0))?;
                             continue;
                         }
                         Value::ContextVar { name, default, .. } => {
-                            output.push_str("<ContextVar name=");
-                            work.push(Part::ContextEnd(id));
+                            append_rendered_text(&mut output, "<ContextVar name=")?;
+                            push_frame(&mut work, Part::ContextEnd(id))?;
                             if let Some(default) = default {
-                                work.push(Part::Value(*default, true));
-                                work.push(Part::Text(" default="));
+                                push_frame(&mut work, Part::Value(*default, true))?;
+                                push_frame(&mut work, Part::Text(" default="))?;
                             }
-                            work.push(Part::Value(*name, true));
+                            push_frame(&mut work, Part::Value(*name, true))?;
                             continue;
                         }
                         Value::ContextToken { variable, used, .. } => {
-                            output.push_str(if *used {
-                                "<Token used var="
-                            } else {
-                                "<Token var="
-                            });
-                            work.push(Part::ContextEnd(id));
-                            work.push(Part::Value(*variable, true));
+                            append_rendered_text(
+                                &mut output,
+                                if *used {
+                                    "<Token used var="
+                                } else {
+                                    "<Token var="
+                                },
+                            )?;
+                            push_frame(&mut work, Part::ContextEnd(id))?;
+                            push_frame(&mut work, Part::Value(*variable, true))?;
                             continue;
                         }
                         _ => {}
@@ -1453,12 +1510,15 @@ impl Context {
                         }
                         Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
                         Value::DefaultDict { .. } => {
-                            work.push(Part::DefaultDictFactory(id, output.len()));
+                            push_frame(&mut work, Part::DefaultDictFactory(id, output.len()))?;
                             ("{", "}", "{...}", Part::Entries(id, 0, true))
                         }
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {
-                                output.push_str(if *frozen { "frozenset()" } else { "set()" });
+                                append_rendered_text(
+                                    &mut output,
+                                    if *frozen { "frozenset()" } else { "set()" },
+                                )?;
                                 continue;
                             }
                             (
@@ -1473,12 +1533,15 @@ impl Context {
                             )
                         }
                         _ => {
-                            output.push_str(&ctx.format_value(id, repr, &mut active));
+                            append_rendered_text(
+                                &mut output,
+                                &ctx.format_value(id, repr, &mut active),
+                            )?;
                             continue;
                         }
                     };
-                    if !ancestors.insert(id) {
-                        output.push_str(placeholder);
+                    if !enter_ancestor(&mut ancestors, id)? {
+                        append_rendered_text(&mut output, placeholder)?;
                         continue;
                     }
                     if matches!(ctx.heap.get(id), Value::List(_) | Value::Tuple(_))
@@ -1489,18 +1552,18 @@ impl Context {
                             "maximum recursion depth exceeded while getting the repr of an object",
                         ));
                     }
-                    active.push(id);
-                    output.push_str(start);
-                    work.push(Part::Leave(id, end));
+                    push_frame(&mut active, id)?;
+                    append_rendered_text(&mut output, start)?;
+                    push_frame(&mut work, Part::Leave(id, end))?;
                     match contents {
                         Part::Entries(_, _, false) if checked => {
                             // CPython renders a snapshot so a hook can mutate the original set.
                             let Value::Set { entries, .. } = ctx.heap.get(id) else {
                                 unreachable!()
                             };
-                            work.push(Part::set_members(entries)?);
+                            push_frame(&mut work, Part::set_members(entries)?)?;
                         }
-                        part => work.push(part),
+                        part => push_frame(&mut work, part)?,
                     }
                 }
             }
