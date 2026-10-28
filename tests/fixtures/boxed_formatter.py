@@ -84,3 +84,13 @@ def current():
             print("%*s" % args)
         except (TypeError, OverflowError) as error:
             print(type(error).__name__)
+
+    class Label:
+        def __str__(self):
+            return "text"
+
+        def __repr__(self):
+            return "café"
+
+    label = Label()
+    print("%s %r %a" % (label, label, label), "%5.3a" % label)
