@@ -19,6 +19,15 @@ Imre and CPython 3.14.5 run the same Python programs. The Rust versions use
 the same inputs and produce the same outputs. Each bar shows the median time
 for 12 fresh processes pinned to one AMD EPYC Milan CPU.
 
+<p align="center">
+  <img src="benchmarks/results/frozen-flask.svg" width="100%" alt="Mixed HTTP throughput for a frozen Flask app on Imre and equivalent Node.js, Bun and Rust/Hyper handlers, in requests per second.">
+</p>
+
+The frozen Flask app compiles its routes and Jinja template ahead of time.
+Node.js, Bun and Rust/Hyper implement the same routes directly. Eight clients
+open a fresh connection for each request to a server pinned to one CPU.
+[Workload, measurements and longer-run timeouts](benchmarks/flask/comparison/README.md#frozen-flask-mixed-http)
+
 ## Hello, world!
 
 ```python
