@@ -453,6 +453,12 @@ impl Context {
                 };
                 let prior = self.heap.replace_active(active);
                 let result = self.call(a, vec![class, b, traceback], Vec::new());
+                // The exceptional exit's truth test still runs inside the handler.
+                let result = if b == NONE {
+                    result
+                } else {
+                    result.and_then(|value| self.truth(value).map(flag))
+                };
                 self.heap.replace_active(prior);
                 result
             }
