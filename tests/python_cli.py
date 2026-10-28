@@ -402,6 +402,15 @@ def main():
             "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
         )
 
+        compare(
+            "-IB", "-c",
+            "import sysconfig, textwrap\n"
+            "from textwrap import dedent, indent\n"
+            "print(repr(dedent(text='  one\\n    two\\n')))\n"
+            "print(repr(indent('a\\r\\n\\r\\nb', '> ', lambda line: line.endswith('\\n'))))\n"
+            "print(textwrap.wrap('one two three', width=5), textwrap.shorten('one two three', 9))",
+        )
+
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")

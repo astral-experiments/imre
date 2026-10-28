@@ -1,8 +1,21 @@
 use super::{Expr, Visitor, ast, resolve, visitor};
 use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
-pub(super) fn bootstrap_source(name: &str) -> Option<(&'static str, &'static str)> {
+/// Python sources used only by the boxed importer.
+pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "textwrap" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some(("textwrap.py", SOURCE.get_or_init(|| {
+                // The indentation functions are independent of TextWrapper's regular expressions.
+                const UPSTREAM: &str = include_str!(
+                    "../../../../benchmarks/cpython_stdlib/full/textwrap/upstream/Lib/textwrap.py"
+                );
+                let first = UPSTREAM.find("\ndef dedent(").unwrap();
+                let (functions, _) = UPSTREAM[first..].split_once("\nif __name__").unwrap();
+                format!("{}{functions}", include_str!("../../stdlib/textwrap/wrapper.py"))
+            })))
+        }
         "importlib.util" => Some((
             "importlib/util.py",
             include_str!("../../stdlib/importlib/util.py"),

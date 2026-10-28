@@ -463,7 +463,7 @@ pub(crate) fn compile(
                         include_str!("../../stdlib/dataclasses.py"),
                     ))
                 } else {
-                    import_module::bootstrap_source(&prefix)
+                    import_module::boxed_source(&prefix)
                         .or_else(|| crate::modules::bundled_runtime_source(&prefix))
                 };
                 if let Some((filename, source)) = bundled {
