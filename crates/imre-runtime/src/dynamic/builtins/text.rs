@@ -873,8 +873,8 @@ pub(super) fn method(
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {
             type_error("str.__new__(): not enough arguments")
-        } else if owner == "str" {
-            type_error(format!("unbound method str.{name}() needs an argument"))
+        } else if matches!(owner, "str" | "bytes") {
+            type_error(format!("unbound method {owner}.{name}() needs an argument"))
         } else {
             type_error("missing string receiver")
         }
@@ -882,6 +882,18 @@ pub(super) fn method(
     if name == "__new__" {
         return ctx.new_string(owner, receiver, args, kwargs);
     }
+    let receiver = if owner == "bytes" {
+        let storage = ctx.scalar_value(receiver);
+        if !matches!(ctx.heap.get(storage), Value::Bytes(_)) {
+            return Err(type_error(format!(
+                "descriptor '{name}' for 'bytes' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            )));
+        }
+        storage
+    } else {
+        receiver
+    };
     if owner == "str" && ctx.str_value(receiver).is_err() {
         return Err(type_error(format!(
             "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
@@ -1001,7 +1013,7 @@ pub(super) fn method(
         return Ok(ctx.alloc(Value::Int(found)));
     }
     if name == "rstrip"
-        && let Value::Bytes(data) = ctx.heap.get(ctx.scalar_value(receiver))
+        && let Value::Bytes(data) = ctx.heap.get(receiver)
     {
         if !kwargs.is_empty() {
             return Err(type_error("bytes.rstrip() takes no keyword arguments"));
@@ -1021,7 +1033,7 @@ pub(super) fn method(
             .unwrap_or(b" \t\n\x0b\x0c\r");
         return Ok(match crate::objects::rstrip_bytes(data, chars)? {
             Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
-            None => ctx.scalar_value(receiver),
+            None => receiver,
         });
     }
     if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {

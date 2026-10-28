@@ -276,6 +276,16 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "values",
 ];
 
+pub(super) const BYTES_METHODS: &[&str] = &[
+    "__mod__",
+    "__repr__",
+    "decode",
+    "rfind",
+    "rsplit",
+    "rstrip",
+    "translate",
+];
+
 pub(super) const STR_METHODS: &[&str] = &[
     "__repr__",
     "capitalize",
@@ -322,14 +332,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Bytes(_)
-            if matches!(
-                attr,
-                "__mod__" | "__repr__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
-            ) =>
-        {
-            "bytes"
-        }
+        Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::ByteArray(_) if matches!(attr, "__repr__" | "decode" | "extend" | "translate") => {
             "bytearray"
         }
