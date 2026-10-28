@@ -285,6 +285,7 @@ enum Cleanup {
 struct LoopTarget {
     step: String,
     done: String,
+    iterator: Option<String>,
     cleanup_depth: usize,
 }
 
