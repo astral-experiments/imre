@@ -28,7 +28,7 @@ def verify(actual, expected, label):
         )
 
 
-def source_tree(work, wheelhouse):
+def source_tree(work, wheelhouse, stdlib=ROOT / "stdlib"):
     wheels = work / "wheels"
     site = work / "site"
     wheels.mkdir()
@@ -71,6 +71,8 @@ def source_tree(work, wheelhouse):
         cwd=site,
         check=True,
     )
+    # Stage the demo alongside the real imre package, including imre.json.
+    shutil.copytree(stdlib / "imre", site / "imre", ignore=shutil.ignore_patterns("__pycache__"))
     for added in (HERE / "overlay").rglob("*.py"):
         target = site / added.relative_to(HERE / "overlay")
         if target.exists():
@@ -110,7 +112,7 @@ def main():
         parser.error("use CPython with assertions enabled")
     work = args.work.resolve()
     work.mkdir(parents=True)
-    site = source_tree(work, args.wheelhouse)
+    site = source_tree(work, args.wheelhouse, args.stdlib)
     paths = [site, HERE / "examples", args.stdlib.resolve(strict=True)]
     compiler = args.imre.resolve(strict=True)
     runtime = args.runtime.resolve(strict=True)

@@ -4,9 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 
-from flask import Flask
-from flask.frozen.export import export_application
-from jinja2.frozen_rows import write_renderer
+from imre.flask import Flask, export_application, write_renderer
 
 from presentation import DETAIL, LIST
 

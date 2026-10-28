@@ -1,5 +1,4 @@
-from flask.frozen.state import AppState, json_bools, json_ints
-from werkzeug.wrappers.frozen import Request, Response
+from imre.flask.views import AppState, Request, Response, json_bools, json_ints
 
 
 def health(req: Request, capture: str, state: AppState) -> Response:

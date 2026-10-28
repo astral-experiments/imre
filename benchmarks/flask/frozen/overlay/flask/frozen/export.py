@@ -12,7 +12,7 @@ from werkzeug.exceptions import default_exceptions
 
 MODULES = (
     "flask/frozen/application.py", "flask/frozen/state.py", "itsdangerous/frozen.py",
-    "jinja2/textprogram.py", "markupsafe/_native.py", "werkzeug/routing/frozen.py",
+    "imre/flask/views.py", "jinja2/textprogram.py", "markupsafe/_native.py", "werkzeug/routing/frozen.py",
     "werkzeug/wrappers/frozen.py", "werkzeug/frozen_serving.py",
 )
 
@@ -42,7 +42,9 @@ def export_application(app, templates, target, *, modules=()):
         copyfile(root / name, filename)
         parent = filename.parent
         while parent != target:
-            (parent / "__init__.py").touch()
+            # Extend the compiler's imre package without shadowing imre.json.
+            if parent != target / "imre":
+                (parent / "__init__.py").touch()
             parent = parent.parent
     code = ["import os", "import sys", "from flask.frozen.application import Application",
             "from flask.frozen.state import AppState", "from werkzeug.wrappers.frozen import Request, Response",

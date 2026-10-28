@@ -2,9 +2,8 @@
 import json
 from dataclasses import dataclass
 
-from flask.frozen.state import AppState, json_ints
+from imre.flask.views import AppState, Request, Response, json_ints
 from imre.json import decode, encode
-from werkzeug.wrappers.frozen import Request, Response
 from domain import Issue
 
 import domain

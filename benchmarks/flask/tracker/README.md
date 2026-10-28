@@ -2,6 +2,8 @@
 
 Two users keep private issue queues. Each user logs in, creates issues, closes or reopens them, and reads the latest 50 issues by status. Stock Flask on CPython and frozen Flask on Imre share the [credential checks, issue model and SQL](domain.py) and [Jinja templates](presentation.py).
 
+The typed tracker imports its Flask class and Jinja row compiler from the demo-local `imre.flask` package. Its handlers use the concrete request and response types in `imre.flask.views` alongside the standard `imre.json` codec. The stock tracker imports upstream `flask`.
+
 ## Run
 
 From an Imre checkout on Linux x86-64, use CPython 3.14.5 with its `sqlite3` module, the repository's Rust toolchain, Clang 18, a C archiver, SQLite 3.35 or newer with development headers, GNU patch, `taskset`, `strace` and `readelf`. The host must allow child-process tracing and provide at least two CPUs. On Debian/Ubuntu the SQLite development package is `libsqlite3-dev`.
