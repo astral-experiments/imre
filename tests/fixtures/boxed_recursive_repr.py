@@ -1,4 +1,17 @@
 def current():
+    class NestedDict(dict):
+        pass
+    class NestedList(list):
+        pass
+    class NestedTuple(tuple):
+        pass
+    mapping = sequence = items = None
+    for _ in range(160):
+        mapping = NestedDict({0: mapping})
+        sequence = NestedList([sequence])
+        items = NestedTuple((items,))
+    assert [len(repr(value)) for value in (mapping, sequence, items)] == [804, 324, 484]
+
     items = []
     items.append(items)
     print(repr(items), str(items))
