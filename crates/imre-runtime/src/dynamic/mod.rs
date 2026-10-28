@@ -822,6 +822,16 @@ impl Context {
         {
             return copy_ids(items);
         }
+        if let Value::Instance { class, fields, .. } = self.heap.get(id)
+            && let Some(names) = self.namedtuple_fields(*class)
+        {
+            let mut items = Vec::new();
+            items
+                .try_reserve_exact(names.len())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            items.extend(names.iter().map(|name| fields[name]));
+            return Ok(items);
+        }
         match self.heap.get(id).clone() {
             Value::Set { entries, .. }
             | Value::Dict(entries)
@@ -875,14 +885,6 @@ impl Context {
                     *sequence = None;
                 }
                 Ok(values)
-            }
-            Value::Instance { class, fields, .. } if self.namedtuple_fields(class).is_some() => {
-                Ok(self
-                    .namedtuple_fields(class)
-                    .unwrap()
-                    .into_iter()
-                    .map(|k| fields[&k])
-                    .collect())
             }
             Value::Instance { .. } if self.slot(id, "__iter__").is_some() => {
                 let iter = self.iterator(id)?;
