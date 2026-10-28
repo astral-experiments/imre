@@ -151,10 +151,12 @@ pub(super) fn construct(
             }
             let (name, method) = match string_hook {
                 Some(method) => ("__str__", Some(method)),
-                None if ctx.string_storage(value).is_none() => {
-                    ("__repr__", ctx.bound_slot(value, "__repr__")?)
+                None if matches!(ctx.heap.get(value), Value::Raised(_))
+                    || ctx.string_storage(value).is_some() =>
+                {
+                    ("__str__", None)
                 }
-                None => ("__str__", None),
+                None => ("__repr__", ctx.bound_slot(value, "__repr__")?),
             };
             if let Some(method) = method {
                 let result = ctx.call(method, Vec::new(), Vec::new())?;
