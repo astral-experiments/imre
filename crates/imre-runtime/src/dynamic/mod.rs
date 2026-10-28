@@ -773,7 +773,9 @@ impl Context {
                 let qualifier = if star.is_some() { "at least " } else { "" };
                 Error::new(
                     "ValueError",
-                    format!("not enough values to unpack (expected {qualifier}{required}, got {i})"),
+                    format!(
+                        "not enough values to unpack (expected {qualifier}{required}, got {i})"
+                    ),
                 )
             })?);
         }
