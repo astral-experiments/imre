@@ -55,6 +55,19 @@ def visited(trace, label, value):
     return value
 
 
+def byte_chunks():
+    for value in [0, 1]:
+        yield b'a\x00' b'\xff', br'\n', b''
+
+
+def totals(values, cells, trace):
+    total = 0
+    for value in values:
+        total += value
+        cells[visited(trace, 'index', 0)] += visited(trace, 'rhs', total)
+        yield total, cells[0]
+
+
 def indexed_values(owner, trace):
     for word in ['first', 'second']:
         visited(trace, 'receiver', owner)[visited(trace, 'key', 0)] = visited(trace, 'rhs', word)
@@ -72,14 +85,48 @@ def unpacked(rows):
         yield left, middle, right
 
 
+def starred(rows):
+    for first, *rest in rows:
+        *middle, last = rest
+        yield first, middle, last
+
+
+def stored(rows, box, cells):
+    for box.value, cells[0] in rows:
+        cells[1], box.value = box.value, cells[0]
+        yield cells[0], cells[1], box.value
+
+
+def chained(values, box):
+    for value in values:
+        local = box.value = [value]
+        local.append(value + 1)
+        yield local is box.value, box.value
+
+
 def current():
+    class Box:
+        pass
+
+    print(list(stored([(1, 2), (3, 4)], Box(), [0, 0])))
+    print(list(chained([2, 3], Box())))
     print(list(unpacked([(1, [2, 3]), (4, (5, 6))])))
+    print(list(starred([[1, 2], [3, 4, 5, 6]])))
+    for target in ('*left, *right', '*left'):
+        try:
+            compile('def split(row):\n    ' + target + ' = row\n    yield left\n', '<split>', 'exec')
+        except SyntaxError:
+            print('invalid star')
     pulls = []
     values = (x + y for x in visited(pulls, "outer", [1, 2])
               for y in visited(pulls, x, range(x)) if y == 0)
     assert pulls == ["outer"]
     assert next(values) == 1 and pulls == ["outer", 1]
+    print(list(byte_chunks()))
     assert list(values) == [2] and pulls == ["outer", 1, 2]
+
+    trace = []
+    print(list(totals([3, -1, 5], [0], trace)), trace)
 
     saved = -1
     assert any((saved := item) for item in [0, 4, 9]) and saved == 4

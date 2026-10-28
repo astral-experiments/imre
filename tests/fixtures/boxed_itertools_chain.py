@@ -34,3 +34,8 @@ def current():
             return super().__getattribute__(name)
 
     assert list(PrivateState([1], [2])) == [1, 2]
+
+    import itertools
+    itertools._chain_get = None
+    itertools._chain_set = None
+    assert list(chain([7], [8])) == [7, 8]

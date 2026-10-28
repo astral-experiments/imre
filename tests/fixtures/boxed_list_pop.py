@@ -18,6 +18,14 @@ class DrainingIndex:
 
 
 def current():
+    class Values(list):
+        def append(self, item):
+            return "override"
+
+    values = Values()
+    assert list.append(values, 3) is None
+    assert values == [3] and values.append(4) == "override"
+
     from copy import copy
 
     element = []
