@@ -233,15 +233,24 @@ pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Resul
     if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(obj) {
         return Ok(data.clone());
     }
-    ctx.items(obj)?
-        .into_iter()
-        .map(|id| {
-            ctx.as_int(id)?
-                .to_i64()
-                .and_then(|n| u8::try_from(n).ok())
-                .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))
-        })
-        .collect()
+    let iter = ctx.iterator(obj)?;
+    ctx.heap.keep(iter);
+    let mark = ctx.heap.temporary_mark();
+    let mut bytes = Vec::new();
+    while let Some(item) = ctx.next_item(iter)? {
+        ctx.heap.keep(item);
+        let byte = ctx
+            .index_integer(item)?
+            .to_i64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))?;
+        bytes
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        bytes.push(byte);
+        ctx.heap.release_temporaries_since(mark);
+    }
+    Ok(bytes)
 }
 
 pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
