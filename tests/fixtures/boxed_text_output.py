@@ -6,6 +6,15 @@ def exercise(path):
             saved.append(stream)
         return stream
 
+    def observe_loop_exit(reader, saved, stop_early):
+        for value in [None, buffered(saved)]:
+            if value is None:
+                yield None
+                if stop_early:
+                    break
+            value = None
+        yield reader.read()
+
     for keep in (False, True):
         saved = []
         entries = {"writer": buffered(saved if keep else None), b"loop": 1, b"": 2}
@@ -14,6 +23,15 @@ def exercise(path):
         assert (b"loop" in entries) == keep
         if keep:
             saved[0].close()
+
+        for stop_early in (False, True):
+            saved = []
+            with open(path, "rb") as reader:
+                assert list(observe_loop_exit(reader, saved if keep else None, stop_early)) == [
+                    None, b"" if keep else b"loop"
+                ]
+            if keep:
+                saved[0].close()
 
         saved = []
         for stream in [buffered()]:
