@@ -2333,6 +2333,28 @@ impl Context {
         self.set_dictionary_key(storage, key, value, None, false)
     }
 
+    /// Convert a bytearray subscript before a replacement byte can run Python code.
+    fn bytearray_item_index(&mut self, key: Id) -> Result<i64> {
+        let index = self.index_value(key)?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "bytearray indices must be integers or slices, not {}",
+                    self.type_name(key)
+                ),
+            )
+        })?;
+        index.to_i64().ok_or_else(|| {
+            Error::new(
+                "IndexError",
+                format!(
+                    "cannot fit '{}' into an index-sized integer",
+                    self.type_name(key)
+                ),
+            )
+        })
+    }
+
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
         if matches!(self.heap.get(obj), Value::Deque(_)) {
@@ -2345,17 +2367,20 @@ impl Context {
             Value::Dict(_) | Value::DefaultDict { .. }
         ) {
             self.set_dictionary_key(obj, key, val, None, true)?;
-        } else if let Value::ByteArray(data) = self.heap.get(obj) {
+        } else if matches!(self.heap.get(obj), Value::ByteArray(_)) {
             if let Value::Slice(parts) = *self.heap.get(key) {
                 return self.set_slice(obj, parts, Some(val));
             }
-            let i = self.as_integer(key)?;
-            let i = if i < 0 { data.len() as i64 + i } else { i };
-            let byte = u8::try_from(self.as_integer(val)?)
-                .map_err(|_| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+            let i = self.bytearray_item_index(key)?;
+            let byte = self
+                .index_integer(val)?
+                .to_i64()
+                .and_then(|n| u8::try_from(n).ok())
+                .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
             let Value::ByteArray(data) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
+            let i = if i < 0 { data.len() as i64 + i } else { i };
             *data
                 .get_mut(i as usize)
                 .ok_or_else(|| Error::new("IndexError", "bytearray index out of range"))? = byte;
@@ -3344,24 +3369,7 @@ impl Context {
                 if let Value::Slice(parts) = *self.heap.get(key) {
                     return self.set_slice(obj, parts, None);
                 }
-                let index = self.index_value(key)?.ok_or_else(|| {
-                    Error::new(
-                        "TypeError",
-                        format!(
-                            "bytearray indices must be integers or slices, not {}",
-                            self.type_name(key)
-                        ),
-                    )
-                })?;
-                let i = index.to_i64().ok_or_else(|| {
-                    Error::new(
-                        "IndexError",
-                        format!(
-                            "cannot fit '{}' into an index-sized integer",
-                            self.type_name(key)
-                        ),
-                    )
-                })?;
+                let i = self.bytearray_item_index(key)?;
                 let len = self.bytes_like(obj)?.len() as i64;
                 let i = if i < 0 { i + len } else { i };
                 if !(0..len).contains(&i) {
