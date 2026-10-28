@@ -25,7 +25,7 @@ pub(in crate::dynamic) struct Selector {
 }
 
 /// Install both constructor names and the concrete key class in one module scope.
-pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
+pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()> {
     let selector = ctx.alloc(Value::Native("selectors.PollSelector".into()));
     ctx.bind(scope, "PollSelector", selector);
     ctx.bind(scope, "DefaultSelector", selector);
@@ -42,10 +42,9 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     ctx.bind(class_scope, "__annotations__", annotations);
     ctx.bind(class_scope, "_fields", fields);
     let base = ctx.builtin("typing.NamedTuple");
-    let key = ctx
-        .allocate_class("SelectorKey".into(), class_scope, vec![base])
-        .expect("a single named tuple base has a linearization");
+    let key = ctx.allocate_class("SelectorKey".into(), class_scope, vec![base])?;
     ctx.bind(scope, "SelectorKey", key);
+    Ok(())
 }
 
 /// A positive Python descriptor may be wider than the kernel's descriptor type.

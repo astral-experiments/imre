@@ -116,7 +116,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "collections" => Some((
             "collections/__init__.py",
-            include_str!("../stdlib/collections/__init__.py"),
+            concat!(
+                include_str!("../stdlib/collections/__init__.py"),
+                "\n",
+                include_str!("../stdlib/collections/namedtuple_repr.py"),
+            ),
         )),
         "contextlib" => Some((
             "contextlib.py",
