@@ -15,8 +15,10 @@ def current():
     print(marshal.loads(b"\xe9\x0e\x00\x00\x03trailing"), marshal.loads(b"i\xff\xff\xff\xff"))
     print(marshal.loads(b"\xf3\x03\x00\x00\x00j2\x00trailing") == b"j2\x00")
     print(marshal.loads(bytearray(b"i\xff\xff\xff\xff")))
+    print(marshal.loads(b"\xec\x03\x00\x00\x00\x00\x00\x00\x00\x02\x00"))
+    print(marshal.loads(b"l\xfd\xff\xff\xff\x01\x00\x00\x00\x02\x00trailing"))
     print(marshal.loads(b"N"), marshal.loads(b"T"), marshal.loads(b"F"))
-    for data in (b"", b"i\x01", b"s\x03\x00\x00\x00x", b"s\xff\xff\xff\xff", b"?", b"0", 3, b"r\x00\x00\x00\x00", b"c"):
+    for data in (b"", b"i\x01", b"l\x02\x00\x00\x00\x00\x00\x00\x00", b"s\x03\x00\x00\x00x", b"s\xff\xff\xff\xff", b"?", b"0", 3, b"r\x00\x00\x00\x00", b"c"):
         try:
             marshal.loads(data, allow_code=False)
         except (EOFError, ValueError, TypeError) as error:

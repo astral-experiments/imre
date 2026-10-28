@@ -1,4 +1,7 @@
+use num_bigint::{BigInt, Sign};
+
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use crate::Int;
 use crate::dynamic::value::ELLIPSIS;
 
 fn read<const N: usize>(data: &[u8]) -> Result<[u8; N]> {
@@ -7,6 +10,42 @@ fn read<const N: usize>(data: &[u8]) -> Result<[u8; N]> {
 
 fn too_short() -> Error {
     Error::new("EOFError", "marshal data too short")
+}
+
+/// Decode a signed count of little-endian 15-bit digits.
+fn read_long(data: &[u8]) -> Result<Int> {
+    let size = i32::from_le_bytes(read(data)?);
+    let count = size
+        .checked_abs()
+        .ok_or_else(|| Error::new("ValueError", "bad marshal data (long size out of range)"))?;
+    let (words, _) = data[4..].as_chunks::<2>();
+    let mut input = words.iter();
+    let mut digits = Vec::new();
+    for index in 0..count {
+        let digit = u16::from_le_bytes(*input.next().ok_or_else(too_short)?);
+        if digit >= 1 << 15 {
+            return Err(Error::new(
+                "ValueError",
+                "bad marshal data (digit out of range in long)",
+            ));
+        }
+        if digit == 0 && index + 1 == count {
+            return Err(Error::new(
+                "ValueError",
+                "bad marshal data (unnormalized long data)",
+            ));
+        }
+        // Each wire digit is exactly three base-32 digits.
+        digits.extend([
+            (digit & 31) as u8,
+            ((digit >> 5) & 31) as u8,
+            (digit >> 10) as u8,
+        ]);
+    }
+    let sign = if size < 0 { Sign::Minus } else { Sign::Plus };
+    Ok(Int::new(
+        BigInt::from_radix_le(sign, &digits, 32).expect("five-bit digits"),
+    ))
 }
 
 fn buffer(ctx: &Context, input: Id) -> Result<&[u8]> {
@@ -57,6 +96,7 @@ pub(super) fn loads(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
         b'.' => Ok(ELLIPSIS),
         b'i' => Ok(ctx.int(i64::from(i32::from_le_bytes(read(data)?)))),
         b'I' => Ok(ctx.int(i64::from_le_bytes(read(data)?))),
+        b'l' => Ok(ctx.alloc(Value::Int(read_long(data)?))),
         b's' => {
             let size = usize::try_from(i32::from_le_bytes(read(data)?)).map_err(|_| {
                 Error::new(
@@ -87,8 +127,8 @@ pub(super) fn loads(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             "native marshal cannot load CPython code objects",
         )),
         // These are valid wire types. Distinguish them from a corrupt tag.
-        b'S' | b'l' | b'f' | b'g' | b'x' | b'y' | b'u' | b't' | b'a' | b'A' | b'z' | b'Z'
-        | b'(' | b')' | b'[' | b'{' | b'<' | b'>' | b':' => Err(Error::new(
+        b'S' | b'f' | b'g' | b'x' | b'y' | b'u' | b't' | b'a' | b'A' | b'z' | b'Z' | b'('
+        | b')' | b'[' | b'{' | b'<' | b'>' | b':' => Err(Error::new(
             "NotImplementedError",
             format!(
                 "native marshal does not support type code '{}'",
