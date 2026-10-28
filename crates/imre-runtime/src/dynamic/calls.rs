@@ -1367,6 +1367,14 @@ impl Context {
                     _ => 2,
                 }]);
             }
+            Value::Range(range) if matches!(name, "start" | "stop" | "step") => {
+                let bound = match name {
+                    "start" => range.start,
+                    "stop" => range.stop,
+                    _ => range.step,
+                };
+                return Ok(self.alloc(Value::Int(bound)));
+            }
             Value::Native(ref class) if class == "module" => match name {
                 "__doc__" => return Ok(self.text(module_type::DOC)),
                 "__init__" | "__new__" => return Ok(self.builtin(&format!("module.{name}"))),
@@ -2097,7 +2105,7 @@ impl Context {
                 None,
             );
         }
-        if matches!(self.heap.get(obj), Value::Slice(_))
+        if matches!(self.heap.get(obj), Value::Range(_) | Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
             return Err(Error::new("AttributeError", "readonly attribute"));
@@ -2577,7 +2585,7 @@ impl Context {
             }
             return Ok(());
         }
-        if matches!(self.heap.get(obj), Value::Slice(_))
+        if matches!(self.heap.get(obj), Value::Range(_) | Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
             return Err(Error::new("AttributeError", "readonly attribute"));

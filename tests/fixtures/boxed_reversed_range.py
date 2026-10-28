@@ -3,6 +3,7 @@ from operator import length_hint
 
 def current():
     for seq in (range(5), range(1, 10, 3), range(8, -1, -3), range(0), range(3, 7, -2)):
+        print(seq.start, seq.stop, seq.step)
         left = reversed(seq)
         right = reversed(seq)
         print(iter(left) is left, left is right, length_hint(left))
@@ -23,6 +24,12 @@ def current():
                         (range(0, 4), range(0, 8, 2))):
         print(left == right, left != right, {left: 1}.get(right), len({left, right}))
     cursor = range(edge).__reversed__()
+    sliced = range(0, edge, 3)[::-2]
+    print(sliced.start, sliced.stop, sliced.step)
+    try:
+        sliced.step = 1
+    except AttributeError as error:
+        print(str(error))
     print(cursor.__iter__() is cursor, cursor.__length_hint__())
     print(cursor.__next__(), cursor.__length_hint__())
     try:
