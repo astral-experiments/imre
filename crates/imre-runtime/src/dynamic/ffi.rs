@@ -432,6 +432,11 @@ impl Context {
                 self.heap.release_unbound_writers();
                 Ok(self.raised_instance(error))
             }
+            "restore_caught" => {
+                let enclosing = self.heap.caught_exception(a);
+                self.heap.replace_active(enclosing);
+                Ok(NONE)
+            }
             "matches" => {
                 if let Value::Raised(error) = self.heap.get(a) {
                     Ok(flag(self.raised_error_matches(error, b)))

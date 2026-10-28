@@ -915,9 +915,18 @@ impl Function<'_, '_> {
         self.label(&handler);
         let exception = self.op("take_error", &[]);
         self.live.push(exception.clone());
+        let enclosing = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+        self.exits.push((
+            Cleanup::PendingValue {
+                value: exception.clone(),
+                enclosing_exception: Some(enclosing),
+            },
+            self.error.clone(),
+        ));
         self.caught.push(exception.clone());
         self.statements(&stmt.finalbody);
         self.caught.pop();
+        self.exits.pop();
         self.live.pop();
         if !self.terminated {
             self.raise(&exception, None, true);
@@ -947,7 +956,13 @@ impl Function<'_, '_> {
                     self.op("exit_context", &[exit, "0", caught]);
                 }
                 Cleanup::ExceptionName(name) => self.clear_exception_name(name),
-                Cleanup::PendingReturn(value) => {
+                Cleanup::PendingValue {
+                    value,
+                    enclosing_exception,
+                } => {
+                    if let Some(caught) = enclosing_exception {
+                        self.op("restore_caught", &[caught]);
+                    }
                     let slot = self.live.iter().rposition(|live| live == value).unwrap();
                     discarded.push((slot, self.live.remove(slot)));
                     self.release_replaced("2");
@@ -961,8 +976,13 @@ impl Function<'_, '_> {
                     let protected_loops = self.loops.split_off(*loop_depth);
                     let protected_handlers = self.caught.split_off(*caught_depth);
                     if let Some(value) = pending.filter(|value| *value != "0") {
-                        self.exits
-                            .push((Cleanup::PendingReturn(value.into()), outer.clone()));
+                        self.exits.push((
+                            Cleanup::PendingValue {
+                                value: value.into(),
+                                enclosing_exception: None,
+                            },
+                            outer.clone(),
+                        ));
                     }
                     self.statements(body);
                     self.caught.extend(protected_handlers);

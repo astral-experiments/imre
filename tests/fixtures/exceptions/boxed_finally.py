@@ -137,9 +137,11 @@ def buffered(path, saved):
         saved.append(stream)
     return stream
 
-def discard_return(path, saved, again):
+def discard_pending(path, saved, again, raised):
     for _ in range(1):
         try:
+            if raised:
+                raise ValueError([buffered(path, saved)])
             return buffered(path, saved)
         finally:
             if again:
@@ -149,7 +151,8 @@ def discard_return(path, saved, again):
         return reader.read()
 
 for again in (False, True):
-    assert discard_return("finally-return.bin", None, again) == b"pending"
-    saved = []
-    assert discard_return("finally-return.bin", saved, again) == b""
-    saved[0].close()
+    for raised in (False, True):
+        assert discard_pending("finally-return.bin", None, again, raised) == b"pending"
+        saved = []
+        assert discard_pending("finally-return.bin", saved, again, raised) == b""
+        saved[0].close()
