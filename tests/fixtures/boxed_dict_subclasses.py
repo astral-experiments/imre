@@ -143,6 +143,13 @@ def mapping_patterns():
 
 
 def current():
+    from collections import defaultdict
+
+    entries = defaultdict(list, [("saved", 2)], extra=3, saved=5)
+    assert entries == {"saved": 5, "extra": 3}
+    assert entries["missing"] == []
+    assert defaultdict(default_factory=1) == {"default_factory": 1}
+
     from collections import Counter, defaultdict
     from collections import _count_elements
     from _collections import _count_elements as native_count

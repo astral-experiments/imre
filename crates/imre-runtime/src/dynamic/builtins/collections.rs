@@ -219,7 +219,13 @@ pub(in super::super) fn copy_dict(ctx: &mut Context, object: Id, storage: Id) ->
     Ok(copy)
 }
 
-fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
+/// Apply the positional entries before keyword entries, as in dict.update.
+pub(in super::super) fn update(
+    ctx: &mut Context,
+    dict: Id,
+    input: Option<Id>,
+    kwargs: &[(String, Id)],
+) -> Result<()> {
     if let Some(input) = input
         && !ctx.for_each_mapping_item(
             input,
