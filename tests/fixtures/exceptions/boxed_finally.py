@@ -65,3 +65,19 @@ def replacement():
             break
     return 7
 print(replacement())
+
+def nested_loop(again):
+    seen = []
+    for outer in range(2):
+        try:
+            for inner in range(2):
+                seen.append((outer, inner))
+                return seen
+        finally:
+            if outer == 0:
+                if again:
+                    continue
+                break
+    return seen
+
+print(nested_loop(True), nested_loop(False))

@@ -878,7 +878,10 @@ impl Function<'_, '_> {
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.error, handler.clone());
         self.exits.push((
-            Cleanup::Finally(stmt.finalbody.as_slice().into()),
+            Cleanup::Finally {
+                body: stmt.finalbody.as_slice().into(),
+                loop_depth: self.loops.len(),
+            },
             outer.clone(),
         ));
         if stmt.handlers.is_empty() {
@@ -920,7 +923,12 @@ impl Function<'_, '_> {
                 Cleanup::With(exit) => {
                     self.invoke(exit, &["0", "0", "0"]);
                 }
-                Cleanup::Finally(body) => self.statements(body),
+                Cleanup::Finally { body, loop_depth } => {
+                    // The finally suite can only target loops that enclose the try.
+                    let protected_loops = self.loops.split_off(*loop_depth);
+                    self.statements(body);
+                    self.loops.extend(protected_loops);
+                }
             }
             self.error = previous;
         }
