@@ -320,6 +320,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
+        ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "FunctionType") => ctx.builtin("function"),
         ("types", "BuiltinFunctionType") => ctx.builtin("builtin_function_or_method"),

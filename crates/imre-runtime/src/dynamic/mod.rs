@@ -1313,7 +1313,8 @@ impl Context {
                     "__reduce__",
                 ]
             }
-            "list" => &["__repr__", "__init__", "append"],
+            "list" => &["__repr__", "__init__", "append", "pop"],
+            "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
             "set" | "frozenset" | "bytearray" => &["__repr__"],
             "property" => property::METHODS,

@@ -502,7 +502,7 @@ impl Context {
                 Value::Native(_)
                     if matches!(
                         self.builtin_type_name(key),
-                        Some("type" | "wrapper_descriptor")
+                        Some("type" | "wrapper_descriptor" | "method_descriptor")
                     ) =>
                 {
                     Self::identity_hash(key)
