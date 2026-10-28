@@ -1177,11 +1177,11 @@ impl Context {
             return Ok(None);
         };
         *running = true;
-        let (code, scope, owner) = (*code, *scope, *owner);
+        let (code, frame_scope, owner) = (*code, *scope, *owner);
         let mut active = std::mem::take(iterators);
         let result = self
             .prepare_generator(code)
-            .and_then(|()| self.run_source(code, scope, owner, ip, &mut active))
+            .and_then(|()| self.run_source(code, frame_scope, owner, ip, &mut active))
             .map_err(|error| self.generator_error(error));
         let Value::Generator {
             running,
@@ -1195,18 +1195,41 @@ impl Context {
             unreachable!()
         };
         *running = false;
-        if !matches!(result, Ok(Step::Yield(..))) {
-            *scope = NONE;
-            *owner = FrameOwner::Module(NONE);
-        }
-        match result? {
-            Step::Yield(value, ip) => {
+        let completed = match result {
+            Ok(Step::Yield(value, ip)) => {
                 *offset = Some(ip);
                 *iterators = active;
-                Ok(Some(value))
+                return Ok(Some(value));
             }
-            Step::Return(NONE) => Ok(None),
-            Step::Return(value) => Err(self.exception("StopIteration", &[value])),
+            Ok(Step::Return(value)) => Ok(value),
+            Err(error) => Err(error),
+        };
+        *scope = NONE;
+        *owner = FrameOwner::Module(NONE);
+        if self.heap.has_file_writers()
+            && (!active.is_empty()
+                || !self.scope_data(frame_scope).closure.cells.is_empty()
+                || self
+                    .scope_data(frame_scope)
+                    .names
+                    .values()
+                    .any(|&value| self.heap.could_own_writer(value, true)))
+            && self.heap.has_unbound_writer(NONE)
+        {
+            self.heap.release_scope_temporary(frame_scope);
+            match &completed {
+                Ok(value) => self.heap.keep(*value),
+                Err(error) => {
+                    for root in error.roots() {
+                        self.heap.keep(root);
+                    }
+                }
+            }
+            self.collect_unreachable();
+        }
+        match completed? {
+            NONE => Ok(None),
+            value => Err(self.exception("StopIteration", &[value])),
         }
     }
 
