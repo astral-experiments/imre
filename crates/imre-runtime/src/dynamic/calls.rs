@@ -366,10 +366,10 @@ impl Context {
             | Value::Module {
                 constructor: Some(class),
                 ..
-            } => *class,
-            Value::Raised(Error {
+            }
+            | Value::Raised(Error {
                 class: Some(class), ..
-            }) if matches!(name, "__dir__" | "__str__") => *class,
+            }) => *class,
             _ => return Ok(None),
         };
         self.class_attr(class, name)

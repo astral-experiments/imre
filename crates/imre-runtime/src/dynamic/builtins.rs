@@ -1289,7 +1289,7 @@ pub(super) fn call(
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
                 }
-                Value::Instance { .. } => {
+                Value::Instance { .. } | Value::Raised(_) => {
                     if let Some(size) = ctx.instance_len(args[0])? {
                         size
                     } else {

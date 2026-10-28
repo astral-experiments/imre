@@ -281,7 +281,7 @@ impl Context {
                 ..
             } => !bindings.is_empty(),
             Value::Range(range) => range.len.as_small() != Some(0),
-            Value::Instance { .. } => {
+            Value::Instance { .. } | Value::Raised(_) => {
                 if let Some(hook) = self.bound_slot(id, "__bool__")? {
                     let value = self.call(hook, Vec::new(), Vec::new())?;
                     let Value::Bool(result) = self.heap.get(value) else {

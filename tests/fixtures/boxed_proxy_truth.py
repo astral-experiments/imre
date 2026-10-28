@@ -29,6 +29,26 @@ def current():
         def __len__(self):
             return Index()
 
+    class EmptyError(ValueError):
+        def __len__(self):
+            return 0
+
+    class IndexedError(EmptyError):
+        def __bool__(self):
+            return True
+
+        def __index__(self):
+            return 1
+
+        def __getitem__(self, key):
+            return -key
+
+    assert not EmptyError() and len(EmptyError()) == 0
+    try:
+        raise IndexedError()
+    except IndexedError as error:
+        assert error and len(error) == 0 and ("a", "b")[error] == "b" and error[3] == -3
+
     print(bool(Short()), len(Short()), not Short(), bool(Precise()))
     print(bool(Indexed()), len(Indexed()))
     try:
