@@ -45,6 +45,11 @@ def current():
     huge = range(-edge, edge, 2)
     print(edge - 2 in huge, edge in huge, huge.count(1), huge.index(edge - 2))
 
+    seq = range(1, 8, 2)
+    print(repr([seq]), seq.__repr__(), range.__len__(seq), seq.__getitem__(-1))
+    print(seq.__eq__(range(1, 9, 2)), seq.__ne__(()) is NotImplemented,
+          seq.__lt__(seq) is NotImplemented, seq.__hash__() == hash(seq))
+
 
 def check_receivers(native_range):
     class range:

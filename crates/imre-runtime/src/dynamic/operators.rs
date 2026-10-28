@@ -1741,6 +1741,18 @@ impl Context {
                             append_rendered_text(&mut output, &text)?;
                             continue;
                         }
+                        Value::Range(range) => {
+                            append_rendered_text(&mut output, "range(")?;
+                            append_rendered_text(&mut output, &rendered_integer(&range.start)?)?;
+                            append_rendered_text(&mut output, ", ")?;
+                            append_rendered_text(&mut output, &rendered_integer(&range.stop)?)?;
+                            if range.step.as_small() != Some(1) {
+                                append_rendered_text(&mut output, ", ")?;
+                                append_rendered_text(&mut output, &rendered_integer(&range.step)?)?;
+                            }
+                            append_rendered_text(&mut output, ")")?;
+                            continue;
+                        }
                         Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                         Value::Tuple(items) => (
                             "(",
