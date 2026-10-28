@@ -106,3 +106,14 @@ def current():
         namedtuple("Broken", broken_fields())
     except ValueError as error:
         print(str(error))
+
+    calls = []
+
+    class Initialized(Match):
+        def __init__(self, a, b, size):
+            calls.append((self.a, a, b, size))
+
+    value = Initialized(1, 2, size=3)
+    print(value.a, calls)
+    value = Initialized._make((4, 5, 6))
+    print(type(value) is Initialized, calls)
