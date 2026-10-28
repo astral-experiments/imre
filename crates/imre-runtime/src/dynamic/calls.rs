@@ -3169,9 +3169,9 @@ impl Context {
                         ));
                     }
                     let mut fields: indexmap::IndexMap<_, _> =
-                        names.iter().cloned().zip(args).collect();
-                    for (k, v) in kwargs {
-                        if !names.contains(&k) || fields.insert(k.clone(), v).is_some() {
+                        names.iter().cloned().zip(args.iter().copied()).collect();
+                    for (k, v) in &kwargs {
+                        if !names.contains(k) || fields.insert(k.clone(), *v).is_some() {
                             return Err(Error::new(
                                 "TypeError",
                                 format!("invalid argument {k:?} to {name}"),
@@ -3197,7 +3197,7 @@ impl Context {
                     if fields.len() != names.len() {
                         return Err(Error::new("TypeError", format!("missing field for {name}")));
                     }
-                    return Ok(self.alloc(Value::Instance {
+                    let instance = self.alloc(Value::Instance {
                         namespace: None,
                         class: callable,
                         fields,
@@ -3206,7 +3206,21 @@ impl Context {
                         property: None,
                         weak_reference: None,
                         memory_stream: None,
-                    }));
+                    });
+                    if let Some(init) = self.class_attr(callable, "__init__") {
+                        let init = self.bind_attribute(init, instance, callable)?;
+                        let result = self.call(init, args, kwargs)?;
+                        if result != NONE {
+                            return Err(Error::new(
+                                "TypeError",
+                                format!(
+                                    "__init__() should return None, not '{}'",
+                                    self.type_name(result)
+                                ),
+                            ));
+                        }
+                    }
+                    return Ok(instance);
                 }
                 let new = self.class_attr(callable, "__new__").or_else(|| {
                     self.has_base(callable, "int")

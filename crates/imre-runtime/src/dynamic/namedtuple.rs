@@ -181,5 +181,15 @@ pub(super) fn make(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
             format!("Expected {} arguments, got {}", names.len(), values.len()),
         ));
     }
-    ctx.call(class, values, Vec::new())
+    let fields = names.iter().cloned().zip(values).collect();
+    Ok(ctx.alloc(Value::Instance {
+        class,
+        namespace: None,
+        fields,
+        dictionary: None,
+        scalar: None,
+        property: None,
+        weak_reference: None,
+        memory_stream: None,
+    }))
 }
