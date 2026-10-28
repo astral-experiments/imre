@@ -465,6 +465,7 @@ impl Context {
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"
+                            | "int.bit_length"
                             | "int.to_bytes"
                             | "list.append"
                             | "list.index"
@@ -1713,8 +1714,10 @@ impl Context {
             Value::ByteArray(_) if name == "maketrans" => {
                 return Ok(self.builtin("bytearray.maketrans"));
             }
-            Value::Native(class) if class == "bool" && name == "to_bytes" => {
-                return Ok(self.builtin("int.to_bytes"));
+            Value::Native(class)
+                if class == "bool" && matches!(name, "bit_length" | "to_bytes") =>
+            {
+                return Ok(self.builtin(&format!("int.{name}")));
             }
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
@@ -1765,7 +1768,7 @@ impl Context {
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
-                    || (class == "int" && name == "to_bytes")
+                    || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
