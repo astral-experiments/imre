@@ -123,6 +123,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             concat!(
                 include_str!("../stdlib/contextlib.py"),
                 "\n",
+                include_str!("../stdlib/contextlib_nullcontext.py"),
+                "\n",
                 include_str!("../stdlib/contextlib_exitstack.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_redirect.py")
