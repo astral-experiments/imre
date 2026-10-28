@@ -103,7 +103,17 @@ impl Function<'_, '_> {
                 value
             }
             ast::Expr::Call(v) => {
-                let callable = self.expr(&v.func);
+                let callable = if let Some(field) = imre_ast::direct_method(
+                    v,
+                    &self.source.method_imports,
+                    Some(&self.source.private_names),
+                ) {
+                    let receiver = self.expr(&field.value);
+                    let name = self.code_name(field.attr.as_str());
+                    self.op("method", &[&receiver, &name])
+                } else {
+                    self.expr(&v.func)
+                };
                 let (args, kwargs) = self.arguments(&v.arguments);
                 let span = self.expression_span(expr, &v.func, b'(');
                 self.op_at("call", &[&callable, &args, &kwargs], span)

@@ -1141,8 +1141,25 @@ impl Context {
         }
     }
 
+    /// Resolve an immediately called attribute before its arguments are evaluated.
+    pub(super) fn lookup_method(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if let Value::Instance { class, .. } = *self.heap.get(obj)
+            && self.class_attr(class, "__getattr__").is_none()
+            && self.class_attr(class, "__getattribute__").is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
+        {
+            self.default_attr_for_call(obj, name, true)
+        } else {
+            self.lookup_attr(obj, name)
+        }
+    }
+
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        self.default_attr_for_call(obj, name, false)
+    }
+
+    /// Keep non-data wrapper receiver checks at call time for direct method calls.
+    fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
@@ -1189,6 +1206,18 @@ impl Context {
             } else {
                 self.dictionary_field(namespace, name)?
             };
+            if for_call
+                && field.is_none()
+                && let Some(member) = member
+                && let Value::Native(symbol) = self.heap.get(member)
+                && Wrapper::lookup(symbol).is_some()
+            {
+                return Ok(self.alloc(Value::Method {
+                    callable: member,
+                    receiver: obj,
+                    explicit: false,
+                }));
+            }
             return self.instance_attribute(obj, class, field, name);
         }
         if let Value::Raised(error) = self.heap.get(obj) {

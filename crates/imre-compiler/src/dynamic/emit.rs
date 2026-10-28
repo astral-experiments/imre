@@ -55,8 +55,10 @@ pub(crate) fn emit(
         let name = output.data(name.as_bytes());
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
         let mut body = parsed.into_syntax().body;
+        let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
         let location = SourceMap {
+            method_imports,
             string_annotations: private_names.string_annotations,
             private_names,
             package,
@@ -93,6 +95,7 @@ enum Body<'a> {
 
 struct SourceMap<'a> {
     private_names: imre_ast::Names,
+    method_imports: std::collections::BTreeSet<String>,
     text: &'a str,
     package: &'a str,
     string_annotations: bool,

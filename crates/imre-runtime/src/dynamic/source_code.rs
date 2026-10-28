@@ -19,6 +19,8 @@ pub(super) struct Program {
     first_line: u32,
     generator: bool,
     locals: HashSet<String>,
+    method_imports: Rc<std::collections::BTreeSet<String>>,
+    private_names: Option<Rc<imre_ast::Names>>,
     instructions: Vec<(u32, Instruction)>,
 }
 
@@ -257,6 +259,8 @@ impl Program {
             first_line: 1,
             generator: false,
             locals: HashSet::new(),
+            method_imports: Rc::default(),
+            private_names: None,
             instructions: Vec::new(),
         }
     }
@@ -372,6 +376,8 @@ impl Program {
                         && !function =>
                 {
                     let mut child = Program::new(self.filename.clone(), s.name.as_str());
+                    child.method_imports = self.method_imports.clone();
+                    child.private_names = self.private_names.clone();
                     child.first_line = line;
                     child.lower(&s.body, lines, true, None)?;
                     self.locals.insert(child.name.clone());
@@ -671,6 +677,7 @@ impl Context {
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
             .collect::<Vec<_>>();
         let mut code = Program::new(Rc::from(filename), "<module>");
+        code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
         code.lower(&parsed.syntax().body, &lines, false, None)?;
         code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         Ok(self.box_source_code(Rc::new(code), None))
@@ -1119,12 +1126,14 @@ impl Context {
         struct Signature<'a> {
             #[serde(borrow)]
             private_scope: Option<(&'a str, bool)>,
+            #[serde(default)]
+            method_imports: std::collections::BTreeSet<String>,
         }
         let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|_| Error::new("SystemError", "invalid generator signature"))?;
-        if let Some((owner, postponed)) = signature.private_scope {
-            imre_ast::lower_in(&mut def.body, owner, postponed);
-        }
+        let private_names = signature
+            .private_scope
+            .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
         let lines = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
             .collect::<Vec<_>>();
@@ -1132,6 +1141,8 @@ impl Context {
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
         );
+        program.method_imports = Rc::new(signature.method_imports);
+        program.private_names = private_names;
         program.first_line = code.first_line;
         program.generator = true;
         program.lower(&def.body, &lines, true, None)?;
@@ -1759,7 +1770,14 @@ impl Context {
                 eval(self, branch)
             }
             Expr::Call(v) => {
-                let f = eval(self, &v.func)?;
+                let f = if let Some(field) =
+                    imre_ast::direct_method(v, &code.method_imports, code.private_names.as_deref())
+                {
+                    let receiver = eval(self, &field.value)?;
+                    self.lookup_method(receiver, field.attr.as_str())?
+                } else {
+                    eval(self, &v.func)?
+                };
                 let args = v
                     .arguments
                     .args
