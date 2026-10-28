@@ -814,14 +814,24 @@ pub(super) fn method(
         }
         "list.extend" => {
             arity(name, args, 1, 1)?;
-            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(args[0]) {
-                let added = items.clone();
-                list_items_mut(ctx, receiver)?.extend(added);
+            // Self-extension snapshots the destination, including a list subclass's payload.
+            let source = if ctx.scalar_value(args[0]) == receiver {
+                receiver
             } else {
-                let iterator = ctx.iterator(args[0])?;
+                args[0]
+            };
+            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(source) {
+                let added = super::super::copy_ids(items)?;
+                let items = list_items_mut(ctx, receiver)?;
+                items
+                    .try_reserve(added.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                items.extend(added);
+            } else {
+                let iterator = ctx.iterator(source)?;
                 ctx.heap.keep(iterator);
                 let default = ctx.int(8);
-                let hint = ctx.length_hint(args[0], Some(default))?;
+                let hint = ctx.length_hint(source, Some(default))?;
                 let hint = ctx.as_integer(hint)? as usize;
                 let items = list_items_mut(ctx, receiver)?;
                 if hint <= isize::MAX as usize - items.len() {

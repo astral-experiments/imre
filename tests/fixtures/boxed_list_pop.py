@@ -50,6 +50,15 @@ def growth_allocation(name, bound):
 
 
 def current():
+    class Source(list):
+        def __iter__(self):
+            return iter((9,))
+
+    items = Source([1, 2])
+    items.extend(items)
+    items.extend(Source())
+    assert items == [1, 2, 1, 2, 9]
+
     class Values(list):
         def append(self, item):
             return "override"
@@ -124,3 +133,23 @@ def current():
             list.pop(*args)
         except TypeError as error:
             print(str(error))
+
+
+def extend_allocation(kind):
+    old, new = object(), object()
+    items = [old] * 128
+    source = items if kind == 'self' else [new] * 117
+    if kind == 'tuple':
+        source = tuple(source)
+    last = source[-1]
+    extend = items.extend
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        extend(source)
+    except MemoryError as error:
+        print("caught", error.args)
+        assert len(items) == 128 and all(value is old for value in items)
+    expected = len(items) + len(source)
+    extend(source)
+    print(len(items) == expected, items[0] is old, items[-1] is last)
