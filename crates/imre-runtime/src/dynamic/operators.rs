@@ -2156,7 +2156,7 @@ impl Context {
     }
 
     pub(super) fn defaultdict_missing(&mut self, obj: Id, key: Id) -> Result<Id> {
-        let Value::DefaultDict { factory, .. } = *self.heap.get(obj) else {
+        let Some(factory) = self.defaultdict_factory(obj) else {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -2169,7 +2169,8 @@ impl Context {
             return Err(self.lookup_error("KeyError", key));
         }
         let value = self.call(factory, Vec::new(), Vec::new())?;
-        self.set_dictionary_key(obj, key, value, None, false)
+        let storage = self.dict_storage(obj).expect("validated defaultdict");
+        self.set_dictionary_key(storage, key, value, None, false)
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
