@@ -296,6 +296,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
         return ctx.module(&format!("{module}.{name}"));
     }
+    // os defines the three standard origins itself. The other flags come from posix.
+    if matches!(module, "os" | "posix")
+        && (module == "os" || !matches!(name, "SEEK_SET" | "SEEK_CUR" | "SEEK_END"))
+        && let Some(value) = crate::objects::os::descriptor_constant(name)
+    {
+        return Ok(ctx.int(i64::from(value)));
+    }
     let id = match (module, name) {
         ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,

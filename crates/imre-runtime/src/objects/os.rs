@@ -8,7 +8,7 @@ use super::files::{errno_error, errno_with_filenames};
 use super::{Int, Str, c_int};
 use crate::StrOwner;
 use num_traits::ToPrimitive;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::io;
 
 pub(super) mod links;
@@ -84,18 +84,31 @@ pub(super) fn directory_entry_types(
 }
 
 macro_rules! descriptor_constants {
+    (os: $($name:ident = $flag:ident),* $(,)?) => {
+        descriptor_constants! { $($name = $flag),* }
+
+        /// Look up the platform value shared by the boxed os and posix modules.
+        pub(crate) fn descriptor_constant(name: &str) -> Option<i32> {
+            match name {
+                $(stringify!($flag) => Some(libc::$flag),)*
+                _ => None,
+            }
+        }
+    };
     ($($name:ident = $flag:ident),* $(,)?) => {$(
         #[unsafe(no_mangle)]
         pub static $name: usize = ((libc::$flag as usize) << 1) | 1;
     )*};
 }
-descriptor_constants! {
+descriptor_constants! { os:
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
     imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
+}
+descriptor_constants! {
     imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,
     imre_os_pollerr = POLLERR, imre_os_pollhup = POLLHUP, imre_os_pollnval = POLLNVAL,
 }
@@ -150,24 +163,31 @@ pub unsafe extern "C" fn imre_os_open(
         (|| {
             // SAFETY: the caller's representation tag describes this rooted path.
             let (name, path) = unsafe { syscall_path(path, bytes, "open", "path") }?;
-            let flags = c_int(flags)? | libc::O_CLOEXEC;
+            let flags = c_int(flags)?;
             let mode = c_int(mode)?;
             // SAFETY: dir_fd is a rooted optional integer according to the ABI.
             let dir_fd = unsafe { directory_fd(dir_fd) }?;
-            loop {
-                // SAFETY: the path is terminated and the variadic mode is promoted to int.
-                let fd = unsafe { libc::openat(dir_fd, name.as_ptr(), flags, mode) };
-                if fd >= 0 {
-                    return Ok(Int::from_usize(fd as usize).into_raw());
-                }
-                let error = io::Error::last_os_error();
-                if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(errno_with_filenames(error, Some(path), None));
-                }
-            }
+            open_at(&name, flags, mode, dir_fd)
+                .map(|fd| Int::from_usize(fd as usize).into_raw())
+                .map_err(|error| errno_with_filenames(error, Some(path), None))
         })(),
         0,
     )
+}
+
+/// Open relative to a directory descriptor and atomically mark the new descriptor close-on-exec.
+pub(crate) fn open_at(path: &CStr, flags: i32, mode: i32, dir_fd: i32) -> io::Result<i32> {
+    loop {
+        // SAFETY: path is terminated and the variadic mode is promoted to int.
+        let fd = unsafe { libc::openat(dir_fd, path.as_ptr(), flags | libc::O_CLOEXEC, mode) };
+        if fd >= 0 {
+            return Ok(fd);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
 }
 
 /// Remove the entry itself, using the raw spelling even for trailing slashes.
@@ -203,17 +223,22 @@ unsafe fn directory_fd(fd: usize) -> Result<libc::c_int> {
     } else {
         // SAFETY: a nonzero optional integer has the native tagged-int ABI.
         let integer = unsafe { Int::borrow(fd) };
-        let n = integer.big();
-        n.to_i32().ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                if n.sign() == num_bigint::Sign::Minus {
-                    "fd is less than minimum"
-                } else {
-                    "fd is greater than maximum"
-                },
-            )
-        })?
+        directory_fd_number(&integer)?
+    })
+}
+
+/// Convert an optional directory argument using its descriptor-specific overflow bounds.
+pub(crate) fn directory_fd_number(integer: &Int) -> Result<i32> {
+    let n = integer.big();
+    n.to_i32().ok_or_else(|| {
+        Error::new(
+            Kind::OverflowError,
+            if n.sign() == num_bigint::Sign::Minus {
+                "fd is less than minimum"
+            } else {
+                "fd is greater than maximum"
+            },
+        )
     })
 }
 
@@ -268,16 +293,21 @@ pub unsafe extern "C" fn imre_os_lseek(fd: usize, position: usize, whence: usize
                     )
                 })?;
             let whence = c_int(whence)?;
-            // SAFETY: lseek takes integer values and retains no pointers.
-            let offset = unsafe { libc::lseek(fd, position, whence) };
-            if offset < 0 {
-                Err(errno_error(io::Error::last_os_error()))
-            } else {
-                Ok(Int::from_usize(offset as usize).into_raw())
-            }
+            seek(fd, position, whence).map(|offset| Int::from_usize(offset as usize).into_raw())
         })(),
         0,
     )
+}
+
+/// Seek on the open file description shared by the descriptor and its duplicates.
+pub(crate) fn seek(fd: i32, position: i64, whence: i32) -> Result<i64> {
+    // SAFETY: lseek takes integer values and retains no pointers.
+    let offset = unsafe { libc::lseek(fd, position, whence) };
+    if offset < 0 {
+        Err(errno_error(io::Error::last_os_error()))
+    } else {
+        Ok(offset)
+    }
 }
 
 /// Close exactly once: retrying an interrupted close can close a reused fd.
@@ -296,13 +326,17 @@ pub(crate) fn close(fd: i32) -> Result<()> {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_dup(fd: usize) -> usize {
     finish(
-        c_int(fd).and_then(|fd| {
-            // SAFETY: F_DUPFD_CLOEXEC takes the integer lower bound for the new fd.
-            checked(unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) })
-                .map(|fd| Int::from_usize(fd as usize).into_raw())
-        }),
+        c_int(fd)
+            .and_then(dup)
+            .map(|fd| Int::from_usize(fd as usize).into_raw()),
         0,
     )
+}
+
+/// Return a new non-inheritable descriptor for the same open file description.
+pub(crate) fn dup(fd: i32) -> Result<i32> {
+    // SAFETY: F_DUPFD_CLOEXEC takes the integer lower bound for the new fd.
+    checked(unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) })
 }
 
 /// Duplicate onto a specified number. POSIX dup2 preserves close-on-exec for
@@ -313,28 +347,33 @@ pub extern "C" fn imre_os_dup2(fd: usize, target: usize, inheritable: usize) -> 
         (|| {
             let (fd, target) = (c_int(fd)?, c_int(target)?);
             let inherit = c_int(inheritable)? != 0;
-            // SAFETY: both calls validate the supplied descriptor numbers.
-            let result = unsafe {
-                #[cfg(target_os = "linux")]
-                if !inherit {
-                    libc::dup3(fd, target, libc::O_CLOEXEC)
-                } else {
-                    libc::dup2(fd, target)
-                }
-                #[cfg(not(target_os = "linux"))]
-                libc::dup2(fd, target)
-            };
-            let result = checked(result)?;
-            #[cfg(not(target_os = "linux"))]
-            if !inherit && let Err(error) = set_cloexec(result) {
-                // SAFETY: release the duplicated descriptor if setup failed.
-                unsafe { libc::close(result) };
-                return Err(error);
-            }
-            Ok(Int::from_usize(result as usize).into_raw())
+            dup2(fd, target, inherit).map(|fd| Int::from_usize(fd as usize).into_raw())
         })(),
         0,
     )
+}
+
+/// Replace the target descriptor, setting or clearing close-on-exec as requested.
+pub(crate) fn dup2(fd: i32, target: i32, inherit: bool) -> Result<i32> {
+    // SAFETY: both calls validate the supplied descriptor numbers.
+    let result = unsafe {
+        #[cfg(target_os = "linux")]
+        if !inherit {
+            libc::dup3(fd, target, libc::O_CLOEXEC)
+        } else {
+            libc::dup2(fd, target)
+        }
+        #[cfg(not(target_os = "linux"))]
+        libc::dup2(fd, target)
+    };
+    let result = checked(result)?;
+    #[cfg(not(target_os = "linux"))]
+    if !inherit && let Err(error) = set_cloexec(result) {
+        // SAFETY: release the duplicated descriptor if setup failed.
+        unsafe { libc::close(result) };
+        return Err(error);
+    }
+    Ok(result)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -412,13 +451,13 @@ pub(crate) fn pipe(flags: libc::c_int) -> Result<[i32; 2]> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_isatty(fd: usize) -> i32 {
-    finish(
-        c_int(fd).map(|fd| {
-            // SAFETY: isatty checks the descriptor and returns zero for an invalid fd.
-            unsafe { libc::isatty(fd) }
-        }),
-        0,
-    )
+    finish(c_int(fd).map(|fd| i32::from(isatty(fd))), 0)
+}
+
+/// Return false for both non-terminals and invalid descriptors.
+pub(crate) fn isatty(fd: i32) -> bool {
+    // SAFETY: isatty checks the descriptor and retains no pointers.
+    unsafe { libc::isatty(fd) != 0 }
 }
 
 pub(crate) struct Flag {
