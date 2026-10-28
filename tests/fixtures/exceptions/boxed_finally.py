@@ -109,6 +109,28 @@ for mode in ("break", "continue", "raise", "return"):
     except Exception as exc:
         print(mode, log, type(exc).__name__)
 
+class ReraisingExit(M):
+    def __exit__(self, kind, error, traceback):
+        self.error = error
+        return self
+
+    def __bool__(self):
+        self.log.append(sys.exception() is self.error)
+        raise
+
+log = []
+with ReraisingExit(log):
+    pass
+try:
+    raise KeyError("caller")
+except KeyError:
+    try:
+        with ReraisingExit(log):
+            raise ValueError("body")
+    except ValueError:
+        pass
+assert log == ["enter", "enter", True]
+
 class ActiveExit(M):
     def __exit__(self, kind, error, tb):
         self.log.append(type(sys.exception()).__name__)
