@@ -8,12 +8,12 @@ The ranges below are the 25th and 75th percentiles of the same 12 measurements o
 
 | Workload | Rust (ms) | CPython (ms) | Imre (ms) | Output file (bytes) |
 | --- | ---: | ---: | ---: | ---: |
-| Inventory (repeated) | 26.82–37.70 | 84.60–100.20 | 42.94–57.25 | 654,942 |
-| Inventory (distinct) | 48.79–58.75 | 120.13–145.75 | 78.00–103.53 | 1,438,871 |
-| Base45 decode | 9.71–11.23 | 206.75–256.81 | 19.34–20.42 | 16,384 |
-| Luhn checksum | 5.39–7.95 | 182.00–251.94 | 16.33–19.90 | 1 |
-| Telemetry report | 10.02–20.68 | 139.94–178.11 | 18.48–24.90 | 123 |
-| Conformance report | 30.81–43.56 | 310.83–358.85 | 50.56–60.35 | 109,258 |
+| Inventory (repeated) | 26.90–28.81 | 83.54–96.18 | 41.28–42.34 | 654,942 |
+| Inventory (distinct) | 48.12–50.47 | 118.59–131.36 | 71.99–75.84 | 1,438,871 |
+| Base45 decode | 9.50–10.20 | 191.56–230.67 | 16.49–17.67 | 16,384 |
+| Luhn checksum | 5.27–6.02 | 150.90–174.22 | 13.55–14.29 | 1 |
+| Telemetry report | 9.79–10.81 | 125.82–131.91 | 16.03–17.93 | 123 |
+| Conformance report | 28.94–30.07 | 279.97–305.03 | 47.93–59.53 | 109,258 |
 
 ## What each process does
 
