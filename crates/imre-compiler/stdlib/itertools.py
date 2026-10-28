@@ -1,31 +1,43 @@
 """Iterator tools for runtime-loaded Python."""
 
 
-class chain:
-    """Yield items from each iterable in order."""
+import itertools as _itertools
 
-    __slots__ = ("_sources", "_active")
 
-    def __init__(self, *iterables):
-        self._sources = iter(iterables)
-        self._active = None
+def _make_chain(_get, _set):
+    class chain:
+        """Yield items from each iterable in order."""
 
-    def __iter__(self):
-        return self
+        __slots__ = ("_sources", "_active")
 
-    def __next__(self):
-        while self._sources is not None:
-            if self._active is None:
+        def __init__(self, *iterables):
+            _set(self, False, iter(iterables))
+            _set(self, True, None)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            while _get(self, False) is not None:
+                if _get(self, True) is None:
+                    try:
+                        active = iter(next(_get(self, False)))
+                        _set(self, True, active)
+                    except BaseException:
+                        _set(self, False, None)
+                        raise
                 try:
-                    self._active = iter(next(self._sources))
-                except BaseException:
-                    self._sources = None
-                    raise
-            try:
-                return next(self._active)
-            except StopIteration:
-                self._active = None
-        raise StopIteration
+                    return next(_get(self, True))
+                except StopIteration:
+                    _set(self, True, None)
+            raise StopIteration
+
+
+    chain.__qualname__ = "chain"
+    return chain
+
+
+chain = _make_chain(_itertools._chain_get, _itertools._chain_set)
 
 
 _missing = object()

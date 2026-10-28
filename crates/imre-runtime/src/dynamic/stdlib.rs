@@ -328,6 +328,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
+        ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
         (
             "_collections",
             "_count_elements"
@@ -854,6 +855,29 @@ pub(super) fn call(
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
+    }
+    if name == "itertools._chain_get" || name == "itertools._chain_set" {
+        if !kwargs.is_empty()
+            || (name.ends_with("_get") && args.len() != 2)
+            || (name.ends_with("_set") && args.len() != 3)
+        {
+            return Err(Error::new("TypeError", "invalid chain state arguments"));
+        }
+        let key = if args[1] == TRUE {
+            "_active"
+        } else {
+            "_sources"
+        };
+        if let Value::Instance { fields, .. } = ctx.heap.get_mut(args[0]) {
+            if name.ends_with("_set") {
+                fields.insert(key.to_owned(), args[2]);
+                return Ok(NONE);
+            }
+            if let Some(&value) = fields.get(key) {
+                return Ok(value);
+            }
+        }
+        return Err(Error::new("TypeError", "invalid chain state receiver"));
     }
     if name == super::deque::CLASS {
         return super::deque::construct(ctx, args, kwargs);

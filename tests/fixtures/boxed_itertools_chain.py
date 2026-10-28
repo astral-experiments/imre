@@ -23,3 +23,19 @@ def current():
     else:
         raise AssertionError("accepted a non-iterable")
     assert next(cursor, None) is None
+
+    class PrivateState(chain):
+        def __setattr__(self, name, value):
+            raise AssertionError(name)
+
+        def __getattribute__(self, name):
+            if name in ("_sources", "_active"):
+                raise AssertionError(name)
+            return super().__getattribute__(name)
+
+    assert list(PrivateState([1], [2])) == [1, 2]
+
+    import itertools
+    itertools._chain_get = None
+    itertools._chain_set = None
+    assert list(chain([7], [8])) == [7, 8]
