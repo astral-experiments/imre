@@ -1344,6 +1344,33 @@ impl Context {
         )
     }
 
+    /// Keep the iterator's backing sequence available when the final pull drops it.
+    fn source_loop_owner(&mut self, iterator: Id) -> Id {
+        if !self.heap.has_file_writers() {
+            return iterator;
+        }
+        match self.heap.get(iterator) {
+            Value::RangeIterator(_) => NONE,
+            Value::Iterator {
+                context: None,
+                sequence,
+                ..
+            } => {
+                let owner = sequence.unwrap_or(NONE);
+                self.heap.keep(owner);
+                owner
+            }
+            _ => iterator,
+        }
+    }
+
+    /// Schedule a flush only when the discarded owner could contain a writer.
+    fn release_source_loop_owner(&mut self, owner: Id) {
+        if self.heap.has_file_writers() && self.heap.could_own_writer(owner, true) {
+            self.heap.release_unbound_writers();
+        }
+    }
+
     fn source_step(
         &mut self,
         code: &Program,
@@ -1428,7 +1455,9 @@ impl Context {
             }
             Instruction::Jump(destination) => *ip = *destination,
             Instruction::PopIter => {
-                iterators.pop().expect("active source loop");
+                let iterator = iterators.pop().expect("active source loop");
+                let owner = self.source_loop_owner(iterator);
+                self.release_source_loop_owner(owner);
             }
             Instruction::Iter(e) => {
                 let v = eval(self, e)?;
@@ -1436,6 +1465,7 @@ impl Context {
             }
             Instruction::Next(target, end) => {
                 let iter = *iterators.last().expect("active source loop");
+                let owner = self.source_loop_owner(iter);
                 match self.next_item(iter)? {
                     Some(v) => {
                         if let Some(target) = target {
@@ -1446,6 +1476,7 @@ impl Context {
                     }
                     None => {
                         iterators.pop();
+                        self.release_source_loop_owner(owner);
                         *ip = *end;
                     }
                 }
