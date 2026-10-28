@@ -116,7 +116,7 @@ pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Resul
 
 impl Encoder {
     fn value(&mut self, ctx: &mut Context, id: Id) -> Result<()> {
-        match ctx.heap.get(id) {
+        match ctx.heap.get(ctx.scalar_value(id)) {
             Value::None => self.output.push_str("null"),
             Value::Bool(value) => self.output.push_str(if *value { "true" } else { "false" }),
             Value::Int(value) => write!(self.output, "{value}").unwrap(),
@@ -202,7 +202,7 @@ impl Encoder {
             if i != 0 {
                 self.output.push_str(&self.item_separator);
             }
-            match ctx.heap.get(key) {
+            match ctx.heap.get(ctx.scalar_value(key)) {
                 Value::Str(s) => write_json_string(&mut self.output, s, self.ascii)?,
                 Value::Int(n) => write_json_string(&mut self.output, &n.to_string(), self.ascii)?,
                 Value::Float(n) => {
