@@ -41,6 +41,16 @@ def ordered_dictionary():
     assert repr(source) == "OrderedDict({'self': ...})"
 
 
+    class ClearOnRepr:
+        def __repr__(self):
+            snapshot.clear()
+            return "first"
+
+    snapshot = OrderedDict([("a", ClearOnRepr()), ("b", 2)])
+    assert repr(snapshot) == "OrderedDict({'a': first, 'b': 2})"
+    assert not snapshot
+
+
 def inherited_deletion():
     from operator import delitem
 

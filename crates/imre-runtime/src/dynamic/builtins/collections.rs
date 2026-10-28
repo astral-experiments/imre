@@ -194,6 +194,31 @@ pub(super) fn entries(ctx: &Context, dict: Id) -> Result<&[(Id, Id)]> {
         .ok_or_else(|| type_error("expected a dictionary"))
 }
 
+/// Copy the mapping before a caller invokes Python code on its entries.
+pub(in super::super) fn copy_dict(ctx: &mut Context, object: Id, storage: Id) -> Result<Id> {
+    let copy = ctx.dict(Vec::new());
+    if entries(ctx, storage)?.is_empty() {
+        return Ok(copy);
+    }
+    if let Some(storage) = ctx.raw_dict_source(object)
+        && let Value::Dict(entries) | Value::DefaultDict { entries, .. } = ctx.heap.get(storage)
+        && let Some(entries) = entries.clone_dense()
+    {
+        *ctx.heap.get_mut(copy) = Value::Dict(entries);
+    } else {
+        ctx.for_each_mapping_item(
+            object,
+            copy,
+            MappingOperation::Copy,
+            |ctx, key, value, hash| {
+                ctx.set_dictionary_key(copy, key, value, hash, true)
+                    .map(|_| ())
+            },
+        )?;
+    }
+    Ok(copy)
+}
+
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some(input) = input
         && !ctx.for_each_mapping_item(
@@ -638,28 +663,7 @@ pub(super) fn method(
     match name {
         "dict.copy" => {
             arity(name, args, 0, 0)?;
-            let copy = ctx.dict(Vec::new());
-            if entries(ctx, receiver)?.is_empty() {
-                return Ok(copy);
-            }
-            if let Some(storage) = ctx.raw_dict_source(object)
-                && let Value::Dict(entries) | Value::DefaultDict { entries, .. } =
-                    ctx.heap.get(storage)
-                && let Some(entries) = entries.clone_dense()
-            {
-                *ctx.heap.get_mut(copy) = Value::Dict(entries);
-            } else {
-                ctx.for_each_mapping_item(
-                    object,
-                    copy,
-                    MappingOperation::Copy,
-                    |ctx, key, value, hash| {
-                        ctx.set_dictionary_key(copy, key, value, hash, true)
-                            .map(|_| ())
-                    },
-                )?;
-            }
-            Ok(copy)
+            copy_dict(ctx, object, receiver)
         }
         "dict.clear" => {
             arity(name, args, 0, 0)?;
