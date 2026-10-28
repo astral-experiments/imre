@@ -2864,6 +2864,35 @@ impl Context {
         Ok(result)
     }
 
+    /// Return the original storage of an exact list or a list subclass.
+    fn list_storage(&self, obj: Id) -> Option<Id> {
+        let storage = self.scalar_value(obj);
+        matches!(self.heap.get(storage), Value::List(_)).then_some(storage)
+    }
+
+    /// Concatenate the two reference arrays without invoking either operand's iterator.
+    fn concat_list(&mut self, storage: Id, other: Id) -> Result<Id> {
+        let Value::List(left) = self.heap.get(storage) else {
+            unreachable!("list payload")
+        };
+        let Value::List(right) = self.heap.get(self.scalar_value(other)) else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "can only concatenate list (not \"{}\") to list",
+                    self.type_name(other)
+                ),
+            ));
+        };
+        let mut items = Vec::new();
+        items
+            .try_reserve_exact(left.len() + right.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        items.extend_from_slice(left);
+        items.extend_from_slice(right);
+        Ok(self.alloc(Value::List(items)))
+    }
+
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         self.binary_operation(op, a, b, false)
     }
@@ -2984,6 +3013,25 @@ impl Context {
             "+" if self.string_storage(a).is_some() && self.string_storage(b).is_some() => {
                 return self.concat_strings(a, b);
             }
+            "+" if let Some(storage) = self.list_storage(a) => {
+                if inplace && storage == a {
+                    builtins::call(self, "list.extend", &[storage, b], &[])?;
+                    return Ok(a);
+                }
+                if self.slot(a, "__add__").is_some() {
+                    // A Python __add__ disables the native sequence-concatenation fallback.
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return self.concat_list(storage, b);
+            }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
                 (Value::Bytes(x), Value::Bytes(y) | Value::ByteArray(y)) => {
                     if y.is_empty() {
@@ -3010,9 +3058,6 @@ impl Context {
                         "TypeError",
                         format!("can't concat {} to bytearray", self.type_name(b)),
                     ));
-                }
-                (Value::List(x), Value::List(y)) => {
-                    return Ok(self.alloc(Value::List([x.as_slice(), y.as_slice()].concat())));
                 }
                 (Value::Tuple(x), Value::Tuple(y)) => {
                     return Ok(self.alloc(Value::Tuple([x.as_slice(), y.as_slice()].concat())));
@@ -3237,6 +3282,13 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         let Some(method) = self.bound_slot(obj, name)? else {
+            // Defining __radd__ installs a numeric slot that also calls inherited list.__add__.
+            if name == "__add__"
+                && let Some(storage) = self.list_storage(obj)
+                && self.slot(obj, "__radd__").is_some()
+            {
+                return self.concat_list(storage, other).map(Some);
+            }
             if name == "__ne__"
                 && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
             {
@@ -3364,8 +3416,13 @@ impl Context {
             *left = bytes;
             return Ok(a);
         }
-        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
-            builtins::call(self, "list.extend", &[a, b], &[])?;
+        // A list subclass inherits a numeric __iadd__ that runs before reflected addition.
+        if op == "+"
+            && let Some(storage) = self.list_storage(a)
+            && storage != a
+            && self.slot(a, "__iadd__").is_none()
+        {
+            builtins::call(self, "list.extend", &[storage, b], &[])?;
             return Ok(a);
         }
         if op == "*"

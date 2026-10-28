@@ -112,6 +112,40 @@ def current():
         clone.pop()
     assert len(original) == 2
     retained = {}
+    class Stored(list):
+        def __iter__(self):
+            raise AssertionError("concatenation must read the original list storage")
+
+    stored = Stored([retained])
+    for result in (stored + [], [] + stored, stored + stored):
+        assert type(result) is list and result is not stored and result[0] is retained
+    assert len(stored) == 1
+
+    class Right:
+        def __radd__(self, left):
+            return "reflected"
+
+        def __iter__(self):
+            return iter((3,))
+
+    exact = [1]
+    exact += Right()
+    assert exact == "reflected"
+    alias = stored
+    stored += Right()
+    assert stored is alias and stored[-1] == 3
+
+    class Declines(list):
+        def __add__(self, other):
+            return NotImplemented
+
+    try:
+        Declines([1]) + [2]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("declined addition fell back to list storage")
+
     items = [retained, 2, 3]
     alias = items
     print(items.pop(), list.pop(items, True), items.pop(-1) is retained, alias)
@@ -169,3 +203,20 @@ def extend_allocation(kind):
     expected = len(items) + len(source)
     extend(source)
     print(len(items) == expected, items[0] is old, items[-1] is last)
+
+
+def concat_allocation():
+    old, new = object(), object()
+    left, right = [old] * 128, [new] * 117
+
+    def combine():
+        return left + right
+
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        combine()
+    except MemoryError as error:
+        print("caught", error.args)
+    result = combine()
+    print(len(left), len(right), len(result), result[127] is old, result[128] is new)
