@@ -255,6 +255,7 @@ impl Context {
             Value::Str(_) => "str",
             Value::Map { .. } => "map",
             Value::Filter { .. } => "filter",
+            Value::Poll(_) => "select.poll",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
@@ -541,6 +542,7 @@ pub(super) enum Value {
         value: crate::objects::Calendar,
         tzinfo: Id,
     },
+    Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
     Range(super::range::Range),
@@ -1079,6 +1081,7 @@ impl Value {
             | Self::LoggerHandle(_)
             | Self::HandlerLock(_)
             | Self::PrimitiveLock(_)
+            | Self::Poll(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)

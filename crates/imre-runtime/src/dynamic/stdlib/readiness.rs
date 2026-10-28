@@ -3,7 +3,7 @@ use super::super::{
     Context, builtins,
     value::{Error, Id, MarkQueue, NONE, Result, Value},
 };
-use crate::objects::readiness::{Poll, PollError};
+use crate::objects::readiness::Poll;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 
 const READ: i64 = 1;
@@ -155,13 +155,7 @@ impl Selector {
 
     /// Each selected pair reuses the key returned by register or modify.
     fn select(&mut self, ctx: &mut Context, seconds: Id) -> Result<Id> {
-        let (count, events) =
-            self.poll
-                .ready(timeout(ctx, seconds)?)
-                .map_err(|error| match error {
-                    PollError::Overflow => Error::new("OverflowError", "too many file descriptors"),
-                    PollError::Io(error) => Error::new("OSError", error.to_string()),
-                })?;
+        let (count, events) = self.poll.ready(timeout(ctx, seconds)?)?;
         let mut results = Vec::new();
         results
             .try_reserve(count)

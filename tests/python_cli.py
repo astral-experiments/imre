@@ -758,6 +758,7 @@ def report(text):
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
+            "boxed_select.py",
             "boxed_urlsplit.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",

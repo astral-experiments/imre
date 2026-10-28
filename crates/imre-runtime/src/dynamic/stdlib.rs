@@ -40,6 +40,7 @@ mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
 mod secrets;
+mod select;
 mod socket;
 mod structure;
 mod traceback;
@@ -80,6 +81,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "operator"
             | "platform"
             | "site"
+            | "select"
             | "selectors"
             | "struct"
             | "base64"
@@ -408,6 +410,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.int(i64::from(value))
         }
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
+        ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
+        ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
+            ctx.int(i64::from(flag))
+        }
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
@@ -1133,6 +1139,9 @@ pub(super) fn call(
         if let Some(op) = operator::Operation::named(name) {
             return op.call(ctx, name, args, kwargs);
         }
+    }
+    if let Some(method) = name.strip_prefix("select.") {
+        return select::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);

@@ -53,16 +53,19 @@ impl Poll {
     pub(crate) fn ready(
         &mut self,
         timeout: Option<Duration>,
-    ) -> std::result::Result<(usize, impl Iterator<Item = (i32, u16)> + '_), PollError> {
+    ) -> Result<(usize, impl Iterator<Item = (i32, u16)> + '_)> {
         self.compact();
         let fds = &mut self.slots;
-        let nfds = fds.len().try_into().map_err(|_| PollError::Overflow)?;
+        let nfds = fds
+            .len()
+            .try_into()
+            .map_err(|_| Error::new(Kind::OverflowError, "too many file descriptors"))?;
         let count = wait(timeout, |remaining| {
             let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
             // SAFETY: nfds is the length of this initialized, exclusively borrowed slice.
             unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
         })
-        .map_err(PollError::Io)? as usize;
+        .map_err(errno_error)? as usize;
         Ok((
             count,
             fds.iter()
@@ -81,10 +84,6 @@ impl Poll {
             }
         }
     }
-}
-pub(crate) enum PollError {
-    Overflow,
-    Io(io::Error),
 }
 
 #[unsafe(no_mangle)]
@@ -113,16 +112,7 @@ pub unsafe extern "C" fn imre_poll_update(
             } else {
                 // SAFETY: a present mask is a rooted canonical integer.
                 let mask = unsafe { Int::borrow(mask) };
-                let small = mask.as_small();
-                if small.map_or_else(|| num_traits::Signed::is_negative(&*mask.big()), |n| n < 0) {
-                    return Err(Error::new(Kind::ValueError, "Cannot convert negative int"));
-                }
-                small.and_then(|n| u16::try_from(n).ok()).ok_or_else(|| {
-                    Error::new(
-                        Kind::OverflowError,
-                        "Python int too large for C unsigned short",
-                    )
-                })? as i16
+                poll_mask(&mask)?
             };
             // SAFETY: the rooted receiver is exclusively borrowed without user callbacks.
             unsafe {
@@ -147,8 +137,29 @@ pub unsafe extern "C" fn imre_poll_update(
     );
 }
 
+/// Convert an interest mask to its unsigned 16-bit kernel representation.
+pub(crate) fn poll_mask(mask: &Int) -> Result<i16> {
+    let small = mask.as_small();
+    if small.map_or_else(|| num_traits::Signed::is_negative(&*mask.big()), |n| n < 0) {
+        return Err(Error::new(Kind::ValueError, "Cannot convert negative int"));
+    }
+    small
+        .and_then(|n| u16::try_from(n).ok())
+        .map(|n| n as i16)
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large for C unsigned short",
+            )
+        })
+}
+
 fn fd(word: usize) -> Result<i32> {
-    let fd = c_int(word)?;
+    checked_fd(c_int(word)?)
+}
+
+/// Reject negative descriptors before passing them to either readiness syscall.
+pub(crate) fn checked_fd(fd: i32) -> Result<i32> {
     if fd < 0 {
         return Err(Error::new(
             Kind::ValueError,
@@ -187,33 +198,14 @@ unsafe fn timeout(tag: u32, word: usize, poll: bool) -> Result<Option<Duration>>
     if tag == 0 || tag & NULLABLE != 0 && word == 0 {
         return Ok(None);
     }
-    let overflow = || {
-        Error::new(
-            Kind::OverflowError,
-            "timestamp too large to convert to C PyTime_t",
-        )
-    };
     let value = match tag & !NULLABLE {
         1 | 2 => {
             let n = if tag & !NULLABLE == 1 {
-                (word - usize::from(tag & NULLABLE != 0)) as i64
+                Some((word - usize::from(tag & NULLABLE != 0)) as i64)
             } else {
-                if word & 1 == 0 {
-                    return Err(overflow());
-                }
-                (word as i64) >> 1
+                (word & 1 != 0).then_some((word as i64) >> 1)
             };
-            let ns = n
-                .checked_mul(if poll { 1_000_000 } else { 1_000_000_000 })
-                .ok_or_else(overflow)?;
-            if poll && i32::try_from(n).is_err() {
-                return Err(Error::new(Kind::OverflowError, "timeout is too large"));
-            }
-            return if n < 0 && !poll {
-                Err(Error::new(Kind::ValueError, "timeout must be non-negative"))
-            } else {
-                Ok((ns >= 0).then(|| Duration::from_nanos(ns as u64)))
-            };
+            return int_timeout(n, poll);
         }
         7 if tag & NULLABLE == 0 => f64::from_bits(word as u64),
         // SAFETY: the caller roots the present optional float's allocation.
@@ -229,6 +221,32 @@ unsafe fn timeout(tag: u32, word: usize, poll: bool) -> Result<Option<Duration>>
             ));
         }
     };
+    float_timeout(value, poll)
+}
+
+/// Convert seconds or poll milliseconds without first rounding a Python integer to float.
+pub(crate) fn int_timeout(n: Option<i64>, poll: bool) -> Result<Option<Duration>> {
+    let overflow = || {
+        Error::new(
+            Kind::OverflowError,
+            "timestamp too large to convert to C PyTime_t",
+        )
+    };
+    let n = n.ok_or_else(overflow)?;
+    let ns = n
+        .checked_mul(if poll { 1_000_000 } else { 1_000_000_000 })
+        .ok_or_else(overflow)?;
+    if poll && i32::try_from(n).is_err() {
+        return Err(Error::new(Kind::OverflowError, "timeout is too large"));
+    }
+    if n < 0 && !poll {
+        return Err(Error::new(Kind::ValueError, "timeout must be non-negative"));
+    }
+    Ok((ns >= 0).then(|| Duration::from_nanos(ns as u64)))
+}
+
+/// Convert fractional timeouts before waiting on file descriptors.
+pub(crate) fn float_timeout(value: f64, poll: bool) -> Result<Option<Duration>> {
     if value.is_nan() {
         return Err(Error::new(
             Kind::ValueError,
@@ -269,10 +287,7 @@ pub unsafe extern "C" fn imre_poll_wait(
                 unreachable!()
             };
             let timeout = timeout(tag, word, true)?;
-            let (count, events) = p.ready(timeout).map_err(|error| match error {
-                PollError::Overflow => Error::new(Kind::OverflowError, "too many file descriptors"),
-                PollError::Io(error) => errno_error(error),
-            })?;
+            let (count, events) = p.ready(timeout)?;
             let mut out = Words::new(6); // owned records
             out.values
                 .try_reserve(count)
@@ -295,6 +310,78 @@ pub unsafe extern "C" fn imre_poll_wait(
     finish(result, ptr::null())
 }
 
+/// The three checked descriptor sets used by one POSIX select call.
+pub(crate) struct SelectFds {
+    sets: [libc::fd_set; 3],
+    max: i32,
+}
+
+impl SelectFds {
+    /// Start with no descriptors in any interest set.
+    pub(crate) fn new() -> Self {
+        Self {
+            // SAFETY: all-zero fd sets are valid and contain no descriptors.
+            sets: unsafe { std::mem::zeroed() },
+            max: -1,
+        }
+    }
+
+    /// Validate each descriptor and limit each input separately, including duplicate entries.
+    pub(crate) fn insert(&mut self, group: usize, index: usize, fd: i32) -> Result<()> {
+        if fd as usize >= libc::FD_SETSIZE {
+            return Err(Error::new(
+                Kind::ValueError,
+                "filedescriptor out of range in select()",
+            ));
+        }
+        if index >= libc::FD_SETSIZE {
+            return Err(Error::new(
+                Kind::ValueError,
+                "too many file descriptors in select()",
+            ));
+        }
+        // SAFETY: fd is nonnegative and strictly below FD_SETSIZE.
+        unsafe { libc::FD_SET(fd, &mut self.sets[group]) };
+        self.max = self.max.max(fd);
+        Ok(())
+    }
+
+    /// Replace the interest sets with the kernel's readiness result, retrying interrupted waits.
+    pub(crate) fn wait(&mut self, timeout: Option<Duration>) -> Result<bool> {
+        let mut ready = self.sets;
+        let count = wait(timeout, |remaining| {
+            ready = self.sets;
+            let [r, w, x] = &mut ready;
+            let mut tv = remaining.map(|d| {
+                let us = d.as_nanos().div_ceil(1_000);
+                libc::timeval {
+                    tv_sec: (us / 1_000_000) as _,
+                    tv_usec: (us % 1_000_000) as _,
+                }
+            });
+            // SAFETY: all sets and optional timeval are writable for the syscall.
+            unsafe {
+                libc::select(
+                    self.max + 1,
+                    r,
+                    w,
+                    x,
+                    tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
+                )
+            }
+        })
+        .map_err(errno_error)?;
+        self.sets = if count == 0 { Self::new().sets } else { ready };
+        Ok(count != 0)
+    }
+
+    /// Test an original descriptor against its ready set.
+    pub(crate) fn ready(&self, group: usize, fd: i32) -> bool {
+        // SAFETY: only descriptor numbers within the fd_set are inspected.
+        (fd as usize) < libc::FD_SETSIZE && unsafe { libc::FD_ISSET(fd, &self.sets[group]) }
+    }
+}
+
 /// Select over three integer lists, retaining each input's order and duplicates.
 ///
 /// # Safety
@@ -312,68 +399,28 @@ pub unsafe extern "C" fn imre_select_wait(
         (|| {
             // SAFETY: the caller roots the tagged timeout.
             let timeout = unsafe { timeout(tag, word, false) }?;
-            // SAFETY: all-zero fd sets are valid and contain no descriptors.
-            let mut wanted: [libc::fd_set; 3] = unsafe { std::mem::zeroed() };
-            let mut max = -1;
+            let mut sets = SelectFds::new();
             let lists = [r, w, x];
-            for (list, set) in lists.iter().zip(&mut wanted) {
+            for (group, list) in lists.iter().enumerate() {
                 // SAFETY: list points to the rooted integer list for this interest set.
                 unsafe {
                     (&**list).0.with(|values| {
-                        for (index, value) in values.iter().enumerate() {
-                            let fd = fd(value.0)?;
-                            if fd as usize >= libc::FD_SETSIZE {
-                                return Err(Error::new(
-                                    Kind::ValueError,
-                                    "filedescriptor out of range in select()",
-                                ));
-                            }
-                            if index >= libc::FD_SETSIZE {
-                                return Err(Error::new(
-                                    Kind::ValueError,
-                                    "too many file descriptors in select()",
-                                ));
-                            }
-                            // SAFETY: fd is nonnegative and strictly below FD_SETSIZE.
-                            libc::FD_SET(fd, set);
-                            max = max.max(fd);
-                        }
-                        Ok(())
+                        values
+                            .iter()
+                            .enumerate()
+                            .try_for_each(|(index, value)| sets.insert(group, index, fd(value.0)?))
                     })
                 }?;
             }
-            let mut ready = wanted;
-            let count = wait(timeout, |remaining| {
-                ready = wanted;
-                let [r, w, x] = &mut ready;
-                let mut tv = remaining.map(|d| {
-                    let us = d.as_nanos().div_ceil(1_000);
-                    libc::timeval {
-                        tv_sec: (us / 1_000_000) as _,
-                        tv_usec: (us % 1_000_000) as _,
-                    }
-                });
-                // SAFETY: all sets and optional timeval are writable for the syscall.
-                unsafe {
-                    libc::select(
-                        max + 1,
-                        r,
-                        w,
-                        x,
-                        tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
-                    )
-                }
-            })
-            .map_err(errno_error)?;
-            for (i, (list, set)) in lists.into_iter().zip(&ready).enumerate() {
+            let any_ready = sets.wait(timeout)?;
+            for (i, list) in lists.into_iter().enumerate() {
                 let mut result = Vec::new();
-                if count > 0 {
+                if any_ready {
                     // SAFETY: the exact list is still rooted, and every fd was checked above.
                     unsafe {
                         (&*list).0.with(|values| -> Result<()> {
                             for value in values {
-                                // SAFETY: values are unchanged across the callback-free syscall.
-                                if libc::FD_ISSET((value.0 as i64 >> 1) as i32, set) {
+                                if sets.ready(i, (value.0 as i64 >> 1) as i32) {
                                     result.try_reserve(1).map_err(|_| Error::allocation())?;
                                     result.push(value.clone());
                                 }

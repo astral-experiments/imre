@@ -84,23 +84,20 @@ pub(super) fn directory_entry_types(
 }
 
 macro_rules! descriptor_constants {
-    (os: $($name:ident = $flag:ident),* $(,)?) => {
-        descriptor_constants! { $($name = $flag),* }
+    ($lookup:ident -> $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
+        $(#[unsafe(no_mangle)]
+        pub static $name: usize = ((libc::$flag as usize) << 1) | 1;)*
 
-        /// Look up the platform value shared by the boxed os and posix modules.
-        pub(crate) fn descriptor_constant(name: &str) -> Option<i32> {
+        /// Look up the platform constant exported by the corresponding boxed module.
+        pub(crate) fn $lookup(name: &str) -> Option<$ty> {
             match name {
                 $(stringify!($flag) => Some(libc::$flag),)*
                 _ => None,
             }
         }
     };
-    ($($name:ident = $flag:ident),* $(,)?) => {$(
-        #[unsafe(no_mangle)]
-        pub static $name: usize = ((libc::$flag as usize) << 1) | 1;
-    )*};
 }
-descriptor_constants! { os:
+descriptor_constants! { descriptor_constant -> i32;
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,
@@ -108,7 +105,7 @@ descriptor_constants! { os:
     imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
 }
-descriptor_constants! {
+descriptor_constants! { poll_constant -> i16;
     imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,
     imre_os_pollerr = POLLERR, imre_os_pollhup = POLLHUP, imre_os_pollnval = POLLNVAL,
 }
