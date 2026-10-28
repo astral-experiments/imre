@@ -8,6 +8,25 @@ use num_traits::{Signed, Zero};
 use super::{Context, Error, Id, Result, Value};
 use crate::Int;
 
+pub(super) const METHODS: &[&str] = &[
+    "__bool__",
+    "__contains__",
+    "__eq__",
+    "__ge__",
+    "__getitem__",
+    "__gt__",
+    "__hash__",
+    "__iter__",
+    "__le__",
+    "__len__",
+    "__lt__",
+    "__ne__",
+    "__repr__",
+    "__reversed__",
+    "count",
+    "index",
+];
+
 #[derive(Clone)]
 pub(super) struct Range {
     pub(super) start: Int,
@@ -130,7 +149,7 @@ impl Cursor {
     }
 }
 
-/// Dispatch the bound range protocols through the same cursor as iter, reversed and next.
+/// Dispatch descriptors for ranges and their iterators.
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -139,10 +158,11 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let search = matches!(name, "count" | "index");
+    let wrapper = !matches!(name, "count" | "index" | "__reversed__" | "__length_hint__");
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            if search {
+            if !wrapper {
                 format!("unbound method {owner}.{name}() needs an argument")
             } else {
                 format!("descriptor '{name}' of '{owner}' object needs an argument")
@@ -163,10 +183,9 @@ pub(super) fn method(
             ),
         ));
     }
-    let wrapper = matches!(name, "__iter__" | "__next__");
     if !kwargs.is_empty() {
         let label = if wrapper {
-            format!("wrapper {name}")
+            format!("wrapper {name}()")
         } else {
             format!("{owner}.{name}()")
         };
@@ -190,6 +209,32 @@ pub(super) fn method(
         };
         return search_range(ctx, range.clone(), *item, name == "index");
     }
+    if matches!(
+        name,
+        "__eq__"
+            | "__ne__"
+            | "__lt__"
+            | "__le__"
+            | "__gt__"
+            | "__ge__"
+            | "__contains__"
+            | "__getitem__"
+    ) {
+        let [other] = rest else {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
+        };
+        return match name {
+            "__contains__" => ctx.contains(*other, receiver).map(super::builtins::boolean),
+            "__getitem__" => ctx.get_item(receiver, *other),
+            "__eq__" | "__ne__" if matches!(ctx.heap.get(*other), Value::Range(_)) => Ok(
+                super::builtins::boolean(ctx.equal(receiver, *other) == (name == "__eq__")),
+            ),
+            _ => Ok(super::value::NOT_IMPLEMENTED),
+        };
+    }
     if !rest.is_empty() {
         let n = rest.len();
         let message = if wrapper {
@@ -200,6 +245,16 @@ pub(super) fn method(
         return Err(Error::new("TypeError", message));
     }
     match (ctx.heap.get(receiver), name) {
+        (_, "__len__") => super::builtins::call(ctx, "len", &[receiver], &[]),
+        (_, "__bool__") => ctx.truth(receiver).map(super::builtins::boolean),
+        (_, "__hash__") => {
+            let hash = ctx.dictionary_hash(receiver)?;
+            Ok(ctx.int(hash))
+        }
+        (_, "__repr__") => {
+            let repr = ctx.checked_format(receiver, true)?;
+            Ok(ctx.text(repr))
+        }
         (Value::Range(range), "__reversed__") => {
             Ok(ctx.alloc(Value::RangeIterator(range.iter(true))))
         }

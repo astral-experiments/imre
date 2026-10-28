@@ -10,13 +10,21 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
-        if let Some(name) = symbol.strip_prefix("slice.")
-            && let Some(&name) = slice::METHODS.iter().find(|&&method| method == name)
+        let slots = match symbol.split_once('.') {
+            Some(("range", attr)) => Some(("range", attr, range::METHODS)),
+            Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
+            _ => None,
+        };
+        if let Some((owner, attr, methods)) = slots
+            && let Some(&name) = methods.iter().find(|&&method| method == attr)
         {
             return Some(Self {
-                owner: "slice",
+                owner,
                 name,
-                method: matches!(name, "indices" | "__reduce__"),
+                method: matches!(
+                    name,
+                    "count" | "index" | "__reversed__" | "indices" | "__reduce__"
+                ),
             });
         }
         let method = match symbol {
@@ -77,6 +85,7 @@ impl BuiltinDescriptor {
         }
         let accepts = match self.owner {
             "object" => true,
+            "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
             "dict" => ctx.dict_storage(receiver).is_some(),

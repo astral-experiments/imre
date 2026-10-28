@@ -325,9 +325,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
-        Value::Range(_) if matches!(attr, "count" | "index" | "__iter__" | "__reversed__") => {
-            "range"
-        }
+        Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
