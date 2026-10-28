@@ -193,16 +193,3 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
     };
     Some(make(ctx, &args))
 }
-
-pub(super) fn repr(ctx: &Context, union: Union) -> String {
-    tuple_items(ctx, union.args)
-        .iter()
-        .map(|&arg| {
-            if ctx.builtins.get("NoneType") == Some(&arg) {
-                return "None".to_owned();
-            }
-            typing::type_repr(ctx, arg)
-        })
-        .collect::<Vec<_>>()
-        .join(" | ")
-}
