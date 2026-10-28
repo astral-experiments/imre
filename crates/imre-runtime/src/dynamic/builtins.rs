@@ -17,7 +17,9 @@ pub(super) use collections::{
     copy_dict, hashable, remove_dict_item, remove_dict_item_hashed, set_add, set_member,
     update as update_dict, update_set,
 };
-pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
+pub(super) use text::{
+    bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
+};
 
 macro_rules! exception_kinds {
     ($($kind:ident),* $(,)?) => {

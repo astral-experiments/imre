@@ -115,6 +115,16 @@ impl Context {
         Ok(self.alloc(Value::Tuple(fields)))
     }
 
+    /// Apply a replacement field conversion before evaluating its nested format specification.
+    fn format_conversion(&mut self, value: Id, conversion: Id) -> Result<Id> {
+        let conversion = self
+            .str_value(conversion)?
+            .chars()
+            .next()
+            .unwrap_or_default();
+        builtins::format_conversion(self, value, conversion)
+    }
+
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
             "match_class" => self.match_class(a, b, c),
@@ -384,34 +394,13 @@ impl Context {
                 let class = (op == "~").then(|| self.flag_class(a)).flatten();
                 self.flag_or_integer(class, result)
             }
+            "format_conversion" => self.format_conversion(a, b),
             "format" => {
-                let mut value = a;
-                if b != NONE {
-                    let conv = self.str_value(b)?;
-                    let s = match conv {
-                        "r" => self.checked_format(a, true)?,
-                        "s" => self.checked_format(a, false)?,
-                        "a" => self
-                            .checked_format(a, true)?
-                            .chars()
-                            .flat_map(|c| {
-                                if c.is_ascii() {
-                                    c.to_string()
-                                } else if (c as u32) <= 0xff {
-                                    format!("\\x{:02x}", c as u32)
-                                } else if (c as u32) <= 0xffff {
-                                    format!("\\u{:04x}", c as u32)
-                                } else {
-                                    format!("\\U{:08x}", c as u32)
-                                }
-                                .chars()
-                                .collect::<Vec<_>>()
-                            })
-                            .collect(),
-                        _ => return Err(Error::new("ValueError", "unsupported conversion")),
-                    };
-                    value = self.text(s);
-                }
+                let value = if b == NONE {
+                    a
+                } else {
+                    self.format_conversion(a, b)?
+                };
                 let spec = if c == NONE {
                     String::new()
                 } else {

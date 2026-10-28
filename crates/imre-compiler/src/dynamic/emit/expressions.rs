@@ -260,16 +260,16 @@ impl Function<'_, '_> {
                         let prefix = self.text(debug.as_str());
                         out = self.op("+", &[&out, &prefix]);
                     }
-                    let v = self.expr(&field.expression);
-                    let conversion = field
-                        .conversion
-                        .to_char()
-                        .map_or_else(|| "0".into(), |c| self.text(&c.to_string()));
+                    let mut value = self.expr(&field.expression);
+                    if let Some(c) = field.conversion.to_char() {
+                        let conversion = self.text(&c.to_string());
+                        value = self.op("format_conversion", &[&value, &conversion]);
+                    }
                     let spec = match &field.format_spec {
                         Some(s) => self.format_parts(&s.elements),
                         None => self.text(""),
                     };
-                    self.op("format", &[&v, &conversion, &spec])
+                    self.op("format", &[&value, "0", &spec])
                 }
             };
             out = self.op("+", &[&out, &value]);
