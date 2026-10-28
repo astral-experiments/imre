@@ -131,3 +131,19 @@ class Renames(Exception):
 stream = io.StringIO()
 print_exception(Renames(), limit=0, file=stream)
 assert stream.getvalue() == "AfterRender: renamed\n"
+
+class ModuleName(str):
+    def __eq__(self, other):
+        visits.append(other)
+        return str(self) == other
+
+    def __add__(self, other):
+        visits.append(other)
+        return str(self) + other
+
+
+for module in ("package.errors", "__main__", None, ModuleName("package.errors")):
+    Outer.Local.__module__ = module
+    visits = []
+    capture(Outer.Local("with module"), limit=0)
+    print(visits)
