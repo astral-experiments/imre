@@ -1922,9 +1922,7 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
-            Value::Native(class)
-                if class == "slice" && matches!(name, "indices" | "__hash__" | "__reduce__") =>
-            {
+            Value::Native(class) if class == "slice" && super::slice::METHODS.contains(&name) => {
                 return Ok(self.builtin(&format!("slice.{name}")));
             }
             Value::Native(class)

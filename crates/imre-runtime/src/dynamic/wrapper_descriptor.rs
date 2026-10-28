@@ -10,6 +10,15 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some(name) = symbol.strip_prefix("slice.")
+            && let Some(&name) = slice::METHODS.iter().find(|&&method| method == name)
+        {
+            return Some(Self {
+                owner: "slice",
+                name,
+                method: matches!(name, "indices" | "__reduce__"),
+            });
+        }
         let method = match symbol {
             "list.append" => Some("append"),
             "list.pop" => Some("pop"),
@@ -24,7 +33,6 @@ impl BuiltinDescriptor {
         }
         let (owner, name) = match symbol {
             "object.__hash__" => ("object", "__hash__"),
-            "slice.__hash__" => ("slice", "__hash__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
