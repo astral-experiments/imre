@@ -618,12 +618,7 @@ impl Context {
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::MappingViewIterator { .. } => return self.next_mapping_view_item(id),
-            Value::DictIterator(iter) => {
-                let mut iter = *iter;
-                let item = iter.next(self);
-                *self.heap.get_mut(id) = Value::DictIterator(iter);
-                return item;
-            }
+            Value::DictIterator(iter) => return (*iter).next(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
                 let input = *input;
