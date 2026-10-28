@@ -181,7 +181,7 @@ pub(super) fn construct(
                 }
                 let class = match ctx.heap.get(message) {
                     Value::Instance { class, .. } => Some(*class),
-                    Value::Raised(error) => error.class,
+                    Value::Raised(error) => Some(error.class),
                     _ => None,
                 };
                 if class.is_some_and(|class| {

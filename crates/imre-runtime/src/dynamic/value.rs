@@ -61,7 +61,6 @@ pub(super) struct Location {
 pub(super) struct Trace {
     pub frames: Vec<(Location, Id)>,
     pub instance: Option<Id>,
-    pub context: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
     /// Live members belong to the exception instance across traceback clones.
@@ -82,11 +81,14 @@ pub(super) struct ImportFields {
 #[derive(Clone, Debug)]
 pub(super) struct Error {
     pub kind: String,
-    pub class: Option<Id>,
+    /// The Python exception class, or NONE for a native error.
+    pub class: Id,
     pub message: String,
     pub args: Option<Id>,
     pub decode: Option<Box<DecodeState>>,
     pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
+    // Keep the context reachable even if the optional traceback cannot be allocated.
+    pub context: Id,
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
     pub import: Option<crate::shared::Shared<ImportFields>>,
@@ -106,15 +108,21 @@ impl Error {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
         Self {
             kind: kind.to_owned(),
-            class: None,
+            class: NONE,
             message: message.into(),
             args: None,
             decode: None,
             os_args: None,
+            context: NONE,
             trace: None,
             exit_status: None,
             import: None,
         }
+    }
+
+    /// Read the class handle of an exception constructed from a Python class.
+    pub(super) fn class(&self) -> Option<Id> {
+        (self.class != NONE).then_some(self.class)
     }
 
     /// Attach the module and member names exposed on a Python import exception.
@@ -153,7 +161,8 @@ impl Error {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
             .into_iter()
-            .chain(self.class)
+            .chain(self.class())
+            .chain((self.context != NONE).then_some(self.context))
             .chain(
                 self.decode
                     .iter()
@@ -167,7 +176,6 @@ impl Error {
                     .map(|&(_, frame)| frame)
                     .chain((trace.stop_value != NONE).then_some(trace.stop_value))
                     .chain(trace.instance)
-                    .chain(trace.context)
                     .chain(trace.cause)
                     .chain(trace.import_message)
                     .chain(
@@ -180,6 +188,14 @@ impl Error {
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
             }))
+    }
+
+    /// Acquire the cold metadata while an error is already propagating.
+    fn try_tracing(&mut self) -> Option<&mut Trace> {
+        if self.trace.is_none() {
+            self.trace = Some(allocator_api2::boxed::Box::try_new(Trace::default()).ok()?);
+        }
+        self.trace.as_deref_mut()
     }
 
     pub(super) fn tracing(&mut self) -> &mut Trace {
@@ -204,12 +220,23 @@ impl Context {
                 loc.line = line;
                 loc.span = Some([start, split, end]);
             }
-            let trace = error.tracing();
             let active = self.heap.active_exception();
-            if trace.frames.is_empty() && active != NONE && trace.instance != Some(active) {
-                trace.context = Some(active);
+            if active != NONE
+                && error
+                    .trace
+                    .as_ref()
+                    .is_none_or(|trace| trace.frames.is_empty() && trace.instance != Some(active))
+            {
+                error.context = active;
             }
-            trace.frames.push((loc, frame));
+            if let Some(trace) = error.try_tracing()
+                && trace.frames.try_reserve(1).is_ok()
+            {
+                trace.frames.push((loc, frame));
+                return;
+            }
+            let original = std::mem::replace(error, Error::new("MemoryError", ""));
+            error.context = self.raised_instance(original);
         }
     }
 

@@ -70,9 +70,8 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
                     "TypeError",
                     "not a valid non-string sequence or mapping object",
                 );
-                let trace = error.tracing();
-                trace.cause = Some(cause);
-                trace.context = Some(cause);
+                error.tracing().cause = Some(cause);
+                error.context = cause;
                 error
             })?;
             query

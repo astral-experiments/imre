@@ -208,7 +208,7 @@ impl Context {
         match self.heap.get(value) {
             Value::Instance { class, .. } => self.class_instances_support_weakref(*class),
             Value::Raised(error) => error
-                .class
+                .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
             Value::Class { .. }
             | Value::Function { .. }
