@@ -1,7 +1,7 @@
 //! Apply Python's lexical class-name mangling before lowering boxed modules.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use ruff_python_ast::name::Name;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
@@ -9,10 +9,60 @@ use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use ruff_text_size::{Ranged, TextSize};
 
+/// Names imported by the module scope disable method binding even after reassignment.
+pub fn module_imports(body: &[ast::Stmt]) -> BTreeSet<String> {
+    use ast::visitor::{Visitor, walk_stmt};
+
+    struct Imports(BTreeSet<String>);
+    impl<'a> Visitor<'a> for Imports {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            let names = match stmt {
+                ast::Stmt::Import(node) => &node.names,
+                ast::Stmt::ImportFrom(node) => &node.names,
+                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => return,
+                _ => return walk_stmt(self, stmt),
+            };
+            for alias in names {
+                let name = alias.asname.as_ref().map_or_else(
+                    || alias.name.as_str().split('.').next().unwrap(),
+                    |asname| asname.as_str(),
+                );
+                self.0.insert(name.to_owned());
+            }
+        }
+
+        fn visit_expr(&mut self, _: &'a ast::Expr) {}
+    }
+
+    let mut imports = Imports(BTreeSet::new());
+    imports.visit_body(body);
+    imports.0
+}
+
+/// Return the attribute for calls where CPython defers a method descriptor's receiver check.
+pub fn direct_method<'a>(
+    call: &'a ast::ExprCall,
+    imports: &BTreeSet<String>,
+    spellings: Option<&Names>,
+) -> Option<&'a ast::ExprAttribute> {
+    let ast::Expr::Attribute(field) = call.func.as_ref() else {
+        return None;
+    };
+    let args = &call.arguments;
+    // CPython's method call path is limited to fewer than 30 stack entries.
+    (args.args.len() + args.keywords.len() + usize::from(!args.keywords.is_empty()) < 30
+        && !args.args.iter().any(|arg| matches!(arg, ast::Expr::Starred(_)))
+        && args.keywords.iter().all(|arg| arg.arg.is_some())
+        && !matches!(field.value.as_ref(), ast::Expr::Name(name) if imports.contains(
+            spellings.and_then(|names| names.original.get(&name.start())).unwrap_or(&name.id).as_str()
+        )))
+    .then_some(field)
+}
+
 #[derive(Default)]
 pub struct Names {
     pub string_annotations: bool,
-    definitions: HashMap<TextSize, Name>,
+    original: HashMap<TextSize, Name>,
     owners: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
 }
@@ -25,7 +75,7 @@ impl Names {
 
     /// A private definition keeps its source name for introspection.
     pub fn definition<'a>(&'a self, name: &'a Identifier) -> &'a str {
-        self.definitions
+        self.original
             .get(&name.start())
             .map_or(name.as_str(), Name::as_str)
     }
@@ -80,12 +130,14 @@ impl Mangler<'_> {
     }
 
     fn definition(&self, name: &mut Identifier) {
+        self.remember(name.start(), &mut name.id);
+    }
+
+    /// Keep the source spelling for symbol-table queries after private-name mangling.
+    fn remember(&self, start: TextSize, name: &mut Name) {
         if let Some(replacement) = self.replacement(name.as_str()) {
-            let original = std::mem::replace(&mut name.id, replacement);
-            self.names
-                .borrow_mut()
-                .definitions
-                .insert(name.start(), original);
+            let original = std::mem::replace(name, replacement);
+            self.names.borrow_mut().original.insert(start, original);
         }
     }
 }
@@ -146,7 +198,7 @@ impl Transformer for Mangler<'_> {
 
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
-            ast::Expr::Name(name) => self.rename(&mut name.id),
+            ast::Expr::Name(name) => self.remember(name.start(), &mut name.id),
             ast::Expr::Attribute(attr) => self.rename(&mut attr.attr.id),
             _ => {}
         }

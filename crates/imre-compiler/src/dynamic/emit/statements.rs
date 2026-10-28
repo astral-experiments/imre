@@ -534,6 +534,9 @@ impl Function<'_, '_> {
             signature["class_cell"] = json!(true);
         }
         let generator = if let Body::GeneratorFunction(stmts) = &body {
+            if !self.source.method_imports.is_empty() {
+                signature["method_imports"] = json!(self.source.method_imports);
+            }
             let first = stmts[0].start();
             if let Some(owner) = self.source.private_names.suite_owner(first) {
                 signature["private_scope"] = json!([owner, self.source.string_annotations]);

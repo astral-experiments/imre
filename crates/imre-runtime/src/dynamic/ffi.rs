@@ -192,9 +192,13 @@ impl Context {
                 self.module(&name)
             }
             "from" => self.import_from(a, b),
-            "attr" => {
+            "attr" | "method" => {
                 let name = self.str_value(b)?.to_owned();
-                self.lookup_attr(a, &name)
+                if op == "method" {
+                    self.lookup_method(a, &name)
+                } else {
+                    self.lookup_attr(a, &name)
+                }
             }
             "setattr" => {
                 let name = self.str_value(b)?.to_owned();

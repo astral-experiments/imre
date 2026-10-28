@@ -4,6 +4,26 @@ from functools import update_wrapper
 
 
 def current():
+    class Foreign:
+        __repr__ = list.__repr__
+    seen = []
+    try:
+        Foreign().__repr__(seen.append(1))
+    except TypeError:
+        pass
+    assert seen == [1]
+    try:
+        saved = Foreign().__repr__
+        saved(seen.append(2))
+    except TypeError:
+        pass
+    assert seen == [1]
+    try:
+        Foreign().__repr__(*(seen.append(3),))
+    except TypeError:
+        pass
+    assert seen == [1]
+
     class Document:
         __slots__ = ("__doc__",)
 
