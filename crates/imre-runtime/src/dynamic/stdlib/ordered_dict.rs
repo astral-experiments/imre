@@ -1,7 +1,7 @@
 //! Storage operations for the Python OrderedDict subclass.
 
 use super::super::value::{DictViewKind, NOT_IMPLEMENTED};
-use super::{Context, Error, FALSE, Id, Result, TRUE, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 /// Use the existing dictionary entries and recursion guard for OrderedDict operations.
 pub(super) fn call(
@@ -31,6 +31,11 @@ pub(super) fn call(
                 ordered: true,
             }))
         }
+        ("move_to_end", [key, last]) => {
+            let last = ctx.truth(*last)?;
+            ctx.move_dictionary_key(storage, *key, last)?;
+            Ok(NONE)
+        }
         ("popitem", [last]) => {
             let last = ctx.truth(*last)?;
             let entries = ctx.stored_entries(storage);
@@ -38,7 +43,7 @@ pub(super) fn call(
                 let message = ctx.text("dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
             };
-            let dense = if last { end } else { 0 };
+            let dense = entries.ordered_dense(if last { end } else { 0 });
             let key = entries[dense].0;
             let cached = entries.stored_hash(dense);
             let (hash, found) = ctx.find_dictionary_key(storage, key, cached)?;
@@ -104,8 +109,10 @@ fn keys_equal(ctx: &mut Context, left: Id, right: Id) -> Result<bool> {
         return Ok(false);
     }
     for index in 0..len {
-        let a = ctx.stored_entries(left)[index].0;
-        let b = ctx.stored_entries(right)[index].0;
+        let first = ctx.stored_entries(left);
+        let second = ctx.stored_entries(right);
+        let a = first[first.ordered_dense(index)].0;
+        let b = second[second.ordered_dense(index)].0;
         let equal = a == b || ctx.checked_equal(a, b)?;
         if (state(ctx, left), state(ctx, right)) != original {
             return Err(Error::new(

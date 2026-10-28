@@ -170,10 +170,11 @@ impl Index {
 
 impl Entries {
     /// Identify changes to insertion positions even when the live size is restored.
-    pub(in super::super) fn order_state(&self) -> (usize, usize) {
+    pub(in super::super) fn order_state(&self) -> (usize, usize, usize) {
         (
             self.next,
             self.index.as_ref().map_or(0, |index| index.generation),
+            self.order.as_ref().map_or(0, |order| order.revision),
         )
     }
 
@@ -272,6 +273,25 @@ impl Context {
             | Value::DefaultDict { entries, .. } => entries,
             _ => unreachable!("dictionary storage"),
         }
+    }
+
+    /// Resolve a move after evaluating its direction, preserving the resident key.
+    pub(in super::super) fn move_dictionary_key(
+        &mut self,
+        dict: Id,
+        key: Id,
+        last: bool,
+    ) -> Result<()> {
+        let entries = self.stored_entries(dict);
+        let Some(end) = entries.len().checked_sub(1) else {
+            return Err(self.lookup_error("KeyError", key));
+        };
+        if entries[entries.ordered_dense(if last { end } else { 0 })].0 == key {
+            return Ok(());
+        }
+        let (_, dense) = self.find_dictionary_key(dict, key, None)?;
+        let dense = dense.ok_or_else(|| self.lookup_error("KeyError", key))?;
+        self.stored_entries_mut(dict).move_to_end(dense, last)
     }
 
     fn stored_entries_mut(&mut self, dict: Id) -> &mut Entries {
@@ -813,7 +833,7 @@ impl Context {
             }
             Ok(resident)
         } else {
-            entries.push((key, value), hash);
+            entries.push((key, value), hash)?;
             Ok(key)
         }
     }
@@ -839,7 +859,7 @@ impl Context {
             }
             return Ok(value);
         }
-        entries.push((key, value), hash);
+        entries.push((key, value), hash)?;
         Ok(value)
     }
 }

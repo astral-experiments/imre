@@ -401,7 +401,13 @@ impl Context {
             kind,
             entries.len(),
             ordered.then(|| entries.order_state()),
-            reverse.then(|| entries.insertion_end()),
+            reverse.then(|| {
+                if ordered {
+                    entries.len()
+                } else {
+                    entries.insertion_end()
+                }
+            }),
         );
         self.alloc(Value::DictIterator(iter))
     }
