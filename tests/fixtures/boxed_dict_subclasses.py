@@ -673,6 +673,10 @@ def fromkeys_construction():
     made[11].append(7)
     assert type(made) is Custom and list(made) == [12, 11]
     assert not source and made[12] is shared and shared == [7]
+    bound = defaultdict.fromkeys
+    made = bound([2, 1, 2], shared)
+    assert type(made) is defaultdict and made.default_factory is None
+    assert list(made) == [2, 1] and made[1] is made[2] is shared
     fresh = defaultdict(list).fromkeys([1])
     assert fresh[1] is None
     try:
