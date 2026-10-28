@@ -21,6 +21,23 @@ def current():
         assert right.__args__[0] is second
     assert Final[int] is Final[int]
     assert Container[int] is Container[int]
+
+    marked, regular = Final[int], Container[int]
+    typing.Final = Container
+    try:
+        try:
+            class Invalid(marked):
+                pass
+        except TypeError as error:
+            assert str(error) == "Cannot subclass typing.Final[int]"
+        else:
+            raise AssertionError("Final alias accepted as a base")
+
+        class Valid(regular):
+            pass
+        assert issubclass(Valid, Container)
+    finally:
+        typing.Final = Final
     assert Callable[[int], int] is Callable[[int], int]
 
     from typing import Final, assert_never

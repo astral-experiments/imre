@@ -60,6 +60,12 @@ impl AliasKind {
     }
 }
 
+/// Recognize the original special form even when its public module name is rebound.
+fn is_special_form(ctx: &Context, id: Id) -> bool {
+    ctx.module_value("typing", "_SpecialForm")
+        .is_some_and(|class| ctx.instance_of(id, class))
+}
+
 /// Render a type used in a generic alias or a union.
 pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
     match ctx.heap.get(id) {
@@ -78,9 +84,10 @@ pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
                 format!("{module}.{qualname}")
             }
         }
-        Value::Instance { .. } if ctx.module_value("typing", "Final") == Some(id) => {
-            "typing.Final".to_owned()
-        }
+        Value::Instance { .. } if is_special_form(ctx, id) => ctx
+            .raw_instance_field(id, "_name")
+            .and_then(|name| ctx.str_value(name).ok())
+            .map_or_else(|| ctx.repr(id), |name| format!("typing.{name}")),
         _ => ctx.repr(id),
     }
 }
@@ -581,8 +588,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         unreachable!()
     };
     let (origin, kind) = (alias.origin, alias.kind);
-    if matches!(kind, AliasKind::Literal(_)) || ctx.module_value("typing", "Final") == Some(origin)
-    {
+    if matches!(kind, AliasKind::Literal(_)) || is_special_form(ctx, origin) {
         return Err(Error::new(
             "TypeError",
             format!("Cannot subclass {}", alias.repr(ctx)),
