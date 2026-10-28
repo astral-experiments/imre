@@ -1714,6 +1714,12 @@ impl Context {
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
             Value::Native(class)
+                if name == "fromkeys"
+                    && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
+            {
+                return Ok(self.bind_dict_fromkeys(obj));
+            }
+            Value::Native(class)
                 if class == "collections.defaultdict"
                     && let Some(member) = self.own_class_attr(obj, name) =>
             {
@@ -1841,12 +1847,6 @@ impl Context {
                     ) =>
             {
                 return Ok(self.builtin(&format!("{class}.__reduce__")));
-            }
-            Value::Native(class)
-                if name == "fromkeys"
-                    && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
-            {
-                return Ok(self.bind_dict_fromkeys(obj));
             }
             Value::Dict(_) | Value::DefaultDict { .. } if name == "fromkeys" => {
                 let owner = self.exact_type(obj)?;
