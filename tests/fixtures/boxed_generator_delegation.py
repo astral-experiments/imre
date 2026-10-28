@@ -60,6 +60,12 @@ def byte_chunks():
         yield b'a\x00' b'\xff', br'\n', b''
 
 
+def removed(items, pairs):
+    for first, second in pairs:
+        del items[first], items[second]
+        yield list(items)
+
+
 def totals(values, cells, trace):
     total = 0
     for value in values:
@@ -127,6 +133,14 @@ def current():
 
     trace = []
     print(list(totals([3, -1, 5], [0], trace)), trace)
+
+    items = {1: 10, 2: 20, 3: 30}
+    deletions = removed(items, [(2, 3), (1, 4)])
+    print(next(deletions))
+    try:
+        next(deletions)
+    except KeyError as error:
+        print(error.args, items)
 
     saved = -1
     assert any((saved := item) for item in [0, 4, 9]) and saved == 4

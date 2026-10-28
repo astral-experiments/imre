@@ -25,6 +25,7 @@ pub(super) struct Program {
 enum Instruction {
     Eval(ast::Expr),
     AugAssign(ast::StmtAugAssign),
+    DeleteItem(ast::ExprSubscript),
     Assign(Vec<ast::Expr>, ast::Expr),
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
@@ -169,6 +170,10 @@ impl Program {
                 Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
                     strings.visit_expr(e)
                 }
+                Instruction::DeleteItem(item) => {
+                    strings.visit_expr(&item.value);
+                    strings.visit_expr(&item.slice);
+                }
                 Instruction::AugAssign(stmt) => {
                     strings.visit_expr(&stmt.target);
                     strings.visit_expr(&stmt.value);
@@ -271,6 +276,20 @@ impl Program {
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = &s.value else { continue };
                     Instruction::Assign(vec![(*s.target).clone()], (**value).clone())
+                }
+                Stmt::Delete(s) => {
+                    for target in &s.targets {
+                        match target {
+                            ast::Expr::Subscript(item)
+                                if !matches!(*item.slice, ast::Expr::Slice(_)) =>
+                            {
+                                self.instructions
+                                    .push((line, Instruction::DeleteItem(item.clone())));
+                            }
+                            _ => return Err(unsupported("deletion target")),
+                        }
+                    }
+                    continue;
                 }
                 Stmt::AugAssign(s) => {
                     self.declare_target(&s.target)?;
@@ -1194,6 +1213,11 @@ impl Context {
                 for target in targets {
                     self.bind_target(code, scope, target, value)?;
                 }
+            }
+            Instruction::DeleteItem(item) => {
+                let object = eval(self, &item.value)?;
+                let key = eval(self, &item.slice)?;
+                self.delete_item(object, key)?;
             }
             Instruction::AugAssign(stmt) => {
                 let update = |ctx: &mut Self, left: Id| -> Result<Id> {
