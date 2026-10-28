@@ -665,7 +665,7 @@ pub(super) fn method(
                     unreachable!()
                 };
                 if method == "copy" {
-                    let copy = items.clone();
+                    let copy = super::super::copy_ids(items)?;
                     return Ok(ctx.alloc(Value::List(copy)));
                 }
                 if method == "reverse" {
