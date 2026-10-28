@@ -108,7 +108,11 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         ctx.heap.keep(*k);
         ctx.heap.keep(*v);
         let key = encoded(ctx, *k, safe, encoding, errors, via)?;
-        let expanded = if doseq && !matches!(ctx.heap.get(*v), Value::Bytes(_) | Value::Str(_)) {
+        let expanded = if doseq
+            && !matches!(
+                ctx.heap.get(ctx.scalar_value(*v)),
+                Value::Bytes(_) | Value::Str(_)
+            ) {
             let len = ctx.builtin("len");
             match ctx.call(len, vec![*v], Vec::new()) {
                 Ok(_) => Some(ctx.iterator(*v)?),
@@ -155,12 +159,12 @@ fn encoded(
     errors: Option<Id>,
     via: Option<Id>,
 ) -> Result<String> {
-    let bytes = matches!(ctx.heap.get(value), Value::Bytes(_));
+    let bytes = matches!(ctx.heap.get(ctx.scalar_value(value)), Value::Bytes(_));
     let id = if bytes || matches!(ctx.heap.get(value), Value::Str(_)) {
         value
     } else if let Some(method) = ctx.bound_slot(value, "__str__")? {
         let rendered = ctx.call(method, Vec::new(), Vec::new())?;
-        if !matches!(ctx.heap.get(rendered), Value::Str(_)) {
+        if ctx.str_value(rendered).is_err() {
             return Err(Error::new(
                 "TypeError",
                 format!(

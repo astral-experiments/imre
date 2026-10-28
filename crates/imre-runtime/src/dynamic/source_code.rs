@@ -14,7 +14,7 @@ pub(super) struct Program {
     pub filename: Rc<str>,
     pub name: String,
     doc: Option<ruff_text_size::TextRange>,
-    strings: HashMap<ruff_text_size::TextRange, Id>,
+    literals: HashMap<ruff_text_size::TextRange, Id>,
     pub(super) string_roots: Id,
     first_line: u32,
     generator: bool,
@@ -24,9 +24,8 @@ pub(super) struct Program {
 
 enum Instruction {
     Eval(ast::Expr),
-    Assign(ast::Expr, ast::Expr),
-    AssignItem(ast::ExprSubscript, ast::Expr),
-    AssignAttr(ast::ExprAttribute, ast::Expr),
+    AugAssign(ast::StmtAugAssign),
+    Assign(Vec<ast::Expr>, ast::Expr),
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
@@ -90,7 +89,8 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    fn constant(&mut self, literal: &'a ast::ExprStringLiteral) -> Result<()> {
+    /// Share equal text constants across nested code objects.
+    fn string_constant(&mut self, literal: &'a ast::ExprStringLiteral) -> Result<()> {
         let text = literal.value.to_str();
         let id = if let Some(&id) = self.shared.get(text) {
             id
@@ -105,10 +105,15 @@ impl<'a> CompiledStrings<'a, '_> {
             self.shared.insert(text, id);
             id
         };
+        self.constant(literal.range(), id)
+    }
+
+    /// Root a literal for later evaluation at its source position.
+    fn constant(&mut self, range: ruff_text_size::TextRange, id: Id) -> Result<()> {
         self.constants
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        self.constants.insert(literal.range(), id);
+        self.constants.insert(range, id);
         self.keep(id)
     }
 
@@ -121,7 +126,13 @@ impl<'a> CompiledStrings<'a, '_> {
                 ast::Expr::Attribute(attr) => {
                     self.heap.code_name(attr.attr.as_str());
                 }
-                ast::Expr::StringLiteral(literal) => self.constant(literal)?,
+                ast::Expr::StringLiteral(literal) => self.string_constant(literal)?,
+                ast::Expr::BytesLiteral(literal) => {
+                    let id = self
+                        .heap
+                        .alloc(Value::Bytes(literal.value.bytes().collect()));
+                    self.constant(literal.range(), id)?;
+                }
                 _ => {}
             }
             ast::visitor::walk_expr(&mut self, expr);
@@ -148,7 +159,7 @@ impl Program {
         let mut strings = CompiledStrings {
             heap,
             shared,
-            constants: &mut self.strings,
+            constants: &mut self.literals,
             roots: Vec::new(),
             pending: Vec::new(),
             exhausted: false,
@@ -158,18 +169,14 @@ impl Program {
                 Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
                     strings.visit_expr(e)
                 }
-                Instruction::Assign(target, e) => {
-                    strings.visit_expr(target);
-                    strings.visit_expr(e);
+                Instruction::AugAssign(stmt) => {
+                    strings.visit_expr(&stmt.target);
+                    strings.visit_expr(&stmt.value);
                 }
-                Instruction::AssignItem(target, e) => {
-                    strings.visit_expr(&target.value);
-                    strings.visit_expr(&target.slice);
-                    strings.visit_expr(e);
-                }
-                Instruction::AssignAttr(target, e) => {
-                    strings.heap.code_name(target.attr.as_str());
-                    strings.visit_expr(&target.value);
+                Instruction::Assign(targets, e) => {
+                    for target in targets {
+                        strings.visit_expr(target);
+                    }
                     strings.visit_expr(e);
                 }
                 Instruction::From(module, bindings) => {
@@ -213,7 +220,7 @@ impl Program {
             filename,
             name: name.to_owned(),
             doc: None,
-            strings: HashMap::new(),
+            literals: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
             generator: false,
@@ -250,21 +257,12 @@ impl Program {
                     }
                     e => Instruction::Eval(e.clone()),
                 },
-                Stmt::Assign(s) => match s.targets.as_slice() {
-                    [target @ (ast::Expr::Name(_) | ast::Expr::Tuple(_) | ast::Expr::List(_))] => {
+                Stmt::Assign(s) => {
+                    for target in &s.targets {
                         self.declare_target(target)?;
-                        Instruction::Assign(target.clone(), (*s.value).clone())
                     }
-                    [ast::Expr::Attribute(target)] => {
-                        Instruction::AssignAttr(target.clone(), (*s.value).clone())
-                    }
-                    [ast::Expr::Subscript(target)]
-                        if !matches!(*target.slice, ast::Expr::Slice(_)) =>
-                    {
-                        Instruction::AssignItem(target.clone(), (*s.value).clone())
-                    }
-                    _ => return Err(unsupported("assignment target")),
-                },
+                    Instruction::Assign(s.targets.clone(), (*s.value).clone())
+                }
                 Stmt::AnnAssign(s) if function => {
                     let ast::Expr::Name(name) = &*s.target else {
                         return Err(unsupported("annotated assignment target"));
@@ -272,7 +270,11 @@ impl Program {
                     self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = &s.value else { continue };
-                    Instruction::Assign((*s.target).clone(), (**value).clone())
+                    Instruction::Assign(vec![(*s.target).clone()], (**value).clone())
+                }
+                Stmt::AugAssign(s) => {
+                    self.declare_target(&s.target)?;
+                    Instruction::AugAssign(s.clone())
                 }
                 Stmt::Return(s) => {
                     if !function {
@@ -356,16 +358,38 @@ impl Program {
         Ok(())
     }
 
-    /// Declare every local name in a loop or fixed unpacking target.
+    /// Declare every local name in a loop or unpacking target.
     fn declare_target(&mut self, target: &ast::Expr) -> Result<()> {
         match target {
             ast::Expr::Name(n) => {
                 self.locals.insert(n.id.to_string());
             }
+            ast::Expr::Attribute(_) => {}
+            ast::Expr::Subscript(item) if !matches!(*item.slice, ast::Expr::Slice(_)) => {}
+            ast::Expr::Starred(_) => {
+                return Err(Error::new(
+                    "SyntaxError",
+                    "starred assignment target must be in a list or tuple",
+                ));
+            }
             ast::Expr::Tuple(ast::ExprTuple { elts, .. })
             | ast::Expr::List(ast::ExprList { elts, .. }) => {
+                if elts
+                    .iter()
+                    .filter(|item| matches!(item, ast::Expr::Starred(_)))
+                    .count()
+                    > 1
+                {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        "multiple starred expressions in assignment",
+                    ));
+                }
                 for element in elts {
-                    self.declare_target(element)?;
+                    self.declare_target(match element {
+                        ast::Expr::Starred(star) => &star.value,
+                        _ => element,
+                    })?;
                 }
             }
             _ => return Err(unsupported("unpacking target")),
@@ -596,7 +620,7 @@ impl Context {
         let filename = self.text(program.filename.as_ref());
         let doc = program
             .doc
-            .and_then(|range| program.strings.get(&range).copied())
+            .and_then(|range| program.literals.get(&range).copied())
             .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
             name,
@@ -1165,20 +1189,41 @@ impl Context {
                 };
                 self.op(op, exception, cause, explicit)?;
             }
-            Instruction::Assign(target, e) => {
+            Instruction::Assign(targets, e) => {
                 let value = eval(self, e)?;
-                self.bind_target(scope, target, value)?;
+                for target in targets {
+                    self.bind_target(code, scope, target, value)?;
+                }
             }
-            Instruction::AssignAttr(target, e) => {
-                let value = eval(self, e)?;
-                let object = eval(self, &target.value)?;
-                self.set_attr(object, target.attr.as_str(), value)?;
-            }
-            Instruction::AssignItem(target, e) => {
-                let value = eval(self, e)?;
-                let object = eval(self, &target.value)?;
-                let key = eval(self, &target.slice)?;
-                self.put_item(object, key, value)?;
+            Instruction::AugAssign(stmt) => {
+                let update = |ctx: &mut Self, left: Id| -> Result<Id> {
+                    ctx.heap.keep(left);
+                    let right = eval(ctx, &stmt.value)?;
+                    let value = ctx.inplace(stmt.op.as_str(), left, right)?;
+                    ctx.heap.keep(value);
+                    Ok(value)
+                };
+                match &*stmt.target {
+                    ast::Expr::Name(name) => {
+                        let left = eval(self, &stmt.target)?;
+                        let value = update(self, left)?;
+                        self.bind_source_name(scope, name.id.as_str(), value)?;
+                    }
+                    ast::Expr::Attribute(field) => {
+                        let object = eval(self, &field.value)?;
+                        let left = self.lookup_attr(object, field.attr.as_str())?;
+                        let value = update(self, left)?;
+                        self.set_attr(object, field.attr.as_str(), value)?;
+                    }
+                    ast::Expr::Subscript(item) => {
+                        let object = eval(self, &item.value)?;
+                        let key = eval(self, &item.slice)?;
+                        let left = self.get_item(object, key)?;
+                        let value = update(self, left)?;
+                        self.put_item(object, key, value)?;
+                    }
+                    _ => unreachable!("validated augmented assignment target"),
+                }
             }
             Instruction::Unless(e, destination) => {
                 if !self.source_condition(code, scope, e)? {
@@ -1195,7 +1240,7 @@ impl Context {
                 match self.next_item(iter)? {
                     Some(v) => {
                         if let Some(target) = target {
-                            self.bind_target(scope, target, v)?;
+                            self.bind_target(code, scope, target, v)?;
                         } else {
                             return Ok(Some(Step::Yield(v, *ip - 1)));
                         }
@@ -1306,23 +1351,49 @@ impl Context {
     }
 
     /// Unpack each level before binding its component targets from left to right.
-    fn bind_target(&mut self, scope: Id, target: &ast::Expr, value: Id) -> Result<()> {
+    fn bind_target(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        target: &ast::Expr,
+        value: Id,
+    ) -> Result<()> {
         match target {
             ast::Expr::Name(n) => self.bind_source_name(scope, n.id.as_str(), value)?,
+            ast::Expr::Attribute(field) => {
+                let object = self.source_expr(code, scope, &field.value)?;
+                self.set_attr(object, field.attr.as_str(), value)?;
+            }
+            ast::Expr::Subscript(item) => {
+                let object = self.source_expr(code, scope, &item.value)?;
+                let key = self.source_expr(code, scope, &item.slice)?;
+                self.put_item(object, key, value)?;
+            }
+            ast::Expr::Starred(star) => self.bind_target(code, scope, &star.value, value)?,
             ast::Expr::Tuple(ast::ExprTuple { elts, .. })
             | ast::Expr::List(ast::ExprList { elts, .. }) => {
                 let count = elts.len();
+                let star = elts
+                    .iter()
+                    .position(|item| matches!(item, ast::Expr::Starred(_)));
+                let required = count - usize::from(star.is_some());
                 let iter = self.iterator(value)?;
                 let mut unpacked = Vec::with_capacity(count);
-                for i in 0..count {
+                for i in 0..required {
                     unpacked.push(self.next_item(iter)?.ok_or_else(|| {
+                        let qualifier = if star.is_some() { "at least " } else { "" };
                         Error::new(
                             "ValueError",
-                            format!("not enough values to unpack (expected {count}, got {i})"),
+                            format!("not enough values to unpack (expected {qualifier}{required}, got {i})"),
                         )
                     })?);
                 }
-                if self.next_item(iter)?.is_some() {
+                if let Some(star) = star {
+                    while let Some(item) = self.next_item(iter)? {
+                        unpacked.push(item);
+                    }
+                    self.group_starred_items(&mut unpacked, star, required - star);
+                } else if self.next_item(iter)?.is_some() {
                     let size = match self.heap.get(value) {
                         Value::List(items) | Value::Tuple(items) => Some(items.len()),
                         Value::Dict(items) => Some(items.len()),
@@ -1335,7 +1406,7 @@ impl Context {
                     ));
                 }
                 for (element, item) in elts.iter().zip(unpacked) {
-                    self.bind_target(scope, element, item)?;
+                    self.bind_target(code, scope, element, item)?;
                 }
             }
             _ => unreachable!("validated unpacking target"),
@@ -1447,7 +1518,7 @@ impl Context {
                 }
                 self.lookup(scope, name)
             }
-            Expr::StringLiteral(v) => Ok(code.strings[&v.range()]),
+            Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {

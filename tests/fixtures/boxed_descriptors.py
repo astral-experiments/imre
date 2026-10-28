@@ -4,6 +4,40 @@ from functools import update_wrapper
 
 
 def current():
+    class Document:
+        __slots__ = ("__doc__",)
+
+    doc = Document()
+    assert not hasattr(doc, "__doc__")
+    doc.__doc__ = "instance documentation"
+    assert doc.__doc__ == "instance documentation"
+    del doc.__doc__
+    assert not hasattr(doc, "__doc__")
+
+    class Namespace:
+        pass
+
+    obj = Namespace()
+    obj.flag = "old"
+    previous = obj.__dict__
+    replacement = {"flag": "new"}
+    obj.__dict__ = replacement
+    assert obj.__dict__ is replacement and obj.flag == "new"
+    obj.flag = "updated"
+    assert replacement["flag"] == "updated" and previous["flag"] == "old"
+    del obj.__dict__
+    assert obj.__dict__ == {} and "flag" in replacement
+
+    class Slotted:
+        __slots__ = ("field",)
+
+    class Mask(Slotted):
+        field = "class"
+
+    masked = Mask()
+    masked.field = "instance"
+    assert masked.__dict__["field"] == masked.field
+
     order = []
 
     class Forward:

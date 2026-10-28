@@ -60,10 +60,14 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
             .map(str::to_owned)
             .collect()
     } else {
-        collect(ctx, fields)?
-            .into_iter()
-            .map(|v| string(ctx, v))
-            .collect::<Result<_>>()?
+        let iterator = ctx.iterator(fields)?;
+        ctx.heap.keep(iterator);
+        let mut names = Vec::new();
+        while let Some(item) = ctx.next_item(iterator)? {
+            ctx.heap.keep(item);
+            names.push(string(ctx, item)?);
+        }
+        names
     };
     let typename = string(ctx, typename)?;
     let rename = ctx.optional_truth(rename, false)?;

@@ -763,6 +763,13 @@ impl Context {
         item
     }
 
+    /// Replace the middle of a checked unpacking result with a fresh list.
+    fn group_starred_items(&mut self, items: &mut Vec<Id>, star: usize, trailing: usize) {
+        let end = items.len() - trailing;
+        let middle = items.drain(star..end).collect();
+        items.insert(star, self.alloc(Value::List(middle)));
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
@@ -1197,7 +1204,7 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
-            "list" => &["__repr__", "__init__"],
+            "list" => &["__repr__", "__init__", "append"],
             "tuple" => &["__repr__", "__getitem__"],
             "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],
             "property" => property::METHODS,

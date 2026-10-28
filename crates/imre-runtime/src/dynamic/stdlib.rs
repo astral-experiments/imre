@@ -197,6 +197,7 @@ fn record(ctx: &mut Context, fields: &[(&str, Id)]) -> Id {
 fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
     let class = ctx.alloc(Value::Native(type_name.to_owned()));
     ctx.alloc(Value::Instance {
+        namespace: None,
         class,
         dictionary: None,
         scalar: None,
@@ -327,8 +328,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
-        ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
         ("itertools", "_chain_allocate") => ctx.builtin("itertools._chain_allocate"),
+        ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
         (
             "_collections",
             "_count_elements"

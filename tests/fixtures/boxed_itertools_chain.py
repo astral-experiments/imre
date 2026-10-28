@@ -47,3 +47,9 @@ def current():
 
     cursor = Constructor.from_iterable([[3], [4]])
     assert type(cursor) is Constructor and list(cursor) == [3, 4]
+
+    import itertools
+    itertools._chain_get = None
+    itertools._chain_set = None
+    itertools._chain_allocate = None
+    assert list(chain.from_iterable([[7], [8]])) == [7, 8]

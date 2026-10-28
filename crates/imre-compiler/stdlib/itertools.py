@@ -1,39 +1,47 @@
 """Iterator tools for runtime-loaded Python."""
 
 
-class chain:
-    """Yield items from each iterable in order."""
+import itertools as _itertools
 
-    __slots__ = ("_sources", "_active")
 
-    def __init__(self, *iterables):
-        import itertools
-        itertools._chain_set(self, False, iter(iterables))
-        itertools._chain_set(self, True, None)
+def _make_chain(_get, _set, _allocate):
+    class chain:
+        """Yield items from each iterable in order."""
 
-    @classmethod
-    def from_iterable(cls, iterable, /):
-        import itertools
-        return itertools._chain_allocate(__class__, cls, iter(iterable))
+        __slots__ = ("_sources", "_active")
 
-    def __iter__(self):
-        return self
+        def __init__(self, *iterables):
+            _set(self, False, iter(iterables))
+            _set(self, True, None)
 
-    def __next__(self):
-        import itertools
-        while itertools._chain_get(self, False) is not None:
-            if itertools._chain_get(self, True) is None:
+        @classmethod
+        def from_iterable(cls, iterable, /):
+            return _allocate(__class__, cls, iter(iterable))
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            while _get(self, False) is not None:
+                if _get(self, True) is None:
+                    try:
+                        active = iter(next(_get(self, False)))
+                        _set(self, True, active)
+                    except BaseException:
+                        _set(self, False, None)
+                        raise
                 try:
-                    active = iter(next(itertools._chain_get(self, False)))
-                    itertools._chain_set(self, True, active)
-                except BaseException:
-                    itertools._chain_set(self, False, None)
-                    raise
-            try:
-                return next(itertools._chain_get(self, True))
-            except StopIteration:
-                itertools._chain_set(self, True, None)
-        raise StopIteration
+                    return next(_get(self, True))
+                except StopIteration:
+                    _set(self, True, None)
+            raise StopIteration
+
+
+    chain.__qualname__ = "chain"
+    return chain
+
+
+chain = _make_chain(_itertools._chain_get, _itertools._chain_set, _itertools._chain_allocate)
 
 
 _missing = object()

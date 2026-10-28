@@ -257,26 +257,22 @@ impl Context {
                 Ok(a)
             }
             "unpack" => {
-                let values = self.items(a)?;
+                let mut values = self.items(a)?;
                 let count = usize::try_from(self.as_integer(b)?)
                     .map_err(|_| Error::new("ValueError", "invalid unpack length"))?;
                 if c == NONE {
                     if count != values.len() {
                         return Err(Error::new("ValueError", "wrong number of values to unpack"));
                     }
-                    Ok(self.alloc(Value::List(values)))
                 } else {
                     let star = usize::try_from(self.as_integer(c)?)
                         .map_err(|_| Error::new("ValueError", "invalid starred target"))?;
                     if star >= count || values.len() < count - 1 {
                         return Err(Error::new("ValueError", "not enough values to unpack"));
                     }
-                    let tail = values.len() - (count - star - 1);
-                    let mut out = values[..star].to_vec();
-                    out.push(self.alloc(Value::List(values[star..tail].to_vec())));
-                    out.extend(&values[tail..]);
-                    Ok(self.alloc(Value::List(out)))
+                    self.group_starred_items(&mut values, star, count - star - 1);
                 }
+                Ok(self.alloc(Value::List(values)))
             }
             "unpack_take" => {
                 let index = usize::try_from(self.as_integer(b)?).expect("compiled unpack index");
