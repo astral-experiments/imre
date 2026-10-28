@@ -25,6 +25,26 @@ def current():
     values = Values()
     assert list.append(values, 3) is None
     assert values == [3] and values.append(4) == "override"
+    add = list.append.__get__(values, Values)
+    take = list.pop.__get__(values, Values)
+    assert add(7) is None and take() == 7
+
+    class Wrong:
+        push = list.append
+
+    try:
+        Wrong().push
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("list.append bound an unrelated receiver")
+
+    seen = []
+    try:
+        Wrong().push(seen.append(1))
+    except TypeError:
+        pass
+    assert seen == [1]
 
     from copy import copy
 

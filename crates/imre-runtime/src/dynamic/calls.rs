@@ -1,4 +1,4 @@
-use super::wrapper_descriptor::Wrapper;
+use super::wrapper_descriptor::BuiltinDescriptor;
 use super::*;
 
 pub(super) enum MappingOperation {
@@ -441,7 +441,7 @@ impl Context {
             return Ok(callable);
         }
         if let Value::Native(symbol) = self.heap.get(value)
-            && let Some(slot) = Wrapper::lookup(symbol)
+            && let Some(slot) = BuiltinDescriptor::lookup(symbol)
         {
             return slot.bind(self, value, receiver);
         }
@@ -483,9 +483,7 @@ impl Context {
                             | "bytes.rstrip"
                             | "int.bit_length"
                             | "int.to_bytes"
-                            | "list.append"
                             | "list.index"
-                            | "list.pop"
                             | "list.clear"
                             | "list.copy"
                             | "list.reverse"
@@ -736,11 +734,15 @@ impl Context {
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
-                Value::Native(symbol) if Wrapper::lookup(symbol).is_some() => "method-wrapper",
+                Value::Native(symbol)
+                    if BuiltinDescriptor::lookup(symbol).is_some_and(|slot| !slot.method) =>
+                {
+                    "method-wrapper"
+                }
                 Value::Native(_) => "builtin_function_or_method",
                 _ => return None,
             },
-            Value::Native(name) if Wrapper::lookup(name).is_some() => "wrapper_descriptor",
+            Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
             Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
                 if name == "typing.Any" {
                     return Some("typing._AnyMeta");
@@ -764,6 +766,7 @@ impl Context {
                             | "builtin_function_or_method"
                             | "method-wrapper"
                             | "wrapper_descriptor"
+                            | "method_descriptor"
                             | "getset_descriptor"
                             | "member_descriptor"
                             | "mappingproxy"
@@ -1210,7 +1213,7 @@ impl Context {
                 && field.is_none()
                 && let Some(member) = member
                 && let Value::Native(symbol) = self.heap.get(member)
-                && Wrapper::lookup(symbol).is_some()
+                && BuiltinDescriptor::lookup(symbol).is_some()
             {
                 return Ok(self.alloc(Value::Method {
                     callable: member,
@@ -1462,21 +1465,25 @@ impl Context {
             Value::Method {
                 callable, receiver, ..
             } if let Value::Native(ref symbol) = *self.heap.get(callable)
-                && let Some(slot) = Wrapper::lookup(symbol) =>
+                && let Some(slot) = BuiltinDescriptor::lookup(symbol) =>
             {
                 if name == "__self__" {
                     return Ok(receiver);
                 }
-                if let Some(value) = slot.attribute(self, name) {
+                if let Some(value) = slot.attribute(self, name, Some(receiver)) {
                     return Ok(value);
                 }
             }
-            Value::Native(ref symbol) if let Some(slot) = Wrapper::lookup(symbol) => {
-                if let Some(value) = slot.attribute(self, name) {
+            Value::Native(ref symbol) if let Some(slot) = BuiltinDescriptor::lookup(symbol) => {
+                if let Some(value) = slot.attribute(self, name, None) {
                     return Ok(value);
                 }
                 if name == "__get__" {
-                    let callable = self.builtin("wrapper_descriptor.__get__");
+                    let callable = self.builtin(if slot.method {
+                        "method_descriptor.__get__"
+                    } else {
+                        "wrapper_descriptor.__get__"
+                    });
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
@@ -1814,6 +1821,9 @@ impl Context {
                 if class == "bool" && matches!(name, "bit_length" | "to_bytes") =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
+            }
+            Value::Native(class) if class == "method_descriptor" && name == "__get__" => {
+                return Ok(self.builtin("method_descriptor.__get__"));
             }
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
@@ -3001,7 +3011,10 @@ impl Context {
                 Ok(result)
             }
             Value::Native(name) if name == "wrapper_descriptor.__get__" => {
-                wrapper_descriptor::descriptor_get(self, &args, &kwargs)
+                wrapper_descriptor::descriptor_get(self, "wrapper_descriptor", &args, &kwargs)
+            }
+            Value::Native(name) if name == "method_descriptor.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "method_descriptor", &args, &kwargs)
             }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {

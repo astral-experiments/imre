@@ -1048,7 +1048,7 @@ impl Context {
             return Ok(None);
         };
         let result = if matches!(self.heap.get(slot), Value::Native(symbol)
-            if super::wrapper_descriptor::Wrapper::lookup(symbol).is_some())
+            if super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol).is_some())
         {
             self.call(slot, vec![id], Vec::new())?
         } else {
@@ -2125,7 +2125,9 @@ impl Context {
                 self.weakref_descriptor_owner(*owner)
             ),
             Value::Class { name, scope, .. } => self.class_repr(name, *scope),
-            Value::Native(name) => format!("<class '{name}'>"),
+            Value::Native(name) => super::wrapper_descriptor::BuiltinDescriptor::lookup(name)
+                .and_then(|slot| slot.method_repr())
+                .unwrap_or_else(|| format!("<class '{name}'>")),
             Value::Module {
                 constructor: Some(_),
                 ..
