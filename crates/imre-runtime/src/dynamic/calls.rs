@@ -1144,6 +1144,33 @@ impl Context {
         }
     }
 
+    /// Bind a context manager's special method on its type before entering the suite.
+    pub(super) fn context_method(&mut self, obj: Id, name: &str) -> Result<Id> {
+        let class = match self.heap.get(obj) {
+            Value::Raised(error) => error.class,
+            value => value.instance_class(),
+        };
+        if let Some(class) = class
+            && let Some(method) = self.class_attr(class, name)
+        {
+            return self.bind_attribute(method, obj, class);
+        }
+        self.builtin_attribute(obj, name).map_err(|_| {
+            let missing = if name == "__exit__" {
+                " (missed __exit__ method)"
+            } else {
+                ""
+            };
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{}' object does not support the context manager protocol{missing}",
+                    self.type_name(obj)
+                ),
+            )
+        })
+    }
+
     /// Resolve an immediately called attribute before its arguments are evaluated.
     pub(super) fn lookup_method(&mut self, obj: Id, name: &str) -> Result<Id> {
         if let Value::Instance { class, .. } = *self.heap.get(obj)

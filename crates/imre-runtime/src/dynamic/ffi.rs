@@ -209,6 +209,8 @@ impl Context {
                 self.module(&name)
             }
             "from" => self.import_from(a, b),
+            "lookup_enter" => self.context_method(a, "__enter__"),
+            "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
                 let name = self.str_value(b)?.to_owned();
                 if op == "method" {

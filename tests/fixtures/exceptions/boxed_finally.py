@@ -55,6 +55,27 @@ def loop():
     return log
 print(loop())
 
+log = []
+manager = M(log)
+manager.__enter__ = lambda: "shadow"
+manager.__exit__ = lambda *args: log.append("shadow exit")
+assert manager.__enter__() == "shadow"
+with manager as entered:
+    assert entered is manager
+assert log == ["enter", "exit"]
+
+class InstanceOnly:
+    pass
+
+manager = InstanceOnly()
+manager.__enter__ = lambda: None
+manager.__exit__ = lambda *args: None
+try:
+    with manager:
+        raise AssertionError("entered an instance without context manager slots")
+except TypeError:
+    pass
+
 def replacement():
     for i in range(3):
         try:

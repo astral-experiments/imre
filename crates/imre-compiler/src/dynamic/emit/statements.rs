@@ -1003,8 +1003,8 @@ impl Function<'_, '_> {
             return;
         };
         let manager = self.expr(&item.context_expr);
-        let enter = self.attr(&manager, "__enter__");
-        let exit = self.attr(&manager, "__exit__");
+        let enter = self.op("lookup_enter", &[&manager]);
+        let exit = self.op("lookup_exit", &[&manager]);
         let value = self.invoke(&enter, &[]);
         let handler = self.name("b");
         let done = self.name("b");
