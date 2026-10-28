@@ -79,6 +79,13 @@ def boolean_values(items, trace):
         yield (item and visited(trace, 'and', 7)) or visited(trace, 'or', 9)
 
 
+def three_then_error():
+    yield 1
+    yield 2
+    yield 3
+    raise AssertionError("unpacking requested a fourth item")
+
+
 def unpacked(rows):
     for row in rows:
         left, [middle, right] = row
@@ -105,6 +112,13 @@ def chained(values, box):
 
 
 def current():
+    try:
+        first, second = three_then_error()
+    except ValueError as error:
+        assert str(error) == "too many values to unpack (expected 2)"
+    else:
+        raise AssertionError("expected too many values")
+
     class Box:
         pass
 

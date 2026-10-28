@@ -1428,35 +1428,7 @@ impl Context {
                 let star = elts
                     .iter()
                     .position(|item| matches!(item, ast::Expr::Starred(_)));
-                let required = count - usize::from(star.is_some());
-                let iter = self.iterator(value)?;
-                let mut unpacked = Vec::with_capacity(count);
-                for i in 0..required {
-                    unpacked.push(self.next_item(iter)?.ok_or_else(|| {
-                        let qualifier = if star.is_some() { "at least " } else { "" };
-                        Error::new(
-                            "ValueError",
-                            format!("not enough values to unpack (expected {qualifier}{required}, got {i})"),
-                        )
-                    })?);
-                }
-                if let Some(star) = star {
-                    while let Some(item) = self.next_item(iter)? {
-                        unpacked.push(item);
-                    }
-                    self.group_starred_items(&mut unpacked, star, required - star);
-                } else if self.next_item(iter)?.is_some() {
-                    let size = match self.heap.get(value) {
-                        Value::List(items) | Value::Tuple(items) => Some(items.len()),
-                        Value::Dict(items) => Some(items.len()),
-                        _ => None,
-                    };
-                    let detail = size.map_or_else(String::new, |n| format!(", got {n}"));
-                    return Err(Error::new(
-                        "ValueError",
-                        format!("too many values to unpack (expected {count}{detail})"),
-                    ));
-                }
+                let unpacked = self.unpack_items(value, count, star)?;
                 for (element, item) in elts.iter().zip(unpacked) {
                     self.bind_target(code, scope, element, item)?;
                 }
