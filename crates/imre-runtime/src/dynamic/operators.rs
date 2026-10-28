@@ -22,6 +22,29 @@ fn enter_ancestor(seen: &mut std::collections::HashSet<Id>, id: Id) -> Result<bo
     Ok(seen.insert(id))
 }
 
+fn rendered_integer(value: &crate::Int) -> Result<crate::Str> {
+    let limit = crate::integer_text::decimal_digit_limit();
+    // Each decimal digit needs fewer than four bits. Reject very large inputs before converting.
+    if limit == 0 || value.as_small().is_some() || value.big().bits() <= u64::from(limit) * 4 {
+        let text = crate::integer_text::try_decimal_coefficient(value)
+            .ok_or_else(|| Error::new("MemoryError", ""))?;
+        if crate::integer_text::decimal_digits_allowed(
+            text.len() - usize::from(text.starts_with('-')),
+        ) {
+            return Ok(text);
+        }
+    }
+    let detail = crate::integer_text::output_limit_message(limit)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    let mut error = Error::new("", detail.into_string());
+    error
+        .kind
+        .try_reserve_exact("ValueError".len())
+        .map_err(render_allocation)?;
+    error.kind.push_str("ValueError");
+    Err(error)
+}
+
 pub(super) fn append_rendered_text(out: &mut String, text: &str) -> Result<()> {
     out.try_reserve(text.len()).map_err(render_allocation)?;
     out.push_str(text);
@@ -1606,8 +1629,7 @@ impl Context {
                     }
                     let (start, end, placeholder, contents) = match ctx.heap.get(id) {
                         Value::Int(value) => {
-                            let text = crate::integer_text::try_decimal_coefficient(value)
-                                .ok_or_else(|| Error::new("MemoryError", ""))?;
+                            let text = rendered_integer(value)?;
                             append_rendered_text(&mut output, &text)?;
                             continue;
                         }

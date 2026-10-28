@@ -159,3 +159,13 @@ def integer_allocation(wide):
         print("value", len(text), text[:5], text[-5:])
     text = str(value)
     print("retry", len(text), text[:5], text[-5:])
+
+
+def integer_digit_limit(limit):
+    over = 10 ** (limit or 700)
+    for value in (over - 1, over, -over, 1 << 19000):
+        for convert in (str, repr, lambda number: repr([number]), lambda number: str(ValueError(number))):
+            try:
+                print(len(convert(value)))
+            except ValueError as error:
+                print(error.args)
