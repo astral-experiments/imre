@@ -1797,6 +1797,14 @@ impl Heap {
         self.frames.last_mut().unwrap().live.truncate(mark);
     }
 
+    /// Drop an upgraded proxy's temporary root without discarding results returned by its hooks.
+    pub(super) fn release_weak_target(&mut self, mark: usize, target: Id) {
+        let root = &mut self.frames.last_mut().unwrap().live[mark];
+        debug_assert_eq!(*root, target);
+        *root = NONE;
+        self.weak_edge_removed(target);
+    }
+
     pub fn active_exception(&self) -> Id {
         self.frames.last().unwrap().active
     }

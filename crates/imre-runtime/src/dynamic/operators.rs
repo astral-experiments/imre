@@ -2170,8 +2170,24 @@ impl Context {
         }
         result
     }
+    /// Keep an upgraded proxy alive through a subscription that can call Python.
+    fn proxy_subscript<T>(
+        &mut self,
+        target: Id,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(target);
+        let result = operation(self);
+        self.heap.release_weak_target(mark, target);
+        result
+    }
+
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        let obj = self.weak_proxy_target(obj)?;
+        let target = self.weak_proxy_target(obj)?;
+        if target != obj {
+            return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
+        }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Get.apply(self, obj, key, false);
         }
@@ -2333,13 +2349,13 @@ impl Context {
         self.set_dictionary_key(storage, key, value, None, false)
     }
 
-    /// Convert a bytearray subscript before a replacement byte can run Python code.
-    fn bytearray_item_index(&mut self, key: Id) -> Result<i64> {
+    /// Convert a scalar subscript before looking up a mutable sequence's current length.
+    fn mutation_index(&mut self, key: Id, kind: &str) -> Result<i64> {
         let index = self.index_value(key)?.ok_or_else(|| {
             Error::new(
                 "TypeError",
                 format!(
-                    "bytearray indices must be integers or slices, not {}",
+                    "{kind} indices must be integers or slices, not {}",
                     self.type_name(key)
                 ),
             )
@@ -2355,8 +2371,28 @@ impl Context {
         })
     }
 
+    /// Resolve a list position after the index callback has had a chance to resize it.
+    fn list_mutation_position(&mut self, obj: Id, key: Id) -> Result<usize> {
+        let offset = self.mutation_index(key, "list")?;
+        let Value::List(items) = self.heap.get(obj) else {
+            unreachable!()
+        };
+        let len = items.len() as i64;
+        let index = if offset < 0 { offset + len } else { offset };
+        if !(0..len).contains(&index) {
+            return Err(Error::new(
+                "IndexError",
+                "list assignment index out of range",
+            ));
+        }
+        Ok(index as usize)
+    }
+
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
-        let obj = self.weak_proxy_target(obj)?;
+        let target = self.weak_proxy_target(obj)?;
+        if target != obj {
+            return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
+        }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Set(val)
                 .apply(self, obj, key, false)
@@ -2371,7 +2407,7 @@ impl Context {
             if let Value::Slice(parts) = *self.heap.get(key) {
                 return self.set_slice(obj, parts, Some(val));
             }
-            let i = self.bytearray_item_index(key)?;
+            let i = self.mutation_index(key, "bytearray")?;
             let byte = self
                 .index_integer(val)?
                 .to_i64()
@@ -2384,16 +2420,12 @@ impl Context {
             *data
                 .get_mut(i as usize)
                 .ok_or_else(|| Error::new("IndexError", "bytearray index out of range"))? = byte;
-        } else if let Value::List(items) = self.heap.get(obj) {
-            let i = self.as_integer(key)?;
-            let i = if i < 0 { items.len() as i64 + i } else { i };
+        } else if matches!(self.heap.get(obj), Value::List(_)) {
+            let i = self.list_mutation_position(obj, key)?;
             let Value::List(items) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
-            let entry = items
-                .get_mut(i as usize)
-                .ok_or_else(|| Error::new("IndexError", "list assignment index out of range"))?;
-            let previous = std::mem::replace(entry, val);
+            let previous = std::mem::replace(&mut items[i], val);
             if previous != val {
                 self.heap.weak_edge_removed(previous);
             }
@@ -3343,7 +3375,10 @@ impl Context {
     }
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
-        let obj = self.weak_proxy_target(obj)?;
+        let target = self.weak_proxy_target(obj)?;
+        if target != obj {
+            return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));
+        }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Delete
                 .apply(self, obj, key, false)
@@ -3374,7 +3409,7 @@ impl Context {
                 if let Value::Slice(parts) = *self.heap.get(key) {
                     return self.set_slice(obj, parts, None);
                 }
-                let i = self.bytearray_item_index(key)?;
+                let i = self.mutation_index(key, "bytearray")?;
                 let len = self.bytes_like(obj)?.len() as i64;
                 let i = if i < 0 { i + len } else { i };
                 if !(0..len).contains(&i) {
@@ -3386,19 +3421,12 @@ impl Context {
                 };
                 data.remove(i as usize);
             }
-            Value::List(entries) => {
-                let i = self.as_integer(key)?;
-                let i = if i < 0 { entries.len() as i64 + i } else { i };
-                if !(0..entries.len() as i64).contains(&i) {
-                    return Err(Error::new(
-                        "IndexError",
-                        "list assignment index out of range",
-                    ));
-                }
+            Value::List(_) => {
+                let i = self.list_mutation_position(obj, key)?;
                 let Value::List(entries) = self.heap.get_mut(obj) else {
                     unreachable!()
                 };
-                let value = entries.remove(i as usize);
+                let value = entries.remove(i);
                 self.heap.weak_edge_removed(value);
             }
             _ => {
