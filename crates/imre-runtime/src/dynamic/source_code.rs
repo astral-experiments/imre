@@ -1848,6 +1848,7 @@ impl Context {
                 } else {
                     eval(self, &v.func)?
                 };
+                let mark = self.heap.temporary_mark();
                 let args = v
                     .arguments
                     .args
@@ -1862,7 +1863,12 @@ impl Context {
                         .ok_or_else(|| unsupported("keyword unpack"))?;
                     kwargs.push((key.to_string(), eval(self, &item.value)?));
                 }
-                self.call(f, args, kwargs)
+                let operand = args.first().copied();
+                let result = self.call(f, args, kwargs)?;
+                if self.consumes_truth_arguments(f, operand) {
+                    self.discard_truth(mark);
+                }
+                Ok(result)
             }
             _ => Err(unsupported(format!(
                 "{:?}",
