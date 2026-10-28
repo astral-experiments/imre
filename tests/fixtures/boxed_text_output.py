@@ -105,6 +105,22 @@ def exercise(path):
     held = buffered()
     held = None
     checked_index()
+
+    def replace_local(reader, saved):
+        owner = buffered(saved)
+        yield reader.read()
+        owner = None
+        yield reader.read()
+
+    for keep in (False, True):
+        saved = []
+        with open(path, "rb") as reader:
+            assert list(replace_local(reader, saved if keep else None)) == [
+                b"", b"" if keep else b"loop"
+            ]
+        if keep:
+            saved[0].close()
+
     held = buffered()
     with open(path, "rb") as reader:
         assert ((held := None), reader.read()) == (None, b"loop")

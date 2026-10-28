@@ -1280,7 +1280,18 @@ impl Context {
         result
     }
 
-    pub(super) fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
+    /// Release the old binding before the next generator target or instruction can observe it.
+    fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
+        if self.store_source_name(scope, name, value)? && self.heap.has_unbound_writer(NONE) {
+            self.collect_unreachable();
+            self.heap.release_unbound_writers();
+        }
+        Ok(())
+    }
+
+    /// Publish a binding and report whether its previous value could own a buffered writer.
+    pub(super) fn store_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<bool> {
+        let replaced = self.replacing_writer(scope, name, value);
         let scope = self.binding_scope(scope, name);
         if let Some(locals) = self.scope_data(scope).exec_locals {
             if matches!(self.heap.get(locals), Value::List(_)) {
@@ -1290,17 +1301,17 @@ impl Context {
                 ));
             }
             let key = self.heap.code_name(name);
-            self.put_item(locals, key, value)
+            self.put_item(locals, key, value)?;
         } else if let Some(globals) = self.scope_data(scope).exec_globals {
             let key = self.heap.code_name(name);
             let storage = self
                 .dict_storage(globals.dict)
                 .expect("exec globals dictionary");
-            self.put_item(storage, key, value)
+            self.put_item(storage, key, value)?;
         } else {
             self.bind(scope, name, value);
-            Ok(())
         }
+        Ok(replaced)
     }
 
     pub(super) fn load_exec_name(&mut self, locals: Id, name: &str) -> Result<Id> {
