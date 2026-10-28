@@ -38,7 +38,8 @@ def check_boxed_call_allocation(imre, root, run):
         "-C", f"link-arg={wrapper}",
         "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
-    imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_itemgetter as fixture; "
+    import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    imports = import_path + "import boxed_itemgetter as fixture; "
     # The first equal-sized allocation copies the call's positional arguments.
     for ordinal, expected in ((0, b"113\n"), (2, b"caught ()\n113\n")):
         result = run(imre, "-B", "-c", imports + "fixture.constructor_allocation()", extra={
@@ -48,6 +49,11 @@ def check_boxed_call_allocation(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, expected, b"refused\n" if ordinal else b"",
         ), result
+    source = import_path + "import boxed_namedtuple_factory as fixture; fixture.layout_read_allocation()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags,
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"9\n", b""), result
     for kind in ("item", "attr"):
         source = imports + f"fixture.result_allocation({kind!r})"
         for ordinal, expected in ((0, b"113 113\n"), (1, b"caught () 0\n113 113\n")):
