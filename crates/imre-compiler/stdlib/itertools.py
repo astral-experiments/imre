@@ -11,6 +11,11 @@ class chain:
         itertools._chain_set(self, False, iter(iterables))
         itertools._chain_set(self, True, None)
 
+    @classmethod
+    def from_iterable(cls, iterable, /):
+        import itertools
+        return itertools._chain_allocate(__class__, cls, iter(iterable))
+
     def __iter__(self):
         return self
 

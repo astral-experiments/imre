@@ -34,3 +34,16 @@ def current():
             return super().__getattribute__(name)
 
     assert list(PrivateState([1], [2])) == [1, 2]
+
+    class Constructor(chain):
+        def __new__(cls, *args):
+            raise AssertionError("__new__")
+
+        def __init__(self, *args):
+            raise AssertionError("__init__")
+
+        def __setattr__(self, name, value):
+            raise AssertionError(name)
+
+    cursor = Constructor.from_iterable([[3], [4]])
+    assert type(cursor) is Constructor and list(cursor) == [3, 4]

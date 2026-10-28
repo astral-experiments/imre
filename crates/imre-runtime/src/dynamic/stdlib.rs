@@ -328,6 +328,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
+        ("itertools", "_chain_allocate") => ctx.builtin("itertools._chain_allocate"),
         (
             "_collections",
             "_count_elements"
@@ -854,6 +855,31 @@ pub(super) fn call(
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
+    }
+    if name == "itertools._chain_allocate" {
+        let [base, class, source] = args else {
+            return Err(Error::new(
+                "TypeError",
+                "invalid chain allocation arguments",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "chain allocation takes no keyword arguments",
+            ));
+        }
+        let valid = matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+            if *class == *base || ancestors.contains(base));
+        if !valid {
+            return Err(Error::new("TypeError", "expected a chain subclass"));
+        }
+        let result = ctx.instance(*class, None);
+        if let Value::Instance { fields, .. } = ctx.heap.get_mut(result) {
+            fields.insert("_sources".to_owned(), *source);
+            fields.insert("_active".to_owned(), NONE);
+        }
+        return Ok(result);
     }
     if name == "itertools._chain_get" || name == "itertools._chain_set" {
         if !kwargs.is_empty()
