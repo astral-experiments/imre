@@ -53,6 +53,17 @@ def check_boxed_call_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, expected, b"refused\n" if ordinal else b"",
         ), result
+    # Refuse the dictionary snapshot and the equally sized sort buffer separately.
+    for sort, ordinal in ((False, 1), (True, 1), (True, 2)):
+        source = import_path + f"import boxed_json_allocation as fixture; fixture.current({sort})"
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": "16400",
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"caught ()\n1025 True\n", b"refused\n",
+        ), result
     for module in (False, True):
         source = import_path + f"import boxed_list_pop as fixture; fixture.copy_allocation({module})"
         result = run(imre, "-B", "-c", source, extra={

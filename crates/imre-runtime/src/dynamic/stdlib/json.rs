@@ -152,7 +152,7 @@ impl Encoder {
                         self.output.push(']');
                     }
                     Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                        self.object(ctx, entries.to_vec())?;
+                        self.object(ctx, super::super::copy_ids(entries)?)?;
                     }
                     _ => {
                         let default = self.default.ok_or_else(|| {
