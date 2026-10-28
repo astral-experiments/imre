@@ -3,6 +3,38 @@ use super::super::value::DictViewKind;
 use super::*;
 use num_traits::Signed;
 
+/// Clear container storage, then finalize any buffered writer whose last owner was removed.
+pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
+    let owns_writer = |&id: &Id| ctx.heap.could_own_writer(id, true);
+    let released = ctx.heap.has_unbound_writer(NONE)
+        && match ctx.heap.get(receiver) {
+            Value::List(items) => items.iter().any(owns_writer),
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => entries
+                .iter()
+                .any(|(key, value)| owns_writer(key) || owns_writer(value)),
+            Value::Deque(ring) => ring.items.iter().any(owns_writer),
+            _ => unreachable!("clearable container"),
+        };
+    match ctx.heap.get_mut(receiver) {
+        Value::List(items) => items.clear(),
+        Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+            for (key, value) in entries.clear() {
+                ctx.heap.weak_edge_removed(key);
+                ctx.heap.weak_edge_removed(value);
+            }
+        }
+        Value::Deque(ring) => {
+            for item in ring.take_items() {
+                ctx.heap.weak_edge_removed(item);
+            }
+        }
+        _ => unreachable!("clearable container"),
+    }
+    if released {
+        ctx.collect_unreachable();
+    }
+}
+
 /// Select the first minimum or maximum, evaluating each key as its candidate arrives.
 pub(super) fn extremum(
     ctx: &mut Context,
@@ -586,7 +618,7 @@ pub(super) fn method(
                 if method == "reverse" {
                     items.reverse();
                 } else {
-                    items.clear();
+                    clear_container(ctx, receiver);
                 }
                 Ok(NONE)
             }
@@ -682,15 +714,7 @@ pub(super) fn method(
         }
         "dict.clear" => {
             arity(name, args, 0, 0)?;
-            let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                ctx.heap.get_mut(receiver)
-            else {
-                unreachable!("dictionary payload")
-            };
-            for (key, value) in entries.clear() {
-                ctx.heap.weak_edge_removed(key);
-                ctx.heap.weak_edge_removed(value);
-            }
+            clear_container(ctx, receiver);
             Ok(NONE)
         }
         "dict.keys" | "dict.values" | "dict.items" => {
