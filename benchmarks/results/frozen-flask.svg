@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="600pt" height="264pt" viewBox="0 0 600 264" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <title>Frozen Flask mixed HTTP throughput</title>
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:title>Frozen Flask mixed HTTP throughput</dc:title>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.8, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style>
+    :root {--ink: #261230; --muted: #6f5d6f; --rule: #e2d5e8; --surface: #fbf2fc; --bar: #c9c1f4; --accent: #6340ac}
+    text {
+      font-variant-numeric: tabular-nums;
+    }
+    @media (prefers-color-scheme: dark) {:root {--ink: #f7eff8; --muted: #b8a5c3; --rule: #493554; --surface: #261230; --bar: #c9c1f4; --accent: #d7ff64}}
+  </style>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 264
+L 600 264
+L 600 0
+L 0 0
+L 0 264
+z
+" style="fill: none"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 9 0
+L 591 0
+Q 600 0 600 9
+L 600 255
+Q 600 264 591 264
+L 9 264
+Q 0 264 0 255
+L 0 9
+Q 0 0 9 0
+z
+" clip-path="url(#p575de133a0)" style="fill: var(--surface)"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 24 91.5
+L 576 91.5
+" clip-path="url(#p575de133a0)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_2">
+    <path d="M 135 101.25
+L 135 221.25
+" clip-path="url(#p575de133a0)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_3">
+    <path d="M 333 101.25
+L 333 221.25
+" clip-path="url(#p575de133a0)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_4">
+    <path d="M 531 101.25
+L 531 221.25
+" clip-path="url(#p575de133a0)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 135 111
+L 443.950717 111
+L 443.950717 121.5
+L 135 121.5
+z
+" clip-path="url(#p575de133a0)" style="fill: var(--accent)"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 135 141
+L 224.714268 141
+L 224.714268 151.5
+L 135 151.5
+z
+" clip-path="url(#p575de133a0)" style="fill: var(--bar)"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 135 171
+L 441.234578 171
+L 441.234578 181.5
+L 135 181.5
+z
+" clip-path="url(#p575de133a0)" style="fill: var(--bar)"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 135 201
+L 457.263698 201
+L 457.263698 211.5
+L 135 211.5
+z
+" clip-path="url(#p575de133a0)" style="fill: var(--bar)"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--muted)" x="24" y="24.798398" transform="rotate(-0 24 24.798398)">IMRE / HTTP BENCHMARKS</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 19.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="56.380781" transform="rotate(-0 24 56.380781)">FROZEN FLASK THROUGHPUT</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="76.397344" transform="rotate(-0 24 76.397344)">Health checks, escaped HTML greetings and JSON sums.</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="135" y="235.548398" transform="rotate(-0 135 235.548398)">0</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="333" y="235.548398" transform="rotate(-0 333 235.548398)">5000</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="531" y="235.548398" transform="rotate(-0 531 235.548398)">10000</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="24" y="118.940391" transform="rotate(-0 24 118.940391)">Frozen Flask on Imre</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="450.700717" y="118.966289" transform="rotate(-0 450.700717 118.966289)">7,802</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="148.940391" transform="rotate(-0 24 148.940391)">Node.js</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="231.464268" y="148.966289" transform="rotate(-0 231.464268 148.966289)">2,266</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="178.940391" transform="rotate(-0 24 178.940391)">Bun</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="447.984578" y="178.966289" transform="rotate(-0 447.984578 178.966289)">7,733</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="208.940391" transform="rotate(-0 24 208.940391)">Rust / Hyper</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="464.013698" y="208.966289" transform="rotate(-0 464.013698 208.966289)">8,138</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="249.983438" transform="rotate(-0 24 249.983438)">Median requests/s · 10 rounds of 1,800 requests · 8 clients · Higher is faster</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p575de133a0">
+   <rect x="0" y="0" width="600" height="264"/>
+  </clipPath>
+ </defs>
+</svg>

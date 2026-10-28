@@ -70,3 +70,49 @@ python3.14 "$bench/compare.py" --wheelhouse /tmp/flask-wheels --client /tmp/flas
 ```
 
 An October 2026 experiment ran LLVM-compiled views inside CPython. Its timings measure a CPython process serving Flask and Werkzeug. [Historical hosted measurements](RESULTS.md#same-flask-app-with-different-execution-and-serving-configurations)
+
+## Frozen Flask mixed HTTP
+
+The frozen Flask fork registers the three routes and parses the Jinja template at build time. Imre compiles the resulting dispatch, views and HTTP transport into one executable. Node.js and Bun share the JavaScript handlers, and Rust uses single-threaded Hyper. All three controls implement the routes directly. [Frozen app, supported Flask features and build prerequisites](https://github.com/astral-experiments/imre/tree/0b9700be0341f718ffae864fa7d6d1c1c9fc8a42/benchmarks/flask/frozen)
+
+The README chart shows median requests per second across ten rounds on an AMD EPYC Milan. Each server ran on one CPU, with eight clients on three separate CPUs. Each round used 180 warmup requests followed by 1,800 timed requests, split equally among the three routes. Every request opened a fresh loopback connection and had its status, content type and body checked. The five-server rotation also included stock CPython Flask. [Per-round throughput, latency, versions and native admission checks](results/2026-10-28-frozen-mixed.json.gz)
+
+| Server | Median req/s | Trial range (req/s) | Median trial p95 (ms) |
+| --- | ---: | ---: | ---: |
+| Frozen Flask on Imre O3 | 7,802 | 6,614–9,525 | 1.663 |
+| Node.js 22.23.3 | 2,266 | 1,858–2,394 | 7.086 |
+| Bun 1.4.4 | 7,733 | 7,058–8,738 | 1.872 |
+| Rust / Hyper 1.12.0 | 8,138 | 6,169–8,926 | 1.991 |
+| Stock Flask on CPython 3.14.5 | 966 | 941–1,049 | 9.996 |
+
+We also tried 9,000 requests per trial. Bun 1.4.4 exceeded the client's five-second timeout waiting for response headers in round two on a greeting and in round seven on a health check. The receipt retains the completed trials from both attempts separately under `aborted_attempts`.
+
+To reproduce the October 28 run, use the frozen app from `0b9700be` with the compiler and runtime from `afc6240a`. The smoke run verifies the pinned wheels, builds the controls and checks that the native Imre server owns the sockets. Choose disjoint server and client CPUs available on your Linux host.
+
+```sh
+work=$(mktemp -d)
+git fetch --no-tags origin afc6240a60f36f189879dbec55811c43551f450c 0b9700be0341f718ffae864fa7d6d1c1c9fc8a42
+git worktree add --detach "$work/checkout" afc6240a60f36f189879dbec55811c43551f450c
+cd "$work/checkout"
+git restore --source=0b9700be0341f718ffae864fa7d6d1c1c9fc8a42 --staged --worktree -- benchmarks/flask/frozen
+
+export CARGO_TARGET_DIR="$work/target"
+server_cpu=28
+client_cpus=29,30,31
+python3.14 benchmarks/flask/frozen/run.py --five-servers --smoke --work "$work/smoke" \
+  --server-cpu "$server_cpu" --client-cpus "$client_cpus"
+FLASK_SECRET_KEY=local-probe-key python3.14 benchmarks/flask/comparison/compare.py \
+  --imre-binary "$work/smoke/build/mixed/server-O3" --wheelhouse "$work/smoke/build/wheels" \
+  --client "$work/smoke/client" --rust "$work/target/release/imre-flask-hyper-control" \
+  --node "$(command -v node)" --bun "$(command -v bun)" --server-cpu "$server_cpu" \
+  --client-cpus "$client_cpus" --mixed-only --concurrency 8 --rounds 10 --warmup 180 \
+  --requests 1800 --output "$work/frozen-mixed.json"
+```
+
+To render the README charts from their published samples, run this in the checkout containing the charts.
+
+```sh
+uv run --script benchmarks/render_runtime_suite.py benchmarks/results/runtime-suite.json \
+  --flask-results benchmarks/flask/comparison/results/2026-10-28-frozen-mixed.json.gz \
+  --output-dir benchmarks/local
+```

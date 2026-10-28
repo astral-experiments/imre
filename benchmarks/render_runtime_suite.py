@@ -5,6 +5,7 @@
 """Render the workload panels and print the README and benchmark-guide tables."""
 
 import argparse
+import gzip
 import json
 import statistics
 from pathlib import Path
@@ -103,8 +104,10 @@ def save(fig, path, title):
     path.write_text(svg.replace("<defs>", f"<defs>\n  {style}", 1))
 
 
-def bars(ax, medians, x, y, width):
-    label_width, value_width = 68, 60
+def bars(
+    ax, medians, x, y, width, *, engines=ENGINES, label_width=68, value_format=".2f"
+):
+    value_width = 60
     row_step, bar_height = 40, 14
     font_size = 13
     plot_x = x + label_width
@@ -112,7 +115,7 @@ def bars(ax, medians, x, y, width):
     ticks = MaxNLocator(nbins=3, steps=(1, 2, 2.5, 5, 10), integer=True).tick_values(
         0, max(medians.values())
     )
-    last_y = y + row_step * (len(ENGINES) - 1)
+    last_y = y + row_step * (len(engines) - 1)
     for tick in ticks:
         tick_x = plot_x + plot_width * tick / ticks[-1]
         rule(ax, tick_x, y - 20, tick_x, last_y + 20)
@@ -126,12 +129,12 @@ def bars(ax, medians, x, y, width):
             align="center",
             mono=True,
         )
-    for i, (engine, name) in enumerate(ENGINES.items()):
+    for i, (engine, name) in enumerate(engines.items()):
         row_y = y + row_step * i
-        ms = medians[engine]
+        value = medians[engine]
         highlight = engine == "imre"
         color = ACCENT if highlight else INK
-        bar_width = plot_width * ms / ticks[-1]
+        bar_width = plot_width * value / ticks[-1]
         label(ax, x, row_y, name, font_size, color=color)
         ax.add_patch(
             Rectangle(
@@ -147,7 +150,7 @@ def bars(ax, medians, x, y, width):
             ax,
             plot_x + bar_width + 9,
             row_y,
-            f"{ms:.2f}",
+            format(value, value_format),
             font_size,
             color=color,
             mono=True,
@@ -182,10 +185,65 @@ def workload_panels(rows, path):
     save(fig, path, "Median runtime by workload")
 
 
+def frozen_flask_panel(report, path):
+    engines = {
+        "imre": "Frozen Flask on Imre",
+        "node": "Node.js",
+        "bun": "Bun",
+        "rust": "Rust / Hyper",
+    }
+    settings = report["settings"]
+    concurrency = settings["concurrency"]
+    first, rounds = settings["first_round"], settings["rounds"]
+    expected_rounds = list(range(first, first + rounds))
+    medians = {}
+    for engine in engines:
+        trials = [
+            row
+            for row in report["trials"]
+            if row["server"] == engine
+            and row["profile"] == "mixed"
+            and row["concurrency"] == concurrency
+        ]
+        if sorted(row["round"] for row in trials) != expected_rounds:
+            raise ValueError(f"Incomplete mixed HTTP trials for {engine}")
+        medians[engine] = statistics.median(row["RPS"] for row in trials)
+
+    fig, ax = canvas(800, 352)
+    surface(ax, 800, 352)
+    label(ax, 32, 30, "IMRE / HTTP BENCHMARKS", 11, color=MUTED, mono=True)
+    label(ax, 32, 68, "FROZEN FLASK THROUGHPUT", 26)
+    label(
+        ax,
+        32,
+        98,
+        "Health checks, escaped HTML greetings and JSON sums.",
+        14,
+        color=MUTED,
+    )
+    rule(ax, 32, 122, 768, 122)
+    bars(
+        ax, medians, 32, 155, 736, engines=engines, label_width=148, value_format=",.0f"
+    )
+    label(
+        ax,
+        32,
+        330,
+        f"Median requests/s · {rounds} rounds of {settings['requests']:,} requests · "
+        f"{concurrency} clients · Higher is faster",
+        12,
+        color=MUTED,
+    )
+    save(fig, path, "Frozen Flask mixed HTTP throughput")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--flask-results", type=Path, help="also chart a mixed HTTP comparison receipt"
+    )
     args = parser.parse_args()
     cases = json.loads(args.results.read_bytes())["cases"]
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -222,6 +280,10 @@ def main():
         rows.append((case, medians))
 
     workload_panels(rows, args.output_dir / "runtime-suite.svg")
+    if args.flask_results:
+        opener = gzip.open if args.flask_results.suffix == ".gz" else open
+        with opener(args.flask_results, "rt") as stream:
+            frozen_flask_panel(json.load(stream), args.output_dir / "frozen-flask.svg")
     print("\n".join(times), "\n\n", "\n".join(spreads), sep="")
 
 
