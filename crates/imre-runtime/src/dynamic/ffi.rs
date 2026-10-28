@@ -1236,7 +1236,7 @@ impl Context {
     }
 
     /// Sweep using the active frames and the context's roots before running callbacks.
-    fn collect_unreachable(&mut self) {
+    pub(super) fn collect_unreachable(&mut self) {
         let (heap, roots) = self.heap_and_roots();
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);

@@ -1765,7 +1765,7 @@ impl Heap {
     }
 
     /// A returned writer or a surviving name keeps a direct owner.
-    fn has_unbound_writer(&self, retained: Id) -> bool {
+    pub(super) fn has_unbound_writer(&self, retained: Id) -> bool {
         self.file_writers
             .iter()
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
