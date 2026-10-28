@@ -145,3 +145,12 @@ def defaultdict_allocation():
     else:
         print("value", len(text), len(visits))
     print("retry", len(repr(value)), len(visits))
+
+
+def exception_argument_allocation():
+    original = " ".join(("saved", "string"))
+    problem = ValueError(original)
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    print(str(problem) is original)
+    print(str(problem) is original)
