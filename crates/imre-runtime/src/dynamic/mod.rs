@@ -370,8 +370,9 @@ impl Context {
                     running: false,
                 }));
             }
-            Value::Instance { class, .. }
-                if let Some(slot) = self.class_attr(class, "__iter__") =>
+            ref value
+                if let Some(class) = value.instance_class()
+                    && let Some(slot) = self.class_attr(class, "__iter__") =>
             {
                 if slot == NONE {
                     return Err(Error::new(
@@ -432,10 +433,10 @@ impl Context {
     /// Compiled loops test for an item before consuming it. User code must advance only once.
     fn loop_iterator(&mut self, iterable: Id) -> Result<Id> {
         let source = self.iterator(iterable)?;
+        let value = self.heap.get(source);
         if matches!(
-            self.heap.get(source),
-            Value::Instance { .. }
-                | Value::ReverseSequence { .. }
+            value,
+            Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::MappingViewIterator { .. }
@@ -447,7 +448,8 @@ impl Context {
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
-        ) {
+        ) || value.instance_class().is_some()
+        {
             return Ok(self.alloc(Value::LoopIterator {
                 source,
                 peeked: None,

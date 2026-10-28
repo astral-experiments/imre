@@ -806,6 +806,7 @@ impl Value {
         match self {
             Self::Instance { class, .. } => Some(*class),
             Self::Module { constructor, .. } => *constructor,
+            Self::Raised(error) => error.class,
             _ => None,
         }
     }
