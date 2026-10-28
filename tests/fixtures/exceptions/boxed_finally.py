@@ -108,3 +108,24 @@ for mode in ("break", "continue", "raise", "return"):
         leave_handler(mode, log)
     except Exception as exc:
         print(mode, log, type(exc).__name__)
+
+class ActiveExit(M):
+    def __exit__(self, kind, error, tb):
+        self.log.append(type(sys.exception()).__name__)
+
+def exit_after_handler(early, log):
+    with ActiveExit(log):
+        try:
+            raise ValueError("handled")
+        except ValueError:
+            if early:
+                return
+
+for early in (False, True):
+    log = []
+    exit_after_handler(early, log)
+    try:
+        raise KeyError("caller")
+    except KeyError:
+        exit_after_handler(early, log)
+    print(log)

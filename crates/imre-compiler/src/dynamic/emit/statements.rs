@@ -937,8 +937,8 @@ impl Function<'_, '_> {
             let (cleanup, outer) = &active[index];
             let previous = std::mem::replace(&mut self.error, outer.clone());
             match cleanup {
-                Cleanup::With(exit) => {
-                    self.invoke(exit, &["0", "0", "0"]);
+                Cleanup::With { exit, caught } => {
+                    self.op("exit_context", &[exit, "0", caught]);
                 }
                 Cleanup::ExceptionName(name) => self.clear_exception_name(name),
                 Cleanup::Finally {
@@ -971,8 +971,14 @@ impl Function<'_, '_> {
         let handler = self.name("b");
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.error, handler.clone());
-        self.exits
-            .push((Cleanup::With(exit.clone()), outer.clone()));
+        let caught = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+        self.exits.push((
+            Cleanup::With {
+                exit: exit.clone(),
+                caught: caught.clone(),
+            },
+            outer.clone(),
+        ));
         self.live.push(exit.clone());
         if let Some(target) = &item.optional_vars {
             self.assign(target, &value);
@@ -982,12 +988,12 @@ impl Function<'_, '_> {
         self.exits.pop();
         self.error = outer;
         if !self.terminated {
-            self.invoke(&exit, &["0", "0", "0"]);
+            self.op("exit_context", &[&exit, "0", &caught]);
             self.jump(&done);
         }
         self.label(&handler);
         let exc = self.op("take_error", &[]);
-        let result = self.op("exit_exception", &[&exit, &exc]);
+        let result = self.op("exit_context", &[&exit, &exc]);
         let suppress = self.truth(&result);
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);

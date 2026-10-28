@@ -438,10 +438,13 @@ impl Context {
                 }
                 self.exact_type(a)
             }
-            "exit_exception" => {
-                let class = self.exact_type(b)?;
-                let traceback = self.exception_traceback(b)?;
-                let prior = self.heap.replace_active(b);
+            "exit_context" | "exit_exception" => {
+                let (class, traceback, active) = if b == NONE {
+                    (NONE, NONE, self.heap.caught_exception(c))
+                } else {
+                    (self.exact_type(b)?, self.exception_traceback(b)?, b)
+                };
+                let prior = self.heap.replace_active(active);
                 let result = self.call(a, vec![class, b, traceback], Vec::new());
                 self.heap.replace_active(prior);
                 result
