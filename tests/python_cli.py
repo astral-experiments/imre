@@ -130,6 +130,18 @@ print(sys.intern(value) is value, sys._is_interned(value))
         expected = (b"caught ()\n" if size else b"value " + digits) + b"retry " + digits
         assert (result.returncode, result.stdout, result.stderr) == (0, expected, b"refused\n" if size else b""), result
 
+    for size in (0, 128, 512, 1024):
+        source = import_path + "import boxed_bytecache as fixture; fixture.long_allocation()"
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        expected = (b"caught ()\n" if size else b"value 0\n") + b"retry 0\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
+        ), result
+
 
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):

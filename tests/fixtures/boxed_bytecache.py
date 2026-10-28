@@ -67,3 +67,16 @@ def current():
             return True
 
     print(marshal.loads(data, allow_code=ReplacingPolicy()), data)
+
+def long_allocation():
+    import marshal
+    packet = b"l" + (512).to_bytes(4, "little") + b"\x01\x00" * 512
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        value = marshal.loads(packet)
+    except MemoryError as error:
+        print("caught", error.args)
+    else:
+        print("value", value % 97)
+    print("retry", marshal.loads(packet) % 97)
