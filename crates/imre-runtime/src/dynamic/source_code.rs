@@ -26,6 +26,10 @@ enum Instruction {
     Eval(ast::Expr),
     AugAssign(ast::StmtAugAssign),
     Assign(Vec<ast::Expr>, ast::Expr),
+    Import {
+        module: String,
+        alias: Option<String>,
+    },
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
@@ -179,6 +183,14 @@ impl Program {
                     }
                     strings.visit_expr(e);
                 }
+                Instruction::Import { module, alias } => {
+                    for part in module.split('.') {
+                        strings.heap.code_name(part);
+                    }
+                    if let Some(alias) = alias {
+                        strings.heap.code_name(alias);
+                    }
+                }
                 Instruction::From(module, bindings) => {
                     strings.heap.code_name(module);
                     for (name, alias) in bindings {
@@ -283,6 +295,19 @@ impl Program {
                     Instruction::Return(s.value.as_deref().cloned())
                 }
                 Stmt::Raise(s) => Instruction::Raise(s.clone()),
+                Stmt::Import(s) if !s.is_lazy => {
+                    for name in &s.names {
+                        let module = name.name.to_string();
+                        let alias = name.asname.as_ref().map(ToString::to_string);
+                        let local = alias
+                            .as_deref()
+                            .unwrap_or_else(|| module.split('.').next().unwrap());
+                        self.locals.insert(local.to_owned());
+                        self.instructions
+                            .push((line, Instruction::Import { module, alias }));
+                    }
+                    continue;
+                }
                 Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
                     let module = s
                         .module
@@ -1164,6 +1189,52 @@ impl Context {
         Err(Error::new("TypeError", indices))
     }
 
+    /// Call the current scope's import hook with the globals and locals of the source frame.
+    fn import_source_module(
+        &mut self,
+        owner: Id,
+        scope: Id,
+        module: &str,
+        names: Option<&[(String, String)]>,
+    ) -> Result<Id> {
+        let mut root = scope;
+        while let Some(parent) = self.scope_data(root).parent {
+            root = parent;
+        }
+        let globals = self.module_globals(root);
+        let builtins = match self.scope_data(root).exec_globals {
+            Some(supplied) => supplied.builtins,
+            None => self.default_source_builtins()?,
+        };
+        let importer = self
+            .load_exec_name(builtins, "__import__")
+            .map_err(|error| {
+                if self.is_builtin_error(&error, "KeyError") {
+                    Error::new("ImportError", "__import__ not found")
+                } else {
+                    error
+                }
+            })?;
+        let modname = self.text(module);
+        let fromlist = if let Some(names) = names {
+            let names = names.iter().map(|(name, _)| self.text(name)).collect();
+            self.alloc(Value::Tuple(names))
+        } else {
+            NONE
+        };
+        let zero = self.int(0);
+        let locals = if self.code_object(owner).parameters == NONE {
+            self.scope_data(scope).exec_locals.unwrap_or(globals)
+        } else {
+            NONE
+        };
+        self.call(
+            importer,
+            vec![modname, globals, locals, fromlist, zero],
+            Vec::new(),
+        )
+    }
+
     fn source_step(
         &mut self,
         code: &Program,
@@ -1263,39 +1334,20 @@ impl Context {
                     Step::Return(v)
                 }));
             }
-            Instruction::From(module, names) => {
-                let mut root = scope;
-                while let Some(parent) = self.scope_data(root).parent {
-                    root = parent;
+            Instruction::Import { module, alias } => {
+                let mut imported = self.import_source_module(owner, scope, module, None)?;
+                let mut parts = module.split('.');
+                let first = parts.next().expect("nonempty module name");
+                if alias.is_some() {
+                    for part in parts {
+                        let part = self.text(part);
+                        imported = self.op("from", imported, part, NONE)?;
+                    }
                 }
-                let globals = self.module_globals(root);
-                let builtins = match self.scope_data(root).exec_globals {
-                    Some(supplied) => supplied.builtins,
-                    None => self.default_source_builtins()?,
-                };
-                let importer = self
-                    .load_exec_name(builtins, "__import__")
-                    .map_err(|error| {
-                        if self.is_builtin_error(&error, "KeyError") {
-                            Error::new("ImportError", "__import__ not found")
-                        } else {
-                            error
-                        }
-                    })?;
-                let modname = self.text(module);
-                let fromlist = names.iter().map(|(name, _)| self.text(name)).collect();
-                let fromlist = self.alloc(Value::Tuple(fromlist));
-                let zero = self.int(0);
-                let locals = if self.code_object(owner).parameters == NONE {
-                    self.scope_data(scope).exec_locals.unwrap_or(globals)
-                } else {
-                    NONE
-                };
-                let m = self.call(
-                    importer,
-                    vec![modname, globals, locals, fromlist, zero],
-                    Vec::new(),
-                )?;
+                self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
+            }
+            Instruction::From(module, names) => {
+                let m = self.import_source_module(owner, scope, module, Some(names))?;
                 for (name, local) in names {
                     let name = self.text(name);
                     let v = self.op("from", m, name, NONE)?;
