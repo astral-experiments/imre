@@ -22,14 +22,15 @@ def choose(value, tail):
 
 
 def choose_guard(value, tail):
-    match 1:
-        case 1 if value or tail():
+    match value:
+        case _ if value or tail():
             return "yes"
     return "no"
 
 
 def choose_generator(value, tail):
-    if value or tail():
+    # The selected arm is itself a condition in runtime-loaded source.
+    if (value or tail()) if value is not None else False:
         yield "yes"
     else:
         yield "no"
