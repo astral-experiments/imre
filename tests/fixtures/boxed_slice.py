@@ -33,6 +33,9 @@ def current():
     print(rec[1:3, 4:])
     print(slice(1, 2, 3) == slice(1, 2, 3), slice(1, 2, 4) > slice(1, 2, 3))
     print({slice(1, 2): "found"}[slice(1, 2)])
+    slot = slice.__hash__
+    assert slot.__objclass__ is slice and cut.__hash__.__self__ is cut
+    assert slot(cut) == cut.__hash__() == hash(cut)
     visits = []
     s = slice(Index("start", -6, visits), Index("stop", 12, visits), Index("step", 2, visits))
     print(s.indices(Index("length", 8, visits)), visits)
