@@ -36,6 +36,29 @@ def current():
     assert getter.__get__((2, 3), tuple) == 3
     assert getter.__get__(Fields(4, 5)) == 5
 
+    class Shift(Fields):
+        def __new__(cls, left, right):
+            return super().__new__(cls, left + 1, right + 2)
+
+    class Foreign(Fields):
+        def __new__(cls, left):
+            return left
+
+        def __init__(self, left):
+            raise AssertionError("foreign result was initialized")
+
+    assert tuple(Shift(2, 3)) == (3, 5)
+    assert tuple(Shift._make((2, 3))) == (2, 3)
+    assert Foreign(9) == 9
+    short = tuple.__new__(Fields, (7,))
+    assert {short: "one"}[(7,)] == "one" and short.left == 7
+    try:
+        short.right
+    except IndexError:
+        pass
+    else:
+        raise AssertionError("missing tuple position")
+
     class Shadow(Fields):
         left = "shadow"
 

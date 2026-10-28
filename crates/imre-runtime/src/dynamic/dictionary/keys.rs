@@ -367,7 +367,7 @@ impl Context {
     }
 
     fn tuple_keys(&self, key: Id) -> Option<Vec<Id>> {
-        match self.heap.get(key) {
+        match self.tuple_backing(key) {
             Value::Tuple(values) | Value::NamedTuple { values, .. } => Some(values.clone()),
             Value::Instance { class, fields, .. } => self
                 .namedtuple_fields(*class)
