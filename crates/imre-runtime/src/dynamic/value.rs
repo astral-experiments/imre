@@ -1655,10 +1655,7 @@ impl Heap {
                 // A normal function allocates its scope in the caller before entering.
                 // Once it returns, only an escaped closure or frame can keep that scope alive.
                 if scope.parent.is_some() && scope.class_body.is_none() {
-                    let caller = &mut self.frames.last_mut().unwrap().live;
-                    if let Some(index) = caller.iter().position(|&id| id == frame.scope) {
-                        caller[index] = NONE;
-                    }
+                    self.release_scope_temporary(frame.scope);
                 }
                 self.collect_next_statement |= weak_released;
             }
@@ -1666,6 +1663,15 @@ impl Heap {
         self.keep(value);
         writer_released
     }
+
+    /// Drop the caller's temporary reference to a completed function or generator scope.
+    pub(super) fn release_scope_temporary(&mut self, scope: Id) {
+        let caller = &mut self.frames.last_mut().unwrap().live;
+        if let Some(index) = caller.iter().position(|&id| id == scope) {
+            caller[index] = NONE;
+        }
+    }
+
     /// Reserve temporary roots before taking a snapshot that may outlive a Python callback.
     pub(super) fn reserve_temporaries(&mut self, additional: usize) -> Result<()> {
         self.frames

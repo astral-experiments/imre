@@ -37,6 +37,27 @@ def exercise(path):
         if keep:
             saved[0].close()
 
+    def suspended_writer(saved):
+        owner = buffered(saved)
+        yield None
+
+    for keep in (False, True):
+        saved = []
+        iterator = suspended_writer(saved if keep else None)
+        assert next(iterator) is None
+        with open(path, "rb") as reader:
+            assert reader.read() == b""
+            assert (next(iterator, None), reader.read()) == (None, b"" if keep else b"loop")
+        if keep:
+            saved[0].close()
+
+        with open(path, "rb") as reader:
+            assert (list(suspended_writer(saved if keep else None)), reader.read()) == (
+                [None], b"" if keep else b"loop"
+            )
+        if keep:
+            saved[-1].close()
+
     def finish():
         stream = buffered()
         stream.write("!")
