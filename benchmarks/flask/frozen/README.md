@@ -20,7 +20,7 @@ python3.14 benchmarks/flask/frozen/run.py --work ./frozen-results \
 
 The output directory must be new. Cargo artifacts use `CARGO_TARGET_DIR` or the checkout's `target` directory. The default client uses up to three other CPUs from the process's affinity mask. Use dedicated server and client CPUs for timing.
 
-For a five-server run with stock CPython Flask, Node, Bun and Rust, see the [cross-language comparison](CONTROLS.md).
+Run `python3.14 benchmarks/flask/frozen/run.py --five-servers` to include stock CPython Flask, Node and Bun. The [cross-language comparison](CONTROLS.md) describes the workload and the shorter `--smoke` run.
 
 ## What runs
 

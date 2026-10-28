@@ -1,6 +1,8 @@
-"""Build this checkout and run the frozen Flask / Rust comparison on Linux."""
+"""Build this checkout and benchmark frozen Flask against Rust or all five servers."""
 
 import argparse
+from collections import Counter
+import json
 import os
 from pathlib import Path
 import shutil
@@ -13,10 +15,71 @@ BENCH = HERE.parent
 ROOT = BENCH.parents[1]
 
 
+def run_five_servers(prepared, common, output, smoke):
+    rounds, warmup, requests = (1, 9, 18) if smoke else (3, 180, 1800)
+    subprocess.run(
+        [
+            sys.executable,
+            "-IB",
+            BENCH / "comparison/compare.py",
+            "--imre-binary",
+            prepared / "mixed/server-O3",
+            "--wheelhouse",
+            prepared / "wheels",
+            "--node",
+            shutil.which("node"),
+            "--bun",
+            shutil.which("bun"),
+            "--mixed-only",
+            "--concurrency",
+            "8",
+            "--rounds",
+            str(rounds),
+            "--warmup",
+            str(warmup),
+            "--requests",
+            str(requests),
+            "--output",
+            output,
+            *common,
+        ],
+        env={**os.environ, "FLASK_SECRET_KEY": "local-probe-key"},
+        check=True,
+    )
+    # The general harness can complete the other controls if native admission fails.
+    report = json.loads(output.read_bytes())
+    build = json.loads((prepared / "build.json").read_bytes())
+    fingerprint = build["graphs"]["mixed"]["builds"]["3"]["elf_sha256"]
+    if (
+        report["imre_native_preflight"]["verified_native_responses"] != 10
+        or report["imre_build"]["binary_sha256"] != fingerprint
+    ):
+        raise RuntimeError(
+            "the built frozen O3 executable did not pass native admission"
+        )
+    names = ("imre", "cpython", "node", "bun", "rust")
+    expected = Counter((name, n) for name in names for n in range(1, rounds + 1))
+    trials = report["trials"]
+    if Counter((row["server"], row["round"]) for row in trials) != expected:
+        raise RuntimeError("expected one timed trial per server per round")
+    for row in trials:
+        if row["Requests"] != requests or row["All"]["Count"] != requests:
+            raise RuntimeError(
+                f"incomplete response validation for {row['server']} round {row['round']}"
+            )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--smoke", action="store_true", help="run admission and one short paired trial"
+        "--smoke",
+        action="store_true",
+        help="run admission and one short trial per server",
+    )
+    parser.add_argument(
+        "--five-servers",
+        action="store_true",
+        help="compare frozen Imre, stock CPython Flask, Node, Bun and Rust",
     )
     parser.add_argument(
         "--work",
@@ -42,7 +105,10 @@ def main():
         or sys.flags.optimize
     ):
         parser.error("run on Linux with CPython 3.14.5 and assertions enabled")
-    for program in ("cargo", "go", args.clang, "patch", "taskset", "strace", "readelf"):
+    programs = ["cargo", "go", args.clang, "patch", "taskset", "strace", "readelf"]
+    if args.five_servers:
+        programs.extend(["node", "bun"])
+    for program in programs:
         if shutil.which(program) is None:
             parser.error(f"{program} is required")
     available = sorted(os.sched_getaffinity(0))
@@ -95,11 +161,7 @@ def main():
         prepare.extend(["--wheelhouse", args.wheelhouse.resolve(strict=True)])
     subprocess.run(prepare, check=True)
     result = work / "results.json"
-    cmd = [
-        sys.executable,
-        "-IB",
-        HERE / "run_pair.py",
-        prepared,
+    common = [
         "--client",
         client,
         "--rust",
@@ -108,12 +170,22 @@ def main():
         str(server),
         "--client-cpus",
         clients,
-        "--output",
-        result,
     ]
-    if args.smoke:
-        cmd.extend(["--rounds", "1", "--warmup", "9", "--requests", "18"])
-    subprocess.run(cmd, check=True)
+    if args.five_servers:
+        run_five_servers(prepared, common, result, args.smoke)
+    else:
+        cmd = [
+            sys.executable,
+            "-IB",
+            HERE / "run_pair.py",
+            prepared,
+            "--output",
+            result,
+            *common,
+        ]
+        if args.smoke:
+            cmd.extend(["--rounds", "1", "--warmup", "9", "--requests", "18"])
+        subprocess.run(cmd, check=True)
     print(f"Results: {result}")
 
 
