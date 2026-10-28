@@ -885,8 +885,7 @@ impl Context {
         if value == root {
             return Ok(None);
         }
-        let string = self.builtin("str");
-        self.call(string, vec![value], Vec::new()).map(Some)
+        builtins::call(self, "str", &[value], &[]).map(Some)
     }
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.

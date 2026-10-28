@@ -159,3 +159,12 @@ def integer_allocation(wide):
         print("value", len(text), text[:5], text[-5:])
     text = str(value)
     print("retry", len(text), text[:5], text[-5:])
+
+
+def exception_argument_allocation():
+    original = " ".join(("saved", "string"))
+    problem = ValueError(original)
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    print(str(problem) is original)
+    print(str(problem) is original)
