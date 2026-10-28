@@ -297,7 +297,7 @@ impl Context {
                 let args = self.items(b)?;
                 let kwargs = self.keyword_args(c)?;
                 let result = self.call(a, args, kwargs)?;
-                if matches!(self.heap.get(a), Value::Native(name) if name == "bool")
+                if self.consumes_truth_arguments(a)
                     && let Some(mark) = self.heap.argument_mark(b)
                 {
                     self.discard_truth(mark);
@@ -1223,10 +1223,16 @@ impl Context {
     }
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
-    fn discard_truth(&mut self, mark: usize) {
+    pub(super) fn discard_truth(&mut self, mark: usize) {
         if self.heap.discard_truth(mark) {
             self.collect_unreachable();
         }
+    }
+
+    /// These builtins return a boolean and release their evaluated arguments before the next operand.
+    pub(super) fn consumes_truth_arguments(&self, callable: Id) -> bool {
+        self.heap.has_file_writers()
+            && matches!(self.heap.get(callable), Value::Native(name) if matches!(name.as_str(), "bool" | "all" | "any"))
     }
 
     /// Sweep using the active frames and the context's roots before running callbacks.

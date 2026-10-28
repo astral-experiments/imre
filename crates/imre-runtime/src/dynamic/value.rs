@@ -1474,16 +1474,42 @@ impl Heap {
 
     /// A name in a surviving frame keeps this object alive until that binding changes.
     fn bound_in_active_frame(&self, value: Id) -> bool {
+        self.active_binding_matches(|bound| bound == value)
+    }
+
+    /// Inspect names in surviving frames without invoking Python attribute or mapping hooks.
+    fn active_binding_matches(&self, mut predicate: impl FnMut(Id) -> bool) -> bool {
         self.frames.iter().rev().any(|frame| {
             let Value::Scope(scope) = self.get(frame.scope) else {
                 return false;
             };
             if let Some(namespace) = scope.namespace {
                 return matches!(self.get(namespace), Value::Dict(entries)
-                    if entries.iter().any(|&(_, bound)| bound == value));
+                    if entries.iter().any(|&(_, bound)| predicate(bound)));
             }
-            scope.names.values().any(|&bound| bound == value)
+            scope.names.values().copied().any(&mut predicate)
         })
+    }
+
+    /// A short strong path proves the writer survives. A miss falls back to a full heap trace.
+    fn keeps_writer(&self, bound: Id, writer: Id, budget: &mut usize) -> bool {
+        if *budget == 0 {
+            return false;
+        }
+        *budget -= 1;
+        if bound == writer {
+            return true;
+        }
+        match self.get(bound) {
+            Value::List(items) | Value::Tuple(items) => items
+                .iter()
+                .take(*budget)
+                .any(|&item| self.keeps_writer(item, writer, budget)),
+            Value::Dict(items) => items.iter().take(*budget).any(|&(key, value)| {
+                self.keeps_writer(key, writer, budget) || self.keeps_writer(value, writer, budget)
+            }),
+            _ => false,
+        }
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
@@ -1741,12 +1767,25 @@ impl Heap {
             .live
             .iter()
             .skip(mark)
-            .any(|&id| self.could_own_writer(id, true));
-        if !could_own_writer || !self.has_unbound_writer(NONE) {
+            .any(|&id| {
+                // A one-argument call roots its operand through a private list.
+                if let Value::List(items) = self.get(id)
+                    && let [item] = items.as_slice()
+                {
+                    return self.could_own_writer(*item, false);
+                }
+                self.could_own_writer(id, false)
+            });
+        if !could_own_writer {
             return false;
         }
         self.release_temporaries_since(mark);
-        true
+        self.file_writers.iter().any(|&writer| {
+            !self.active_binding_matches(|bound| {
+                let mut budget = 8;
+                self.keeps_writer(bound, writer, &mut budget)
+            })
+        })
     }
 
     pub fn release_temporaries_since(&mut self, mark: usize) {

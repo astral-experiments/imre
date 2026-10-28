@@ -223,6 +223,36 @@ def exercise(path):
         with open(path, mode, encoding="utf-8") as reader:
             print(repr(reader.read()), repr(reader.readline()))
 
+    def truth_values(value):
+        writer = buffered()
+        yield value
+        yield value
+        writer.close()
+
+    def exhausted_writer():
+        if False:
+            yield None
+        return buffered()
+
+    with open(path, "rb") as reader:
+        assert (any(exhausted_writer()), reader.read()) == (False, b"loop")
+
+    with open(path, "rb") as reader:
+        assert (any(([buffered()], [True])[1]), reader.read()) == (True, b"loop")
+
+    def read_after(predicate, value, reader):
+        yield predicate(truth_values(value)), reader.read()
+
+    for predicate, value in ((any, True), (all, False)):
+        with open(path, "rb") as reader:
+            assert (predicate(truth_values(value)), reader.read()) == (value, b"loop")
+        with open(path, "rb") as reader:
+            assert list(read_after(predicate, value, reader)) == [(value, b"loop")]
+        with open(path, "rb") as reader:
+            iterator = truth_values(value)
+            assert (predicate(iterator), reader.read()) == (value, b"")
+            assert list(iterator) == [value]
+
 
 def full_device():
     output = open("/dev/full", "w")
