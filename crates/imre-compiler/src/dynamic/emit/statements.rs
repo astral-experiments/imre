@@ -339,7 +339,7 @@ impl Function<'_, '_> {
                         .as_deref()
                         .map_or_else(|| "0".into(), |e| self.expr(e));
                     self.live.push(value.clone());
-                    self.run_cleanups(0);
+                    self.run_cleanups(0, Some(&value));
                     self.live.pop();
                     self.end(&format!("ret i64 {value}"));
                 }
@@ -389,7 +389,7 @@ impl Function<'_, '_> {
                         } else {
                             (target.step.clone(), None)
                         };
-                        self.run_cleanups(target.cleanup_depth);
+                        self.run_cleanups(target.cleanup_depth, None);
                         if let Some(iter) = iterator
                             && !self.terminated
                         {
@@ -733,8 +733,7 @@ impl Function<'_, '_> {
                                 "2".to_owned() // An attribute or item setter may replace a writer.
                             }
                         };
-                        let (ptr, count) = self.live_handles();
-                        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+                        self.release_replaced(&replaced);
                     } else {
                         self.write(&p, value);
                     }
@@ -916,9 +915,18 @@ impl Function<'_, '_> {
         self.label(&handler);
         let exception = self.op("take_error", &[]);
         self.live.push(exception.clone());
+        let enclosing = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+        self.exits.push((
+            Cleanup::PendingValue {
+                value: exception.clone(),
+                enclosing_exception: Some(enclosing),
+            },
+            self.error.clone(),
+        ));
         self.caught.push(exception.clone());
         self.statements(&stmt.finalbody);
         self.caught.pop();
+        self.exits.pop();
         self.live.pop();
         if !self.terminated {
             self.raise(&exception, None, true);
@@ -926,9 +934,16 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
+    /// Collect discarded owners while retaining the operands needed after the transfer.
+    fn release_replaced(&mut self, replaced: &str) {
+        let (ptr, count) = self.live_handles();
+        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+    }
+
     /// A return, break or continue inside a finally may replace the pending exit.
-    fn run_cleanups(&mut self, depth: usize) {
+    fn run_cleanups(&mut self, depth: usize, pending: Option<&str>) {
         let active = self.exits.clone();
+        let mut discarded = Vec::new();
         for index in (depth..active.len()).rev() {
             if self.terminated {
                 break;
@@ -941,6 +956,17 @@ impl Function<'_, '_> {
                     self.op("exit_context", &[exit, "0", caught]);
                 }
                 Cleanup::ExceptionName(name) => self.clear_exception_name(name),
+                Cleanup::PendingValue {
+                    value,
+                    enclosing_exception,
+                } => {
+                    if let Some(caught) = enclosing_exception {
+                        self.op("restore_caught", &[caught]);
+                    }
+                    let slot = self.live.iter().rposition(|live| live == value).unwrap();
+                    discarded.push((slot, self.live.remove(slot)));
+                    self.release_replaced("2");
+                }
                 Cleanup::Finally {
                     body,
                     loop_depth,
@@ -949,12 +975,24 @@ impl Function<'_, '_> {
                     // Loops and handlers entered inside the try do not enclose its finally.
                     let protected_loops = self.loops.split_off(*loop_depth);
                     let protected_handlers = self.caught.split_off(*caught_depth);
+                    if let Some(value) = pending.filter(|value| *value != "0") {
+                        self.exits.push((
+                            Cleanup::PendingValue {
+                                value: value.into(),
+                                enclosing_exception: None,
+                            },
+                            outer.clone(),
+                        ));
+                    }
                     self.statements(body);
                     self.caught.extend(protected_handlers);
                     self.loops.extend(protected_loops);
                 }
             }
             self.error = previous;
+        }
+        for (slot, value) in discarded.into_iter().rev() {
+            self.live.insert(slot, value);
         }
         self.exits = active;
     }

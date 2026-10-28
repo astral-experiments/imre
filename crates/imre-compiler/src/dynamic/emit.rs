@@ -284,6 +284,10 @@ enum Cleanup {
         caught: String,
     },
     ExceptionName(String),
+    PendingValue {
+        value: String,
+        enclosing_exception: Option<String>,
+    },
     Finally {
         body: std::rc::Rc<[ast::Stmt]>,
         loop_depth: usize,
