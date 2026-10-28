@@ -84,3 +84,9 @@ def current():
             print("%*s" % args)
         except (TypeError, OverflowError) as error:
             print(type(error).__name__)
+
+    class Lookup:
+        def __getitem__(self, key):
+            return key.upper()
+
+    assert "%(left)s:%(right)s" % Lookup() == "LEFT:RIGHT"

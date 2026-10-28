@@ -714,10 +714,11 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     let parsed = format
         .parse::<CFormatString>()
         .map_err(|e| Error::new("ValueError", e.to_string()))?;
-    let mapping = matches!(
-        ctx.heap.get(rhs),
-        Value::Dict(_) | Value::DefaultDict { .. }
-    );
+    let mapping = bytes_fields::is_mapping(ctx, rhs)
+        || matches!(
+            ctx.heap.get(ctx.scalar_value(rhs)),
+            Value::Bytes(_) | Value::ByteArray(_)
+        );
     let mut args = percent_args(ctx, rhs)?;
     let mut output = String::new();
     let mut positions = format.char_indices().enumerate();
