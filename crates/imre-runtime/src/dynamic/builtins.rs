@@ -434,6 +434,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "collections.defaultdict"
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
+        Value::Poll(_) if matches!(attr, "register" | "modify" | "unregister" | "poll") => {
+            "select.poll"
+        }
         Value::Selector(_)
             if matches!(
                 attr,
