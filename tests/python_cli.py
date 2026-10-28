@@ -30,14 +30,18 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
-def check_boxed_call_allocation(imre, root, run):
+def call_allocation_flags(root):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "itemgetter_refuse.o"
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
-    flags = "\x1f".join([
+    return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
+
+
+def check_boxed_call_allocation(imre, run, flags):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
     imports = import_path + "import boxed_itemgetter as fixture; "
     # The first equal-sized allocation copies the call's positional arguments.
@@ -203,14 +207,8 @@ def check_slice_stack(imre, imports, root, env):
     assert output(imre, boundary, 8) == exhausted
 
 
-def check_argument_allocation(imre, root, run):
+def check_argument_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "argument_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
-    flags = "\x1f".join([
-        "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
-    ])
     cases = [
         ((), 0, b"113 113 2\n", b""),
         ((), 1, b"caught () 0\n113 113 1\n", b"refused\n"),
@@ -251,9 +249,10 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
-            check_argument_allocation(imre, root, run)
+            flags = call_allocation_flags(root)
+            check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
-            check_boxed_call_allocation(imre, root, run)
+            check_boxed_call_allocation(imre, run, flags)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
