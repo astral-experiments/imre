@@ -261,6 +261,23 @@ impl Context {
         }
     }
 
+    /// Concatenate two string payloads, bypassing Python addition hooks.
+    fn concat_strings(&mut self, left: Id, right: Id) -> Result<Id> {
+        let left = self.str_value(left)?;
+        let right = self.str_value(right)?;
+        let size = left
+            .len()
+            .checked_add(right.len())
+            .ok_or_else(|| Error::new("OverflowError", "strings are too large to concatenate"))?;
+        let mut result = String::new();
+        result
+            .try_reserve_exact(size)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        result.push_str(left);
+        result.push_str(right);
+        Ok(self.text(result))
+    }
+
     fn str_value(&self, id: Id) -> Result<&str> {
         let id = self
             .string_storage(id)

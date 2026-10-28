@@ -24,6 +24,9 @@ class Printable:
 
 
 def current():
+    for left, right in (("a", Word("b")), (Word("a"), "b"), (Word("a"), Word("b"))):
+        result = left + right
+        assert type(result) is str and result == "ab"
     class Text(str):
         pass
     class Data(bytes):
