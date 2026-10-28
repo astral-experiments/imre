@@ -225,3 +225,27 @@ def current():
         str(dead_proxy)
     except ReferenceError as error:
         print(type(error).__name__)
+
+    class Items(list):
+        pass
+
+    class Last:
+        def __index__(self):
+            owners.clear()
+            for i in range(4800):
+                cycle = [i]
+                cycle.append(cycle)
+            assert observer() is not None
+            return -1
+
+    for operation in ("get", "set", "delete"):
+        owners = [Items([1, 2])]
+        observer = ref(owners[0])
+        target = proxy(owners[0])
+        if operation == "get":
+            print(target[Last()])
+        elif operation == "set":
+            target[Last()] = 3
+        else:
+            del target[Last()]
+        print(operation, observer() is None)
