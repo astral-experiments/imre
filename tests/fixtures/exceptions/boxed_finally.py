@@ -81,3 +81,30 @@ def nested_loop(again):
     return seen
 
 print(nested_loop(True), nested_loop(False))
+
+def leave_handler(mode, log):
+    for _ in range(1):
+        try:
+            try:
+                raise ValueError("inner")
+            except ValueError as error:
+                if mode == "break":
+                    break
+                if mode == "continue":
+                    continue
+                if mode == "raise":
+                    raise KeyError("replacement")
+                return
+        finally:
+            try:
+                log.append(str(error))
+            except NameError:
+                log.append("unbound")
+            raise
+
+for mode in ("break", "continue", "raise", "return"):
+    log = []
+    try:
+        leave_handler(mode, log)
+    except Exception as exc:
+        print(mode, log, type(exc).__name__)
