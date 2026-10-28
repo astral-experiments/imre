@@ -36,6 +36,9 @@ fn read_long(data: &[u8]) -> Result<Int> {
             ));
         }
         // Each wire digit is exactly three base-32 digits.
+        digits
+            .try_reserve(3)
+            .map_err(|_| Error::new("MemoryError", ""))?;
         digits.extend([
             (digit & 31) as u8,
             ((digit >> 5) & 31) as u8,
@@ -43,9 +46,8 @@ fn read_long(data: &[u8]) -> Result<Int> {
         ]);
     }
     let sign = if size < 0 { Sign::Minus } else { Sign::Plus };
-    Ok(Int::new(
-        BigInt::from_radix_le(sign, &digits, 32).expect("five-bit digits"),
-    ))
+    Int::try_new(BigInt::from_radix_le(sign, &digits, 32).expect("five-bit digits"))
+        .map_err(|_| Error::new("MemoryError", ""))
 }
 
 /// Read one scalar from CPython's marshal format and ignore trailing bytes.
