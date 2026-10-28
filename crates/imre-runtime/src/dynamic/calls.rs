@@ -1880,15 +1880,6 @@ impl Context {
                 return Ok(self.builtin("set.discard"));
             }
             Value::Native(class)
-                if class == "list"
-                    && matches!(
-                        name,
-                        "clear" | "copy" | "index" | "pop" | "reverse" | "sort"
-                    ) =>
-            {
-                return Ok(self.builtin(&format!("list.{name}")));
-            }
-            Value::Native(class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || builtins::is_enum_base(&class)
                     || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
