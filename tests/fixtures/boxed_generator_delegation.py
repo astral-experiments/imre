@@ -66,6 +66,26 @@ def removed(items, pairs):
         yield list(items)
 
 
+def checked_members(values):
+    for value in values:
+        assert value in {0, 1}, value
+        yield value
+
+
+def loop_jumps(rows):
+    for row in rows:
+        for value in row:
+            if value < 0:
+                break
+            if value == 0:
+                continue
+            yield value
+        else:
+            yield "exhausted"
+    else:
+        yield "done"
+
+
 def totals(values, cells, trace):
     total = 0
     for value in values:
@@ -143,6 +163,15 @@ def current():
     assert pulls == ["outer"]
     assert next(values) == 1 and pulls == ["outer", 1]
     print(list(byte_chunks()))
+    selected = checked_members([1, 2])
+    assert next(selected) == 1
+    try:
+        next(selected)
+    except AssertionError as error:
+        assert error.args == (2,)
+    else:
+        raise AssertionError("expected failed membership assertion")
+    assert list(loop_jumps([[0, 1], [2, -1, 3], []])) == [1, "exhausted", 2, "exhausted", "done"]
     assert list(values) == [2] and pulls == ["outer", 1, 2]
 
     trace = []

@@ -36,10 +36,19 @@ enum Instruction {
     Yield(Option<ast::Expr>),
     Return(Option<ast::Expr>),
     Raise(ast::StmtRaise),
+    Assert(ast::StmtAssert),
     Unless(ast::Expr, usize),
     Iter(ast::Expr),
     Next(Option<ast::Expr>, usize),
     Jump(usize),
+    PopIter,
+}
+
+/// Pending exits of the innermost loop body being lowered.
+struct LoopJumps {
+    head: usize,
+    has_iterator: bool,
+    breaks: Vec<usize>,
 }
 
 enum Step {
@@ -178,6 +187,12 @@ impl Program {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
                 }
+                Instruction::Assert(stmt) => {
+                    strings.visit_expr(&stmt.test);
+                    if let Some(message) = &stmt.msg {
+                        strings.visit_expr(message);
+                    }
+                }
                 Instruction::AugAssign(stmt) => {
                     strings.visit_expr(&stmt.target);
                     strings.visit_expr(&stmt.value);
@@ -225,7 +240,7 @@ impl Program {
                         strings.visit_expr(e);
                     }
                 }
-                Instruction::Jump(_) => {}
+                Instruction::Jump(_) | Instruction::PopIter => {}
             }
         }
         self.string_roots = strings.finish()?;
@@ -246,7 +261,13 @@ impl Program {
         }
     }
 
-    fn lower(&mut self, body: &[ast::Stmt], lines: &[usize], function: bool) -> Result<()> {
+    fn lower(
+        &mut self,
+        body: &[ast::Stmt],
+        lines: &[usize],
+        function: bool,
+        mut active: Option<&mut LoopJumps>,
+    ) -> Result<()> {
         use ast::Stmt;
         if function
             && let Some(Stmt::Expr(statement)) = body.first()
@@ -327,6 +348,7 @@ impl Program {
                     }
                     continue;
                 }
+                Stmt::Assert(s) => Instruction::Assert(s.clone()),
                 Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
                     let module = s
                         .module
@@ -351,21 +373,64 @@ impl Program {
                 {
                     let mut child = Program::new(self.filename.clone(), s.name.as_str());
                     child.first_line = line;
-                    child.lower(&s.body, lines, true)?;
+                    child.lower(&s.body, lines, true, None)?;
                     self.locals.insert(child.name.clone());
                     Instruction::Define(Rc::new(child), s.parameters.clone())
                 }
-                Stmt::For(s) if !s.is_async => {
-                    self.declare_target(&s.target)?;
-                    self.instructions
-                        .push((line, Instruction::Iter((*s.iter).clone())));
+                Stmt::Break(_) => {
+                    let current = active
+                        .as_deref_mut()
+                        .ok_or_else(|| Error::new("SyntaxError", "'break' outside loop"))?;
+                    if current.has_iterator {
+                        self.instructions.push((line, Instruction::PopIter));
+                    }
+                    current.breaks.push(self.instructions.len());
+                    Instruction::Jump(0)
+                }
+                Stmt::Continue(_) => {
+                    let current = active.as_deref().ok_or_else(|| {
+                        Error::new("SyntaxError", "'continue' not properly in loop")
+                    })?;
+                    Instruction::Jump(current.head)
+                }
+                Stmt::For(_) | Stmt::While(_) => {
+                    let (body, orelse, guard) = match stmt {
+                        Stmt::For(s) if !s.is_async => {
+                            self.declare_target(&s.target)?;
+                            self.instructions
+                                .push((line, Instruction::Iter((*s.iter).clone())));
+                            (
+                                &s.body,
+                                &s.orelse,
+                                Instruction::Next(Some((*s.target).clone()), 0),
+                            )
+                        }
+                        Stmt::While(s) => (
+                            &s.body,
+                            &s.orelse,
+                            Instruction::Unless((*s.test).clone(), 0),
+                        ),
+                        _ => return Err(unsupported("async for")),
+                    };
                     let head = self.instructions.len();
-                    self.instructions.push((line, Instruction::Jump(0)));
-                    self.lower(&s.body, lines, function)?;
+                    let mut current = LoopJumps {
+                        head,
+                        has_iterator: matches!(guard, Instruction::Next(..)),
+                        breaks: Vec::new(),
+                    };
+                    self.instructions.push((line, guard));
+                    self.lower(body, lines, function, Some(&mut current))?;
                     self.instructions.push((line, Instruction::Jump(head)));
-                    self.instructions[head].1 =
-                        Instruction::Next(Some((*s.target).clone()), self.instructions.len());
-                    self.lower(&s.orelse, lines, function)?;
+                    let other = self.instructions.len();
+                    match &mut self.instructions[head].1 {
+                        Instruction::Next(_, end) | Instruction::Unless(_, end) => *end = other,
+                        _ => unreachable!("loop guard"),
+                    }
+                    self.lower(orelse, lines, function, active.as_deref_mut())?;
+                    let end = self.instructions.len();
+                    for jump in current.breaks {
+                        self.instructions[jump].1 = Instruction::Jump(end);
+                    }
                     continue;
                 }
                 Stmt::If(s) => {
@@ -373,16 +438,30 @@ impl Program {
                     let mut arm = Some((&*s.test, s.body.as_slice()));
                     for clause in &s.elif_else_clauses {
                         if let Some((test, body)) = arm.take() {
-                            self.arm(test, body, line, lines, function, &mut ends)?;
+                            ends.push(self.arm(
+                                test,
+                                body,
+                                line,
+                                lines,
+                                function,
+                                active.as_deref_mut(),
+                            )?);
                         }
                         if let Some(test) = &clause.test {
                             arm = Some((test, &clause.body));
                         } else {
-                            self.lower(&clause.body, lines, function)?;
+                            self.lower(&clause.body, lines, function, active.as_deref_mut())?;
                         }
                     }
                     if let Some((test, body)) = arm {
-                        self.arm(test, body, line, lines, function, &mut ends)?;
+                        ends.push(self.arm(
+                            test,
+                            body,
+                            line,
+                            lines,
+                            function,
+                            active.as_deref_mut(),
+                        )?);
                     }
                     let end = self.instructions.len();
                     for i in ends {
@@ -448,15 +527,15 @@ impl Program {
         line: u32,
         lines: &[usize],
         function: bool,
-        ends: &mut Vec<usize>,
-    ) -> Result<()> {
+        active: Option<&mut LoopJumps>,
+    ) -> Result<usize> {
         let index = self.instructions.len();
         self.instructions.push((line, Instruction::Jump(0)));
-        self.lower(body, lines, function)?;
-        ends.push(self.instructions.len());
+        self.lower(body, lines, function, active)?;
+        let end = self.instructions.len();
         self.instructions.push((line, Instruction::Jump(0)));
         self.instructions[index].1 = Instruction::Unless(test.clone(), self.instructions.len());
-        Ok(())
+        Ok(end)
     }
 }
 
@@ -592,7 +671,7 @@ impl Context {
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
             .collect::<Vec<_>>();
         let mut code = Program::new(Rc::from(filename), "<module>");
-        code.lower(&parsed.syntax().body, &lines, false)?;
+        code.lower(&parsed.syntax().body, &lines, false, None)?;
         code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         Ok(self.box_source_code(Rc::new(code), None))
     }
@@ -1055,7 +1134,7 @@ impl Context {
         );
         program.first_line = code.first_line;
         program.generator = true;
-        program.lower(&def.body, &lines, true)?;
+        program.lower(&def.body, &lines, true, None)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
@@ -1268,6 +1347,17 @@ impl Context {
             Instruction::Eval(e) => {
                 eval(self, e)?;
             }
+            Instruction::Assert(stmt) => {
+                if !self.source_condition(code, scope, &stmt.test)? {
+                    let class = self.builtin("AssertionError");
+                    let args = match &stmt.msg {
+                        Some(message) => vec![eval(self, message)?],
+                        None => Vec::new(),
+                    };
+                    let error = self.call(class, args, Vec::new())?;
+                    self.op("raise", error, NONE, FALSE)?;
+                }
+            }
             Instruction::Raise(s) => {
                 let (op, exception) = match &s.exc {
                     Some(exc) => ("raise", eval(self, exc)?),
@@ -1326,6 +1416,9 @@ impl Context {
                 }
             }
             Instruction::Jump(destination) => *ip = *destination,
+            Instruction::PopIter => {
+                iterators.pop().expect("active source loop");
+            }
             Instruction::Iter(e) => {
                 let v = eval(self, e)?;
                 iterators.push(self.iterator(v)?);
@@ -1595,6 +1688,21 @@ impl Context {
                     .map(|x| eval(self, x))
                     .collect::<Result<_>>()?;
                 Ok(self.alloc(Value::Tuple(items)))
+            }
+            Expr::Set(display) => {
+                let items = display
+                    .elts
+                    .iter()
+                    .map(|item| eval(self, item))
+                    .collect::<Result<Vec<_>>>()?;
+                let result = self.alloc(Value::Set {
+                    entries: Default::default(),
+                    frozen: false,
+                });
+                for item in items {
+                    builtins::set_add(self, result, item)?;
+                }
+                Ok(result)
             }
             Expr::Dict(v) => {
                 let result = self.dict(vec![]);
