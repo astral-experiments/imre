@@ -130,6 +130,22 @@ def exercise(path):
     assert earlier[2] == b""
     earlier[0].close()
 
+    def writer_phases(saved):
+        writer = buffered(saved)
+        yield 0
+        yield 1
+
+    for keep in (False, True):
+        saved = []
+        for phase in writer_phases(saved if keep else None):
+            with open(path, "rb") as reader:
+                assert reader.read() == b""
+            break
+        with open(path, "rb") as reader:
+            assert reader.read() == (b"" if keep else b"loop")
+        if keep:
+            saved[0].close()
+
     sample = "Málaga 東京🧪e\u0301\n"
     with open(path, "w") as ready:
         alias = ready

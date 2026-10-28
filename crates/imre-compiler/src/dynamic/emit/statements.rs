@@ -385,13 +385,17 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
                     if let Some(target) = self.loops.last() {
-                        let dest = if matches!(stmt, ast::Stmt::Break(_)) {
-                            &target.done
+                        let (dest, iterator) = if matches!(stmt, ast::Stmt::Break(_)) {
+                            (target.done.clone(), target.iterator.clone())
                         } else {
-                            &target.step
-                        }
-                        .clone();
+                            (target.step.clone(), None)
+                        };
                         self.run_cleanups(target.cleanup_depth);
+                        if let Some(iter) = iterator
+                            && !self.terminated
+                        {
+                            self.op("break_iter", &[&iter]);
+                        }
                         self.jump(&dest);
                     } else {
                         self.unsupported("loop control outside a loop");
@@ -798,6 +802,7 @@ impl Function<'_, '_> {
         self.loops.push(LoopTarget {
             step: step.clone(),
             done: done.clone(),
+            iterator: iterator.map(str::to_owned),
             cleanup_depth: self.exits.len(),
         });
         self.statements(body);

@@ -348,6 +348,10 @@ impl Context {
             "generator" => self.generator(a, b),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
+            "break_iter" => {
+                self.release_loop_iterator(a);
+                Ok(NONE)
+            }
             "more" | "more_else" => {
                 let more = self.iterator_has_item(a)?;
                 if !more && op == "more_else" {

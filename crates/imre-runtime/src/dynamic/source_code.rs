@@ -1405,6 +1405,12 @@ impl Context {
         }
     }
 
+    /// Recheck buffered writers when a break discards the loop's hidden iterator.
+    pub(super) fn release_loop_iterator(&mut self, iterator: Id) {
+        let owner = self.source_loop_owner(iterator);
+        self.release_source_loop_owner(owner);
+    }
+
     fn source_step(
         &mut self,
         code: &Program,
@@ -1490,8 +1496,7 @@ impl Context {
             Instruction::Jump(destination) => *ip = *destination,
             Instruction::PopIter => {
                 let iterator = iterators.pop().expect("active source loop");
-                let owner = self.source_loop_owner(iterator);
-                self.release_source_loop_owner(owner);
+                self.release_loop_iterator(iterator);
             }
             Instruction::Iter(e) => {
                 let v = eval(self, e)?;
