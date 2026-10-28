@@ -4,7 +4,7 @@
 import itertools as _itertools
 
 
-def _make_chain(_get, _set):
+def _make_chain(_get, _set, _allocate):
     class chain:
         """Yield items from each iterable in order."""
 
@@ -13,6 +13,10 @@ def _make_chain(_get, _set):
         def __init__(self, *iterables):
             _set(self, False, iter(iterables))
             _set(self, True, None)
+
+        @classmethod
+        def from_iterable(cls, iterable, /):
+            return _allocate(__class__, cls, iter(iterable))
 
         def __iter__(self):
             return self
@@ -37,7 +41,7 @@ def _make_chain(_get, _set):
     return chain
 
 
-chain = _make_chain(_itertools._chain_get, _itertools._chain_set)
+chain = _make_chain(_itertools._chain_get, _itertools._chain_set, _itertools._chain_allocate)
 
 
 _missing = object()
