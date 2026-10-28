@@ -1760,6 +1760,16 @@ impl Heap {
         if self.file_writers.is_empty() {
             return false;
         }
+        let all_retained = self.file_writers.iter().all(|&writer| {
+            self.active_binding_matches(|bound| {
+                let mut budget = 8;
+                self.keeps_writer(bound, writer, &mut budget)
+            })
+        });
+        if all_retained {
+            self.release_temporaries_since(mark);
+            return false;
+        }
         let could_own_writer = self
             .frames
             .last()
@@ -1768,16 +1778,10 @@ impl Heap {
             .iter()
             .skip(mark)
             .any(|&id| self.could_own_writer(id, true));
-        if !could_own_writer {
-            return false;
+        if could_own_writer {
+            self.release_temporaries_since(mark);
         }
-        self.release_temporaries_since(mark);
-        self.file_writers.iter().any(|&writer| {
-            !self.active_binding_matches(|bound| {
-                let mut budget = 8;
-                self.keeps_writer(bound, writer, &mut budget)
-            })
-        })
+        could_own_writer
     }
 
     pub fn release_temporaries_since(&mut self, mark: usize) {

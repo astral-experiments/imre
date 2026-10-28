@@ -237,6 +237,9 @@ def exercise(path):
     with open(path, "rb") as reader:
         assert (any(exhausted_writer()), reader.read()) == (False, b"loop")
 
+    with open(path, "rb") as reader:
+        assert (any(([buffered()], [True])[1]), reader.read()) == (True, b"loop")
+
     def read_after(predicate, value, reader):
         yield predicate(truth_values(value)), reader.read()
 
