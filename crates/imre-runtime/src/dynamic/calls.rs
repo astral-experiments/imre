@@ -361,16 +361,8 @@ impl Context {
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
-        let class = match self.heap.get(object) {
-            Value::Instance { class, .. }
-            | Value::Module {
-                constructor: Some(class),
-                ..
-            }
-            | Value::Raised(Error {
-                class: Some(class), ..
-            }) => *class,
-            _ => return Ok(None),
+        let Some(class) = self.heap.get(object).instance_class() else {
+            return Ok(None);
         };
         self.class_attr(class, name)
             .map(|slot| self.bind_attribute(slot, object, class))
@@ -1146,14 +1138,8 @@ impl Context {
 
     /// Bind a context manager's special method on its type before entering the suite.
     pub(super) fn context_method(&mut self, obj: Id, name: &str) -> Result<Id> {
-        let class = match self.heap.get(obj) {
-            Value::Raised(error) => error.class,
-            value => value.instance_class(),
-        };
-        if let Some(class) = class
-            && let Some(method) = self.class_attr(class, name)
-        {
-            return self.bind_attribute(method, obj, class);
+        if let Some(method) = self.bound_slot(obj, name)? {
+            return Ok(method);
         }
         self.builtin_attribute(obj, name).map_err(|_| {
             let missing = if name == "__exit__" {

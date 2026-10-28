@@ -54,6 +54,22 @@ class FailedCursor:
 
 
 def current():
+    class RowsError(ValueError):
+        def __iter__(self):
+            return iter((3, 5))
+
+    class CursorError(LookupError):
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise StopIteration
+
+    assert list(RowsError()) == [3, 5]
+    error_cursor = CursorError()
+    assert iter(error_cursor) is error_cursor and next(error_cursor, 7) == 7
+    assert [item for item in error_cursor] == []
+
     log = []
     source = [0, 2, 3]
     def select(item):
