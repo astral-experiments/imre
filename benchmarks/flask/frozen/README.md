@@ -20,6 +20,8 @@ python3.14 benchmarks/flask/frozen/run.py --work ./frozen-results \
 
 The output directory must be new. Cargo artifacts use `CARGO_TARGET_DIR` or the checkout's `target` directory. The default client uses up to three other CPUs from the process's affinity mask. Use dedicated server and client CPUs for timing.
 
+For a five-server run with stock CPython Flask, Node, Bun and Rust, see the [cross-language comparison](CONTROLS.md).
+
 ## What runs
 
 The benchmark applies [modifications to existing package sources](upstream.patch) to the verified wheels, adds the [fork modules](overlay), and checks the resulting file digests. At registration, a real Flask application registers its views, Werkzeug binds the rules, and Jinja parses the template. The exporter builds a direct-call dispatch function from the registered views, method table and template program. The static server calls MarkupSafe's five-character escaping implementation and uses a frozen itsdangerous-compatible HMAC timestamp signer. The generated source graph for the recorded mixed benchmark is [pinned by hash](mixed-graph.json). The [application](examples/freeze_mixed.py) and [ordinary Python views](examples/mixed_views.py) remain small.
