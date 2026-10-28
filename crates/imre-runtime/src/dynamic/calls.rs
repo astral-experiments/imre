@@ -460,6 +460,7 @@ impl Context {
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "module.__init__"
+                            | "int.bit_length"
                             | "int.to_bytes"
                             | "list.append"
                             | "list.index"
@@ -1711,8 +1712,10 @@ impl Context {
             Value::ByteArray(_) if name == "maketrans" => {
                 return Ok(self.builtin("bytearray.maketrans"));
             }
-            Value::Native(class) if class == "bool" && name == "to_bytes" => {
-                return Ok(self.builtin("int.to_bytes"));
+            Value::Native(class)
+                if class == "bool" && matches!(name, "bit_length" | "to_bytes") =>
+            {
+                return Ok(self.builtin(&format!("int.{name}")));
             }
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
@@ -1762,7 +1765,7 @@ impl Context {
                     || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
-                    || (class == "int" && name == "to_bytes")
+                    || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {

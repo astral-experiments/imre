@@ -310,7 +310,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
-        Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
+        Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if matches!(attr, "__iter__" | "__reversed__") => "range",
         Value::RangeIterator(iter)
@@ -833,6 +833,7 @@ pub(super) fn call(
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
             "module" => ctx.module_method(method, args, kwargs),
+            "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)

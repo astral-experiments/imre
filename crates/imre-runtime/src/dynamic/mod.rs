@@ -1208,7 +1208,7 @@ impl Context {
             "tuple" => &["__repr__", "__getitem__"],
             "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],
             "property" => property::METHODS,
-            "int" => &["to_bytes"],
+            "int" => &["bit_length", "to_bytes"],
             "str" => {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
