@@ -103,7 +103,7 @@ impl Function<'_, '_> {
                 value
             }
             ast::Expr::Call(v) => {
-                // Allocate the argument root before evaluating the callable and its receiver.
+                let mark = self.temporary_mark();
                 let args = self.op("list", &[]);
                 let callable = if let Some(field) = imre_ast::direct_method(
                     v,
@@ -118,7 +118,7 @@ impl Function<'_, '_> {
                 };
                 let kwargs = self.arguments(&args, &v.arguments);
                 let span = self.expression_span(expr, &v.func, b'(');
-                self.op_at("call", &[&callable, &args, &kwargs], span)
+                self.call_at(&callable, &args, &kwargs, &mark, span)
             }
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
