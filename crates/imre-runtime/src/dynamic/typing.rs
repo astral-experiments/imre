@@ -60,6 +60,12 @@ impl AliasKind {
     }
 }
 
+/// Recognize the original special form even when its public module name is rebound.
+fn is_special_form(ctx: &Context, id: Id) -> bool {
+    ctx.module_value("typing", "_SpecialForm")
+        .is_some_and(|class| ctx.instance_of(id, class))
+}
+
 /// Append a type argument's special spelling if it has one.
 pub(super) fn append_type_label(ctx: &Context, id: Id, out: &mut String) -> Result<bool> {
     use super::operators::append_rendered_text;
@@ -79,7 +85,16 @@ pub(super) fn append_type_label(ctx: &Context, id: Id, out: &mut String) -> Resu
             }
             class_name("__qualname__").unwrap_or(name)
         }
-        Value::Instance { .. } if ctx.module_value("typing", "Final") == Some(id) => "typing.Final",
+        Value::Instance { .. } if is_special_form(ctx, id) => {
+            let Some(name) = ctx
+                .raw_instance_field(id, "_name")
+                .and_then(|field| ctx.str_value(field).ok())
+            else {
+                return Ok(false);
+            };
+            append_rendered_text(out, "typing.")?;
+            name
+        }
         _ => return Ok(false),
     };
     append_rendered_text(out, label)?;
@@ -561,8 +576,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         unreachable!()
     };
     let (origin, kind) = (alias.origin, alias.kind);
-    if matches!(kind, AliasKind::Literal(_)) || ctx.module_value("typing", "Final") == Some(origin)
-    {
+    if matches!(kind, AliasKind::Literal(_)) || is_special_form(ctx, origin) {
         return Err(Error::new(
             "TypeError",
             format!("Cannot subclass {}", ctx.checked_format(id, true)?),
