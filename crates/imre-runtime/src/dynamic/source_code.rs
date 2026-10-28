@@ -24,6 +24,7 @@ pub(super) struct Program {
 
 enum Instruction {
     Eval(ast::Expr),
+    AugAssign(ast::StmtAugAssign),
     Assign(Vec<ast::Expr>, ast::Expr),
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
@@ -168,6 +169,10 @@ impl Program {
                 Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
                     strings.visit_expr(e)
                 }
+                Instruction::AugAssign(stmt) => {
+                    strings.visit_expr(&stmt.target);
+                    strings.visit_expr(&stmt.value);
+                }
                 Instruction::Assign(targets, e) => {
                     for target in targets {
                         strings.visit_expr(target);
@@ -266,6 +271,10 @@ impl Program {
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = &s.value else { continue };
                     Instruction::Assign(vec![(*s.target).clone()], (**value).clone())
+                }
+                Stmt::AugAssign(s) => {
+                    self.declare_target(&s.target)?;
+                    Instruction::AugAssign(s.clone())
                 }
                 Stmt::Return(s) => {
                     if !function {
@@ -1184,6 +1193,36 @@ impl Context {
                 let value = eval(self, e)?;
                 for target in targets {
                     self.bind_target(code, scope, target, value)?;
+                }
+            }
+            Instruction::AugAssign(stmt) => {
+                let update = |ctx: &mut Self, left: Id| -> Result<Id> {
+                    ctx.heap.keep(left);
+                    let right = eval(ctx, &stmt.value)?;
+                    let value = ctx.inplace(stmt.op.as_str(), left, right)?;
+                    ctx.heap.keep(value);
+                    Ok(value)
+                };
+                match &*stmt.target {
+                    ast::Expr::Name(name) => {
+                        let left = eval(self, &stmt.target)?;
+                        let value = update(self, left)?;
+                        self.bind_source_name(scope, name.id.as_str(), value)?;
+                    }
+                    ast::Expr::Attribute(field) => {
+                        let object = eval(self, &field.value)?;
+                        let left = self.lookup_attr(object, field.attr.as_str())?;
+                        let value = update(self, left)?;
+                        self.set_attr(object, field.attr.as_str(), value)?;
+                    }
+                    ast::Expr::Subscript(item) => {
+                        let object = eval(self, &item.value)?;
+                        let key = eval(self, &item.slice)?;
+                        let left = self.get_item(object, key)?;
+                        let value = update(self, left)?;
+                        self.put_item(object, key, value)?;
+                    }
+                    _ => unreachable!("validated augmented assignment target"),
                 }
             }
             Instruction::Unless(e, destination) => {
