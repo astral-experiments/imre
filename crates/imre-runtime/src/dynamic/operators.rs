@@ -601,6 +601,7 @@ impl Context {
             (Value::Complex(z), _) => self.complex_equal(*z, right),
             (_, Value::Complex(z)) => self.complex_equal(*z, left),
             (Value::Calendar { value: a, .. }, Value::Calendar { value: b, .. }) => a.equal(b),
+            (Value::Range(a), Value::Range(b)) => a.equal(b),
             (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
                 crate::floats::compare(&self.as_int(b).unwrap(), *f) == 0
             }

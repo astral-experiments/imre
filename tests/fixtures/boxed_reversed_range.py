@@ -16,6 +16,12 @@ def current():
     print(list(reversed(range(edge + 2, edge + 9, 3))))
     print(list(reversed(range(-edge, -edge - 10, -4))))
     print(list(reversed(range(edge, -edge, edge))))
+    for left, right in ((range(0), range(4, 1)),
+                        (range(2, 3), range(2, 8, 7)),
+                        (range(edge, 0, -3), range(edge, 1, -3)),
+                        (range(0, edge, 2), range(0, edge - 1, 2)),
+                        (range(0, 4), range(0, 8, 2))):
+        print(left == right, left != right, {left: 1}.get(right), len({left, right}))
     cursor = range(edge).__reversed__()
     print(cursor.__iter__() is cursor, cursor.__length_hint__())
     print(cursor.__next__(), cursor.__length_hint__())

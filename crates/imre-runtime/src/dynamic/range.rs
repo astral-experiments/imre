@@ -37,6 +37,20 @@ impl Range {
         })
     }
 
+    /// Compare the represented sequences without visiting their elements.
+    pub(super) fn equal(&self, other: &Self) -> bool {
+        if !self.len.cmp(&other.len).is_eq() {
+            return false;
+        }
+        match self.len.as_small() {
+            Some(0) => true,
+            len => {
+                self.start.cmp(&other.start).is_eq()
+                    && (len == Some(1) || self.step.cmp(&other.step).is_eq())
+            }
+        }
+    }
+
     pub(super) fn at(&self, index: &BigInt) -> Int {
         Int::new(self.start.big().as_ref() + self.step.big().as_ref() * index)
     }
