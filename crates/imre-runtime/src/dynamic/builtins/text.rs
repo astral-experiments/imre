@@ -793,12 +793,12 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     continue;
                 }
                 let rendered: Cow<'_, str> = match spec.format_char {
-                    's' => match ctx.heap.get(arg) {
-                        Value::Str(s) => Cow::Borrowed(s),
-                        _ => ctx.display(arg).into(),
-                    },
+                    's' => {
+                        let text = super::call(ctx, "str", &[arg], &[])?;
+                        Cow::Borrowed(ctx.str_value(text)?)
+                    }
                     'r' => ctx.checked_format(arg, true)?.into(),
-                    'a' => ascii(&ctx.repr(arg)).into(),
+                    'a' => ascii(&ctx.checked_format(arg, true)?).into(),
                     'c' => match ctx.heap.get(arg) {
                         Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
                         _ => u32::try_from(ctx.as_integer(arg)?)
