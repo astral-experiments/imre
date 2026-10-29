@@ -747,11 +747,35 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
     .into_handle())
 }
 
+/// Every run longer than the limit crosses a multiple of it. Check those offsets
+/// before using the eager parser, which validates integers even in unused fields.
+fn has_long_digit_run(text: &str, limit: usize) -> bool {
+    if limit == 0 || text.len() <= limit {
+        return false;
+    }
+    let bytes = text.as_bytes();
+    (limit..bytes.len()).step_by(limit).any(|i| {
+        if !bytes[i].is_ascii_digit() {
+            return false;
+        }
+        let before = bytes[i - limit..i]
+            .iter()
+            .rev()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        bytes[i..]
+            .get(..=limit - before)
+            .is_some_and(|tail| tail.iter().all(u8::is_ascii_digit))
+    })
+}
+
 pub(super) fn loads(
     text: &str,
     owner: impl FnOnce() -> Option<StrOwner>,
 ) -> Result<*const Object, Error> {
-    if check_depth(text).is_err() {
+    if check_depth(text).is_err()
+        || has_long_digit_run(text, crate::integer_text::decimal_digit_limit() as usize)
+    {
         return deep::loads(text, owner);
     }
     let keys = KeyMemo::default();

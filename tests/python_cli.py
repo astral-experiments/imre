@@ -670,6 +670,12 @@ def report(text):
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
 
+        token_limit = Path(__file__).with_name("fixtures") / "json_integer_token_limit.py"
+        for limit in ("640", "0"):
+            digit_env = {"PYTHONINTMAXSTRDIGITS": limit}
+            compare("-B", token_limit, extra=digit_env)
+            compare("-B", token_limit, extra=digit_env, native_args=("run", token_limit, "--runtime-imports", "--quiet"))
+
         (helpers / "uuid").mkdir()
         uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
