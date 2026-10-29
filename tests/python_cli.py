@@ -11,31 +11,30 @@ import tempfile
 from pathlib import Path
 
 
-def check_callable_label_allocation(imre, root, run):
+def check_context_protocol_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "callable_label_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "refuse_callable_label.c", "-o", wrapper], check=True)
+    wrapper = root / "context_protocol_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_context_protocol.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
-    for shape in range(10):
-        reference = run(sys.executable, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape))
-        assert reference.returncode == 0, reference
-        for target in [0, 1, 2, "all"]:
-            extra = {"IMRE_ENCODED_FLAGS": flags, "CALL_LABEL_REFUSE_NTH": str(target if target != "all" else 0)}
-            if target == "all":
-                extra["CALL_LABEL_REFUSE_ALL"] = "1"
-            result = run(imre, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape), extra=extra)
-            assert result.returncode == 0 and b"preserved True\n" in result.stdout, result
-            expected = reference.stdout if not any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines()) else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
-            assert result.stdout == expected, (result, reference)
-            activated = any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
-            expected_denial = target in (1, "all") or (shape >= 8 and target == 2)
-            assert activated == expected_denial, (shape, target, result)
-            if activated:
-                assert result.stdout.startswith(b"kind MemoryError\n"), result
-                assert b"call_label_allocation " in result.stderr, result
+    for shape, opcode in [(0, "lookup_enter"), (7, "lookup_exit")]:
+        for target in [0, 1]:
+            result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "CONTEXT_REFUSE_NTH": str(target),
+                "CONTEXT_REFUSE_OPCODE": opcode,
+            })
+            assert result.returncode == 0, result
+            if target:
+                assert result.stdout == b"kind MemoryError\n", result
+                assert b"context_allocation 1 " in result.stderr and b" 1\n" in result.stderr, result
+            else:
+                assert result.stdout.startswith(b"kind TypeError\ndetail "), result
+    for shape in [8, 9]:
+        result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), root / "context-output", extra={"IMRE_ENCODED_FLAGS": flags})
+        assert (result.returncode, result.stdout) == (0, b"written 4\nclosed True\ncontent True\n"), result
 
 
 def check_fixed_float_allocation(imre, root, run):
@@ -201,6 +200,33 @@ def call_allocation_flags(root):
         "-C", f"link-arg={wrapper}",
         "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
+
+
+def check_callable_label_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "callable_label_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_callable_label.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape in range(10):
+        reference = run(sys.executable, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape))
+        assert reference.returncode == 0, reference
+        for target in [0, 1, 2, "all"]:
+            extra = {"IMRE_ENCODED_FLAGS": flags, "CALL_LABEL_REFUSE_NTH": str(target if target != "all" else 0)}
+            if target == "all":
+                extra["CALL_LABEL_REFUSE_ALL"] = "1"
+            result = run(imre, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape), extra=extra)
+            assert result.returncode == 0 and b"preserved True\n" in result.stdout, result
+            expected = reference.stdout if not any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines()) else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            assert result.stdout == expected, (result, reference)
+            activated = any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
+            expected_denial = target in (1, "all") or (shape >= 8 and target == 2)
+            assert activated == expected_denial, (shape, target, result)
+            if activated:
+                assert result.stdout.startswith(b"kind MemoryError\n"), result
+                assert b"call_label_allocation " in result.stderr, result
 
 
 def check_boxed_call_allocation(imre, run, flags):
@@ -574,9 +600,10 @@ def main():
             check_select_result_allocation(imre, root, run)
             check_poll_result_allocation(imre, root, run)
             flags = call_allocation_flags(root)
+            check_callable_label_allocation(imre, root, run)
             check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
-            check_callable_label_allocation(imre, root, run)
+            check_context_protocol_allocation(imre, root, run)
             check_fixed_float_allocation(imre, root, run)
             check_boxed_literal_roots_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
