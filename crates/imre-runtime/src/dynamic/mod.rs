@@ -1144,6 +1144,17 @@ impl Context {
         }
     }
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
+        let closure = Default::default();
+        self.scope_with_closure(module.into(), parent, closure)
+    }
+
+    /// Allocate a scope using closure storage prepared by its caller.
+    fn scope_with_closure(
+        &mut self,
+        module: String,
+        parent: Option<Id>,
+        closure: allocator_api2::boxed::Box<value::ClosureScope>,
+    ) -> Id {
         self.alloc(Value::Scope(Scope {
             class_body: None,
             enum_namespace: None,
@@ -1153,13 +1164,13 @@ impl Context {
             class_namespace: None,
             first_argument: None,
             names: Default::default(),
-            closure: Default::default(),
+            closure,
             namespace: None,
             globals: Default::default(),
             exec_globals: None,
             exec_locals: None,
             parent,
-            module: module.to_owned(),
+            module,
         }))
     }
     /// Comprehensions own their loop variables, but assignment expressions bind outside them.
