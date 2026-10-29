@@ -4,6 +4,7 @@ pub(super) mod comparator;
 
 use crate::StrOwner;
 use std::cmp::Ordering;
+use std::fmt::{self, Write};
 
 use smallvec::SmallVec;
 
@@ -831,8 +832,27 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
         fail("SystemError", "unchecked float format precision");
     }
     // The low bit selects percentages. A zero high byte keeps the default sign.
-    let result = format_fixed_float(value, precision, flags & 1 != 0, (flags >> 8) as u8);
-    StrOwner::into_raw(StrOwner::new(result))
+    match format_fixed_float(value, precision, flags & 1 != 0, (flags >> 8) as u8)
+        .and_then(|text| StrOwner::try_new(text).map_err(|_| Error::allocation()))
+    {
+        Ok(owner) => StrOwner::into_raw(owner),
+        Err(error) => {
+            error.raise();
+            std::ptr::null()
+        }
+    }
+}
+
+/// Reserve each float-format chunk before appending so allocation failure stays recoverable.
+struct FloatText(Str);
+
+impl fmt::Write for FloatText {
+    /// Append a formatting chunk only after its UTF-8 bytes fit in the output buffer.
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        self.0.try_reserve(text.len()).map_err(|_| fmt::Error)?;
+        self.0.push_str(text);
+        Ok(())
+    }
 }
 
 /// Render a fixed-point or percentage field after its precision and sign have been checked.
@@ -841,7 +861,7 @@ pub(crate) fn format_fixed_float(
     precision: u32,
     percent: bool,
     positive_sign: u8,
-) -> Str {
+) -> crate::Result<Str> {
     let value = if percent { value * 100.0 } else { value };
     let mut result = if value.is_nan() {
         Str::from("nan")
@@ -853,15 +873,21 @@ pub(crate) fn format_fixed_float(
         })
     } else {
         let precision = precision as usize;
-        compact_str::format_compact!("{value:.precision$}")
+        let mut text = FloatText(Str::default());
+        write!(text, "{value:.precision$}").map_err(|_| Error::allocation())?;
+        text.0
     };
-    if positive_sign != 0 && !result.starts_with('-') {
+    let prefix = positive_sign != 0 && !result.starts_with('-');
+    result
+        .try_reserve(usize::from(prefix) + usize::from(percent))
+        .map_err(|_| Error::allocation())?;
+    if prefix {
         result.insert(0, char::from(positive_sign));
     }
     if percent {
         result.push('%');
     }
-    result
+    Ok(result)
 }
 
 /// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
