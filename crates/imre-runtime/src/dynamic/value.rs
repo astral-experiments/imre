@@ -1999,10 +1999,29 @@ impl Heap {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
+        let live = &mut self.frames.last_mut().unwrap().live;
         self.weak.retain(|&target, refs| {
             refs.retain(|&id| self.slots[id as usize].marked());
             if self.slots[target as usize].marked() {
                 return !refs.is_empty();
+            }
+            let count = refs
+                .iter()
+                .filter(|&&id| {
+                    self.slots[id as usize]
+                        .value
+                        .as_ref()
+                        .unwrap()
+                        .weak_reference()
+                        .unwrap()
+                        .callback
+                        != NONE
+                })
+                .count();
+            let dispatch = callbacks.try_reserve(count).is_ok()
+                && live.try_reserve(count.saturating_mul(2)).is_ok();
+            if !dispatch {
+                eprintln!("Exception ignored while clearing object weakrefs: MemoryError");
             }
             for &id in refs.iter() {
                 let wr = self.slots[id as usize]
@@ -2013,8 +2032,9 @@ impl Heap {
                     .unwrap();
                 wr.target = None;
                 let callback = std::mem::replace(&mut wr.callback, NONE);
-                if callback != NONE {
+                if dispatch && callback != NONE {
                     callbacks.push((callback, id));
+                    live.extend([callback, id]);
                 }
             }
             false
@@ -2032,10 +2052,6 @@ impl Heap {
         self.next_collection = (self.slots.len() - self.free.len())
             .saturating_mul(2)
             .max(4096);
-        for &(callback, wr) in &callbacks {
-            self.keep(callback);
-            self.keep(wr);
-        }
         (!callbacks.is_empty()).then_some(callbacks)
     }
 }
