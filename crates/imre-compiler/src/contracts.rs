@@ -750,7 +750,7 @@ impl Builtin {
 
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
 impl Builtin {
-    /// Checks the representations consumed by specialized list and range lowerings.
+    /// Checks the operand and result representations required by native lowerings.
     /// Dominance, aliasing and the truth of recorded bounds remain pass proofs.
     pub(crate) fn verify_specialization(
         &self,
@@ -771,6 +771,9 @@ impl Builtin {
         };
         let valid = match self {
             Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
+            Self::WeakProxyTarget => {
+                matches!(result, Type::Class(class) if signature(&[Type::WeakProxy(class)], result))
+            }
             Self::TupleGet => {
                 matches!(args, [tuple, index] if index.ty == Type::Int && types.homogeneous_tuple_element(tuple.ty) == Some(result))
             }
@@ -927,6 +930,8 @@ pub(crate) enum RuntimeParam {
     Value(Type),
     /// A decoded, nonnegative index. A tagged integer word also lowers to `i64`.
     NativeIndex,
+    /// A rooted weak proxy for any fixed-layout class.
+    WeakProxy,
 }
 
 const INT_LIST: RuntimeParam = RuntimeParam::Value(Type::ListInt);
@@ -938,6 +943,14 @@ pub(crate) struct OwnedIntOrError;
 pub(crate) struct BorrowedIntOrError;
 /// One signals success. Zero signals a pending error.
 pub(crate) struct StatusOrError;
+/// A nonnull result owns one reference to the proxy's class. Null signals a pending error.
+pub(crate) struct OwnedWeakTargetOrError;
+
+pub(crate) const WEAK_PROXY_TARGET: RuntimeCall<OwnedWeakTargetOrError, 1> = RuntimeCall {
+    symbol: "imre_weak_proxy_target",
+    params: [RuntimeParam::WeakProxy],
+    result: OwnedWeakTargetOrError,
+};
 
 pub(crate) const LIST_GET: RuntimeCall<OwnedIntOrError, 2> = RuntimeCall {
     symbol: "imre_list_get",
@@ -1015,7 +1028,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "imre_weak_proxy_new"
-                | "imre_weak_proxy_target"
                 | "imre_mktime"
                 | "imre_mktime_indexed"
                 | "imre_mktime_offset"
