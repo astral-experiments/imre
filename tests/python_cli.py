@@ -148,6 +148,18 @@ def call_allocation_flags(root):
 def check_boxed_call_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_traceback_allocation as fixture; fixture.allocation()"
+    for size in (0, 160, 224):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        expected = b"MemoryError () ValueError invalid literal for int() with base 10: 'invalid'\n23\n" if size else b"ValueError\n23\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
+        ), result
+
     source = import_path + "import boxed_memory_error_kind as fixture; fixture.allocation()"
     for ordinal in (0, 1):
         result = run(imre, "-B", "-c", source, extra={
