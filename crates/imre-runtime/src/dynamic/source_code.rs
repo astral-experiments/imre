@@ -1158,6 +1158,7 @@ impl Context {
     }
 
     pub(super) fn resume_source(&mut self, id: Id) -> Result<Option<Id>> {
+        self.heap.reserve_temporaries(1)?;
         self.heap.keep(id);
         let Value::Generator {
             owner,
@@ -1244,6 +1245,7 @@ impl Context {
         let Body::Source(code) = self.code_object(owner).body.clone() else {
             unreachable!("source frame")
         };
+        self.heap.reserve_temporaries(2)?;
         self.heap.keep(owner);
         self.heap.enter(scope, owner, frame_owner);
         let result = (|| {
