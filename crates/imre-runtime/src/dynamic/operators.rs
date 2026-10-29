@@ -2417,9 +2417,11 @@ impl Context {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 v[position(v.len())?]
             }
-            Value::Instance { .. } => {
-                let v = self.sequence(storage).unwrap();
-                v[position(v.len())?]
+            Value::Instance { class, fields, .. } => {
+                let names = self
+                    .namedtuple_fields(*class)
+                    .expect("validated named tuple");
+                fields[&names[position(names.len())?]]
             }
             Value::Str(s) => {
                 let c = s.chars().nth(position(s.chars().count())?).unwrap();
