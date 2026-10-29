@@ -256,7 +256,11 @@ impl Context {
             }
             "append" => {
                 match self.heap.get_mut(a) {
-                    Value::List(v) => v.push(b),
+                    Value::List(v) => {
+                        v.try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", ""))?;
+                        v.push(b);
+                    }
                     Value::Set { frozen: false, .. } => builtins::set_add(self, a, b)?,
                     _ => return Err(Error::new("TypeError", "expected a list or set")),
                 }
