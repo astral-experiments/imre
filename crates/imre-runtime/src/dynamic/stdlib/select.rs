@@ -70,8 +70,10 @@ fn select(ctx: &mut Context, args: &[Id]) -> Result<Id> {
                 e
             }
         })?;
+        ctx.heap.reserve_temporaries(1)?;
         ctx.heap.keep(iterator);
         while let Some(obj) = ctx.next_item(iterator)? {
+            ctx.heap.reserve_temporaries(1)?;
             ctx.heap.keep(obj);
             let n = fd(ctx, obj)?;
             sets.insert(group, items.len(), n)?;
