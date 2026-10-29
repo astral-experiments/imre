@@ -1266,6 +1266,62 @@ pub(super) fn method(
         })?;
         return Ok(ctx.text(text.into_string()));
     }
+    if matches!(name, "startswith" | "endswith") {
+        positional(name, kwargs)?;
+        arity(name, args, 1, 3)?;
+        let source = ctx.str_value(receiver)?;
+        let length = source.chars().count() as i64;
+        let bound = |i: i64| {
+            if i < 0 {
+                length.saturating_add(i).max(0)
+            } else {
+                i
+            }
+        };
+        let start = args
+            .get(1)
+            .filter(|&&id| id != NONE)
+            .map(|&x| ctx.as_integer(x))
+            .transpose()?
+            .map(bound)
+            .unwrap_or(0);
+        let end = args
+            .get(2)
+            .filter(|&&id| id != NONE)
+            .map(|&x| ctx.as_integer(x))
+            .transpose()?
+            .map(bound)
+            .unwrap_or(length)
+            .min(length);
+        let byte_at = |index: i64| {
+            if index >= length {
+                source.len()
+            } else {
+                source
+                    .char_indices()
+                    .nth(index as usize)
+                    .map_or(source.len(), |(byte, _)| byte)
+            }
+        };
+        let part = source.get(byte_at(start)..byte_at(end)).unwrap_or_default();
+        let candidates = match ctx.heap.get(args[0]) {
+            Value::Tuple(values) => values.as_slice(),
+            _ => &args[..1],
+        };
+        for &id in candidates {
+            let needle = ctx.str_value(id)?;
+            if start <= end
+                && (if name == "startswith" {
+                    part.starts_with(needle)
+                } else {
+                    part.ends_with(needle)
+                })
+            {
+                return Ok(TRUE);
+            }
+        }
+        return Ok(FALSE);
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => format_string(ctx, &source, args, kwargs),
@@ -1339,55 +1395,6 @@ pub(super) fn method(
                 _ => source.trim_start_matches(matches),
             };
             Ok(ctx.text(trimmed))
-        }
-        "startswith" | "endswith" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 3)?;
-            let length = source.chars().count() as i64;
-            let bound = |i: i64| {
-                if i < 0 {
-                    length.saturating_add(i).max(0)
-                } else {
-                    i
-                }
-            };
-            let start = args
-                .get(1)
-                .filter(|&&id| id != NONE)
-                .map(|&x| ctx.as_integer(x))
-                .transpose()?
-                .map(bound)
-                .unwrap_or(0);
-            let end = args
-                .get(2)
-                .filter(|&&id| id != NONE)
-                .map(|&x| ctx.as_integer(x))
-                .transpose()?
-                .map(bound)
-                .unwrap_or(length)
-                .min(length);
-            let part: String = source
-                .chars()
-                .skip(start as usize)
-                .take(end.saturating_sub(start).max(0) as usize)
-                .collect();
-            let candidates = match ctx.heap.get(args[0]) {
-                Value::Tuple(values) => values.as_slice(),
-                _ => &args[..1],
-            };
-            for &id in candidates {
-                let needle = ctx.str_value(id)?;
-                if start <= end
-                    && (if name == "startswith" {
-                        part.starts_with(needle)
-                    } else {
-                        part.ends_with(needle)
-                    })
-                {
-                    return Ok(TRUE);
-                }
-            }
-            Ok(FALSE)
         }
         "replace" => {
             positional(name, kwargs)?;
