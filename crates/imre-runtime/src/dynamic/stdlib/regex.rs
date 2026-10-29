@@ -178,13 +178,32 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
     let mut in_class = false;
     while let Some(c) = chars.next() {
         if c != '\\' {
+            if c == '{'
+                && !in_class
+                && chars.peek() == Some(&',')
+                && chars.clone().skip(1).find(|c| !c.is_ascii_digit()) == Some('}')
+            {
+                // Python treats an omitted lower bound as zero, including in {,}.
+                result.push_str("{0");
+                continue;
+            }
             if c == '$' && !in_class && !multiline && chars.peek().is_none() {
                 result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
                 continue;
             }
-            if c == '[' {
+            if c == '[' && !in_class {
                 in_class = true;
-            } else if c == ']' {
+                result.push('[');
+                if chars.next_if_eq(&'^').is_some() {
+                    result.push('^');
+                }
+                // A closing bracket in the first position is a literal member.
+                if chars.next_if_eq(&']').is_some() {
+                    result.push(']');
+                }
+                continue;
+            }
+            if c == ']' {
                 in_class = false;
             }
             result.push(c);
