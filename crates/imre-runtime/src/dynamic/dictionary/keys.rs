@@ -799,19 +799,23 @@ impl Context {
         key: Id,
         known_hash: Option<i64>,
     ) -> Result<(i64, Option<usize>)> {
+        let roots = self.heap.temporary_mark();
         self.heap.keep(dict);
         self.heap.keep(key);
-        let mut lookup = KeyLookup::new(self, dict, key, known_hash)?;
-        let mut previous = None;
-        loop {
-            match lookup.next(self, previous) {
-                ControlFlow::Break(found) => return Ok((lookup.hash, found)),
-                ControlFlow::Continue((position, resident)) => {
-                    self.heap.keep(resident);
-                    previous = Some((position, resident, self.dictionary_equal(resident, key)?));
+        let result = KeyLookup::new(self, dict, key, known_hash).and_then(|mut lookup| {
+            let mut previous = None;
+            loop {
+                match lookup.next(self, previous) {
+                    ControlFlow::Break(found) => return Ok((lookup.hash, found)),
+                    ControlFlow::Continue((position, resident)) => {
+                        previous =
+                            Some((position, resident, self.dictionary_equal(resident, key)?));
+                    }
                 }
             }
-        }
+        });
+        self.heap.release_temporaries_since(roots);
+        result
     }
 
     /// Insert a cache entry and identify the actual resident after reentrant comparison.
