@@ -716,6 +716,16 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
+
+        compare(
+            "-IB", "-c",
+            "import re, sysconfig\n"
+            "for cls, pattern in [(re.error, '('), (re.PatternError, b'[')]:\n"
+            "    try: re.compile(pattern)\n"
+            "    except cls as exc: print(type(exc) is re.PatternError, exc.pattern == pattern, exc.pos)\n"
+            "print(re.error is re.PatternError, issubclass(re.error, Exception))",
+        )
+
         resource_package = installed / "pkgutil_resource"
         resource_package.mkdir()
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
