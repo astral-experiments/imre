@@ -133,19 +133,45 @@ impl Encoder {
                         "maximum JSON nesting exceeded",
                     ));
                 }
+                let roots = ctx.heap.temporary_mark();
+                ctx.heap.reserve_temporaries(1)?;
+                ctx.heap.keep(id);
+                let contents = if matches!(ctx.heap.get(id), Value::Instance { .. })
+                    && (ctx.builtin_slot_accepts(id, "list")
+                        || ctx.builtin_slot_accepts(id, "tuple"))
+                {
+                    Self::snapshot(ctx, id)?
+                } else {
+                    id
+                };
+                // Materialize subclass iteration before detecting a repeated container. A
+                // second call may return an empty sequence and end the recursion itself.
+                let empty = match ctx.heap.get(contents) {
+                    Value::List(items)
+                    | Value::Tuple(items)
+                    | Value::NamedTuple { values: items, .. }
+                        if items.is_empty() =>
+                    {
+                        Some("[]")
+                    }
+                    _ if ctx.dict_entries(id).is_some_and(<[_]>::is_empty) => Some("{}"),
+                    _ => None,
+                };
+                if let Some(empty) = empty {
+                    self.output.push_str(empty);
+                    ctx.heap.release_temporaries_since(roots);
+                    return Ok(());
+                }
                 if !self.active.insert(id) {
                     return Err(Error::new("ValueError", "Circular reference detected"));
                 }
-                if self.default.is_some() {
-                    ctx.heap.keep(id);
-                }
-                match ctx.heap.get(id) {
+                match ctx.heap.get(contents) {
                     Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => {
                         self.output.push('[');
                         let mut i = 0;
                         while let Value::List(items)
                         | Value::Tuple(items)
-                        | Value::NamedTuple { values: items, .. } = ctx.heap.get(id)
+                        | Value::NamedTuple { values: items, .. } = ctx.heap.get(contents)
                         {
                             let Some(&item) = items.get(i) else { break };
                             if i != 0 {
@@ -159,6 +185,10 @@ impl Encoder {
                     Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
                         self.object(ctx, super::super::copy_ids(entries)?)?;
                     }
+                    Value::Instance {
+                        dictionary: Some(_),
+                        ..
+                    } => self.subclass_object(ctx, id)?,
                     _ => {
                         let default = self.default.ok_or_else(|| {
                             Error::new(
@@ -174,45 +204,88 @@ impl Encoder {
                     }
                 }
                 self.active.remove(&id);
+                ctx.heap.release_temporaries_since(roots);
             }
         }
         Ok(())
     }
 
     fn object(&mut self, ctx: &mut Context, mut entries: Vec<(Id, Id)>) -> Result<()> {
-        if self.default.is_some() || self.sort_keys {
-            // A callback can remove an entry while the encoder still holds its key and value.
-            for &(key, value) in &entries {
-                ctx.heap.keep(key);
-                ctx.heap.keep(value);
-            }
+        // Encoding a nested subclass can call Python and clear the original mapping.
+        ctx.heap
+            .reserve_temporaries(entries.len().saturating_mul(2))?;
+        for &(key, value) in &entries {
+            ctx.heap.keep(key);
+            ctx.heap.keep(value);
         }
         if self.sort_keys {
             super::builtins::sort_values(ctx, &mut entries, false, |(key, _)| key)?;
         }
         self.output.push('{');
         for (i, (key, value)) in entries.into_iter().enumerate() {
-            if i != 0 {
-                self.output.push_str(&self.item_separator);
-            }
-            match ctx.heap.get(ctx.scalar_value(key)) {
-                Value::Str(s) => write_json_string(&mut self.output, s, self.ascii)?,
-                Value::Int(n) => write_json_string(&mut self.output, &n.to_string(), self.ascii)?,
-                Value::Float(n) => {
-                    let text = float_text(ctx, key, *n, self.allow_nan)?;
-                    write_json_string(&mut self.output, &text, self.ascii)?
-                }
-                Value::None => self.output.push_str("\"null\""),
-                Value::Bool(v) => self
-                    .output
-                    .push_str(if *v { "\"true\"" } else { "\"false\"" }),
-                _ => return Err(Error::new("TypeError", "unsupported JSON object key")),
-            }
-            self.output.push_str(&self.key_separator);
-            self.value(ctx, value)?;
+            self.member(ctx, i, key, value)?;
         }
         self.output.push('}');
         Ok(())
+    }
+
+    /// Materialize a subclass iterator while keeping previously yielded values alive.
+    fn snapshot(ctx: &mut Context, source: Id) -> Result<Id> {
+        let iterator = ctx.iterator(source)?;
+        let list = ctx.alloc(Value::List(Vec::new()));
+        super::builtins::call(ctx, "list.extend", &[list, iterator], &[])?;
+        Ok(list)
+    }
+
+    /// Read a dict subclass through its items method and sort the returned pairs when requested.
+    fn subclass_object(&mut self, ctx: &mut Context, id: Id) -> Result<()> {
+        let method = ctx.lookup_attr(id, "items")?;
+        let result = ctx.call(method, Vec::new(), Vec::new())?;
+        let items = if matches!(ctx.heap.get(result), Value::List(_)) {
+            result
+        } else {
+            Self::snapshot(ctx, result)?
+        };
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(items);
+        if self.sort_keys {
+            super::builtins::call(ctx, "list.sort", &[items], &[])?;
+        }
+        self.output.push('{');
+        let mut i = 0;
+        while let Value::List(pairs) = ctx.heap.get(items) {
+            let Some(&pair) = pairs.get(i) else { break };
+            let values = ctx.tuple_items(pair)?;
+            let Some(&[key, value]) = values.as_deref() else {
+                return Err(Error::new("ValueError", "items must return 2-tuples"));
+            };
+            self.member(ctx, i, key, value)?;
+            i += 1;
+        }
+        self.output.push('}');
+        Ok(())
+    }
+
+    /// Write an object member after any sorting and pair validation.
+    fn member(&mut self, ctx: &mut Context, i: usize, key: Id, value: Id) -> Result<()> {
+        if i != 0 {
+            self.output.push_str(&self.item_separator);
+        }
+        match ctx.heap.get(ctx.scalar_value(key)) {
+            Value::Str(s) => write_json_string(&mut self.output, s, self.ascii)?,
+            Value::Int(n) => write_json_string(&mut self.output, &n.to_string(), self.ascii)?,
+            Value::Float(n) => {
+                let text = float_text(ctx, key, *n, self.allow_nan)?;
+                write_json_string(&mut self.output, &text, self.ascii)?
+            }
+            Value::None => self.output.push_str("\"null\""),
+            Value::Bool(v) => self
+                .output
+                .push_str(if *v { "\"true\"" } else { "\"false\"" }),
+            _ => return Err(Error::new("TypeError", "unsupported JSON object key")),
+        }
+        self.output.push_str(&self.key_separator);
+        self.value(ctx, value)
     }
 }
 
