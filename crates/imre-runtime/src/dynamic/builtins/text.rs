@@ -422,7 +422,7 @@ pub(super) fn builtin_format(
         let number = float_operand(ctx, value)?
             .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
         return Ok(ctx.text(
-            crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
+            crate::objects::format_fixed_float(number, precision, percent, sign)?.into_string(),
         ));
     }
     if matches!(
