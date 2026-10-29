@@ -76,13 +76,22 @@ impl Range {
 
     /// Return the position of an exact integer without traversing the range.
     pub(super) fn index_of(&self, value: &Int) -> Option<Int> {
-        let delta = value.big().as_ref() - self.start.big().as_ref();
+        let value = value.big();
+        let start = self.start.big();
+        let stop = self.stop.big();
         let step = self.step.big();
-        if !(&delta % step.as_ref()).is_zero() {
+        let in_bounds = if step.is_positive() {
+            start <= value && value < stop
+        } else {
+            stop < value && value <= start
+        };
+        if !in_bounds {
             return None;
         }
-        let index = delta / step.as_ref();
-        (!index.is_negative() && &index < self.len.big().as_ref()).then(|| Int::new(index))
+        let delta = value.as_ref() - start.as_ref();
+        (&delta % step.as_ref())
+            .is_zero()
+            .then(|| Int::new(delta / step.as_ref()))
     }
 
     /// The reverse cursor starts at the last reachable element, even for an unaligned stop.
