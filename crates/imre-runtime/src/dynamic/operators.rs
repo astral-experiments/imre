@@ -2826,7 +2826,7 @@ impl Context {
             a
         } else {
             self.alloc(Value::Set {
-                entries: entries.clone(),
+                entries: entries.try_clone()?,
                 frozen: *frozen,
             })
         };
