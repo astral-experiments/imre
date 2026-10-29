@@ -113,11 +113,14 @@ pub(super) fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
         } else {
             input
         };
-        if let Value::Union(nested) = ctx.heap.get(input) {
-            flattened.extend_from_slice(tuple_items(ctx, nested.args));
-        } else {
-            flattened.push(input);
-        }
+        let items = match ctx.heap.get(input) {
+            Value::Union(nested) => tuple_items(ctx, nested.args),
+            _ => std::slice::from_ref(&input),
+        };
+        flattened
+            .try_reserve(items.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        flattened.extend_from_slice(items);
     }
     let members = ctx.alloc(Value::Set {
         entries: Default::default(),
@@ -138,8 +141,13 @@ pub(super) fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
                     continue 'member;
                 }
             }
+            unhashable
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
             unhashable.push(arg);
         }
+        args.try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
         args.push(arg);
     }
     match args.as_slice() {
@@ -188,9 +196,8 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
     if ctx.classes.get("typing.Union") != Some(&target) {
         return None;
     }
-    let args = match ctx.heap.get(index) {
-        Value::Tuple(args) => args.clone(),
-        _ => vec![index],
-    };
-    Some(make(ctx, &args))
+    Some(match ctx.heap.get(index) {
+        Value::Tuple(args) => super::copy_ids(args).and_then(|args| make(ctx, &args)),
+        _ => make(ctx, &[index]),
+    })
 }
