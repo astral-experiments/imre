@@ -82,7 +82,10 @@ fn select(ctx: &mut Context, args: &[Id]) -> Result<Id> {
         }
     }
     let any_ready = sets.wait(timeout)?;
-    let mut lists = Vec::with_capacity(3);
+    let mut lists = Vec::new();
+    lists
+        .try_reserve_exact(3)
+        .map_err(|_| Error::new("MemoryError", ""))?;
     for (group, items) in inputs.into_iter().enumerate() {
         let mut ready = Vec::new();
         if any_ready {

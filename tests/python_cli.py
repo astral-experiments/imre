@@ -11,6 +11,33 @@ import tempfile
 from pathlib import Path
 
 
+def check_select_result_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "refuse_select_result.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_select_result.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "boxed_select_result_allocation.py"
+    for optimization in (0, 3):
+        executable = root / f"select-result-O{optimization}"
+        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+                    extra={"IMRE_ENCODED_FLAGS": flags})
+        assert built.returncode == 0, built
+        for shape in range(4):
+            for count in ((1,) if shape == 0 else (1, 511)):
+                arguments = (str(shape), str(count))
+                reference = run(sys.executable, "-B", source, *arguments)
+                assert (reference.returncode, reference.stdout, reference.stderr) == (0, b"ok\nTrue\nTrue\n", b""), reference
+                for refused in (0, 1):
+                    result = run(executable, *arguments, extra={"SELECT_RESULT_REFUSE": str(refused)})
+                    assert (result.returncode, result.stdout, result.stderr) == (
+                        0, b"MemoryError\nTrue\n" if refused else reference.stdout,
+                        b"select_result_allocation_refused\n" if refused else b"",
+                    ), (optimization, shape, count, refused, result)
+
+
 def check_raise_site_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "exceptions" / "refuse_raise_site.c"
     wrapper = root / "refuse_raise_site.o"
@@ -327,6 +354,7 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_select_result_allocation(imre, root, run)
             flags = call_allocation_flags(root)
             check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
