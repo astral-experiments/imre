@@ -134,17 +134,17 @@ impl StructFormat {
     }
 }
 
-pub(crate) fn struct_calcsize(format: &str) -> Result<usize, String> {
-    Ok(StructFormat::parse(format)?.size)
-}
-
-pub(crate) fn struct_unpack(format: &str, buffer: &[u8]) -> Result<Vec<u64>, String> {
-    StructFormat::parse(format)?.unpack(buffer)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn struct_calcsize(format: &str) -> Result<usize, String> {
+        Ok(StructFormat::parse(format)?.size)
+    }
+
+    fn struct_unpack(format: &str, buffer: &[u8]) -> Result<Vec<u64>, String> {
+        StructFormat::parse(format)?.unpack(buffer)
+    }
 
     #[test]
     fn elf_integer_fields_respect_byte_order() {

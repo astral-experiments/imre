@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 mod structure;
-pub(crate) use structure::{StructFormat, struct_calcsize, struct_unpack};
+pub(crate) use structure::StructFormat;
 
 pub(crate) const SCHEME_NAMES: &[&str] = &["posix_prefix", "venv"];
 pub(crate) const PATH_NAMES: &[&str] = &[
