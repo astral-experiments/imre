@@ -3458,26 +3458,51 @@ impl Context {
                 let local = self.scope(module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
                     .map_err(|e| Error::new("SystemError", e.to_string()))?;
-                let names = |key: &str| -> Vec<String> {
-                    sig[key]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|n| n.as_str().map(str::to_owned))
-                        .collect()
+                let names = |key: &str| -> Result<Vec<String>> {
+                    let mut names = Vec::new();
+                    for name in sig[key].as_array().into_iter().flatten() {
+                        if let Some(name) = name.as_str() {
+                            names
+                                .try_reserve(1)
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            names.push(copy_label(name)?);
+                        }
+                    }
+                    Ok(names)
                 };
-                let locals = names("scope_locals");
-                let nonlocals = names("scope_nonlocals");
+                let locals = names("scope_locals")?;
+                let nonlocals = names("scope_nonlocals")?;
                 let Value::Scope(frame) = self.heap.get_mut(local) else {
                     unreachable!()
                 };
+                frame
+                    .closure
+                    .declared
+                    .try_reserve(locals.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                frame
+                    .closure
+                    .nonlocals
+                    .try_reserve(nonlocals.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
                 frame.closure.declared.extend(locals);
                 frame.closure.declared_complete =
                     sig["scope_locals_complete"].as_bool().unwrap_or(false);
                 frame.closure.nonlocals.extend(nonlocals);
-                let posonly = names("posonly");
-                let pos: Vec<_> = posonly.iter().cloned().chain(names("positional")).collect();
-                let kwonly = names("kwonly");
+                let posonly = names("posonly")?;
+                let positional = names("positional")?;
+                let mut pos = Vec::new();
+                let count = posonly
+                    .len()
+                    .checked_add(positional.len())
+                    .ok_or_else(|| Error::new("MemoryError", ""))?;
+                pos.try_reserve_exact(count)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                for name in &posonly {
+                    pos.push(copy_label(name)?);
+                }
+                pos.extend(positional);
+                let kwonly = names("kwonly")?;
                 for (n, &v) in pos.iter().zip(&args) {
                     self.bind(local, n, v);
                 }
