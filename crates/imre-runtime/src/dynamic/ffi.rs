@@ -156,7 +156,7 @@ impl Context {
             }
             "match_sequence_length" => Ok(NONE),
             "lookup" | "lookup_class_local" => {
-                let name = self.str_value(b)?.to_owned();
+                let name = copy_label(self.str_value(b)?)?;
                 if op == "lookup_class_local" {
                     if let Some(value) = self.scope_name(a, &name) {
                         return Ok(value);
@@ -175,7 +175,7 @@ impl Context {
                             .expect("enclosing comprehension scope");
                     }
                 }
-                let name = self.str_value(b)?.to_owned();
+                let name = copy_label(self.str_value(b)?)?;
                 let value = self.enum_assignment(scope, &name, c)?;
                 let replaced = self.store_source_name(scope, &name, value)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
@@ -188,7 +188,7 @@ impl Context {
                 }
             }
             "declare_global" => {
-                let name = self.str_value(b)?.to_owned();
+                let name = copy_label(self.str_value(b)?)?;
                 let Value::Scope(scope) = self.heap.get_mut(a) else {
                     unreachable!()
                 };
@@ -196,7 +196,7 @@ impl Context {
                 Ok(NONE)
             }
             "delname" | "clearname" => {
-                let name = self.str_value(b)?.to_owned();
+                let name = copy_label(self.str_value(b)?)?;
                 let scope = self.binding_scope(a, &name);
                 if !self.remove_binding(scope, &name, b)? && op == "delname" {
                     return Err(self.missing_binding(a, scope, &name));
@@ -205,14 +205,14 @@ impl Context {
             }
             "comprehension_scope" => self.comprehension_scope(a, b),
             "import" => {
-                let name = self.str_value(b)?.to_owned();
+                let name = copy_label(self.str_value(b)?)?;
                 self.module(&name)
             }
             "from" => self.import_from(a, b),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
-                let name = self.str_value(b)?.to_owned();
+                let name = copy_label(self.str_value(b)?)?;
                 if op == "method" {
                     self.lookup_method(a, &name)
                 } else {
@@ -220,12 +220,12 @@ impl Context {
                 }
             }
             "setattr" => {
-                let name = self.str_value(b)?.to_owned();
+                let name = copy_label(self.str_value(b)?)?;
                 self.set_attr(a, &name, c)?;
                 Ok(c)
             }
             "delattr" => {
-                let name = self.str_value(b)?.to_owned();
+                let name = copy_label(self.str_value(b)?)?;
                 self.delete_attr(a, &name)?;
                 Ok(NONE)
             }
