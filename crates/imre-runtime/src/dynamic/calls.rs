@@ -3213,7 +3213,9 @@ impl Context {
             Value::Method {
                 callable, receiver, ..
             } => {
-                let mut all = Vec::with_capacity(args.len() + 1);
+                let mut all = Vec::new();
+                all.try_reserve_exact(args.len() + 1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
                 all.push(receiver);
                 all.extend(args);
                 self.call(callable, all, kwargs)
