@@ -35,7 +35,8 @@ void *__wrap_realloc(void *ptr, size_t size) {
 }
 
 static int enter(const char *op) {
-    if (!after_put || refused || strcmp(op, "call") != 0) return 0;
+    const char *wanted = getenv("IMRE_TEST_CALL_OP");
+    if (!after_put || refused || strcmp(op, wanted ? wanted : "call") != 0) return 0;
     after_put = 0;
     in_call = 1;
     const char *size = getenv("IMRE_TEST_CALL_SIZE");

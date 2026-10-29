@@ -108,7 +108,7 @@ pub(crate) struct Context {
     slot_depth: usize,
 }
 
-/// Copy a function or module label without aborting on allocation failure.
+/// Copy a runtime name without aborting on allocation failure.
 fn copy_label(value: &str) -> Result<String> {
     let mut copied = String::new();
     copied
