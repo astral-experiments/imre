@@ -209,6 +209,9 @@ impl Builtin {
                     | PathOperation::Readlink
                     | PathOperation::Link(_)
                     | PathOperation::Absolute
+                    | PathOperation::Name
+                    | PathOperation::Stem
+                    | PathOperation::Suffix
                     | PathOperation::WithName
                     | PathOperation::WithStem
                     | PathOperation::WithSuffix
@@ -243,9 +246,6 @@ impl Builtin {
                     | PathOperation::Anchor
                     | PathOperation::CountPart
                     | PathOperation::Text
-                    | PathOperation::Name
-                    | PathOperation::Stem
-                    | PathOperation::Suffix
                     | PathOperation::IsAbsolute
                     | PathOperation::Info
                     | PathOperation::InfoRepr
@@ -1248,6 +1248,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_with_name"
                 | "imre_path_change_extension"
                 | "imre_path_relative_to"
+                | "imre_path_name"
+                | "imre_path_stem"
+                | "imre_path_suffix"
                 | "imre_path_suffixes"
                 | "imre_path_resolve"
                 | "imre_tempdir_new"

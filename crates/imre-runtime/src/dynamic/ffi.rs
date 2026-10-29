@@ -520,8 +520,10 @@ impl Context {
                         error.tracing().instance = Some(normalized);
                     }
                     let active = self.heap.active_exception();
-                    if active != NONE && error.tracing().instance != Some(active) {
-                        error.tracing().context = Some(active);
+                    if active != NONE
+                        && error.trace.as_ref().and_then(|trace| trace.instance) != Some(active)
+                    {
+                        error.context = active;
                     }
                 }
                 Err(error)

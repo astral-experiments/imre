@@ -52,7 +52,7 @@ pub(super) fn allocate(ctx: &mut Context, owner: &str, args: &[Id]) -> Result<Id
     if ctx.subclass(class, import) {
         error.tracing().import_message = Some(NONE);
     }
-    error.class = python_class;
+    error.class = python_class.unwrap_or(NONE);
     Ok(ctx.alloc(Value::Raised(error)))
 }
 
@@ -79,7 +79,7 @@ pub(super) fn initialize(
         unreachable!()
     };
     let kind = error.kind.clone();
-    let class = error.class;
+    let class = error.class();
     let prior = error.os_args.clone();
     if owner == "OSError" && !class.is_some_and(|id| ctx.deferred_os_init(id)) {
         return Ok(NONE);

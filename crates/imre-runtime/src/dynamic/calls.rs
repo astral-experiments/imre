@@ -109,7 +109,7 @@ impl Context {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
-        let stop = error.class.map_or_else(
+        let stop = error.class().map_or_else(
             || error.kind == "StopIteration",
             |class| self.has_base(class, "StopIteration"),
         );
@@ -226,7 +226,7 @@ impl Context {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
-        self.class_attr(error.class?, name)
+        self.class_attr(error.class()?, name)
     }
 
     /// Bind an override only if it precedes the built-in numeric method in the MRO.
@@ -828,7 +828,7 @@ impl Context {
                 ..
             } => Ok(self.builtin("time.struct_time")),
             Value::Raised(error) => {
-                if let Some(class) = error.class {
+                if let Some(class) = error.class() {
                     return Ok(class);
                 }
                 let name = error.kind.clone();
@@ -975,7 +975,7 @@ impl Context {
     pub(super) fn raised_error_matches(&self, error: &Error, class: Id) -> bool {
         match self.heap.get(class) {
             Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
-            _ if let Some(actual) = error.class => self.subclass(actual, class),
+            _ if let Some(actual) = error.class() => self.subclass(actual, class),
             Value::Native(_) => {
                 let kind = error.kind.as_ref();
                 let builtin = self.builtins.get(kind).copied();
@@ -1026,7 +1026,7 @@ impl Context {
 
     /// Includes runtime-loaded subclasses of the named builtin exception.
     pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
-        (error.class.is_none()
+        (error.class().is_none()
             && builtins::exception_subclass(&error.kind, kind).unwrap_or(error.kind == kind))
             || self
                 .builtins
@@ -1240,7 +1240,7 @@ impl Context {
         }
         if let Value::Raised(error) = self.heap.get(obj) {
             let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
-            if let Some(class) = error.class
+            if let Some(class) = error.class()
                 && let Some(member) = self.class_attr(class, name)
             {
                 let field = if self.data_descriptor(member) {
@@ -1305,7 +1305,7 @@ impl Context {
                 match name {
                     "__traceback__" => return self.exception_traceback(obj),
                     "__context__" => {
-                        return Ok(error.trace.as_ref().and_then(|t| t.context).unwrap_or(NONE));
+                        return Ok(error.context);
                     }
                     "__cause__" => {
                         return Ok(error.trace.as_ref().and_then(|t| t.cause).unwrap_or(NONE));
@@ -2662,7 +2662,7 @@ impl Context {
             let Value::Raised(error) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
-            error.tracing().context = (value != NONE).then_some(value);
+            error.context = value;
             return Ok(());
         }
         if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {

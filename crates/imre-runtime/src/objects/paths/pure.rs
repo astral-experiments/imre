@@ -420,9 +420,8 @@ impl PurePath {
         Ok(path)
     }
 
-    pub(super) fn name(&self) -> &StrOwner {
-        self.name
-            .get_or_init(|| StrOwner::new(self.tail.last().cloned().unwrap_or_default()))
+    pub(super) fn name(&self) -> Result<&StrOwner> {
+        super::cached_name(&self.name, || super::try_owned_string(self.basename()))
     }
 
     pub(super) fn basename(&self) -> &str {

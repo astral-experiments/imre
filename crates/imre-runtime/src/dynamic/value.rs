@@ -61,7 +61,6 @@ pub(super) struct Location {
 pub(super) struct Trace {
     pub frames: Vec<(Location, Id)>,
     pub instance: Option<Id>,
-    pub context: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
     /// Live members belong to the exception instance across traceback clones.
@@ -82,11 +81,14 @@ pub(super) struct ImportFields {
 #[derive(Clone, Debug)]
 pub(super) struct Error {
     pub kind: std::borrow::Cow<'static, str>,
-    pub class: Option<Id>,
+    /// The Python exception class, or NONE for a native error.
+    pub class: Id,
     pub message: String,
     pub args: Option<Id>,
     pub decode: Option<Box<DecodeState>>,
     pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
+    // Keep the context reachable even if the optional traceback cannot be allocated.
+    pub context: Id,
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
     pub import: Option<crate::shared::Shared<ImportFields>>,
@@ -110,15 +112,21 @@ impl Error {
             } else {
                 std::borrow::Cow::Owned(kind.to_owned())
             },
-            class: None,
+            class: NONE,
             message: message.into(),
             args: None,
             decode: None,
             os_args: None,
+            context: NONE,
             trace: None,
             exit_status: None,
             import: None,
         }
+    }
+
+    /// Read the class handle of an exception constructed from a Python class.
+    pub(super) fn class(&self) -> Option<Id> {
+        (self.class != NONE).then_some(self.class)
     }
 
     /// Attach the module and member names exposed on a Python import exception.
@@ -157,7 +165,8 @@ impl Error {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
             .into_iter()
-            .chain(self.class)
+            .chain(self.class())
+            .chain((self.context != NONE).then_some(self.context))
             .chain(
                 self.decode
                     .iter()
@@ -171,7 +180,6 @@ impl Error {
                     .map(|&(_, frame)| frame)
                     .chain((trace.stop_value != NONE).then_some(trace.stop_value))
                     .chain(trace.instance)
-                    .chain(trace.context)
                     .chain(trace.cause)
                     .chain(trace.import_message)
                     .chain(
@@ -184,6 +192,14 @@ impl Error {
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
             }))
+    }
+
+    /// Acquire the cold metadata while an error is already propagating.
+    fn try_tracing(&mut self) -> Option<&mut Trace> {
+        if self.trace.is_none() {
+            self.trace = Some(allocator_api2::boxed::Box::try_new(Trace::default()).ok()?);
+        }
+        self.trace.as_deref_mut()
     }
 
     pub(super) fn tracing(&mut self) -> &mut Trace {
@@ -208,12 +224,24 @@ impl Context {
                 loc.line = line;
                 loc.span = Some([start, split, end]);
             }
-            let trace = error.tracing();
             let active = self.heap.active_exception();
-            if trace.frames.is_empty() && active != NONE && trace.instance != Some(active) {
-                trace.context.get_or_insert(active);
+            if error.context == NONE
+                && active != NONE
+                && error
+                    .trace
+                    .as_ref()
+                    .is_none_or(|trace| trace.frames.is_empty() && trace.instance != Some(active))
+            {
+                error.context = active;
             }
-            trace.frames.push((loc, frame));
+            if let Some(trace) = error.try_tracing()
+                && trace.frames.try_reserve(1).is_ok()
+            {
+                trace.frames.push((loc, frame));
+                return;
+            }
+            let original = std::mem::replace(error, Error::new("MemoryError", ""));
+            error.context = self.raised_instance(original);
         }
     }
 
@@ -818,7 +846,7 @@ impl Value {
         match self {
             Self::Instance { class, .. } => Some(*class),
             Self::Module { constructor, .. } => *constructor,
-            Self::Raised(error) => error.class,
+            Self::Raised(error) => error.class(),
             _ => None,
         }
     }
@@ -1435,13 +1463,13 @@ impl Heap {
         callback: Id,
         kind: super::weakref::Kind,
         subclass: Option<Id>,
-    ) -> Id {
+    ) -> Result<Id> {
         let references = self.weak_references(target);
         if subclass.is_none() && callback == NONE
             && let Some(&id) = references.iter().find(|&&id|
                 matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
         {
-            return id;
+            return Ok(id);
         }
         // Callback-free canonical references precede proxies, then callbacks in newest-first order.
         let index = references
@@ -1456,6 +1484,15 @@ impl Heap {
                 _ => true,
             })
             .unwrap_or(references.len());
+        let mut new_references = Vec::new();
+        if let Some(references) = self.weak.get_mut(&target) {
+            references.try_reserve(1)
+        } else {
+            self.weak
+                .try_reserve(1)
+                .and_then(|()| new_references.try_reserve(1))
+        }
+        .map_err(|_| Error::new("MemoryError", ""))?;
         let reference = super::weakref::Reference {
             target: Some(target),
             callback,
@@ -1471,11 +1508,14 @@ impl Heap {
         } else {
             self.alloc(Value::Weak(reference))
         };
-        self.weak.entry(target).or_default().insert(index, id);
+        self.weak
+            .entry(target)
+            .or_insert(new_references)
+            .insert(index, id);
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
         self.collect_next_statement = true;
-        id
+        Ok(id)
     }
 
     fn weak_edge(&self, value: Id) -> bool {

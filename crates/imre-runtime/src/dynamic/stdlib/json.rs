@@ -155,13 +155,19 @@ impl Encoder {
             let roots = ctx.heap.temporary_mark();
             let chunk = ctx.text(std::mem::take(&mut self.output));
             let write = ctx.lookup_attr(stream, "write")?;
-            ctx.call(write, vec![chunk], Vec::new())?;
+            ctx.call(write, super::super::copy_ids(&[chunk])?, Vec::new())?;
             ctx.heap.release_temporaries_since(roots);
         }
         Ok(())
     }
 
     fn value(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            self.value_inner(ctx, id, depth)
+        })
+    }
+
+    fn value_inner(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
         match ctx.heap.get(ctx.scalar_value(id)) {
             Value::None => write_json_fragment(&mut self.output, "null")?,
             Value::Bool(value) => {
@@ -256,7 +262,8 @@ impl Encoder {
                                 ),
                             )
                         })?;
-                        let result = ctx.call(default, vec![id], Vec::new())?;
+                        let result =
+                            ctx.call(default, super::super::copy_ids(&[id])?, Vec::new())?;
                         self.value(ctx, result, depth)?;
                     }
                 }
@@ -386,7 +393,7 @@ impl Encoder {
         let mut items = ctx.call(method, Vec::new(), Vec::new())?;
         if self.sort_keys {
             let sorted = ctx.builtin("sorted");
-            items = ctx.call(sorted, vec![items], Vec::new())?;
+            items = ctx.call(sorted, super::super::copy_ids(&[items])?, Vec::new())?;
         }
         let iter = ctx.iterator(items)?;
         let mut i = 0;
@@ -457,7 +464,7 @@ fn float_text(ctx: &mut Context, id: Id, value: f64, allow_nan: bool) -> Result<
     }
     if !allow_nan {
         let repr = ctx.builtin("repr");
-        let text = ctx.call(repr, vec![id], Vec::new())?;
+        let text = ctx.call(repr, super::super::copy_ids(&[id])?, Vec::new())?;
         return Err(Error::new(
             "ValueError",
             format!(
@@ -473,4 +480,40 @@ fn float_text(ctx: &mut Context, id: Id, value: f64, allow_nan: bool) -> Result<
     } else {
         "-Infinity".into()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_nested_objects_on_a_small_stack() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let argv = [c"imre".as_ptr()];
+                // SAFETY: argv and the configuration are valid for the initializer,
+                // which transfers ownership of a newly allocated context.
+                let mut ctx = unsafe {
+                    Box::from_raw(crate::dynamic::ffi::imre_dyn_new(
+                        1,
+                        argv.as_ptr(),
+                        c"{\"paths\":[]}".as_ptr(),
+                    ))
+                };
+                let key = ctx.text("x");
+                let mut value = NONE;
+                for _ in 0..400 {
+                    value = ctx.dict(vec![(key, value)]);
+                }
+                let output = encode(&mut ctx, value, &[], None).unwrap();
+                assert_eq!(
+                    ctx.str_value(output).unwrap(),
+                    format!("{}null{}", "{\"x\": ".repeat(400), "}".repeat(400))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 }
