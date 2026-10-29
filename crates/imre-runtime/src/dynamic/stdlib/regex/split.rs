@@ -135,17 +135,21 @@ pub(super) fn nonempty(
     if start == text.len() {
         return Ok(false);
     }
-    let nfa = pattern
-        .split_retry
-        .get_or_init(|| {
-            NFA::compiler()
-                .syntax(syntax(pattern.bytes, pattern.flags))
-                .configure(NFA::config().utf8(!pattern.bytes))
-                .build(&pattern.engine_source)
-                .map_err(|e| e.to_string())
-        })
-        .as_ref()
-        .map_err(Clone::clone)?;
+    let nfa = if let Some(nfa) = pattern.regex.guarded_nfa() {
+        nfa
+    } else {
+        pattern
+            .split_retry
+            .get_or_init(|| {
+                NFA::compiler()
+                    .syntax(syntax(pattern.bytes, pattern.flags))
+                    .configure(NFA::config().utf8(!pattern.bytes))
+                    .build(&pattern.engine_source)
+                    .map_err(|e| e.to_string())
+            })
+            .as_ref()
+            .map_err(Clone::clone)?
+    };
     enum Frame {
         Visit(StateID, usize),
         Restore(usize, Option<NonMaxUsize>),
