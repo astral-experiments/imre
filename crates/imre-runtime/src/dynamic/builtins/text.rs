@@ -1266,6 +1266,47 @@ pub(super) fn method(
         })?;
         return Ok(ctx.text(text.into_string()));
     }
+    if name == "join" {
+        positional(name, kwargs)?;
+        arity(name, args, 1, 1)?;
+        let collected;
+        let values = match ctx.heap.get(args[0]) {
+            Value::List(items) | Value::Tuple(items) => items.as_slice(),
+            _ => {
+                collected = ctx.items(args[0])?;
+                &collected
+            }
+        };
+        if let [item] = values {
+            return ctx
+                .string_storage(*item)
+                .ok_or_else(|| type_error("expected str"));
+        }
+        let sep = ctx.str_value(receiver)?;
+        let mut length = sep
+            .len()
+            .checked_mul(values.len().saturating_sub(1))
+            .ok_or_else(crate::Error::memory_error)?;
+        for &item in values {
+            length = length
+                .checked_add(ctx.str_value(item)?.len())
+                .ok_or_else(crate::Error::memory_error)?;
+        }
+        if length == 0 && sep.is_empty() {
+            return Ok(ctx.string_storage(receiver).unwrap());
+        }
+        let mut output = String::new();
+        output
+            .try_reserve_exact(length)
+            .map_err(|_| crate::Error::memory_error())?;
+        for (index, &item) in values.iter().enumerate() {
+            if index != 0 {
+                output.push_str(sep);
+            }
+            output.push_str(ctx.str_value(item)?);
+        }
+        return Ok(ctx.text(output));
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => format_string(ctx, &source, args, kwargs),
@@ -1400,16 +1441,6 @@ pub(super) fn method(
             let old = ctx.str_value(args[0])?;
             let new = ctx.str_value(args[1])?;
             Ok(ctx.text(source.replacen(old, new, usize::try_from(count).unwrap_or(usize::MAX))))
-        }
-        "join" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            let values = ctx.items(args[0])?;
-            let parts = values
-                .iter()
-                .map(|&id| ctx.str_value(id))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(ctx.text(parts.join(&source)))
         }
         "capitalize" | "lower" | "upper" => {
             positional(name, kwargs)?;
