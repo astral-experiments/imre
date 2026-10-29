@@ -1253,6 +1253,14 @@ impl Context {
         }
     }
 
+    /// Run deferred callbacks when a native loop reaches a collection point.
+    pub(super) fn collect_garbage(&mut self) {
+        let (heap, roots) = self.heap_and_roots();
+        if let Some(callbacks) = heap.collect_if_due(roots) {
+            self.run_weak_callbacks(callbacks);
+        }
+    }
+
     /// Flush unreachable file owners before the caller evaluates its next operand.
     pub(super) fn leave_frame(&mut self, result: Id, returning: bool) {
         if self.heap.leave(result, returning) {
