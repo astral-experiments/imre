@@ -22,13 +22,14 @@ impl Union {
         let Some(unhashable) = self.unhashable else {
             return ctx.dictionary_hash(self.members);
         };
-        let items = tuple_items(ctx, unhashable).to_vec();
-        for &item in &items {
+        let count = tuple_items(ctx, unhashable).len();
+        for i in 0..count {
+            let item = tuple_items(ctx, unhashable)[i];
             ctx.dictionary_hash(item)?;
         }
         Err(Error::new(
             "TypeError",
-            format!("union contains {} unhashable elements", items.len()),
+            format!("union contains {count} unhashable elements"),
         ))
     }
 
