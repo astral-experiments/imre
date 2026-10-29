@@ -87,6 +87,29 @@ def current():
     raw = io.BytesIO()
     text = io.TextIOWrapper(raw)
     assert text.detach() is raw and text.__del__() is None and not raw.closed
+    class Size:
+        def __init__(self, owner, replacement):
+            self.owner = owner
+            self.replacement = replacement
+
+        def __index__(self):
+            if self.replacement is None:
+                self.owner.detach()
+            else:
+                self.owner.__init__(self.replacement, encoding="utf-8")
+            return 2
+
+    for name in ("read", "readline"):
+        stream = io.TextIOWrapper(io.BytesIO(b"old"), encoding="utf-8")
+        read = getattr(stream, name)
+        assert read(Size(stream, io.BytesIO(b"new"))) == "ne"
+        try:
+            read(Size(stream, None))
+        except ValueError as error:
+            assert str(error) == "underlying buffer has been detached"
+        else:
+            raise AssertionError("read from a detached buffer")
+
     print("wrapped binary streams")
 
 

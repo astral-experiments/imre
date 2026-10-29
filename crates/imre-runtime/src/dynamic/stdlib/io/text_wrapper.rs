@@ -72,8 +72,22 @@ pub(in crate::dynamic) struct Wrapper {
 }
 
 fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> Result<Id> {
-    let f = ctx.lookup_attr(obj, name)?;
-    ctx.call(f, args, Vec::new())
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(obj);
+    let result = ctx
+        .lookup_attr(obj, name)
+        .and_then(|f| ctx.call(f, args, Vec::new()));
+    ctx.heap.release_temporaries_since(mark);
+    match &result {
+        Ok(value) => ctx.heap.keep(*value),
+        Err(error) => {
+            for value in error.roots() {
+                ctx.heap.keep(value);
+            }
+        }
+    }
+    ctx.heap.weak_edge_removed(obj);
+    result
 }
 
 fn flag(ctx: &mut Context, obj: Id, method: &str) -> Result<bool> {
@@ -204,11 +218,37 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         return Err(Error::new("TypeError", "expected a TextIOWrapper instance"));
     };
-    *memory_stream = Some(MemoryStream::Wrapper(Rc::new(state)));
+    if let Some(MemoryStream::Wrapper(old)) =
+        memory_stream.replace(MemoryStream::Wrapper(Rc::new(state)))
+        && let Some(buffer) = old.buffer.get()
+    {
+        ctx.heap.weak_edge_removed(buffer);
+    }
     Ok(NONE)
 }
 
 impl Wrapper {
+    /// Get the current stream state after a Python callback may have reinitialized it.
+    fn from_receiver(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
+        let Value::Instance {
+            memory_stream: Some(MemoryStream::Wrapper(w)),
+            ..
+        } = ctx.heap.get(receiver)
+        else {
+            return Err(Error::new(
+                "ValueError",
+                "I/O operation on uninitialized object",
+            ));
+        };
+        Ok(w.clone())
+    }
+
+    /// Resolve the current buffer before calling a method that can reenter the wrapper.
+    fn invoke_buffer(ctx: &mut Context, receiver: Id, name: &str, args: Vec<Id>) -> Result<Id> {
+        let buffer = Self::from_receiver(ctx, receiver)?.binary()?;
+        invoke(ctx, buffer, name, args)
+    }
+
     pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
         visit.extend(self.buffer.get());
         visit.extend([self.encoding, self.errors]);
@@ -229,16 +269,16 @@ impl Wrapper {
         }
     }
 
-    fn drain(&self, ctx: &mut Context, buffer: Id) -> Result<()> {
+    fn drain(&self, ctx: &mut Context, receiver: Id) -> Result<()> {
         let pending = self.output.take();
         if !pending.is_empty() {
             let data = ctx.alloc(Value::Bytes(pending));
-            invoke(ctx, buffer, "write", vec![data])?;
+            Self::invoke_buffer(ctx, receiver, "write", vec![data])?;
         }
         Ok(())
     }
 
-    fn write(&self, ctx: &mut Context, buffer: Id, value: Id) -> Result<Id> {
+    fn write(&self, ctx: &mut Context, receiver: Id, value: Id) -> Result<Id> {
         if !self.writable {
             return Err(Error::new("UnsupportedOperation", "not writable"));
         }
@@ -273,7 +313,7 @@ impl Wrapper {
         self.write_start.set(false);
         if encoded.len() >= self.chunk_size.get() {
             while !self.output.borrow().is_empty() {
-                self.drain(ctx, buffer)?;
+                self.drain(ctx, receiver)?;
             }
         }
         let length = {
@@ -285,27 +325,31 @@ impl Wrapper {
             pending.len()
         };
         if flush || self.write_through || length >= self.chunk_size.get() {
-            self.drain(ctx, buffer)?;
+            self.drain(ctx, receiver)?;
         }
         if flush {
-            invoke(ctx, buffer, "flush", vec![])?;
+            Self::invoke_buffer(ctx, receiver, "flush", vec![])?;
         }
         self.input.borrow_mut().discard();
         Ok(ctx.int(count as i64))
     }
 
-    fn read(&self, ctx: &mut Context, buffer: Id, limit: Option<usize>, line: bool) -> Result<Id> {
-        if !self.readable {
+    fn read(ctx: &mut Context, receiver: Id, limit: Option<usize>, line: bool) -> Result<Id> {
+        let w = Self::from_receiver(ctx, receiver)?;
+        w.binary()?;
+        if !w.readable {
             return Err(Error::new("UnsupportedOperation", "not readable"));
         }
-        self.drain(ctx, buffer)?;
+        w.drain(ctx, receiver)?;
         let all = !line && limit.is_none();
         loop {
+            let w = Self::from_receiver(ctx, receiver)?;
+            let buffer = w.binary()?;
             if !all
                 && let Some(part) =
-                    self.input
+                    w.input
                         .borrow_mut()
-                        .take(limit, line, self.newline.as_deref(), false)
+                        .take(limit, line, w.newline.as_deref(), false)
             {
                 return Ok(ctx.text(part));
             }
@@ -313,11 +357,13 @@ impl Wrapper {
                 ("read", vec![])
             } else {
                 (
-                    if self.read1 { "read1" } else { "read" },
-                    vec![ctx.int(self.chunk_size.get() as i64)],
+                    if w.read1 { "read1" } else { "read" },
+                    vec![ctx.int(w.chunk_size.get() as i64)],
                 )
             };
             let data = invoke(ctx, buffer, method, args)?;
+            let w = Self::from_receiver(ctx, receiver)?;
+            w.binary()?;
             let bytes = ctx.bytes_like(data).map_err(|_| {
                 Error::new(
                     "TypeError",
@@ -328,26 +374,26 @@ impl Wrapper {
                 )
             })?;
             let end = all || bytes.is_empty();
-            let (codec, raw) = self.input.borrow_mut().chunk(bytes, self.codec, end)?;
+            let (codec, raw) = w.input.borrow_mut().chunk(bytes, w.codec, end)?;
             let raw = ctx.alloc(Value::Bytes(raw));
             // The ordinary native codec entry owns error handling. A registered handler
             // may run Python, so release the reader borrow before invoking it.
-            let errors = ctx.scalar_value(self.errors);
+            let errors = ctx.scalar_value(w.errors);
             let decoded = super::super::codecs::decode(ctx, codec, &[raw, errors], &[])?;
             let Value::Tuple(parts) = ctx.heap.get(decoded) else {
                 unreachable!("native codec decoder returns (text, consumed)");
             };
-            self.input.borrow_mut().append(
+            w.input.borrow_mut().append(
                 ctx.str_value(parts[0])?,
                 ctx.bytes_like(raw)?,
                 codec,
-                self.newline.as_deref(),
+                w.newline.as_deref(),
                 end,
             );
             if end {
-                let mut input = self.input.borrow_mut();
+                let mut input = w.input.borrow_mut();
                 let part = input
-                    .take(limit, line, self.newline.as_deref(), true)
+                    .take(limit, line, w.newline.as_deref(), true)
                     .unwrap_or_default();
                 if all {
                     input.discard();
@@ -369,17 +415,7 @@ pub(super) fn call(
     if name == "__init__" {
         return initialize(ctx, receiver, args, kwargs);
     }
-    let Value::Instance {
-        memory_stream: Some(MemoryStream::Wrapper(w)),
-        ..
-    } = ctx.heap.get(receiver)
-    else {
-        return Err(Error::new(
-            "ValueError",
-            "I/O operation on uninitialized object",
-        ));
-    };
-    let w = w.clone();
+    let w = Wrapper::from_receiver(ctx, receiver)?;
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -435,7 +471,7 @@ pub(super) fn call(
                     ctx.heap.keep(id);
                 }
             }
-            let closed = invoke(ctx, buffer, "close", vec![]);
+            let closed = Wrapper::invoke_buffer(ctx, receiver, "close", vec![]);
             return match (flushed, closed) {
                 (Err(flush), Err(mut close)) => {
                     close.tracing().context = Some(ctx.raised_instance(flush));
@@ -447,22 +483,26 @@ pub(super) fn call(
         }
         "detach" => {
             invoke(ctx, receiver, "flush", vec![])?;
+            let w = Wrapper::from_receiver(ctx, receiver)?;
+            let buffer = w.binary()?;
             w.buffer.set(None);
             return Ok(buffer);
         }
         _ => {}
     }
     w.check_open(ctx, buffer)?;
+    let w = Wrapper::from_receiver(ctx, receiver)?;
+    let buffer = w.binary()?;
     match name {
         "__enter__" => Ok(receiver),
         "flush" => {
-            w.drain(ctx, buffer)?;
-            invoke(ctx, buffer, "flush", vec![])
+            w.drain(ctx, receiver)?;
+            Wrapper::invoke_buffer(ctx, receiver, "flush", vec![])
         }
         "readable" | "writable" | "seekable" | "isatty" | "fileno" => {
             invoke(ctx, buffer, name, vec![])
         }
-        "write" => w.write(ctx, buffer, args[0]),
+        "write" => w.write(ctx, receiver, args[0]),
         "read" | "readline" => {
             let n = if name == "read" {
                 super::super::files::read_length(ctx, args.first().copied())?
@@ -476,7 +516,7 @@ pub(super) fn call(
             } else {
                 -1
             };
-            w.read(ctx, buffer, usize::try_from(n).ok(), name == "readline")
+            Wrapper::read(ctx, receiver, usize::try_from(n).ok(), name == "readline")
         }
         "seek" | "tell" => {
             if !w.seekable {
@@ -487,7 +527,7 @@ pub(super) fn call(
             }
             invoke(ctx, receiver, "flush", vec![])?;
             if name == "tell" {
-                let pos = invoke(ctx, buffer, "tell", vec![])?;
+                let pos = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
                 return w.input.borrow().position(ctx, pos);
             }
             let offset = ctx
@@ -508,7 +548,7 @@ pub(super) fn call(
                 0 => (offset, 0),
                 2 if offset == 0 => (0, 2),
                 1 if offset == 0 => {
-                    let pos = invoke(ctx, buffer, "tell", vec![])?;
+                    let pos = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
                     let pos = w.input.borrow().position(ctx, pos)?;
                     (ctx.as_integer(pos)?, 0)
                 }
@@ -531,7 +571,7 @@ pub(super) fn call(
             };
             let off = ctx.int(offset);
             let dir = ctx.int(whence);
-            let position = invoke(ctx, buffer, "seek", vec![off, dir])?;
+            let position = Wrapper::invoke_buffer(ctx, receiver, "seek", vec![off, dir])?;
             let beginning = !ctx.truth(position)?;
             w.input.replace(Reader::at(beginning));
             w.write_start.set(beginning);
