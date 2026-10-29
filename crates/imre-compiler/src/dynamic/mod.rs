@@ -21,6 +21,7 @@ struct Imports {
     names: Vec<(u32, String)>,
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
+    uses_import_builtin: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
     pkgutil_names: HashSet<String>,
@@ -223,6 +224,9 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        if matches!(e, Expr::Name(n) if n.id == "__import__" && n.ctx == ast::ExprContext::Load) {
+            self.uses_import_builtin = true;
+        }
         // A resource lookup can be the first operation to load its package.
         if let Expr::Call(call) = e
             && match &*call.func {
@@ -350,6 +354,7 @@ pub(crate) fn compile(
             "struct",
             "traceback",
             "SystemExit",
+            "__import__",
         ]
         .iter()
         .any(|name| src.contains(name))
@@ -365,6 +370,8 @@ pub(crate) fn compile(
         },
     ) {
         Ok(i) if i.runtime_imports || (runtime_imports && !i.names.is_empty()) => i,
+        // Closed file builds still require a statically resolved import graph.
+        Ok(i) if i.uses_import_builtin && (startup.is_some() || options.runtime_imports) => i,
         _ => return Ok(None),
     };
     first
