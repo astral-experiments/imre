@@ -215,7 +215,7 @@ impl Reader {
         line: bool,
         newline: Option<&str>,
         end: bool,
-    ) -> Option<String> {
+    ) -> Result<Option<String>> {
         let text = &self.text[self.cursor..];
         let boundary = if line {
             match newline {
@@ -239,11 +239,15 @@ impl Reader {
                 .nth(n)
         });
         if counted.is_none() && boundary.is_none() && !end {
-            return None;
+            return Ok(None);
         }
         let n = counted.unwrap_or(line_end);
+        let mut part = String::new();
+        part.try_reserve_exact(n)
+            .map_err(|_| crate::Error::allocation())?;
+        part.push_str(&text[..n]);
         self.cursor += n;
-        Some(text[..n].to_owned())
+        Ok(Some(part))
     }
     pub(super) fn newlines(&self, ctx: &mut Context) -> Id {
         let mut found = Vec::new();

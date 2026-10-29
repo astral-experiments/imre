@@ -1153,6 +1153,16 @@ pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usiz
     unsafe { (&*ctx).heap.temporary_mark() }
 }
 
+/// Drop the finished iteration's temporary handles before asking for the next item.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns the context and recorded this mark in its active frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.reserve_slot_or_request_collection();
+    ctx.collect_garbage();
+}
+
 /// Release a consumed truth operand on the branch that no longer needs it.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
@@ -1342,6 +1352,34 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn dictionary_view_intersection_collects_discarded_values() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the argument and configuration pointers outlive context initialization.
+        let mut ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+        ctx.heap
+            .enter(NONE, NONE, value::FrameOwner::Function(NONE));
+        let dict = ctx.alloc(Value::Dict(Default::default()));
+        let keys = ctx.alloc(Value::DictView {
+            dict,
+            kind: value::DictViewKind::Keys,
+            ordered: false,
+        });
+        let range = crate::dynamic::range::Range::new(0.into(), 16_384.into(), 1.into()).unwrap();
+        let source = ctx.alloc(Value::Range(range));
+
+        let mark = ctx.heap.temporary_mark();
+        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let probe = Rc::downgrade(&value);
+        ctx.alloc(Value::AttrGetter(value));
+        ctx.heap.release_temporaries_since(mark);
+
+        let selected = ctx.binary("&", keys, source).unwrap();
+        assert!(ctx.stored_entries(selected).is_empty());
+        assert!(probe.upgrade().is_none());
+    }
 
     #[test]
     fn urlencode_collects_discarded_sequence_values() {

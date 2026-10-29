@@ -10825,6 +10825,30 @@ print(show("x"))
         }
     }
 
+    #[test]
+    fn path_prefix_accessors_propagate_allocation_errors() {
+        for field in ["drive", "root", "anchor"] {
+            let llvm = compile(
+                &format!(
+                    "from pathlib import PureWindowsPath\ndef probe(p: PureWindowsPath) -> str:\n    return p.{field}\nprint(probe(PureWindowsPath('C:/a')))\n"
+                ),
+                &CompileOptions::default(),
+            )
+            .unwrap();
+            assert_checked_pointer_call(&llvm, "imre_path_prefix");
+            let mut lines = llvm.lines();
+            lines
+                .find(|line| line.contains(" = call ptr @fn_0("))
+                .unwrap();
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .contains("call i32 @imre_error_pending()")
+            );
+        }
+    }
+
     fn assert_checked_pointer_call(llvm: &str, function: &str) {
         let pattern = format!(" = call ptr @{function}(");
         let mut lines = llvm.lines();

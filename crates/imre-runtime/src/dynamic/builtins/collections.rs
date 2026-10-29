@@ -108,10 +108,12 @@ fn select_item(
     };
     ctx.heap.keep(winner);
     let mut winning_key = rank(ctx, winner)?;
+    let mut limit = ctx.heap.streaming_collection_limit();
     loop {
         ctx.heap.release_temporaries_since(mark);
         ctx.heap.keep(winner);
         ctx.heap.keep(winning_key);
+        ctx.collect_streaming_garbage(&mut limit);
         let Some(item) = next(ctx)? else {
             break;
         };
@@ -149,6 +151,14 @@ fn list_sort(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id
     let Value::List(live) = ctx.heap.get_mut(receiver) else {
         unreachable!()
     };
+    let count = live.len();
+    ctx.heap.reserve_temporaries(count)?;
+    ctx.sorting_lists
+        .try_reserve(1)
+        .map_err(|_| crate::Error::memory_error())?;
+    let Value::List(live) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
     let mut values = std::mem::take(live);
     for &value in &values {
         ctx.heap.keep(value);
@@ -183,6 +193,7 @@ fn sort_list_items(
             .map_err(|_| Error::new("MemoryError", ""))?;
         for &value in values.iter() {
             let sort_key = ctx.call(key, vec![value], vec![])?;
+            ctx.heap.reserve_temporaries(1)?;
             ctx.heap.keep(sort_key);
             keyed.push((sort_key, value));
         }

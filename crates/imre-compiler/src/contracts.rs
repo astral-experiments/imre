@@ -209,6 +209,9 @@ impl Builtin {
                     | PathOperation::Readlink
                     | PathOperation::Link(_)
                     | PathOperation::Absolute
+                    | PathOperation::Drive
+                    | PathOperation::Root
+                    | PathOperation::Anchor
                     | PathOperation::Name
                     | PathOperation::Stem
                     | PathOperation::Suffix
@@ -241,9 +244,6 @@ impl Builtin {
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
-                    | PathOperation::Drive
-                    | PathOperation::Root
-                    | PathOperation::Anchor
                     | PathOperation::CountPart
                     | PathOperation::Text
                     | PathOperation::IsAbsolute
