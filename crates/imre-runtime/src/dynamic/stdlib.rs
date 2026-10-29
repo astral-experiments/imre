@@ -1533,17 +1533,14 @@ pub(super) fn call(
             value.map_or(NONE, |value| ctx.text(value))
         }
         "struct.calcsize" => {
-            let size = system::struct_calcsize(ctx.str_value(argument(args, 0)?)?)
-                .map_err(|e| Error::new("struct.error", e))?;
-            ctx.int(size as i64)
+            let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
+            ctx.int(layout.size as i64)
         }
         "struct.unpack" => {
-            let format = ctx.str_value(argument(args, 0)?)?;
-            let Value::Bytes(bytes) = ctx.heap.get(argument(args, 1)?) else {
-                return Err(Error::new("TypeError", "expected bytes"));
-            };
-            let values =
-                system::struct_unpack(format, bytes).map_err(|e| Error::new("struct.error", e))?;
+            let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
+            let values = layout
+                .unpack(ctx.bytes_like(argument(args, 1)?)?)
+                .map_err(|e| Error::new("struct.error", e))?;
             structure::unsigned_tuple(ctx, values)
         }
         "json.loads" => {

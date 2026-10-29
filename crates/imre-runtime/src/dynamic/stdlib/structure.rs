@@ -32,17 +32,28 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
                 "Struct() missing required argument 'format' (pos 1)",
             )
         })?;
-    let format = match ctx.heap.get(format) {
+    let (format, layout) = parse(ctx, format)?;
+    Ok(ctx.alloc(Value::Struct {
+        format: format.to_owned(),
+        layout: Rc::new(layout),
+    }))
+}
+
+/// Read the underlying format spelling and validate the layout before inspecting the buffer.
+pub(super) fn parse(ctx: &Context, format: Id) -> Result<(&str, StructFormat)> {
+    let format = match ctx.heap.get(ctx.scalar_value(format)) {
         Value::Str(text) => {
-            Codec::Ascii.encode(text, None, || {
-                crate::StrOwner::try_new(crate::Str::from(text.as_str()))
-                    .map_err(|_| crate::Error::memory_error())
-            })?;
-            text.clone()
+            if !text.is_ascii() {
+                Codec::Ascii.encode(text, None, || {
+                    crate::StrOwner::try_new(crate::Str::from(text.as_str()))
+                        .map_err(|_| crate::Error::memory_error())
+                })?;
+            }
+            text.as_str()
         }
-        Value::Bytes(data) => std::str::from_utf8(data)
-            .map_err(|_| format_error("bad char in struct format"))?
-            .to_owned(),
+        Value::Bytes(data) => {
+            std::str::from_utf8(data).map_err(|_| format_error("bad char in struct format"))?
+        }
         _ => {
             return Err(Error::new(
                 "TypeError",
@@ -56,8 +67,7 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     if format.contains('\0') {
         return Err(format_error("embedded null character"));
     }
-    let layout = Rc::new(StructFormat::parse(&format).map_err(format_error)?);
-    Ok(ctx.alloc(Value::Struct { format, layout }))
+    Ok((format, StructFormat::parse(format).map_err(format_error)?))
 }
 
 pub(super) fn unsigned_tuple(ctx: &mut Context, values: Vec<u64>) -> Id {
@@ -94,19 +104,7 @@ pub(super) fn method(
                 ),
             ));
         };
-        let bytes = match ctx.heap.get(*id) {
-            Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes,
-            _ => {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "a bytes-like object is required, not '{}'",
-                        ctx.type_name(*id)
-                    ),
-                ));
-            }
-        };
-        let values = layout.unpack(bytes).map_err(format_error)?;
+        let values = layout.unpack(ctx.bytes_like(*id)?).map_err(format_error)?;
         return Ok(unsigned_tuple(ctx, values));
     }
     let count = layout.item_count();
