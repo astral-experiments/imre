@@ -605,6 +605,8 @@ impl Context {
     }
 
     fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
+        // A reentrant callback can exhaust the parent and release its last reference to id.
+        self.heap.keep(id);
         match self.call(callable, Vec::new(), Vec::new()) {
             Ok(item) => {
                 // A recursive call can exhaust the same iterator inside the callable.
