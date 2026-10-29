@@ -82,8 +82,10 @@ impl<'a> IntoIterator for &'a Entries {
 
 impl Entries {
     /// Copy a dense table with its cached key hashes and insertion positions.
-    pub(super) fn clone_dense(&self) -> Option<Self> {
-        (self.len() >= self.next.saturating_mul(2) / 3).then(|| self.clone())
+    pub(super) fn clone_dense(&self) -> super::Result<Option<Self>> {
+        (self.len() >= self.next.saturating_mul(2) / 3)
+            .then(|| self.try_clone())
+            .transpose()
     }
 
     pub(super) fn push(&mut self, value: (Id, Id), hash: i64) -> Result<()> {

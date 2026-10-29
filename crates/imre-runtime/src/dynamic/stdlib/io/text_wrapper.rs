@@ -296,9 +296,30 @@ impl Wrapper {
             Some("\r\n") => Some("\r\n"),
             _ => None,
         };
-        let translated;
-        let text = if let Some(nl) = replacement {
-            translated = text.replace('\n', nl);
+        let mut translated = String::new();
+        let text = if let Some(nl) = replacement
+            && text.contains('\n')
+        {
+            let extra = if nl.len() == 2 {
+                text.matches('\n').count()
+            } else {
+                0
+            };
+            let length = text
+                .len()
+                .checked_add(extra)
+                .ok_or_else(crate::Error::allocation)?;
+            translated
+                .try_reserve_exact(length)
+                .map_err(|_| crate::Error::allocation())?;
+            for part in text.split_inclusive('\n') {
+                if let Some(before) = part.strip_suffix('\n') {
+                    translated.push_str(before);
+                    translated.push_str(nl);
+                } else {
+                    translated.push_str(part);
+                }
+            }
             &translated
         } else {
             text
@@ -389,7 +410,7 @@ impl Wrapper {
                 codec,
                 w.newline.as_deref(),
                 end,
-            );
+            )?;
             if end {
                 let mut input = w.input.borrow_mut();
                 let part = input

@@ -693,6 +693,18 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 ) -> Id {
     // SAFETY: the emitter supplies a valid context and a constant of exactly len bytes.
     let (ctx, data) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    // Each literal roots its value and the returned handle; metadata roots every name.
+    let roots = if kind == 5 {
+        data.iter()
+            .filter(|&&byte| byte == 0)
+            .count()
+            .saturating_add(2)
+    } else {
+        2
+    };
+    if let Err(error) = ctx.heap.reserve_temporaries(roots) {
+        return finish(ctx, Err(error));
+    }
     let value = match kind {
         0 => std::str::from_utf8(data)
             .ok()
@@ -1257,6 +1269,15 @@ impl Context {
         }
     }
 
+    /// Collect unreachable values before a native iterator step grows the heap.
+    pub(super) fn collect_streaming_garbage(&mut self, limit: &mut usize) {
+        let due = self.heap.prepare_streaming_collection(*limit);
+        self.collect_garbage();
+        if due {
+            *limit = self.heap.streaming_collection_limit();
+        }
+    }
+
     /// Run deferred callbacks when a native loop reaches a collection point.
     pub(super) fn collect_garbage(&mut self) {
         let (heap, roots) = self.heap_and_roots();
@@ -1306,6 +1327,34 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn urlencode_collects_discarded_sequence_values() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the argument and configuration pointers outlive context initialization.
+        let mut ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+        ctx.heap
+            .enter(NONE, NONE, value::FrameOwner::Function(NONE));
+        let range = crate::dynamic::range::Range::new(0.into(), 16_384.into(), 1.into()).unwrap();
+        let values = ctx.alloc(Value::Range(range));
+        let key = ctx.text("k");
+        let pair = ctx.alloc(Value::Tuple(vec![key, values]));
+        let query = ctx.alloc(Value::List(vec![pair]));
+        let encode = ctx.builtin("urllib.parse.urlencode");
+
+        let mark = ctx.heap.temporary_mark();
+        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let probe = Rc::downgrade(&value);
+        ctx.alloc(Value::AttrGetter(value));
+        ctx.heap.release_temporaries_since(mark);
+
+        let encoded = ctx.call(encode, vec![query, TRUE], Vec::new()).unwrap();
+        let encoded = ctx.str_value(encoded).unwrap();
+        assert!(encoded.starts_with("k=0&k=1&"));
+        assert!(encoded.ends_with("k=16383"));
+        assert!(probe.upgrade().is_none());
+    }
 
     #[test]
     fn surviving_function_and_cell_trace_only_the_captured_binding() {

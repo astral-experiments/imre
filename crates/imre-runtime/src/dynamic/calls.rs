@@ -3454,6 +3454,9 @@ impl Context {
                     let globals = self.module_globals(scope);
                     return self.exec_source(code, globals, None, Some(callable));
                 }
+                // Root the scope, packed arguments, keyword names, and returning value.
+                self.heap
+                    .reserve_temporaries(kwargs.len().saturating_add(4))?;
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)

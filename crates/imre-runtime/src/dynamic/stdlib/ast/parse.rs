@@ -44,6 +44,10 @@ impl Parser<'_> {
     }
 
     fn suite(&mut self, body: ast::Suite) -> Result<Id> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.suite_inner(body))
+    }
+
+    fn suite_inner(&mut self, body: ast::Suite) -> Result<Id> {
         let values = body
             .into_iter()
             .map(|s| self.statement(s))
@@ -213,7 +217,11 @@ impl Parser<'_> {
         }
     }
 
-    fn expr(&mut self, mut e: ast::Expr) -> Result<Id> {
+    fn expr(&mut self, e: ast::Expr) -> Result<Id> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.expr_inner(e))
+    }
+
+    fn expr_inner(&mut self, mut e: ast::Expr) -> Result<Id> {
         use ast::Expr;
         // Postfix expressions can grow without parentheses. Move their operands
         // out of Ruff's tree so conversion and destruction both use bounded stack.
@@ -438,5 +446,31 @@ pub(super) fn parse_source(
             "ValueError",
             "ast.parse supports exec or eval mode",
         )),
+    }
+}
+
+#[cfg(test)]
+mod stack_tests {
+    #[test]
+    fn convert_nested_conditionals_on_a_small_stack() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let argv = [c"imre".as_ptr()];
+                // SAFETY: argv and the configuration outlive initialization, which returns an owned context.
+                let mut ctx = unsafe {
+                    Box::from_raw(crate::dynamic::ffi::imre_dyn_new(
+                        1,
+                        argv.as_ptr(),
+                        c"{\"paths\":[]}".as_ptr(),
+                    ))
+                };
+                ctx.module("ast").unwrap();
+                let source = format!("{}z", "x if y else ".repeat(512));
+                super::parse_source(&mut ctx, &source, "nested.py", "eval", false).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

@@ -37,6 +37,26 @@ def check_context_protocol_allocation(imre, root, run):
         assert (result.returncode, result.stdout) == (0, b"written 4\nclosed True\ncontent True\n"), result
 
 
+def check_boxed_literal_roots_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "literal_roots_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "literal_roots_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc",
+    ])
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_literal_roots as fixture; fixture.allocation()"
+    for ordinal in (0, 1):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        expected = (b"caught ()\n" if ordinal else b"value 3\n") + b"retry 3 True\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+
 def check_select_result_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "refuse_select_result.o"
@@ -430,6 +450,7 @@ def main():
             check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
             check_context_protocol_allocation(imre, root, run)
+            check_boxed_literal_roots_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
 
         entry = root / "serve.py"
@@ -530,6 +551,7 @@ def main():
             )
 
         compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
+        compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
             "-IB", "-c", "import sys; sys.path; m = __import__(sys.argv[1]); "
             "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
@@ -974,6 +996,7 @@ def report(text):
             "boxed_module_type.py",
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
+            "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
             "boxed_mapping_abc.py",
             "boxed_dict_pop.py",
@@ -1048,6 +1071,22 @@ def report(text):
                 assert (retry.returncode, retry.stdout, retry.stderr) == (0, b"c\n", b"draw\ndraw\n"), retry
         plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
         compare("-IB", "-c", imports)
+        if sys.platform.startswith("linux"):
+            import resource
+
+            source = root / "nested-functions.py"
+            source.write_text("".join(" " * i + "def f():\n" for i in range(64)) + " " * 64 + "pass\n")
+            executable = root / "walk-statements"
+            fixture = fixtures / "boxed_ast_statement_stack.py"
+            built = run(imre, "build", fixture, "--runtime-imports", "-o", executable)
+            assert built.returncode == 0, built.stderr
+
+            def small_stack():
+                resource.setrlimit(resource.RLIMIT_STACK, (96 * 1024, 96 * 1024))
+
+            result = subprocess.run([executable, source], capture_output=True, preexec_fn=small_stack)
+            assert (result.returncode, result.stdout) == (0, b"130\n"), result.stderr
+
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
         for flags in ("-IB", "-IBOO"):
             compare(flags, "-c", imports + "arithmetic.current()")

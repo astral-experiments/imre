@@ -188,6 +188,40 @@ impl Entries {
         old.values
     }
 
+    /// Copy the ordered entries and their cached probes without calling Python hash slots.
+    pub(in super::super) fn try_clone(&self) -> Result<Self> {
+        /// Copy one table buffer after ensuring the allocator can hold it.
+        fn copy<T: Copy>(items: &[T]) -> Result<Vec<T>> {
+            let mut out = Vec::new();
+            out.try_reserve_exact(items.len())
+                .map_err(|_| crate::Error::memory_error())?;
+            out.extend_from_slice(items);
+            Ok(out)
+        }
+
+        Ok(Self {
+            values: copy(&self.values)?,
+            positions: self.positions.as_deref().map(copy).transpose()?,
+            index: match &self.index {
+                Some(index) => Some(Index {
+                    slots: copy(&index.slots)?,
+                    hashes: copy(&index.hashes)?,
+                    generation: index.generation,
+                }),
+                None => None,
+            },
+            order: match &self.order {
+                Some(order) => Some(super::Order {
+                    indices: copy(&order.indices)?,
+                    revision: order.revision,
+                }),
+                None => None,
+            },
+            next: self.next,
+            usable: self.usable,
+        })
+    }
+
     fn dense(&self, position: usize) -> Option<usize> {
         if let Some(positions) = &self.positions {
             positions.binary_search(&position).ok()
@@ -799,19 +833,23 @@ impl Context {
         key: Id,
         known_hash: Option<i64>,
     ) -> Result<(i64, Option<usize>)> {
+        let roots = self.heap.temporary_mark();
         self.heap.keep(dict);
         self.heap.keep(key);
-        let mut lookup = KeyLookup::new(self, dict, key, known_hash)?;
-        let mut previous = None;
-        loop {
-            match lookup.next(self, previous) {
-                ControlFlow::Break(found) => return Ok((lookup.hash, found)),
-                ControlFlow::Continue((position, resident)) => {
-                    self.heap.keep(resident);
-                    previous = Some((position, resident, self.dictionary_equal(resident, key)?));
+        let result = KeyLookup::new(self, dict, key, known_hash).and_then(|mut lookup| {
+            let mut previous = None;
+            loop {
+                match lookup.next(self, previous) {
+                    ControlFlow::Break(found) => return Ok((lookup.hash, found)),
+                    ControlFlow::Continue((position, resident)) => {
+                        previous =
+                            Some((position, resident, self.dictionary_equal(resident, key)?));
+                    }
                 }
             }
-        }
+        });
+        self.heap.release_temporaries_since(roots);
+        result
     }
 
     /// Insert a cache entry and identify the actual resident after reentrant comparison.
