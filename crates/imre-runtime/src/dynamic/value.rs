@@ -1642,11 +1642,31 @@ impl Heap {
         )))
     }
 
-    pub fn string_literal(&mut self, text: &str) -> Id {
-        if text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            return self.code_name(text);
+    pub fn string_literal(&mut self, text: &str) -> Result<Id> {
+        let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if intern && let Some(entry) = self.interned.get_mut(text) {
+            entry.literal = true;
+            let id = entry.id;
+            self.keep(id);
+            return Ok(id);
         }
-        self.alloc(Value::Str(text.to_owned()))
+        let mut value = String::new();
+        value
+            .try_reserve_exact(text.len())
+            .map_err(|_| crate::Error::memory_error())?;
+        value.push_str(text);
+        if !intern {
+            return Ok(self.alloc(Value::Str(value)));
+        }
+        let owner = crate::objects::try_literal_string(text)?;
+        let owner = crate::sys::try_intern_owner(&owner).ok_or_else(crate::Error::memory_error)?;
+        self.interned
+            .try_reserve(1)
+            .map_err(|_| crate::Error::memory_error())?;
+        let id = self.alloc_slot(Value::Str(value));
+        self.interned
+            .insert(owner, InternedString { id, literal: true });
+        Ok(id)
     }
 
     /// Runtime-compiled ASCII constants are interned for the lifetime of their code.
