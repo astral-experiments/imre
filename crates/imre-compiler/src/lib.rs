@@ -615,6 +615,30 @@ mod tests {
     }
 
     #[test]
+    fn nonconvergent_list_hints_preserve_diagnostics_and_later_checks() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("subject.py");
+        let mut compiler = super::IncrementalCompiler::default();
+        for (item, expected) in [
+            ("(a, b)", "expected int, got tuple[int, int]"),
+            ("a", "iterator values require an immediate"),
+        ] {
+            let source = format!(
+                "def f():\n    rows = []\n    for a, b in zip([1], [2], strict=True):\n        rows.append({item})\n    nested = []\n    for _ in range(2):\n        nested = zip(nested)\nf()\n"
+            );
+            std::fs::write(&path, source).unwrap();
+            let error = compiler.check_file(&path, None).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+        std::fs::write(
+            &path,
+            "def f():\n    rows = []\n    for c in 'xy':\n        rows.append(c)\n    return rows\nf()\n",
+        )
+        .unwrap();
+        compiler.check_file(&path, None).unwrap();
+    }
+
+    #[test]
     fn reject_starred_tuple_displays_before_expanding_their_fields() {
         let mut globals = String::from("a0 = (1,)\n");
         for i in 1..=16 {
