@@ -667,6 +667,10 @@ fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
 }
 
 fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> Id {
+    let result = result.and_then(|id| {
+        ctx.heap.reserve_temporaries(1)?;
+        Ok(id)
+    });
     match result {
         Ok(id) => {
             ctx.heap.keep(id);
