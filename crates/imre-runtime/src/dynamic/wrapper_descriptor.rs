@@ -11,6 +11,7 @@ pub(super) struct BuiltinDescriptor {
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
         let slots = match symbol.split_once('.') {
+            Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
@@ -30,7 +31,6 @@ impl BuiltinDescriptor {
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
-            "bytearray.__repr__" => ("bytearray", "__repr__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),

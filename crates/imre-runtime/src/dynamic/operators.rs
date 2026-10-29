@@ -222,6 +222,14 @@ impl Context {
         })
     }
 
+    /// Convert a bytearray element using the index protocol and the inclusive byte bounds.
+    pub(super) fn byte_value(&mut self, value: Id) -> Result<u8> {
+        self.index_integer(value)?
+            .to_i64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))
+    }
+
     /// Resolve Python's integer-index protocol without rounding or truncating a numeric value.
     pub(super) fn index_integer(&mut self, value: Id) -> Result<crate::Int> {
         self.index_value(value)?.ok_or_else(|| {
@@ -2476,11 +2484,7 @@ impl Context {
                 return self.set_slice(obj, parts, Some(val));
             }
             let i = self.mutation_index(key, "bytearray")?;
-            let byte = self
-                .index_integer(val)?
-                .to_i64()
-                .and_then(|n| u8::try_from(n).ok())
-                .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+            let byte = self.byte_value(val)?;
             let Value::ByteArray(data) = self.heap.get_mut(obj) else {
                 unreachable!()
             };

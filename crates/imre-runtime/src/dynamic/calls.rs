@@ -87,12 +87,12 @@ impl Context {
                         | "tuple"
                         | "int"
                         | "bytes"
+                        | "bytearray"
                         | "str"
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (name == "__repr__"
-                    && matches!(kind.as_str(), "set" | "frozenset" | "bytes" | "bytearray")) =>
+                ) || (name == "__repr__" && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -1878,6 +1878,7 @@ impl Context {
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
+                    || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
                     || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
