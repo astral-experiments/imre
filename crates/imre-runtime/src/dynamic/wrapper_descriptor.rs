@@ -27,6 +27,10 @@ impl BuiltinDescriptor {
             });
         }
         let (owner, name) = match symbol {
+            "object.__format__" => ("object", "__format__"),
+            "int.__format__" => ("int", "__format__"),
+            "str.__format__" => ("str", "__format__"),
+            "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
@@ -45,7 +49,7 @@ impl BuiltinDescriptor {
         Some(Self {
             owner,
             name,
-            method: false,
+            method: name == "__format__",
         })
     }
 
@@ -74,9 +78,8 @@ impl BuiltinDescriptor {
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
             "dict" => ctx.dict_storage(receiver).is_some(),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
-            "str" | "bytes" | "bytearray" | "list" | "tuple" | "set" | "frozenset" => {
-                ctx.builtin_slot_accepts(receiver, self.owner)
-            }
+            "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
+            | "frozenset" => ctx.builtin_slot_accepts(receiver, self.owner),
             _ => matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)),
         };
         if !accepts {

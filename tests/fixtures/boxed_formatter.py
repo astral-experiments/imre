@@ -42,6 +42,17 @@ def current():
     label = "abc"
     assert f"{label=}" == "label='abc'" and f"{label=:}" == "label=abc"
 
+    class Wrapped(Number):
+        def __format__(self, spec):
+            return "[" + super().__format__(spec) + "]"
+
+    wrapped = Wrapped(31)
+    assert format(wrapped, "x") == "[1f]"
+    assert int.__format__(wrapped, "x") == "1f"
+    assert object.__format__(wrapped, "") == "count"
+    assert type(None).__format__(None, "") == "None"
+    assert str.__format__.__get__(result, Text)("s") is result
+
     class Word:
         def __str__(self):
             return "label"

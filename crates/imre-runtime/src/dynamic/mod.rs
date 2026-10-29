@@ -174,7 +174,9 @@ impl Context {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
-            ("str", Value::Str(_))
+            ("int", Value::Int(_) | Value::Bool(_))
+            | ("float", Value::Float(_))
+            | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("set", Value::Set { frozen: false, .. })
@@ -1319,7 +1321,7 @@ impl Context {
             self.builtin(builtins::exception_initializer(name));
         }
         let methods = match name {
-            "object" => &["__hash__"],
+            "object" => &["__hash__", "__format__"],
             "dict" => builtins::DICT_METHODS,
             "collections.defaultdict" => {
                 self.builtin("dict");
@@ -1338,7 +1340,8 @@ impl Context {
             "set" | "frozenset" => &["__repr__"],
             "bytearray" => builtins::BYTEARRAY_METHODS,
             "property" => property::METHODS,
-            "int" => &["bit_length", "to_bytes"],
+            "int" => &["bit_length", "to_bytes", "__format__"],
+            "float" => &["__format__"],
             "bytes" => builtins::BYTES_METHODS,
             "str" => {
                 self.builtin("str.maketrans");

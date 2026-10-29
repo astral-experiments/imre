@@ -48,9 +48,11 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
-            Value::Native(kind) if name == "__hash__" && kind == "object" => {
-                self.builtins.get("object.__hash__").copied()
-            }
+            Value::Native(kind) if kind == "object" => match name {
+                "__hash__" => self.builtins.get("object.__hash__").copied(),
+                "__format__" => self.builtins.get("object.__format__").copied(),
+                _ => None,
+            },
             Value::Native(kind) if kind == "collections.defaultdict" => {
                 let owner = match name {
                     "__init__" | "__missing__" | "__repr__" | "copy" | "__copy__"
@@ -86,6 +88,7 @@ impl Context {
                         | "list"
                         | "tuple"
                         | "int"
+                        | "float"
                         | "bytes"
                         | "bytearray"
                         | "str"
@@ -1827,6 +1830,12 @@ impl Context {
                 return Ok(self.token_missing);
             }
             Value::Native(class)
+                if name == "__format__" && self.builtin_type_name(obj) == Some("type") =>
+            {
+                let owner = builtins::format_owner(&class);
+                return Ok(self.builtin(&format!("{owner}.__format__")));
+            }
+            Value::Native(class)
                 if matches!(class.as_str(), "bytes" | "bytearray")
                     && matches!(name, "__repr__" | "maketrans" | "translate") =>
             {
@@ -2048,6 +2057,15 @@ impl Context {
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
         let base = self.scalar_value(obj);
+        if name == "__format__" {
+            let owner = builtins::format_owner(self.type_name(base));
+            let callable = self.builtin(&format!("{owner}.__format__"));
+            return Ok(self.alloc(Value::Method {
+                callable,
+                receiver: obj,
+                explicit: false,
+            }));
+        }
         if name == "maketrans" && matches!(self.heap.get(base), Value::Str(_)) {
             return Ok(self.builtin("str.maketrans"));
         }
@@ -3033,6 +3051,7 @@ impl Context {
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
+                            | "float.__format__"
                     )
                     || !name.contains('.')
                     || matches!(

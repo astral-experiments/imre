@@ -298,6 +298,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "__format__",
     "__repr__",
     "capitalize",
     "encode",
@@ -326,6 +327,16 @@ pub(super) const STR_METHODS: &[&str] = &[
     "translate",
     "upper",
 ];
+
+/// Select the builtin formatting implementation inherited by this native value or type.
+pub(super) fn format_owner(class: &str) -> &'static str {
+    match class {
+        "int" | "bool" | "enum.IntEnum" | "enum.IntFlag" => "int",
+        "str" | "enum.StrEnum" => "str",
+        "float" => "float",
+        _ => "object",
+    }
+}
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
@@ -843,6 +854,16 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "object" | "int" | "float" | "str" if method == "__format__" => {
+                positional(name, kwargs)?;
+                arity(name, args, 2, 2)?;
+                if owner != "object" && !ctx.builtin_slot_accepts(args[0], owner) {
+                    return Err(type_error(format!(
+                        "descriptor '__format__' requires a '{owner}' object"
+                    )));
+                }
+                text::builtin_format(ctx, owner, args[0], Some(args[1]))
+            }
             "module" => ctx.module_method(method, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),

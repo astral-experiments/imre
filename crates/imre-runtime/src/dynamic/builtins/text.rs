@@ -387,6 +387,17 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
         }
         return Ok(result);
     }
+    let owner = format_owner(ctx.type_name(ctx.scalar_value(value)));
+    builtin_format(ctx, owner, value, spec)
+}
+
+/// Render with the selected base method without redispatching to the receiver's override.
+pub(super) fn builtin_format(
+    ctx: &mut Context,
+    owner: &str,
+    value: Id,
+    spec: Option<Id>,
+) -> Result<Id> {
     let spec = spec
         .map(|spec| ctx.str_value(spec))
         .transpose()?
@@ -397,6 +408,12 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
             return Ok(ctx.text(text.into_string()));
         }
         return super::call(ctx, "str", &[value], &[]);
+    }
+    if owner == "object" {
+        return Err(type_error(format!(
+            "unsupported format string passed to {}.__format__",
+            ctx.type_name(value)
+        )));
     }
     if ctx.string_storage(value).is_some() && spec == "s" {
         return Ok(value);
