@@ -2064,16 +2064,27 @@ impl Heap {
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
+        let mut reclaiming = true;
         for (id, slot) in self.slots.iter_mut().enumerate() {
             let dead = slot.trace.replace(UNMARKED) == UNMARKED;
-            if dead && slot.value.take().is_some() {
+            if dead && reclaiming && slot.value.is_some() {
+                if self.free.try_reserve(1).is_err() {
+                    // Finish clearing marks and deliver callbacks before the next sweep.
+                    reclaiming = false;
+                    continue;
+                }
+                slot.value = None;
                 self.immutable_hashes.remove(&(id as Id));
                 self.free.push(id);
             }
         }
-        self.next_collection = (self.slots.len() - self.free.len())
-            .saturating_mul(2)
-            .max(4096);
+        self.next_collection = if reclaiming {
+            (self.slots.len() - self.free.len())
+                .saturating_mul(2)
+                .max(4096)
+        } else {
+            self.slots.len()
+        };
         (!callbacks.is_empty()).then_some(callbacks)
     }
 }
