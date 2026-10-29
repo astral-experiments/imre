@@ -902,7 +902,17 @@ impl Context {
         {
             let iter = self.iterator(id)?;
             let mut items = Vec::new();
+            if let Value::Repeat(repeat) = self.heap.get(iter)
+                && let Some(remaining) = repeat.remaining
+            {
+                items
+                    .try_reserve_exact(remaining)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+            }
             while let Some(item) = self.next_item(iter)? {
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
                 items.push(item);
             }
             return Ok(items);
