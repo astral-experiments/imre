@@ -1293,6 +1293,7 @@ pub(super) fn call(
                 "default",
                 "ensure_ascii",
                 "allow_nan",
+                "indent",
                 "sort_keys",
                 "separators",
             ],

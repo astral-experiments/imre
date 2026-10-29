@@ -1014,6 +1014,8 @@ except KeyError as err:
     print(str(err))
 print(json.dumps({"ok": True}, **options))
 print(json.dumps({"z": Extra(), "a": json.loads("1.25")}, **options))
+print(repr(json.dumps({"items": [1, {}]}, indent=2)))
+print(repr(json.dumps([Extra()], indent="--", **options)))
 print(json.dumps({2: False, json.loads("0.5"): True}, sort_keys=True))
 from enum import IntEnum
 class Code(IntEnum):
