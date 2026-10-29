@@ -118,6 +118,10 @@ def current():
             else:
                 raise AssertionError("set repr descriptor accepted a weak proxy")
 
+    key = 0
+    for _ in range(65536):
+        key = GenericAlias(list, key)
+    assert key in {key}
     print("ok")
 
 

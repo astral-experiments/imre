@@ -11,28 +11,35 @@ import tempfile
 from pathlib import Path
 
 
-def check_class_metadata_allocation(imre, root, run):
+def check_fixed_float_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "class_metadata_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "refuse_class_metadata.c", "-o", wrapper], check=True)
+    wrapper = root / "refuse_fixed_float.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_fixed_float_format.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_float_format,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
-    for shape in range(7):
-        reference = run(sys.executable, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape))
-        assert reference.returncode == 0, reference
-        for target in [0, 1, 2, "all"]:
-            extra = {"IMRE_ENCODED_FLAGS": flags, "CLASS_METADATA_REFUSE_NTH": str(target if target != "all" else 0)}
-            if target == "all":
-                extra["CLASS_METADATA_REFUSE_ALL"] = "1"
-            result = run(imre, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape), extra=extra)
-            assert result.returncode == 0 and b"metadata True True\n" in result.stdout, result
-            expected = reference.stdout if not target else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
-            assert result.stdout == expected, (result, reference)
-            if target:
-                assert result.stdout.startswith(b"kind MemoryError\n"), result
-                assert b"class_metadata_allocation " in result.stderr and b" 1\n" in result.stderr, result
+    source = fixtures / "fixed_float_format_allocation.py"
+    for optimization in (0, 3):
+        executable = root / f"fixed-float-O{optimization}"
+        built = run(imre, "build", source, "--no-cache", "--opt-level", str(optimization), "-o", executable,
+                    extra={"IMRE_ENCODED_FLAGS": flags})
+        assert built.returncode == 0, built
+        for shape in (0, 3, 6):
+            for prefix in (0, 1):
+                arguments = ("1.25", str(shape), str(prefix))
+                reference = run(sys.executable, "-B", source, *arguments)
+                assert reference.returncode == 0 and not reference.stderr, reference
+                for policy in ("none", "buffer", "owner"):
+                    failed = policy == "owner" or (policy == "buffer" and shape != 6)
+                    result = run(executable, *arguments, extra={
+                        "FIXED_FLOAT_REFUSE": policy,
+                        "FIXED_FLOAT_CALL": str(1 + prefix),
+                    })
+                    expected = b"MemoryError\n" + reference.stdout.partition(b"\n")[2] if failed else reference.stdout
+                    assert (result.returncode, result.stdout, result.stderr) == (
+                        0, expected, b"fixed_float_allocation_refused\n" if failed else b"",
+                    ), (optimization, shape, prefix, policy, result)
 
 
 def check_boxed_literal_roots_allocation(imre, root, run):
@@ -404,6 +411,29 @@ print(sys.intern(value) is value, sys._is_interned(value))
         ), result
 
 
+def check_ffi_result_roots(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "ffi-result-roots.o"
+    subprocess.run(["cc", "-c", fixtures / "ffi_result_roots_refuse.c", "-o", wrapper], check=True)
+    result_flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    source = import_path + "import boxed_ffi_result_roots as fixture; fixture.allocation()"
+    for ordinal in (0, 1):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": result_flags,
+            "IMRE_TEST_CALL_SIZE": "128",
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        expected = (b"caught ()\n" if ordinal else b"value 3\n") + b"retry 3 True\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+
+
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):
         set_stack = None
@@ -469,6 +499,30 @@ def check_argument_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
 
 
+def check_class_metadata_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "class_metadata_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_class_metadata.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape in range(7):
+        reference = run(sys.executable, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape))
+        assert reference.returncode == 0, reference
+        for target in [0, 1, 2, "all"]:
+            extra = {"IMRE_ENCODED_FLAGS": flags, "CLASS_METADATA_REFUSE_NTH": str(target if target != "all" else 0)}
+            if target == "all":
+                extra["CLASS_METADATA_REFUSE_ALL"] = "1"
+            result = run(imre, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape), extra=extra)
+            assert result.returncode == 0 and b"metadata True True\n" in result.stdout, result
+            expected = reference.stdout if not target else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            assert result.stdout == expected, (result, reference)
+            if target:
+                assert result.stdout.startswith(b"kind MemoryError\n"), result
+                assert b"class_metadata_allocation " in result.stderr and b" 1\n" in result.stderr, result
+
+
 
 def check_marshal_allocation(exe):
     import resource
@@ -513,12 +567,14 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_ffi_result_roots(imre, root, run)
             check_select_result_allocation(imre, root, run)
             check_poll_result_allocation(imre, root, run)
             flags = call_allocation_flags(root)
             check_argument_allocation(imre, run, flags)
-            check_raise_site_allocation(imre, root, run)
             check_class_metadata_allocation(imre, root, run)
+            check_raise_site_allocation(imre, root, run)
+            check_fixed_float_allocation(imre, root, run)
             check_boxed_literal_roots_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
         check_boxed_json_callback_allocation(imre, root, run)

@@ -673,6 +673,10 @@ fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
 }
 
 fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> Id {
+    let result = result.and_then(|id| {
+        ctx.heap.reserve_temporaries(1)?;
+        Ok(id)
+    });
     match result {
         Ok(id) => {
             ctx.heap.keep(id);
@@ -716,22 +720,31 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .ok_or_else(|| Error::new("ValueError", "invalid integer literal")),
         1 | 5 | 6 => {
             let id = std::str::from_utf8(data)
-                .map(|text| {
+                .map_err(|e| Error::new("UnicodeError", e.to_string()))
+                .and_then(|text| {
                     if kind == 1 {
                         return ctx.heap.string_literal(text);
                     }
                     if kind == 6 {
-                        return ctx.heap.code_name(text);
+                        return Ok(ctx.heap.code_name(text));
                     }
                     for name in text.split('\0') {
                         ctx.heap.code_name(name);
                     }
-                    NONE
-                })
-                .map_err(|e| Error::new("UnicodeError", e.to_string()));
+                    Ok(NONE)
+                });
             return finish(ctx, id);
         }
-        2 => Ok(Value::Bytes(data.to_vec())),
+        2 => {
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(data.len())
+                .map(|()| {
+                    bytes.extend_from_slice(data);
+                    Value::Bytes(bytes)
+                })
+                .map_err(|_| crate::Error::memory_error().into())
+        }
         3 => data
             .try_into()
             .map(|bytes| Value::Float(f64::from_le_bytes(bytes)))
@@ -1138,6 +1151,16 @@ pub(super) unsafe extern "C" fn imre_dyn_failed(ctx: *const Context) -> bool {
 pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usize {
     // SAFETY: the generated caller owns this context for the entire expression.
     unsafe { (&*ctx).heap.temporary_mark() }
+}
+
+/// Drop the finished iteration's temporary handles before asking for the next item.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns the context and recorded this mark in its active frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.reserve_slot_or_request_collection();
+    ctx.collect_garbage();
 }
 
 /// Release a consumed truth operand on the branch that no longer needs it.

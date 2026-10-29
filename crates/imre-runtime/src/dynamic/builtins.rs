@@ -1436,11 +1436,16 @@ pub(super) fn call(
         "all" | "any" => {
             let iterable = one_positional_arg(name, args, kwargs)?;
             let iter = ctx.iterator(iterable)?;
+            ctx.heap.keep(iter);
+            let mark = ctx.heap.temporary_mark();
             let stop_value = name == "any";
             while let Some(item) = ctx.next_item(iter)? {
                 if ctx.truth(item)? == stop_value {
                     return Ok(boolean(stop_value));
                 }
+                ctx.heap.release_temporaries_since(mark);
+                ctx.heap.reserve_slot_or_request_collection();
+                ctx.collect_garbage();
             }
             Ok(boolean(!stop_value))
         }

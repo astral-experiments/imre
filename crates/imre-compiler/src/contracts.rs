@@ -209,6 +209,9 @@ impl Builtin {
                     | PathOperation::Readlink
                     | PathOperation::Link(_)
                     | PathOperation::Absolute
+                    | PathOperation::Drive
+                    | PathOperation::Root
+                    | PathOperation::Anchor
                     | PathOperation::Name
                     | PathOperation::Stem
                     | PathOperation::Suffix
@@ -241,9 +244,6 @@ impl Builtin {
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
-                    | PathOperation::Drive
-                    | PathOperation::Root
-                    | PathOperation::Anchor
                     | PathOperation::CountPart
                     | PathOperation::Text
                     | PathOperation::IsAbsolute
@@ -497,6 +497,7 @@ impl Builtin {
             | Self::StringIntList
             | Self::EnumLookup(_)
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
+            Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
             | Self::DictIsOrdered
@@ -521,7 +522,6 @@ impl Builtin {
             | Self::ExceptionWithCause
             | Self::ExceptionOrigin(_)
             | Self::ExceptionSuppressContext
-            | Self::FloatFormat { .. }
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
