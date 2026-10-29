@@ -412,19 +412,14 @@ impl Context {
                 self.flag_or_integer(class, result)
             }
             "format_conversion" => self.format_conversion(a, b),
+            "format_concat" => self.concat_strings(a, b),
             "format" => {
                 let value = if b == NONE {
                     a
                 } else {
                     self.format_conversion(a, b)?
                 };
-                let spec = if c == NONE {
-                    String::new()
-                } else {
-                    self.str_value(c)?.to_owned()
-                };
-                let s = builtins::format_value(self, value, &spec)?;
-                Ok(self.text(s))
+                builtins::format_value(self, value, (c != NONE).then_some(c))
             }
             "take_error" => {
                 let error = self

@@ -10,6 +10,7 @@ use ruff_python_literal::format::{
     FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
 };
 
+use super::super::operators::append_rendered_text;
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
@@ -359,30 +360,61 @@ fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
     })
 }
 
-/// Apply a scalar format specifier used by both f-strings and str.format.
-pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
+/// Apply the type's format method and return its string, including a string subclass.
+pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<Id>) -> Result<Id> {
+    if let Some(spec) = spec
+        && ctx.string_storage(spec).is_none()
+    {
+        return Err(type_error(format!(
+            "format() argument 2 must be str, not {}",
+            ctx.type_name(spec)
+        )));
+    }
+    if let Some(method) = ctx.bound_slot(value, "__format__")? {
+        let spec = match spec {
+            Some(spec) => spec,
+            None => ctx
+                .heap
+                .source_string_constant("")
+                .ok_or_else(|| Error::new("MemoryError", ""))?,
+        };
+        let result = ctx.call(method, super::super::copy_ids(&[spec])?, Vec::new())?;
+        if ctx.string_storage(result).is_none() {
+            return Err(type_error(format!(
+                "__format__ must return a str, not {}",
+                ctx.type_name(result)
+            )));
+        }
+        return Ok(result);
+    }
+    let spec = spec
+        .map(|spec| ctx.str_value(spec))
+        .transpose()?
+        .unwrap_or("");
     if spec.is_empty() {
         if let Value::Int(number) = ctx.heap.get(value) {
-            return super::super::operators::rendered_integer(number).map(crate::Str::into_string);
+            let text = super::super::operators::rendered_integer(number)?;
+            return Ok(ctx.text(text.into_string()));
         }
-        return ctx.checked_format(value, false);
+        return super::call(ctx, "str", &[value], &[]);
     }
-    if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
-        return Ok(ctx.display(value));
+    if ctx.string_storage(value).is_some() && spec == "s" {
+        return Ok(value);
     }
     if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
         let number = float_operand(ctx, value)?
             .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
-        return Ok(
+        return Ok(ctx.text(
             crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
-        );
+        ));
     }
-    if matches!(ctx.heap.get(value), Value::Bool(_) | Value::Int(_)) {
-        return Ok(crate::objects::brace_integer_field(
-            spec,
-            ctx.as_int(value)?,
-            ctx.type_name(value),
-        )?);
+    if matches!(
+        ctx.heap.get(ctx.scalar_value(value)),
+        Value::Bool(_) | Value::Int(_)
+    ) {
+        let text =
+            crate::objects::brace_integer_field(spec, ctx.as_int(value)?, ctx.type_name(value))?;
+        return Ok(ctx.text(text));
     }
     Err(type_error(format!("unsupported format string {spec:?}")))
 }
@@ -411,7 +443,7 @@ fn format_string(
     source: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
-) -> Result<String> {
+) -> Result<Id> {
     #[derive(Default)]
     struct Indices {
         next: usize,
@@ -424,9 +456,10 @@ fn format_string(
         kwargs: &[(String, Id)],
         indices: &mut Indices,
         nested: bool,
-    ) -> Result<String> {
+    ) -> Result<Id> {
         let parsed =
             FormatString::from_raw_str(s).map_err(|e| Error::new("ValueError", e.to_string()))?;
+        let single = parsed.format_parts.len() == 1;
         let mut output = String::new();
         for part in parsed.format_parts {
             let FormatPart::Field {
@@ -436,7 +469,7 @@ fn format_string(
             } = part
             else {
                 if let FormatPart::Literal(text) = part {
-                    output.push_str(&text);
+                    append_rendered_text(&mut output, &text)?;
                 }
                 continue;
             };
@@ -503,13 +536,17 @@ fn format_string(
                         "format specifier nested too deeply",
                     ));
                 }
-                render(ctx, &format_spec, args, kwargs, indices, true)?
+                Some(render(ctx, &format_spec, args, kwargs, indices, true)?)
             } else {
-                format_spec
+                (!format_spec.is_empty()).then(|| ctx.text(format_spec))
             };
-            output.push_str(&format_value(ctx, value, &spec)?);
+            let rendered = format_value(ctx, value, spec)?;
+            if single {
+                return Ok(rendered);
+            }
+            append_rendered_text(&mut output, ctx.str_value(rendered)?)?;
         }
-        Ok(output)
+        Ok(ctx.text(output))
     }
     render(ctx, source, args, kwargs, &mut Indices::default(), false)
 }
@@ -1211,10 +1248,7 @@ pub(super) fn method(
     }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
-        "format" => {
-            let result = format_string(ctx, &source, args, kwargs)?;
-            Ok(ctx.text(result))
-        }
+        "format" => format_string(ctx, &source, args, kwargs),
         "partition" | "rpartition" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!(
