@@ -765,6 +765,7 @@ def report(text):
             "boxed_source_exec.py",
             "boxed_sys_intern.py",
             "boxed_bytes_add.py",
+            "boxed_binary_iterators.py",
             "boxed_bytes_io.py",
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
