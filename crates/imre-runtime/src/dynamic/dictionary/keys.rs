@@ -5,6 +5,7 @@ use std::ops::ControlFlow;
 use std::sync::LazyLock;
 
 use num_traits::ToPrimitive;
+use smallvec::SmallVec;
 
 use super::Entries;
 use crate::dynamic::value::{DictViewKind, NONE};
@@ -13,6 +14,17 @@ use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 const EMPTY: usize = usize::MAX;
 const DUMMY: usize = usize::MAX - 1;
 const MODULUS: i64 = (1 << 61) - 1;
+
+/// A pending operation in the left-to-right hash of a boxed key.
+enum HashFrame {
+    Xor(Id),
+    Sequence {
+        tuple: Option<Id>,
+        len: usize,
+        acc: u64,
+        remaining: smallvec::IntoIter<[Id; 3]>,
+    },
+}
 
 #[derive(Clone)]
 pub(super) struct Index {
@@ -420,14 +432,37 @@ impl Context {
         )
     }
 
-    fn tuple_keys(&self, key: Id) -> Option<Vec<Id>> {
+    fn tuple_keys(&self, key: Id) -> Result<Option<SmallVec<[Id; 3]>>> {
+        let mut items = SmallVec::new();
         match self.tuple_backing(key) {
-            Value::Tuple(values) | Value::NamedTuple { values, .. } => Some(values.clone()),
-            Value::Instance { class, fields, .. } => self
-                .namedtuple_fields(*class)
-                .map(|names| names.iter().map(|name| fields[name]).collect()),
-            _ => None,
+            Value::Tuple(values) | Value::NamedTuple { values, .. } => {
+                items
+                    .try_reserve(values.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                items.extend_from_slice(values);
+            }
+            Value::Instance { class, fields, .. } => {
+                let Some(names) = self.namedtuple_fields(*class) else {
+                    return Ok(None);
+                };
+                items
+                    .try_reserve(names.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                items.extend(names.iter().map(|name| fields[name]));
+            }
+            _ => return Ok(None),
         }
+        Ok(Some(items))
+    }
+
+    /// Record a successful hash before the container can be probed again.
+    fn cache_key_hash(&mut self, key: Id, hash: i64) -> Result<i64> {
+        self.heap
+            .immutable_hashes
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.heap.immutable_hashes.insert(key, hash);
+        Ok(hash)
     }
 
     /// Hash the stable arena handle without calling any Python special methods.
@@ -435,15 +470,59 @@ impl Context {
         normalized(data_hash(&key.to_ne_bytes()))
     }
 
-    pub(in super::super) fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
+    pub(in super::super) fn dictionary_hash(&mut self, mut key: Id) -> Result<i64> {
+        let mut parents = SmallVec::new();
+        'visit: loop {
+            let mut hash = match self.dictionary_hash_step(key, &mut parents)? {
+                ControlFlow::Continue(child) => {
+                    key = child;
+                    continue;
+                }
+                ControlFlow::Break(hash) => hash,
+            };
+            while let Some(parent) = parents.last_mut() {
+                match parent {
+                    HashFrame::Xor(id) => hash = normalized(hash ^ data_hash(&id.to_ne_bytes())),
+                    HashFrame::Sequence {
+                        tuple,
+                        len,
+                        acc,
+                        remaining,
+                    } => {
+                        *acc = tuple_lane(*acc, hash);
+                        if let Some(child) = remaining.next() {
+                            key = child;
+                            continue 'visit;
+                        }
+                        hash = if let Some(key) = *tuple {
+                            self.cache_key_hash(key, finish_tuple(*acc, *len))?
+                        } else if *acc == u64::MAX {
+                            1_546_275_796
+                        } else {
+                            *acc as i64
+                        };
+                    }
+                }
+                parents.pop();
+            }
+            return Ok(hash);
+        }
+    }
+
+    /// Hash a leaf or save its enclosing operation and visit the next child.
+    fn dictionary_hash_step(
+        &mut self,
+        key: Id,
+        parents: &mut SmallVec<[HashFrame; 2]>,
+    ) -> Result<ControlFlow<i64, Id>> {
         if let Value::Union(union) = *self.heap.get(key) {
-            return union.hash(self);
+            return union.hash(self).map(ControlFlow::Break);
         }
         if let Value::Weak(wr) = *self.heap.get(key) {
             if wr.kind != super::super::weakref::Kind::Reference {
                 return Err(self.unhashable(key));
             }
-            return self.weak_reference_hash(key, wr);
+            return self.weak_reference_hash(key, wr).map(ControlFlow::Break);
         }
         if let Some(class) = self.heap.get(key).instance_class()
             && let Some(slot) = self.class_attr(class, "__hash__")
@@ -452,7 +531,7 @@ impl Context {
                 return Err(self.unhashable(key));
             }
             if matches!(self.heap.get(slot), Value::Native(name) if name == "object.__hash__") {
-                return Ok(Self::identity_hash(key));
+                return Ok(ControlFlow::Break(Self::identity_hash(key)));
             }
             let method = self.bind_attribute(slot, key, class)?;
             let returned = self.call(method, vec![], vec![])?;
@@ -466,64 +545,59 @@ impl Context {
                     ));
                 }
             };
-            return Ok(normalized(hash));
-        }
-        if matches!(self.heap.get(key), Value::Method { .. }) {
-            let mut receivers = smallvec::SmallVec::<[Id; 4]>::new();
-            let mut callable = key;
-            while let Value::Method {
-                callable: inner,
-                receiver,
-                ..
-            } = *self.heap.get(callable)
-            {
-                receivers
-                    .try_reserve(1)
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                receivers.push(receiver);
-                callable = inner;
-            }
-            let mut hash = self.dictionary_hash(callable)?;
-            for receiver in receivers.into_iter().rev() {
-                hash = normalized(hash ^ data_hash(&receiver.to_ne_bytes()));
-            }
-            return Ok(hash);
+            return Ok(ControlFlow::Break(normalized(hash)));
         }
         // Immutable scalar subclasses inherit the hash of their backing value.
         let key = self.scalar_value(key);
-        if let Value::GenericAlias(alias) = self.heap.get(key) {
-            if matches!(alias.kind, super::super::typing::AliasKind::Literal(_)) {
+        let child = match self.heap.get(key) {
+            Value::Method {
+                callable, receiver, ..
+            } => Some((*callable, *receiver)),
+            Value::GenericAlias(alias)
+                if matches!(alias.kind, super::super::typing::AliasKind::Literal(_)) =>
+            {
                 let members = super::super::typing::literal_members(self, alias.args)?;
-                return self.dictionary_hash(members);
+                return Ok(ControlFlow::Continue(members));
             }
-            let (origin, args) = (alias.origin, alias.args);
-            return Ok(normalized(
-                data_hash(&origin.to_ne_bytes()) ^ self.dictionary_hash(args)?,
-            ));
+            Value::GenericAlias(alias) => Some((alias.args, alias.origin)),
+            _ => None,
+        };
+        if let Some((child, xor)) = child {
+            parents
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            parents.push(HashFrame::Xor(xor));
+            return Ok(ControlFlow::Continue(child));
         }
         if let Some(&hash) = self.heap.immutable_hashes.get(&key) {
-            return Ok(hash);
+            return Ok(ControlFlow::Break(hash));
         }
-        let hash = if let Some(values) = self.tuple_keys(key) {
-            let mut acc = TUPLE_START;
-            for &value in &values {
-                acc = tuple_lane(acc, self.dictionary_hash(value)?);
-            }
-            let hash = finish_tuple(acc, values.len());
-            self.heap.immutable_hashes.insert(key, hash);
-            hash
-        } else if let Value::Slice(parts) = *self.heap.get(key) {
+        let sequence = if let Value::Slice(parts) = *self.heap.get(key) {
             // Slice components are hashed again on each lookup, in start/stop/step order.
-            let mut hash = TUPLE_START;
-            for part in parts {
-                hash = tuple_lane(hash, self.dictionary_hash(part)?);
+            Some((SmallVec::from_buf(parts), None))
+        } else {
+            self.tuple_keys(key)?.map(|items| (items, Some(key)))
+        };
+        if let Some((items, tuple)) = sequence {
+            let len = items.len();
+            let mut remaining = items.into_iter();
+            if let Some(child) = remaining.next() {
+                parents
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                parents.push(HashFrame::Sequence {
+                    tuple,
+                    len,
+                    acc: TUPLE_START,
+                    remaining,
+                });
+                return Ok(ControlFlow::Continue(child));
             }
-            if hash == u64::MAX {
-                1_546_275_796
-            } else {
-                hash as i64
-            }
-        } else if let Value::Set {
+            return self
+                .cache_key_hash(key, finish_tuple(TUPLE_START, 0))
+                .map(ControlFlow::Break);
+        }
+        let hash = if let Value::Set {
             entries,
             frozen: true,
         } = self.heap.get(key)
@@ -544,8 +618,7 @@ impl Context {
             } else {
                 hash as i64
             };
-            self.heap.immutable_hashes.insert(key, hash);
-            hash
+            self.cache_key_hash(key, hash)?
         } else {
             match self.heap.get(key) {
                 Value::Int(n) => integer_hash(n),
@@ -619,7 +692,7 @@ impl Context {
                 _ => Self::identity_hash(key),
             }
         };
-        Ok(normalized(hash))
+        Ok(ControlFlow::Break(normalized(hash)))
     }
 
     /// Look up a Python name in immutable builtin type dictionaries. Type lookup clears errors.
@@ -659,7 +732,7 @@ impl Context {
     fn compare_key_pairs(&mut self, left: Id, right: Id) -> Result<bool> {
         enum Work {
             Pair(Id, Id),
-            Tuple(std::iter::Zip<std::vec::IntoIter<Id>, std::vec::IntoIter<Id>>),
+            Tuple(std::iter::Zip<smallvec::IntoIter<[Id; 3]>, smallvec::IntoIter<[Id; 3]>>),
             Set(Id, Id, usize),
             Probe(KeyLookup, Option<(usize, Id)>),
             Done(bool),
@@ -744,7 +817,7 @@ impl Context {
                             Work::Done(false)
                         }
                     } else if let (Some(a), Some(b)) =
-                        (self.tuple_keys(left), self.tuple_keys(right))
+                        (self.tuple_keys(left)?, self.tuple_keys(right)?)
                     {
                         if a.len() == b.len() {
                             Work::Tuple(a.into_iter().zip(b))
