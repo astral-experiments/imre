@@ -417,11 +417,15 @@ impl Function<'_, '_> {
     ) {
         let g = &generators[0];
         let iter = self.op("iter", &[source]);
+        let mark = self.temporary_mark();
         let step = self.name("b");
         let body = self.name("b");
         let done = self.name("b");
         self.jump(&step);
         self.label(&step);
+        self.line(&format!(
+            "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
+        ));
         let more = self.op("more", &[&iter]);
         let cond = self.value(&format!("icmp eq i64 {more}, 2"));
         self.branch(&cond, &body, &done);

@@ -233,7 +233,7 @@ impl Context {
                 Err(e) if self.is_attribute_error(&e) => {
                     let mut error =
                         Error::new("ValueError", format!("{original}.__spec__ is not set"));
-                    error.tracing().context = Some(self.raised_instance(e));
+                    error.context = self.raised_instance(e);
                     error.tracing().cause = Some(NONE);
                     Err(error)
                 }
@@ -258,7 +258,7 @@ impl Context {
                         .with_import(Some(fullname), None, None);
                         let cause = self.raised_instance(cause);
                         error.tracing().cause = Some(cause);
-                        error.tracing().context = Some(cause);
+                        error.context = cause;
                         return Err(error);
                     }
                     path => path?,

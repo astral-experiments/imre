@@ -81,8 +81,14 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
             "sum() can't sum {kind} [use {empty}.join(seq) instead]"
         )));
     }
+    ctx.heap.keep(iterator);
     let mark = ctx.heap.temporary_mark();
-    let Some(mut item) = ctx.next_item(iterator)? else {
+    let next_item = |ctx: &mut Context| {
+        ctx.heap.reserve_slot_or_request_collection();
+        ctx.collect_garbage();
+        ctx.next_item(iterator)
+    };
+    let Some(mut item) = next_item(ctx)? else {
         return Ok(total);
     };
 
@@ -102,14 +108,14 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
             };
             integer = next;
             ctx.heap.release_temporaries_since(mark);
-            let Some(next) = ctx.next_item(iterator)? else {
+            let Some(next) = next_item(ctx)? else {
                 return Ok(ctx.int(integer));
             };
             item = next;
         }
         ctx.heap.release_temporaries_since(mark);
         ctx.heap.keep(total);
-        let Some(next) = ctx.next_item(iterator)? else {
+        let Some(next) = next_item(ctx)? else {
             return Ok(total);
         };
         item = next;
@@ -133,14 +139,14 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
             };
             real.add(value);
             ctx.heap.release_temporaries_since(mark);
-            let Some(next) = ctx.next_item(iterator)? else {
+            let Some(next) = next_item(ctx)? else {
                 return Ok(ctx.alloc(Value::Float(real.value())));
             };
             item = next;
         }
         ctx.heap.release_temporaries_since(mark);
         ctx.heap.keep(total);
-        let Some(next) = ctx.next_item(iterator)? else {
+        let Some(next) = next_item(ctx)? else {
             return Ok(total);
         };
         item = next;
@@ -163,7 +169,7 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
             };
             real.add(component);
             ctx.heap.release_temporaries_since(mark);
-            let Some(next) = ctx.next_item(iterator)? else {
+            let Some(next) = next_item(ctx)? else {
                 return Ok(ctx.alloc(complex_total(real, imag)));
             };
             item = next;
@@ -174,7 +180,7 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
         total = ctx.binary("+", total, item)?;
         ctx.heap.release_temporaries_since(mark);
         ctx.heap.keep(total);
-        let Some(next) = ctx.next_item(iterator)? else {
+        let Some(next) = next_item(ctx)? else {
             return Ok(total);
         };
         item = next;

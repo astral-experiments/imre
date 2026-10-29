@@ -19,7 +19,8 @@ mod builtins;
 mod bytes;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
-    bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, rsplit_bytes, rstrip_bytes,
+    bytes_contains, bytes_contains_int, concat_bytes, owned_input as owned_bytes_input,
+    repeat_bytes, rsplit_bytes, rstrip_bytes,
 };
 mod cache_paths;
 mod calendar;
@@ -87,7 +88,7 @@ mod source_modules;
 pub(crate) mod stdio;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
-pub(crate) use stdlib::format_fixed_float;
+pub(crate) use stdlib::{format_fixed_float, replace_text};
 mod string_enums;
 mod structs;
 mod tempdirs;

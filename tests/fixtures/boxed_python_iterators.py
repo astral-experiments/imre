@@ -54,6 +54,13 @@ class FailedCursor:
 
 
 def current():
+    from functools import partial
+
+    chain = iter([7])
+    for _ in range(16384):
+        chain = iter(partial(next, chain), None)
+    print(next(chain), next(chain, "exhausted"))
+
     class RowsError(ValueError):
         def __iter__(self):
             return iter((3, 5))

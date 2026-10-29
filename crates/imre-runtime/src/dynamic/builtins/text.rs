@@ -184,7 +184,7 @@ pub(super) fn construct(
                 }
                 let class = match ctx.heap.get(message) {
                     Value::Instance { class, .. } => Some(*class),
-                    Value::Raised(error) => error.class,
+                    Value::Raised(error) => Some(error.class),
                     _ => None,
                 };
                 if class.is_some_and(|class| {
@@ -422,7 +422,7 @@ pub(super) fn builtin_format(
         let number = float_operand(ctx, value)?
             .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
         return Ok(ctx.text(
-            crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
+            crate::objects::format_fixed_float(number, precision, percent, sign)?.into_string(),
         ));
     }
     if matches!(
@@ -1307,6 +1307,87 @@ pub(super) fn method(
         }
         return Ok(ctx.text(output));
     }
+    if matches!(name, "startswith" | "endswith") {
+        positional(name, kwargs)?;
+        arity(name, args, 1, 3)?;
+        let source = ctx.str_value(receiver)?;
+        let length = source.chars().count() as i64;
+        let bound = |i: i64| {
+            if i < 0 {
+                length.saturating_add(i).max(0)
+            } else {
+                i
+            }
+        };
+        let start = args
+            .get(1)
+            .filter(|&&id| id != NONE)
+            .map(|&x| ctx.as_integer(x))
+            .transpose()?
+            .map(bound)
+            .unwrap_or(0);
+        let end = args
+            .get(2)
+            .filter(|&&id| id != NONE)
+            .map(|&x| ctx.as_integer(x))
+            .transpose()?
+            .map(bound)
+            .unwrap_or(length)
+            .min(length);
+        let byte_at = |index: i64| {
+            if index >= length {
+                source.len()
+            } else {
+                source
+                    .char_indices()
+                    .nth(index as usize)
+                    .map_or(source.len(), |(byte, _)| byte)
+            }
+        };
+        let part = source.get(byte_at(start)..byte_at(end)).unwrap_or_default();
+        let candidates = match ctx.heap.get(args[0]) {
+            Value::Tuple(values) => values.as_slice(),
+            _ => &args[..1],
+        };
+        for &id in candidates {
+            let needle = ctx.str_value(id)?;
+            if start <= end
+                && (if name == "startswith" {
+                    part.starts_with(needle)
+                } else {
+                    part.ends_with(needle)
+                })
+            {
+                return Ok(TRUE);
+            }
+        }
+        return Ok(FALSE);
+    }
+    if name == "replace" {
+        positional(name, kwargs)?;
+        arity(name, args, 2, 3)?;
+        let count = args
+            .get(2)
+            .map(|&x| ctx.as_integer(x))
+            .transpose()?
+            .unwrap_or(-1);
+        let value = crate::objects::replace_text(
+            ctx.str_value(receiver)?,
+            ctx.str_value(args[0])?,
+            ctx.str_value(args[1])?,
+            usize::try_from(count).unwrap_or(usize::MAX),
+            args[0] == args[1],
+            |length| {
+                let mut text = String::new();
+                text.try_reserve_exact(length).ok()?;
+                Some(text)
+            },
+        )?;
+        return Ok(match value {
+            Some(text) => ctx.text(text),
+            None => ctx.string_storage(receiver).unwrap(),
+        });
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => format_string(ctx, &source, args, kwargs),
@@ -1380,67 +1461,6 @@ pub(super) fn method(
                 _ => source.trim_start_matches(matches),
             };
             Ok(ctx.text(trimmed))
-        }
-        "startswith" | "endswith" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 3)?;
-            let length = source.chars().count() as i64;
-            let bound = |i: i64| {
-                if i < 0 {
-                    length.saturating_add(i).max(0)
-                } else {
-                    i
-                }
-            };
-            let start = args
-                .get(1)
-                .filter(|&&id| id != NONE)
-                .map(|&x| ctx.as_integer(x))
-                .transpose()?
-                .map(bound)
-                .unwrap_or(0);
-            let end = args
-                .get(2)
-                .filter(|&&id| id != NONE)
-                .map(|&x| ctx.as_integer(x))
-                .transpose()?
-                .map(bound)
-                .unwrap_or(length)
-                .min(length);
-            let part: String = source
-                .chars()
-                .skip(start as usize)
-                .take(end.saturating_sub(start).max(0) as usize)
-                .collect();
-            let candidates = match ctx.heap.get(args[0]) {
-                Value::Tuple(values) => values.as_slice(),
-                _ => &args[..1],
-            };
-            for &id in candidates {
-                let needle = ctx.str_value(id)?;
-                if start <= end
-                    && (if name == "startswith" {
-                        part.starts_with(needle)
-                    } else {
-                        part.ends_with(needle)
-                    })
-                {
-                    return Ok(TRUE);
-                }
-            }
-            Ok(FALSE)
-        }
-        "replace" => {
-            positional(name, kwargs)?;
-            arity(name, args, 2, 3)?;
-            let count = args
-                .get(2)
-                .map(|&x| ctx.as_integer(x))
-                .transpose()?
-                .unwrap_or(-1);
-            let old = ctx.str_value(args[0])?;
-            let new = ctx.str_value(args[1])?;
-            Ok(ctx.text(source.replacen(old, new, usize::try_from(count).unwrap_or(usize::MAX))))
         }
         "capitalize" | "lower" | "upper" => {
             positional(name, kwargs)?;

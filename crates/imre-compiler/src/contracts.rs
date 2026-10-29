@@ -209,6 +209,12 @@ impl Builtin {
                     | PathOperation::Readlink
                     | PathOperation::Link(_)
                     | PathOperation::Absolute
+                    | PathOperation::Drive
+                    | PathOperation::Root
+                    | PathOperation::Anchor
+                    | PathOperation::Name
+                    | PathOperation::Stem
+                    | PathOperation::Suffix
                     | PathOperation::WithName
                     | PathOperation::WithStem
                     | PathOperation::WithSuffix
@@ -238,14 +244,8 @@ impl Builtin {
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
-                    | PathOperation::Drive
-                    | PathOperation::Root
-                    | PathOperation::Anchor
                     | PathOperation::CountPart
                     | PathOperation::Text
-                    | PathOperation::Name
-                    | PathOperation::Stem
-                    | PathOperation::Suffix
                     | PathOperation::IsAbsolute
                     | PathOperation::Info
                     | PathOperation::InfoRepr
@@ -497,6 +497,7 @@ impl Builtin {
             | Self::StringIntList
             | Self::EnumLookup(_)
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
+            Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
             | Self::DictIsOrdered
@@ -521,7 +522,6 @@ impl Builtin {
             | Self::ExceptionWithCause
             | Self::ExceptionOrigin(_)
             | Self::ExceptionSuppressContext
-            | Self::FloatFormat { .. }
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
@@ -1248,6 +1248,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_with_name"
                 | "imre_path_change_extension"
                 | "imre_path_relative_to"
+                | "imre_path_name"
+                | "imre_path_stem"
+                | "imre_path_suffix"
                 | "imre_path_suffixes"
                 | "imre_path_resolve"
                 | "imre_tempdir_new"

@@ -1,4 +1,5 @@
 //! Boxed POSIX readiness shares the descriptor sets and poll registrations with typed calls.
+use super::super::copy_ids;
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{
     errno_error,
@@ -70,8 +71,10 @@ fn select(ctx: &mut Context, args: &[Id]) -> Result<Id> {
                 e
             }
         })?;
+        ctx.heap.reserve_temporaries(1)?;
         ctx.heap.keep(iterator);
         while let Some(obj) = ctx.next_item(iterator)? {
+            ctx.heap.reserve_temporaries(1)?;
             ctx.heap.keep(obj);
             let n = fd(ctx, obj)?;
             sets.insert(group, items.len(), n)?;
@@ -173,7 +176,7 @@ pub(super) fn call(
         for (fd, flags) in events {
             let fd = ctx.int(i64::from(fd));
             let flags = ctx.int(i64::from(flags));
-            out.push(ctx.alloc(Value::Tuple(vec![fd, flags])));
+            out.push(ctx.alloc(Value::Tuple(copy_ids(&[fd, flags])?)));
         }
         return Ok(ctx.alloc(Value::List(out)));
     }

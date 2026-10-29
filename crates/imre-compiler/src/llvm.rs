@@ -10798,6 +10798,57 @@ print(show("x"))
         }
     }
 
+    #[test]
+    fn path_component_accessors_propagate_allocation_errors() {
+        for field in ["name", "stem", "suffix"] {
+            let llvm = compile(
+                &format!(
+                    "from pathlib import PurePosixPath\ndef probe(p: PurePosixPath) -> str:\n    return p.{field}\nprint(probe(PurePosixPath('a/b.c')))\n"
+                ),
+                &CompileOptions::default(),
+            )
+            .unwrap();
+            for call in [
+                format!(" = call ptr @imre_path_{field}("),
+                " = call ptr @fn_0(".to_owned(),
+            ] {
+                let mut lines = llvm.lines();
+                lines.find(|line| line.contains(&call)).unwrap();
+                assert!(
+                    lines
+                        .next()
+                        .unwrap()
+                        .contains("call i32 @imre_error_pending()"),
+                    "{call}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn path_prefix_accessors_propagate_allocation_errors() {
+        for field in ["drive", "root", "anchor"] {
+            let llvm = compile(
+                &format!(
+                    "from pathlib import PureWindowsPath\ndef probe(p: PureWindowsPath) -> str:\n    return p.{field}\nprint(probe(PureWindowsPath('C:/a')))\n"
+                ),
+                &CompileOptions::default(),
+            )
+            .unwrap();
+            assert_checked_pointer_call(&llvm, "imre_path_prefix");
+            let mut lines = llvm.lines();
+            lines
+                .find(|line| line.contains(" = call ptr @fn_0("))
+                .unwrap();
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .contains("call i32 @imre_error_pending()")
+            );
+        }
+    }
+
     fn assert_checked_pointer_call(llvm: &str, function: &str) {
         let pattern = format!(" = call ptr @{function}(");
         let mut lines = llvm.lines();

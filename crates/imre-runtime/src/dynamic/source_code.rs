@@ -53,9 +53,17 @@ struct LoopJumps {
     breaks: Vec<usize>,
 }
 
+/// Execution state shared by ordinary and resumed runtime-source instructions.
+struct SourceCursor<'a> {
+    ip: usize,
+    iterators: &'a mut Vec<Id>,
+    advanced: Option<Result<Option<Id>>>,
+}
+
 enum Step {
     Yield(Id, usize),
     Return(Id),
+    Advance(Id, usize),
 }
 
 fn unsupported(what: impl std::fmt::Display) -> Error {
@@ -164,6 +172,17 @@ impl<'a> CompiledStrings<'a, '_> {
     }
 }
 
+/// Collect source line offsets before constructing code or AST nodes.
+pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Result<Vec<usize>> {
+    let mut starts = Vec::new();
+    starts
+        .try_reserve_exact(1 + offsets.clone().count())
+        .map_err(|_| crate::Error::allocation())?;
+    starts.push(0);
+    starts.extend(offsets);
+    Ok(starts)
+}
+
 impl Program {
     /// Keep each code object's constants alive, including constants owned by unexecuted children.
     fn prepare_strings<'a>(
@@ -267,7 +286,19 @@ impl Program {
 
     fn lower(
         &mut self,
-        body: &[ast::Stmt],
+        body: ast::Suite,
+        lines: &[usize],
+        function: bool,
+        active: Option<&mut LoopJumps>,
+    ) -> Result<()> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            self.lower_suite(body, lines, function, active)
+        })
+    }
+
+    fn lower_suite(
+        &mut self,
+        body: ast::Suite,
         lines: &[usize],
         function: bool,
         mut active: Option<&mut LoopJumps>,
@@ -283,27 +314,26 @@ impl Program {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
             let op = match stmt {
                 Stmt::Pass(_) => continue,
-                Stmt::Expr(s) => match &*s.value {
+                Stmt::Expr(s) => match *s.value {
                     ast::Expr::Yield(y) => {
                         if !function {
                             return Err(Error::new("SyntaxError", "'yield' outside function"));
                         }
                         self.generator = true;
-                        Instruction::Yield(y.value.as_deref().cloned())
+                        Instruction::Yield(y.value.map(|value| *value))
                     }
                     ast::Expr::YieldFrom(y) if function => {
                         self.generator = true;
-                        self.instructions
-                            .push((line, Instruction::Iter((*y.value).clone())));
+                        self.instructions.push((line, Instruction::Iter(*y.value)));
                         Instruction::Next(None, self.instructions.len() + 1)
                     }
-                    e => Instruction::Eval(e.clone()),
+                    e => Instruction::Eval(e),
                 },
                 Stmt::Assign(s) => {
                     for target in &s.targets {
                         self.declare_target(target)?;
                     }
-                    Instruction::Assign(s.targets.clone(), (*s.value).clone())
+                    Instruction::Assign(s.targets, *s.value)
                 }
                 Stmt::AnnAssign(s) if function => {
                     let ast::Expr::Name(name) = &*s.target else {
@@ -311,17 +341,17 @@ impl Program {
                     };
                     self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
-                    let Some(value) = &s.value else { continue };
-                    Instruction::Assign(vec![(*s.target).clone()], (**value).clone())
+                    let Some(value) = s.value else { continue };
+                    Instruction::Assign(vec![*s.target], *value)
                 }
                 Stmt::Delete(s) => {
-                    for target in &s.targets {
+                    for target in s.targets {
                         match target {
                             ast::Expr::Subscript(item)
                                 if !matches!(*item.slice, ast::Expr::Slice(_)) =>
                             {
                                 self.instructions
-                                    .push((line, Instruction::DeleteItem(item.clone())));
+                                    .push((line, Instruction::DeleteItem(item)));
                             }
                             _ => return Err(unsupported("deletion target")),
                         }
@@ -330,15 +360,15 @@ impl Program {
                 }
                 Stmt::AugAssign(s) => {
                     self.declare_target(&s.target)?;
-                    Instruction::AugAssign(s.clone())
+                    Instruction::AugAssign(s)
                 }
                 Stmt::Return(s) => {
                     if !function {
                         return Err(Error::new("SyntaxError", "'return' outside function"));
                     }
-                    Instruction::Return(s.value.as_deref().cloned())
+                    Instruction::Return(s.value.map(|value| *value))
                 }
-                Stmt::Raise(s) => Instruction::Raise(s.clone()),
+                Stmt::Raise(s) => Instruction::Raise(s),
                 Stmt::Import(s) if !s.is_lazy => {
                     for name in &s.names {
                         let module = name.name.to_string();
@@ -352,7 +382,7 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Assert(s) => Instruction::Assert(s.clone()),
+                Stmt::Assert(s) => Instruction::Assert(s),
                 Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
                     let module = s
                         .module
@@ -379,9 +409,9 @@ impl Program {
                     child.method_imports = self.method_imports.clone();
                     child.private_names = self.private_names.clone();
                     child.first_line = line;
-                    child.lower(&s.body, lines, true, None)?;
+                    child.lower(s.body, lines, true, None)?;
                     self.locals.insert(child.name.clone());
-                    Instruction::Define(Rc::new(child), s.parameters.clone())
+                    Instruction::Define(Rc::new(child), s.parameters)
                 }
                 Stmt::Break(_) => {
                     let current = active
@@ -403,19 +433,10 @@ impl Program {
                     let (body, orelse, guard) = match stmt {
                         Stmt::For(s) if !s.is_async => {
                             self.declare_target(&s.target)?;
-                            self.instructions
-                                .push((line, Instruction::Iter((*s.iter).clone())));
-                            (
-                                &s.body,
-                                &s.orelse,
-                                Instruction::Next(Some((*s.target).clone()), 0),
-                            )
+                            self.instructions.push((line, Instruction::Iter(*s.iter)));
+                            (s.body, s.orelse, Instruction::Next(Some(*s.target), 0))
                         }
-                        Stmt::While(s) => (
-                            &s.body,
-                            &s.orelse,
-                            Instruction::Unless((*s.test).clone(), 0),
-                        ),
+                        Stmt::While(s) => (s.body, s.orelse, Instruction::Unless(*s.test, 0)),
                         _ => return Err(unsupported("async for")),
                     };
                     let head = self.instructions.len();
@@ -441,8 +462,8 @@ impl Program {
                 }
                 Stmt::If(s) => {
                     let mut ends = Vec::new();
-                    let mut arm = Some((&*s.test, s.body.as_slice()));
-                    for clause in &s.elif_else_clauses {
+                    let mut arm = Some((*s.test, s.body));
+                    for clause in s.elif_else_clauses {
                         if let Some((test, body)) = arm.take() {
                             ends.push(self.arm(
                                 test,
@@ -453,10 +474,10 @@ impl Program {
                                 active.as_deref_mut(),
                             )?);
                         }
-                        if let Some(test) = &clause.test {
-                            arm = Some((test, &clause.body));
+                        if let Some(test) = clause.test {
+                            arm = Some((test, clause.body));
                         } else {
-                            self.lower(&clause.body, lines, function, active.as_deref_mut())?;
+                            self.lower(clause.body, lines, function, active.as_deref_mut())?;
                         }
                     }
                     if let Some((test, body)) = arm {
@@ -478,7 +499,7 @@ impl Program {
                 _ => {
                     return Err(unsupported(format!(
                         "{:?}",
-                        ast::AnyNodeRef::from(stmt).kind()
+                        ast::AnyNodeRef::from(&stmt).kind()
                     )));
                 }
             };
@@ -528,8 +549,8 @@ impl Program {
 
     fn arm(
         &mut self,
-        test: &ast::Expr,
-        body: &[ast::Stmt],
+        test: ast::Expr,
+        body: ast::Suite,
         line: u32,
         lines: &[usize],
         function: bool,
@@ -540,7 +561,7 @@ impl Program {
         self.lower(body, lines, function, active)?;
         let end = self.instructions.len();
         self.instructions.push((line, Instruction::Jump(0)));
-        self.instructions[index].1 = Instruction::Unless(test.clone(), self.instructions.len());
+        self.instructions[index].1 = Instruction::Unless(test, self.instructions.len());
         Ok(end)
     }
 }
@@ -673,12 +694,10 @@ impl Context {
         let filename = filename_text;
         let parsed = ruff_python_parser::parse_module(&source)
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
-        let lines = std::iter::once(0)
-            .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
-            .collect::<Vec<_>>();
+        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
-        code.lower(&parsed.syntax().body, &lines, false, None)?;
+        code.lower(parsed.into_syntax().body, &lines, false, None)?;
         code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         Ok(self.box_source_code(Rc::new(code), None))
     }
@@ -1104,9 +1123,9 @@ impl Context {
                 running: false,
             }))
         } else {
-            match self.run_source(code, scope, owner, 0, &mut Vec::new())? {
+            match self.run_source(code, scope, owner, 0, &mut Vec::new(), None)? {
                 Step::Return(v) => Ok(v),
-                Step::Yield(..) => unreachable!("classified generator"),
+                Step::Yield(..) | Step::Advance(..) => unreachable!("classified generator"),
             }
         }
     }
@@ -1134,9 +1153,7 @@ impl Context {
         let private_names = signature
             .private_scope
             .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
-        let lines = std::iter::once(0)
-            .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
-            .collect::<Vec<_>>();
+        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut program = Program::new(
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
@@ -1145,7 +1162,7 @@ impl Context {
         program.private_names = private_names;
         program.first_line = code.first_line;
         program.generator = true;
-        program.lower(&def.body, &lines, true, None)?;
+        program.lower(std::mem::take(&mut def.body), &lines, true, None)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
@@ -1157,9 +1174,43 @@ impl Context {
         Ok(())
     }
 
-    pub(super) fn resume_source(&mut self, id: Id) -> Result<Option<Id>> {
-        self.heap.reserve_temporaries(1)?;
-        self.heap.keep(id);
+    pub(super) fn resume_source(&mut self, mut id: Id) -> Result<Option<Id>> {
+        let mut parents = Vec::new();
+        let mut advanced = None;
+        loop {
+            let result = match self.resume_source_frame(id, advanced.take()) {
+                Ok(Step::Advance(child, _)) => {
+                    if parents.try_reserve(1).is_err() {
+                        advanced = Some(Err(crate::Error::allocation().into()));
+                        continue;
+                    }
+                    parents.push(id);
+                    id = child;
+                    continue;
+                }
+                Ok(Step::Yield(value, _)) => Ok(Some(value)),
+                Ok(Step::Return(value)) if value == NONE || !parents.is_empty() => Ok(None),
+                Ok(Step::Return(value)) => Err(self.exception("StopIteration", &[value])),
+                Err(error) => Err(error),
+            };
+            let Some(parent) = parents.pop() else {
+                return result;
+            };
+            id = parent;
+            advanced = Some(result);
+        }
+    }
+
+    /// Resume one frame, retaining its running state while a delegated child executes.
+    fn resume_source_frame(
+        &mut self,
+        id: Id,
+        advanced: Option<Result<Option<Id>>>,
+    ) -> Result<Step> {
+        if advanced.is_none() {
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(id);
+        }
         let Value::Generator {
             owner,
             code,
@@ -1171,18 +1222,18 @@ impl Context {
         else {
             unreachable!()
         };
-        if *running {
+        if *running && advanced.is_none() {
             return Err(Error::new("ValueError", "generator already executing"));
         }
         let Some(ip) = offset.take() else {
-            return Ok(None);
+            return Ok(Step::Return(NONE));
         };
         *running = true;
         let (code, frame_scope, owner) = (*code, *scope, *owner);
         let mut active = std::mem::take(iterators);
         let result = self
             .prepare_generator(code)
-            .and_then(|()| self.run_source(code, frame_scope, owner, ip, &mut active))
+            .and_then(|()| self.run_source(code, frame_scope, owner, ip, &mut active, advanced))
             .map_err(|error| self.generator_error(error));
         let Value::Generator {
             running,
@@ -1195,12 +1246,12 @@ impl Context {
         else {
             unreachable!()
         };
-        *running = false;
+        *running = matches!(result, Ok(Step::Advance(..)));
         let completed = match result {
-            Ok(Step::Yield(value, ip)) => {
+            Ok(step @ (Step::Yield(_, ip) | Step::Advance(_, ip))) => {
                 *offset = Some(ip);
                 *iterators = active;
-                return Ok(Some(value));
+                return Ok(step);
             }
             Ok(Step::Return(value)) => Ok(value),
             Err(error) => Err(error),
@@ -1228,10 +1279,7 @@ impl Context {
             }
             self.collect_unreachable();
         }
-        match completed? {
-            NONE => Ok(None),
-            value => Err(self.exception("StopIteration", &[value])),
-        }
+        completed.map(Step::Return)
     }
 
     fn run_source(
@@ -1239,26 +1287,36 @@ impl Context {
         owner: Id,
         scope: Id,
         frame_owner: FrameOwner,
-        mut ip: usize,
+        ip: usize,
         iterators: &mut Vec<Id>,
+        advanced: Option<Result<Option<Id>>>,
     ) -> Result<Step> {
         let Body::Source(code) = self.code_object(owner).body.clone() else {
             unreachable!("source frame")
         };
-        self.heap.reserve_temporaries(2)?;
-        self.heap.keep(owner);
-        self.heap.enter(scope, owner, frame_owner);
+        if advanced.is_none() {
+            self.heap.reserve_temporaries(2)?;
+            self.heap.keep(owner);
+            self.heap.enter(scope, owner, frame_owner);
+        }
+        let mut cursor = SourceCursor {
+            ip,
+            iterators,
+            advanced,
+        };
         let result = (|| {
-            while let Some((line, op)) = code.instructions.get(ip) {
+            while let Some((line, op)) = code.instructions.get(cursor.ip) {
                 let loc = Location {
                     file: code.filename.to_string().into(),
                     line: *line,
                     span: None,
                 };
                 // The frame owns its code and scope. Active iterators must also survive nested calls.
-                self.checkpoint(iterators, loc, NONE);
-                ip += 1;
-                match self.source_step(&code, owner, scope, op, &mut ip, iterators) {
+                if cursor.advanced.is_none() {
+                    self.checkpoint(cursor.iterators, loc, NONE);
+                }
+                cursor.ip += 1;
+                match self.source_step(&code, owner, scope, op, &mut cursor) {
                     Ok(Some(step)) => return Ok(step),
                     Ok(None) => (),
                     Err(mut e) => {
@@ -1276,6 +1334,8 @@ impl Context {
         let (value, returning) = match &result {
             Ok(Step::Return(v)) => (*v, true),
             Ok(Step::Yield(v, _)) => (*v, false),
+            // The parent frame remains visible until the child returns its next item.
+            Ok(Step::Advance(..)) => return result,
             Err(_) => (NONE, false),
         };
         self.leave_frame(value, returning);
@@ -1419,9 +1479,13 @@ impl Context {
         owner: Id,
         scope: Id,
         op: &Instruction,
-        ip: &mut usize,
-        iterators: &mut Vec<Id>,
+        cursor: &mut SourceCursor<'_>,
     ) -> Result<Option<Step>> {
+        let SourceCursor {
+            ip,
+            iterators,
+            advanced,
+        } = cursor;
         let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
         match op {
             Instruction::Eval(e) => {
@@ -1507,7 +1571,17 @@ impl Context {
             Instruction::Next(target, end) => {
                 let iter = *iterators.last().expect("active source loop");
                 let owner = self.source_loop_owner(iter);
-                match self.next_item(iter)? {
+                let next = if let Some(result) = advanced.take() {
+                    result?
+                } else if code.generator
+                    && let Value::Generator { code, .. } = self.heap.get(iter)
+                    && !matches!(self.code_object(*code).body, Body::Native(_))
+                {
+                    return Ok(Some(Step::Advance(iter, *ip - 1)));
+                } else {
+                    self.next_item(iter)?
+                };
+                match next {
                     Some(v) => {
                         if let Some(target) = target {
                             self.bind_target(code, scope, target, v)?;
