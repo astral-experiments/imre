@@ -759,8 +759,11 @@ pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
             .try_reserve_exact(size)
             .map_err(|_| Error::allocation())?;
         // SAFETY: the empty Vec owns size writable bytes in its reserved allocation.
-        let n = unsafe { receive(fd(s), bytes.as_mut_ptr(), size, flags) }.map_err(errno_error)?;
-        // SAFETY: recv initialized exactly n bytes of private storage.
+        let received =
+            unsafe { receive(fd(s), bytes.as_mut_ptr(), size, flags) }.map_err(errno_error)?;
+        let n = received.min(size);
+        // SAFETY: even when recv reports the full packet length, the prefix
+        // retained here stays within the receive allocation.
         unsafe {
             bytes.set_len(n);
         }
@@ -783,7 +786,8 @@ unsafe fn receive(fd: RawFd, buffer: *mut u8, len: usize, flags: i32) -> io::Res
         return Ok(0);
     }
     retry(|| {
-        // SAFETY: recv initializes only the prefix indicated by its return value.
+        // SAFETY: the caller supplies len writable bytes. Flags can make the
+        // returned count differ from the number of bytes actually copied.
         let n = unsafe { libc::recv(fd, buffer.cast(), len, flags) };
         usize::try_from(n).map_err(|_| io::Error::last_os_error())
     })
@@ -977,6 +981,25 @@ pub extern "C" fn imre_socket_getsockopt(s: &Object, level: usize, name: usize) 
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn truncated_datagram_uses_only_the_receive_buffer() {
+        use std::os::fd::IntoRawFd;
+        use std::os::unix::net::UnixDatagram;
+
+        let (sender, socket) = UnixDatagram::pair().unwrap();
+        let receiver = super::handle(socket.into_raw_fd(), true)
+            .ok()
+            .expect("socket handle");
+        sender.send(b"larger packet").unwrap();
+        let received = super::recv(&receiver, 3, libc::MSG_TRUNC)
+            .ok()
+            .expect("packet");
+        assert_eq!(received.len(), 3);
+        assert_eq!(received, b"lar");
+    }
+
     use super::is_reverse_owner;
 
     #[test]
