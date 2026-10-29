@@ -205,14 +205,19 @@ impl Context {
     }
 
     pub(super) fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
+        Ok(self.index_result(value)?.map(|(_, number)| number))
+    }
+
+    /// Preserve the integer object returned by the index protocol for type-sensitive errors.
+    fn index_result(&mut self, value: Id) -> Result<Option<(Id, crate::Int)>> {
         if let Ok(integer) = self.as_int(value) {
-            return Ok(Some(integer));
+            return Ok(Some((value, integer)));
         }
         let Some(index) = self.bound_slot(value, "__index__")? else {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        self.as_int(result).map(Some).map_err(|_| {
+        self.as_int(result).map(|n| Some((result, n))).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
@@ -233,7 +238,12 @@ impl Context {
 
     /// Resolve Python's integer-index protocol without rounding or truncating a numeric value.
     pub(super) fn index_integer(&mut self, value: Id) -> Result<crate::Int> {
-        self.index_value(value)?.ok_or_else(|| {
+        Ok(self.require_index_result(value)?.1)
+    }
+
+    /// Require an index and retain its Python type alongside its numeric value.
+    fn require_index_result(&mut self, value: Id) -> Result<(Id, crate::Int)> {
+        self.index_result(value)?.ok_or_else(|| {
             Error::new(
                 "TypeError",
                 format!(
@@ -254,19 +264,22 @@ impl Context {
             });
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
-        let length = self.index_integer(value)?;
+        let (index, length) = self.require_index_result(value)?;
+        if length.cmp(&crate::Int::from(0)).is_lt() {
+            return Err(Error::new("ValueError", "__len__() should return >= 0"));
+        }
         let length = length
             .to_i64()
             .and_then(|n| isize::try_from(n).ok())
             .ok_or_else(|| {
                 Error::new(
                     "OverflowError",
-                    "cannot fit 'int' into an index-sized integer",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        self.type_name(index)
+                    ),
                 )
             })?;
-        if length < 0 {
-            return Err(Error::new("ValueError", "__len__() should return >= 0"));
-        }
         Ok(Some(length as usize))
     }
 
