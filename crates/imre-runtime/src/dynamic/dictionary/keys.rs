@@ -391,7 +391,7 @@ impl Context {
             }
             return self.weak_reference_hash(key, wr);
         }
-        if let Value::Instance { class, .. } = *self.heap.get(key)
+        if let Some(class) = self.heap.get(key).instance_class()
             && let Some(slot) = self.class_attr(class, "__hash__")
         {
             if slot == NONE {
