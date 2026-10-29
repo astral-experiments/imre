@@ -349,7 +349,7 @@ impl Wrapper {
                 && let Some(part) =
                     w.input
                         .borrow_mut()
-                        .take(limit, line, w.newline.as_deref(), false)
+                        .take(limit, line, w.newline.as_deref(), false)?
             {
                 return Ok(ctx.text(part));
             }
@@ -393,7 +393,7 @@ impl Wrapper {
             if end {
                 let mut input = w.input.borrow_mut();
                 let part = input
-                    .take(limit, line, w.newline.as_deref(), true)
+                    .take(limit, line, w.newline.as_deref(), true)?
                     .unwrap_or_default();
                 if all {
                     input.discard();
