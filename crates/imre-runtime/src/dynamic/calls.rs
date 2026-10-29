@@ -1292,11 +1292,11 @@ impl Context {
         if let Some(value) = self.os_attribute(obj, name)? {
             return Ok(value);
         }
-        match self.heap.get(obj).clone() {
+        match *self.heap.get(obj) {
             Value::Complex(z) if matches!(name, "real" | "imag") => {
                 return Ok(self.alloc(Value::Float(if name == "real" { z.real } else { z.imag })));
             }
-            Value::Raised(error)
+            Value::Raised(ref error)
                 if matches!(
                     name,
                     "__traceback__" | "__context__" | "__cause__" | "__suppress_context__"
@@ -1335,13 +1335,13 @@ impl Context {
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
             }
-            Value::Native(class)
-                if ((builtins::is_builtin_type(&class) && !class.contains('.'))
+            Value::Native(ref class)
+                if ((builtins::is_builtin_type(class) && !class.contains('.'))
                     || matches!(class.as_str(), "traceback" | "frame"))
                     && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
-                    "__name__" | "__qualname__" => return Ok(self.text(class)),
+                    "__name__" | "__qualname__" => return Ok(self.text(class.clone())),
                     "__module__" => return Ok(self.text("builtins")),
                     _ => {}
                 }
@@ -1369,11 +1369,11 @@ impl Context {
                     _ => 2,
                 }]);
             }
-            Value::Range(range) if matches!(name, "start" | "stop" | "step") => {
+            Value::Range(ref range) if matches!(name, "start" | "stop" | "step") => {
                 let bound = match name {
-                    "start" => range.start,
-                    "stop" => range.stop,
-                    _ => range.step,
+                    "start" => range.start.clone(),
+                    "stop" => range.stop.clone(),
+                    _ => range.step.clone(),
                 };
                 return Ok(self.alloc(Value::Int(bound)));
             }
@@ -1391,7 +1391,7 @@ impl Context {
                 "__objclass__" => return Ok(self.builtin(super::namedtuple::GETTER)),
                 _ => {}
             },
-            Value::Native(class) if class == "member_descriptor" && name == "__module__" => {
+            Value::Native(ref class) if class == "member_descriptor" && name == "__module__" => {
                 return Ok(self.text("builtins"));
             }
             Value::TupleGetter { doc, .. } if name == "__doc__" => return Ok(doc.unwrap_or(NONE)),
@@ -1418,24 +1418,29 @@ impl Context {
                     return Ok(attribute);
                 }
             }
-            Value::Native(symbol) if symbol.starts_with("posix.") || symbol == "zlib.adler32" => {
+            Value::Native(ref symbol)
+                if symbol.starts_with("posix.") || symbol == "zlib.adler32" =>
+            {
                 let (module, function) = symbol.split_once('.').unwrap();
                 match name {
-                    "__name__" | "__qualname__" => return Ok(self.text(function)),
-                    "__module__" => return Ok(self.text(module)),
-                    "__self__" => return self.module(module),
+                    "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
+                    "__module__" => return Ok(self.text(module.to_owned())),
+                    "__self__" => {
+                        let module = module.to_owned();
+                        return self.module(&module);
+                    }
                     _ => {}
                 }
             }
-            Value::Native(class) if class == "staticmethod" && name == "__get__" => {
+            Value::Native(ref class) if class == "staticmethod" && name == "__get__" => {
                 return Ok(self.builtin("staticmethod.__get__"));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == "property" && super::property::METHODS.contains(&name) =>
             {
                 return Ok(self.builtin(&format!("property.{name}")));
             }
-            Value::Code(code) => match name {
+            Value::Code(ref code) => match name {
                 "co_name" => return Ok(code.name),
                 "co_filename" => return Ok(code.filename),
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
@@ -1446,7 +1451,12 @@ impl Context {
                             "code lacks closure metadata",
                         ));
                     }
-                    let names = code.freevars.iter().map(|name| self.text(name)).collect();
+                    let names = code
+                        .freevars
+                        .clone()
+                        .into_iter()
+                        .map(|name| self.text(name))
+                        .collect();
                     return Ok(self.alloc(Value::Tuple(names)));
                 }
                 _ => {}
@@ -1537,22 +1547,24 @@ impl Context {
                     }
                 }
             },
-            Value::RegexPattern(pattern) if name == "flags" => return Ok(self.int(pattern.flags)),
-            Value::RegexPattern(pattern) if name == "groups" => {
+            Value::RegexPattern(ref pattern) if name == "flags" => {
+                return Ok(self.int(pattern.flags));
+            }
+            Value::RegexPattern(ref pattern) if name == "groups" => {
                 return Ok(self.int(pattern.group_count() as i64));
             }
-            Value::RegexPattern(pattern) if name == "pattern" => {
+            Value::RegexPattern(ref pattern) if name == "pattern" => {
                 return Ok(pattern.source);
             }
-            Value::Calendar { value, tzinfo } => {
-                return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
+            Value::Calendar { ref value, tzinfo } => {
+                return stdlib::datetime::attribute(self, obj, &value.clone(), tzinfo, name);
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if matches!(
                     class.as_str(),
                     "array.array"
@@ -1562,6 +1574,7 @@ impl Context {
                         | super::deque::REVERSE_ITERATOR
                 ) =>
             {
+                let class = class.as_str().to_owned();
                 let (module, short) = class.rsplit_once('.').unwrap();
                 if class == super::namedtuple::GETTER
                     && let Some(value) = super::namedtuple::class_attribute(self, obj, name)
@@ -1570,9 +1583,9 @@ impl Context {
                 }
                 match name {
                     "__name__" | "__qualname__" => {
-                        return Ok(self.text(short));
+                        return Ok(self.text(short.to_owned()));
                     }
-                    "__module__" => return Ok(self.text(module)),
+                    "__module__" => return Ok(self.text(module.to_owned())),
                     _ if class == super::namedtuple::GETTER
                         && super::namedtuple::GETTER_METHODS.contains(&name) =>
                     {
@@ -1584,23 +1597,23 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == "tuple" && matches!(name, "__new__" | "__getitem__") =>
             {
                 return Ok(self.builtin(&format!("tuple.{name}")));
             }
-            Value::Native(class) if matches!(class.as_str(), "map" | "filter") => match name {
+            Value::Native(ref class) if matches!(class.as_str(), "map" | "filter") => match name {
                 "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
-                "__name__" | "__qualname__" => return Ok(self.text(&class)),
+                "__name__" | "__qualname__" => return Ok(self.text(class.clone())),
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
-            Value::Native(class) if class == "datetime.time" => match name {
+            Value::Native(ref class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
                 _ => {}
             },
-            Value::Native(class) if class == super::thread_lock::CLASS => match name {
+            Value::Native(ref class) if class == super::thread_lock::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("lock")),
                 attr if super::thread_lock::is_method(attr) => {
@@ -1608,7 +1621,7 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Native(class) if class == super::thread_local::CLASS => match name {
+            Value::Native(ref class) if class == super::thread_local::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("_local")),
                 attr if super::thread_local::is_method(attr) => {
@@ -1616,7 +1629,7 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Native(class)
+            Value::Native(ref class)
                 if matches!(class.as_str(), "itertools.count" | "itertools.repeat") =>
             {
                 match name {
@@ -1627,7 +1640,7 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
+            Value::Native(ref class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }
             Value::MappingProxy(dict)
@@ -1639,9 +1652,10 @@ impl Context {
                 if name == "__self__"
                     && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
-                return Ok(self.builtin(owner));
+                let owner = owner.to_owned();
+                return Ok(self.builtin(&owner));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if matches!(class.as_str(), "int" | "float") && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
@@ -1668,27 +1682,27 @@ impl Context {
                 "keywords" => return Ok(keywords),
                 _ => {}
             },
-            Value::File(handle) if name == "closed" => {
+            Value::File(ref handle) if name == "closed" => {
                 return Ok(if handle.closed() { TRUE } else { FALSE });
             }
-            Value::Native(class) if class == "socket.socket" && name == "__name__" => {
+            Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));
             }
             Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
             Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
-            Value::BufferedRandom(file) if name == "closed" => {
+            Value::BufferedRandom(ref file) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
-            Value::TextFile(file) if name == "closed" => {
+            Value::TextFile(ref file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
             }
-            Value::Raised(error)
+            Value::Raised(ref error)
                 if let Some(index) = builtins::IMPORT_KEYWORDS
                     .iter()
                     .position(|&key| key == name)
-                    && self.is_builtin_error(&error, "ImportError") =>
+                    && self.is_builtin_error(error, "ImportError") =>
             {
-                let Some(fields) = error.import else {
+                let Some(fields) = &error.import else {
                     return Ok(error
                         .trace
                         .as_ref()
@@ -1700,9 +1714,11 @@ impl Context {
                     "path" => fields.path.as_deref(),
                     _ => fields.name_from.as_deref(),
                 };
-                return Ok(value.map_or(NONE, |value| self.text(value)));
+                return Ok(value
+                    .map(str::to_owned)
+                    .map_or(NONE, |value| self.text(value)));
             }
-            Value::Raised(error) => {
+            Value::Raised(ref error) => {
                 if let Some(state) = &error.decode {
                     match name {
                         "encoding" => return Ok(state.encoding),
@@ -1714,11 +1730,11 @@ impl Context {
                     }
                 }
                 if name == "args" {
-                    return Ok(self.exception_argument_tuple(obj, error));
+                    return Ok(self.exception_argument_tuple(obj, error.clone()));
                 }
                 if error.kind == "UnicodeDecodeError"
                     && let Some([encoding, object, start, end, reason]) =
-                        self.exception_arguments(&error)
+                        self.exception_arguments(error)
                 {
                     match name {
                         "encoding" => return Ok(*encoding),
@@ -1731,30 +1747,39 @@ impl Context {
                 }
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
-            Value::Native(class)
+            Value::Native(ref class)
                 if name == "fromkeys"
                     && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
             {
                 return Ok(self.bind_dict_fromkeys(obj));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == "collections.defaultdict"
                     && let Some(member) = self.own_class_attr(obj, name) =>
             {
                 return Ok(member);
             }
-            Value::Struct { format, layout } => match name {
-                "format" => return Ok(self.text(format)),
+            Value::Struct {
+                ref format,
+                ref layout,
+            } => match name {
+                "format" => return Ok(self.text(format.clone())),
                 "size" => return Ok(self.int(layout.size as i64)),
                 _ => {}
             },
-            Value::Hash(hash) => match name {
-                "name" => return Ok(self.text(hash.borrow().name())),
-                "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
+            Value::Hash(ref hash) => match name {
+                "name" => {
+                    let name = hash.borrow().name();
+                    return Ok(self.text(name));
+                }
+                "digest_size" => {
+                    let size = hash.borrow().digest_size();
+                    return Ok(self.int(size as i64));
+                }
                 "block_size" => return Ok(self.int(64)),
                 _ => {}
             },
-            Value::CodecInfo { entry, decode } => match name {
+            Value::CodecInfo { ref entry, decode } => match name {
                 "name" => return Ok(self.text(entry.codec().name())),
                 "decode" => return Ok(decode),
                 _ => {}
@@ -1789,19 +1814,19 @@ impl Context {
                 if name == "__module__"
                     && (builtin.starts_with("weakref.") || builtin.starts_with("_weakref.")) =>
             {
-                return Ok(self.text(builtin.split('.').next().unwrap()));
+                return Ok(self.text(builtin.split('.').next().unwrap().to_owned()));
             }
             Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
                 return Ok(old.unwrap_or(self.token_missing));
             }
-            Value::Native(builtin)
+            Value::Native(ref builtin)
                 if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>
             {
                 let short = builtin.rsplit('.').next().unwrap();
                 match name {
-                    "__name__" | "__qualname__" => return Ok(self.text(short)),
+                    "__name__" | "__qualname__" => return Ok(self.text(short.to_owned())),
                     "__module__" => return Ok(self.text("binascii")),
                     "__base__" | "__bases__" => {
                         let base = self.builtin(if short == "Error" {
@@ -1818,26 +1843,26 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(builtin)
-                if name == "__name__" && self.builtins.get(&builtin) == Some(&obj) =>
+            Value::Native(ref builtin)
+                if name == "__name__" && self.builtins.get(builtin) == Some(&obj) =>
             {
-                return Ok(self.text(builtin.rsplit('.').next().unwrap_or(&builtin)));
+                return Ok(self.text(builtin.rsplit('.').next().unwrap_or(builtin).to_owned()));
             }
-            Value::Native(method)
+            Value::Native(ref method)
                 if method.starts_with("abc.abstract.") && name == "__isabstractmethod__" =>
             {
                 return Ok(TRUE);
             }
-            Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
+            Value::Native(ref class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if name == "__format__" && self.builtin_type_name(obj) == Some("type") =>
             {
-                let owner = builtins::format_owner(&class);
+                let owner = builtins::format_owner(class);
                 return Ok(self.builtin(&format!("{owner}.__format__")));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if matches!(class.as_str(), "bytes" | "bytearray")
                     && matches!(name, "__repr__" | "maketrans" | "translate") =>
             {
@@ -1847,23 +1872,23 @@ impl Context {
             Value::ByteArray(_) if name == "maketrans" => {
                 return Ok(self.builtin("bytearray.maketrans"));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == "bool" && matches!(name, "bit_length" | "to_bytes") =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
-            Value::Native(class) if class == "method_descriptor" && name == "__get__" => {
+            Value::Native(ref class) if class == "method_descriptor" && name == "__get__" => {
                 return Ok(self.builtin("method_descriptor.__get__"));
             }
-            Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
+            Value::Native(ref class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == "collections.defaultdict" && matches!(name, "copy" | "__copy__") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if name == "__reduce__"
                     && matches!(
                         class.as_str(),
@@ -1876,17 +1901,17 @@ impl Context {
                 let owner = self.exact_type(obj)?;
                 return Ok(self.bind_dict_fromkeys(owner));
             }
-            Value::Native(class) if class == "set" && name == "copy" => {
+            Value::Native(ref class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
             }
-            Value::Native(class) if class == "set" && name == "discard" => {
+            Value::Native(ref class) if class == "set" && name == "discard" => {
                 return Ok(self.builtin("set.discard"));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
-                    || builtins::is_enum_base(&class)
+                    || builtins::is_enum_base(class)
                     || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
-                    || (builtins::is_exception(&class)
+                    || (builtins::is_exception(class)
                         && matches!(name, "__new__" | "__init__"))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
@@ -1898,7 +1923,7 @@ impl Context {
                     return Ok(method);
                 }
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == "object"
                     && matches!(
                         name,
@@ -1911,35 +1936,37 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
-            Value::Native(class) if class == "slice" && super::slice::METHODS.contains(&name) => {
+            Value::Native(ref class)
+                if class == "slice" && super::slice::METHODS.contains(&name) =>
+            {
                 return Ok(self.builtin(&format!("slice.{name}")));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == super::namedtuple::GETTER
                     && super::namedtuple::GETTER_METHODS.contains(&name) =>
             {
                 return Ok(self.builtin(&format!("{}.{name}", super::namedtuple::GETTER)));
             }
-            Value::Native(class) if class == "operator.itemgetter" && name == "__reduce__" => {
+            Value::Native(ref class) if class == "operator.itemgetter" && name == "__reduce__" => {
                 return Ok(self.builtin("operator.itemgetter.__reduce__"));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if (class == "range" && super::range::METHODS.contains(&name))
                     || (matches!(class.as_str(), "range_iterator" | "longrange_iterator")
                         && matches!(name, "__iter__" | "__next__" | "__length_hint__")) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
-            Value::Native(class)
+            Value::Native(ref class)
                 if class == "enumerate" && matches!(name, "__iter__" | "__next__") =>
             {
                 return Ok(self.builtin(&format!("enumerate.{name}")));
             }
-            Value::Native(class) if class == "str" && name == "__new__" => {
+            Value::Native(ref class) if class == "str" && name == "__new__" => {
                 return Ok(self.builtin("str.__new__"));
             }
             Value::Module {
-                name: module,
+                name: ref module,
                 scope,
                 constructor,
                 ..
@@ -1956,14 +1983,14 @@ impl Context {
                 if let Some(value) = self.scope_name(scope, name) {
                     return Ok(value);
                 }
-                if stdlib::is_module(&module) {
-                    let value = stdlib::attribute(self, &module, name)?;
+                if stdlib::is_module(module) {
+                    let value = stdlib::attribute(self, &module.to_owned(), name)?;
                     self.bind(scope, name, value);
                     return Ok(value);
                 }
             }
             Value::Class {
-                name: class_name,
+                name: ref class_name,
                 scope,
                 ..
             } => {
@@ -2001,7 +2028,11 @@ impl Context {
                         .class_namespace
                         .as_ref()
                         .and_then(|namespace| namespace.name_override);
-                    return Ok(assigned.unwrap_or_else(|| self.heap.code_name(&class_name)));
+                    if let Some(name) = assigned {
+                        return Ok(name);
+                    }
+                    let class_name = class_name.clone();
+                    return Ok(self.heap.code_name(&class_name));
                 }
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
@@ -2025,9 +2056,9 @@ impl Context {
             }
             Value::NamedTuple {
                 class,
-                names,
-                values,
-                extras,
+                ref names,
+                ref values,
+                ref extras,
             } => {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
