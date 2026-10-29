@@ -693,6 +693,18 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 ) -> Id {
     // SAFETY: the emitter supplies a valid context and a constant of exactly len bytes.
     let (ctx, data) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    // Each literal roots its value and the returned handle; metadata roots every name.
+    let roots = if kind == 5 {
+        data.iter()
+            .filter(|&&byte| byte == 0)
+            .count()
+            .saturating_add(2)
+    } else {
+        2
+    };
+    if let Err(error) = ctx.heap.reserve_temporaries(roots) {
+        return finish(ctx, Err(error));
+    }
     let value = match kind {
         0 => std::str::from_utf8(data)
             .ok()
