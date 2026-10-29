@@ -155,7 +155,7 @@ impl Encoder {
             let roots = ctx.heap.temporary_mark();
             let chunk = ctx.text(std::mem::take(&mut self.output));
             let write = ctx.lookup_attr(stream, "write")?;
-            ctx.call(write, vec![chunk], Vec::new())?;
+            ctx.call(write, super::super::copy_ids(&[chunk])?, Vec::new())?;
             ctx.heap.release_temporaries_since(roots);
         }
         Ok(())
@@ -256,7 +256,8 @@ impl Encoder {
                                 ),
                             )
                         })?;
-                        let result = ctx.call(default, vec![id], Vec::new())?;
+                        let result =
+                            ctx.call(default, super::super::copy_ids(&[id])?, Vec::new())?;
                         self.value(ctx, result, depth)?;
                     }
                 }
@@ -386,7 +387,7 @@ impl Encoder {
         let mut items = ctx.call(method, Vec::new(), Vec::new())?;
         if self.sort_keys {
             let sorted = ctx.builtin("sorted");
-            items = ctx.call(sorted, vec![items], Vec::new())?;
+            items = ctx.call(sorted, super::super::copy_ids(&[items])?, Vec::new())?;
         }
         let iter = ctx.iterator(items)?;
         let mut i = 0;
@@ -457,7 +458,7 @@ fn float_text(ctx: &mut Context, id: Id, value: f64, allow_nan: bool) -> Result<
     }
     if !allow_nan {
         let repr = ctx.builtin("repr");
-        let text = ctx.call(repr, vec![id], Vec::new())?;
+        let text = ctx.call(repr, super::super::copy_ids(&[id])?, Vec::new())?;
         return Err(Error::new(
             "ValueError",
             format!(
