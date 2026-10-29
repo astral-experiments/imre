@@ -3013,7 +3013,33 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        match self.heap.get(callable).clone() {
+        let target = match self.heap.get(callable) {
+            Value::Class {
+                name,
+                scope,
+                ancestors,
+                namedtuple_fields,
+            } => {
+                let mut copied_name = String::new();
+                copied_name
+                    .try_reserve_exact(name.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                copied_name.push_str(name);
+                let mut copied_ancestors = Vec::new();
+                copied_ancestors
+                    .try_reserve_exact(ancestors.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                copied_ancestors.extend_from_slice(ancestors);
+                Value::Class {
+                    name: copied_name,
+                    scope: *scope,
+                    ancestors: copied_ancestors,
+                    namedtuple_fields: namedtuple_fields.clone(),
+                }
+            }
+            value => value.clone(),
+        };
+        match target {
             Value::Weak(wr) => match wr.kind {
                 weakref::Kind::Reference => wr.call(&args, &kwargs),
                 weakref::Kind::CallableProxy => self.call(wr.upgrade()?, args, kwargs),
