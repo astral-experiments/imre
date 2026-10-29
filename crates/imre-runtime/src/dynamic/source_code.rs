@@ -278,7 +278,7 @@ impl Program {
 
     fn lower(
         &mut self,
-        body: &[ast::Stmt],
+        body: ast::Suite,
         lines: &[usize],
         function: bool,
         mut active: Option<&mut LoopJumps>,
@@ -294,27 +294,26 @@ impl Program {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
             let op = match stmt {
                 Stmt::Pass(_) => continue,
-                Stmt::Expr(s) => match &*s.value {
+                Stmt::Expr(s) => match *s.value {
                     ast::Expr::Yield(y) => {
                         if !function {
                             return Err(Error::new("SyntaxError", "'yield' outside function"));
                         }
                         self.generator = true;
-                        Instruction::Yield(y.value.as_deref().cloned())
+                        Instruction::Yield(y.value.map(|value| *value))
                     }
                     ast::Expr::YieldFrom(y) if function => {
                         self.generator = true;
-                        self.instructions
-                            .push((line, Instruction::Iter((*y.value).clone())));
+                        self.instructions.push((line, Instruction::Iter(*y.value)));
                         Instruction::Next(None, self.instructions.len() + 1)
                     }
-                    e => Instruction::Eval(e.clone()),
+                    e => Instruction::Eval(e),
                 },
                 Stmt::Assign(s) => {
                     for target in &s.targets {
                         self.declare_target(target)?;
                     }
-                    Instruction::Assign(s.targets.clone(), (*s.value).clone())
+                    Instruction::Assign(s.targets, *s.value)
                 }
                 Stmt::AnnAssign(s) if function => {
                     let ast::Expr::Name(name) = &*s.target else {
@@ -322,17 +321,17 @@ impl Program {
                     };
                     self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
-                    let Some(value) = &s.value else { continue };
-                    Instruction::Assign(vec![(*s.target).clone()], (**value).clone())
+                    let Some(value) = s.value else { continue };
+                    Instruction::Assign(vec![*s.target], *value)
                 }
                 Stmt::Delete(s) => {
-                    for target in &s.targets {
+                    for target in s.targets {
                         match target {
                             ast::Expr::Subscript(item)
                                 if !matches!(*item.slice, ast::Expr::Slice(_)) =>
                             {
                                 self.instructions
-                                    .push((line, Instruction::DeleteItem(item.clone())));
+                                    .push((line, Instruction::DeleteItem(item)));
                             }
                             _ => return Err(unsupported("deletion target")),
                         }
@@ -341,15 +340,15 @@ impl Program {
                 }
                 Stmt::AugAssign(s) => {
                     self.declare_target(&s.target)?;
-                    Instruction::AugAssign(s.clone())
+                    Instruction::AugAssign(s)
                 }
                 Stmt::Return(s) => {
                     if !function {
                         return Err(Error::new("SyntaxError", "'return' outside function"));
                     }
-                    Instruction::Return(s.value.as_deref().cloned())
+                    Instruction::Return(s.value.map(|value| *value))
                 }
-                Stmt::Raise(s) => Instruction::Raise(s.clone()),
+                Stmt::Raise(s) => Instruction::Raise(s),
                 Stmt::Import(s) if !s.is_lazy => {
                     for name in &s.names {
                         let module = name.name.to_string();
@@ -363,7 +362,7 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Assert(s) => Instruction::Assert(s.clone()),
+                Stmt::Assert(s) => Instruction::Assert(s),
                 Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
                     let module = s
                         .module
@@ -390,9 +389,9 @@ impl Program {
                     child.method_imports = self.method_imports.clone();
                     child.private_names = self.private_names.clone();
                     child.first_line = line;
-                    child.lower(&s.body, lines, true, None)?;
+                    child.lower(s.body, lines, true, None)?;
                     self.locals.insert(child.name.clone());
-                    Instruction::Define(Rc::new(child), s.parameters.clone())
+                    Instruction::Define(Rc::new(child), s.parameters)
                 }
                 Stmt::Break(_) => {
                     let current = active
@@ -414,19 +413,10 @@ impl Program {
                     let (body, orelse, guard) = match stmt {
                         Stmt::For(s) if !s.is_async => {
                             self.declare_target(&s.target)?;
-                            self.instructions
-                                .push((line, Instruction::Iter((*s.iter).clone())));
-                            (
-                                &s.body,
-                                &s.orelse,
-                                Instruction::Next(Some((*s.target).clone()), 0),
-                            )
+                            self.instructions.push((line, Instruction::Iter(*s.iter)));
+                            (s.body, s.orelse, Instruction::Next(Some(*s.target), 0))
                         }
-                        Stmt::While(s) => (
-                            &s.body,
-                            &s.orelse,
-                            Instruction::Unless((*s.test).clone(), 0),
-                        ),
+                        Stmt::While(s) => (s.body, s.orelse, Instruction::Unless(*s.test, 0)),
                         _ => return Err(unsupported("async for")),
                     };
                     let head = self.instructions.len();
@@ -452,8 +442,8 @@ impl Program {
                 }
                 Stmt::If(s) => {
                     let mut ends = Vec::new();
-                    let mut arm = Some((&*s.test, s.body.as_slice()));
-                    for clause in &s.elif_else_clauses {
+                    let mut arm = Some((*s.test, s.body));
+                    for clause in s.elif_else_clauses {
                         if let Some((test, body)) = arm.take() {
                             ends.push(self.arm(
                                 test,
@@ -464,10 +454,10 @@ impl Program {
                                 active.as_deref_mut(),
                             )?);
                         }
-                        if let Some(test) = &clause.test {
-                            arm = Some((test, &clause.body));
+                        if let Some(test) = clause.test {
+                            arm = Some((test, clause.body));
                         } else {
-                            self.lower(&clause.body, lines, function, active.as_deref_mut())?;
+                            self.lower(clause.body, lines, function, active.as_deref_mut())?;
                         }
                     }
                     if let Some((test, body)) = arm {
@@ -489,7 +479,7 @@ impl Program {
                 _ => {
                     return Err(unsupported(format!(
                         "{:?}",
-                        ast::AnyNodeRef::from(stmt).kind()
+                        ast::AnyNodeRef::from(&stmt).kind()
                     )));
                 }
             };
@@ -539,8 +529,8 @@ impl Program {
 
     fn arm(
         &mut self,
-        test: &ast::Expr,
-        body: &[ast::Stmt],
+        test: ast::Expr,
+        body: ast::Suite,
         line: u32,
         lines: &[usize],
         function: bool,
@@ -551,7 +541,7 @@ impl Program {
         self.lower(body, lines, function, active)?;
         let end = self.instructions.len();
         self.instructions.push((line, Instruction::Jump(0)));
-        self.instructions[index].1 = Instruction::Unless(test.clone(), self.instructions.len());
+        self.instructions[index].1 = Instruction::Unless(test, self.instructions.len());
         Ok(end)
     }
 }
@@ -687,7 +677,7 @@ impl Context {
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
-        code.lower(&parsed.syntax().body, &lines, false, None)?;
+        code.lower(parsed.into_syntax().body, &lines, false, None)?;
         code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         Ok(self.box_source_code(Rc::new(code), None))
     }
@@ -1152,7 +1142,7 @@ impl Context {
         program.private_names = private_names;
         program.first_line = code.first_line;
         program.generator = true;
-        program.lower(&def.body, &lines, true, None)?;
+        program.lower(std::mem::take(&mut def.body), &lines, true, None)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }

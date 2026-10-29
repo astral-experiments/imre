@@ -159,6 +159,33 @@ fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usiz
         .map(|i| i as usize)
 }
 
+fn slice_memory_error(_: std::collections::TryReserveError) -> Error {
+    Error::new("MemoryError", "sequence slice is too large")
+}
+
+/// Copies only the elements selected by normalized slice bounds.
+fn sliced_values<T: Copy>(
+    source: &[T],
+    positions: impl Iterator<Item = usize>,
+    count: usize,
+) -> Result<Vec<T>> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(count).map_err(slice_memory_error)?;
+    out.extend(positions.map(|i| source[i]));
+    Ok(out)
+}
+
+/// Collects the selected code points in output order without boxing the input string.
+fn sliced_text(chars: impl Iterator<Item = char>, stride: usize, count: usize) -> Result<String> {
+    let mut out = String::new();
+    out.try_reserve_exact(count).map_err(slice_memory_error)?;
+    for c in chars.step_by(stride).take(count) {
+        out.try_reserve(c.len_utf8()).map_err(slice_memory_error)?;
+        out.push(c);
+    }
+    Ok(out)
+}
+
 impl Context {
     /// Expose a tuple subclass's stored positions even when its length differs from the named fields.
     pub(super) fn tuple_backing(&self, value: Id) -> &Value {
@@ -2627,34 +2654,55 @@ impl Context {
             ));
         }
         let bounds = super::slice::sequence_components(self, parts)?;
-        let vals = self.items(obj)?;
-        let [start, end, step] = super::slice::normalize(bounds, vals.len() as i64);
-        let out: Vec<_> = slice_positions(start, end, step).map(|i| vals[i]).collect();
-        match self.heap.get(obj) {
-            Value::Str(_) => {
-                let s = out
-                    .iter()
-                    .map(|&i| self.str_value(i))
-                    .collect::<Result<Vec<_>>>()?
-                    .concat();
-                Ok(self.text(s))
+        let len = match self.heap.get(obj) {
+            Value::Str(text) => text.chars().count(),
+            Value::Bytes(data) | Value::ByteArray(data) => data.len(),
+            Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                items.len()
             }
-            Value::Bytes(_) | Value::ByteArray(_) => {
-                let bytes = out
-                    .iter()
-                    .map(|&i| self.as_integer(i).map(|x| x as u8))
-                    .collect::<Result<_>>()?;
-                Ok(
-                    self.alloc(if matches!(self.heap.get(obj), Value::Bytes(_)) {
-                        Value::Bytes(bytes)
-                    } else {
-                        Value::ByteArray(bytes)
-                    }),
-                )
+            Value::Instance { class, .. } => self
+                .namedtuple_fields(*class)
+                .expect("validated named tuple")
+                .len(),
+            _ => unreachable!("validated sequence"),
+        };
+        let [start, end, step] = super::slice::normalize(bounds, len as i64);
+        let distance = if step > 0 {
+            end.saturating_sub(start)
+        } else {
+            start.saturating_sub(end)
+        };
+        let count = (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize;
+        let positions = slice_positions(start, end, step);
+        let result = match self.heap.get(obj) {
+            Value::Str(text) => {
+                let stride = usize::try_from(step.unsigned_abs()).unwrap_or(usize::MAX);
+                let value = if step > 0 {
+                    sliced_text(text.chars().skip(start as usize), stride, count)?
+                } else {
+                    let skip = (len as i64 - 1 - start) as usize;
+                    sliced_text(text.chars().rev().skip(skip), stride, count)?
+                };
+                Value::Str(value)
             }
-            Value::List(_) => Ok(self.alloc(Value::List(out))),
-            _ => Ok(self.alloc(Value::Tuple(out))),
-        }
+            Value::Bytes(data) => Value::Bytes(sliced_values(data, positions, count)?),
+            Value::ByteArray(data) => Value::ByteArray(sliced_values(data, positions, count)?),
+            Value::List(items) => Value::List(sliced_values(items, positions, count)?),
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                Value::Tuple(sliced_values(items, positions, count)?)
+            }
+            Value::Instance { class, fields, .. } => {
+                let names = self
+                    .namedtuple_fields(*class)
+                    .expect("validated named tuple");
+                let mut items = Vec::new();
+                items.try_reserve_exact(count).map_err(slice_memory_error)?;
+                items.extend(positions.map(|i| fields[&names[i]]));
+                Value::Tuple(items)
+            }
+            _ => unreachable!("validated sequence"),
+        };
+        Ok(self.alloc(result))
     }
 
     fn set_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
@@ -2852,9 +2900,11 @@ impl Context {
             Some(iterator)
         };
         let mark = self.heap.temporary_mark();
+        let mut limit = self.heap.streaming_collection_limit();
         let mut position = 0;
         loop {
             let (key, hash) = if let Some(iterator) = iterator {
+                self.collect_streaming_garbage(&mut limit);
                 let Some(key) = self.next_item(iterator)? else {
                     break;
                 };

@@ -619,8 +619,8 @@ pub unsafe extern "C" fn imre_str_encode(value: *const Str) -> *const Bytes {
     unsafe { imre_bytes_literal(value.as_ptr(), value.len()) }
 }
 
-/// A borrowed file buffer must become the immutable input in a codec exception.
-pub(super) fn owned_input(value: &[u8]) -> Result<crate::BytesOwner> {
+/// Retain an immutable copy of a borrowed input buffer.
+pub(crate) fn owned_input(value: &[u8]) -> Result<crate::BytesOwner> {
     let mut bytes = allocate(value.len())?;
     bytes.extend_from_slice(value);
     crate::BytesOwner::try_new(bytes).map_err(|_| Error::memory_error())
