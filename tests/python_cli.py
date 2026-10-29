@@ -84,6 +84,32 @@ def check_select_result_allocation(imre, root, run):
                     ), (optimization, shape, count, refused, result)
 
 
+def check_poll_result_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "refuse_poll_result.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_poll_result.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=poll,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "boxed_poll_result_allocation.py"
+    for optimization in (0, 3):
+        executable = root / f"poll-result-O{optimization}"
+        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+                    extra={"IMRE_ENCODED_FLAGS": flags})
+        assert built.returncode == 0, built
+        for count in (1, 2, 7):
+            reference = run(sys.executable, "-B", source, str(count), "select")
+            assert (reference.returncode, reference.stdout, reference.stderr) == (0, b"ok\nTrue\nTrue\n", b""), reference
+            first = 1 + (count == 2)
+            for nth in sorted({0, first, first + count - 1}):
+                result = run(executable, str(count), "select", extra={"POLL_RESULT_REFUSE_NTH": str(nth)})
+                assert (result.returncode, result.stdout, result.stderr) == (
+                    0, b"MemoryError\nTrue\n" if nth else reference.stdout,
+                    b"poll_result_allocation_refused\n" if nth else b"",
+                ), (optimization, count, nth, result)
+
+
 def check_raise_site_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "exceptions" / "refuse_raise_site.c"
     wrapper = root / "refuse_raise_site.o"
@@ -103,6 +129,38 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
+def check_boxed_json_callback_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "json_callback_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_json_callback_arguments.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_json_callback_arguments as fixture; "
+    source = root / "json_callback_probe.py"
+    source.write_text(imports + "fixture.current(int(sys.argv[1]))\n")
+    executable = root / "json_callback_probe"
+    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable, extra={
+        "IMRE_ENCODED_FLAGS": flags,
+    })
+    assert built.returncode == 0, built.stderr
+    # Refuse the singleton arguments for default, float repr, writer and sorting.
+    # Native allocation traces distinguish these from earlier output-buffer growth.
+    for mode in range(5):
+        target = (2, 2, 3, 2, 7)[mode]
+        for ordinal in (0, target, 37):
+            result = run(executable, str(mode), extra={
+                "IMRE_TEST_JSON_CALLBACK_NTH": str(ordinal),
+            })
+            expected = b"MemoryError True\nTrue\n" if ordinal == target else (
+                b"ok True\nTrue\n" if mode in (0, 3, 4) else b"ValueError True\nTrue\n"
+            )
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if ordinal == target else b"",
+            ), (mode, ordinal, result)
+
+
 def call_allocation_flags(root):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "itemgetter_refuse.o"
@@ -116,6 +174,18 @@ def call_allocation_flags(root):
 def check_boxed_call_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_traceback_allocation as fixture; fixture.allocation()"
+    for size in (0, 160, 224):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        expected = b"MemoryError () ValueError invalid literal for int() with base 10: 'invalid'\n23\n" if size else b"ValueError\n23\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
+        ), result
+
     source = import_path + "import boxed_memory_error_kind as fixture; fixture.allocation()"
     for ordinal in (0, 1):
         result = run(imre, "-B", "-c", source, extra={
@@ -336,6 +406,29 @@ print(sys.intern(value) is value, sys._is_interned(value))
         ), result
 
 
+def check_ffi_result_roots(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "ffi-result-roots.o"
+    subprocess.run(["cc", "-c", fixtures / "ffi_result_roots_refuse.c", "-o", wrapper], check=True)
+    result_flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    source = import_path + "import boxed_ffi_result_roots as fixture; fixture.allocation()"
+    for ordinal in (0, 1):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": result_flags,
+            "IMRE_TEST_CALL_SIZE": "128",
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        expected = (b"caught ()\n" if ordinal else b"value 3\n") + b"retry 3 True\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+
+
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):
         set_stack = None
@@ -445,13 +538,16 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_ffi_result_roots(imre, root, run)
             check_select_result_allocation(imre, root, run)
+            check_poll_result_allocation(imre, root, run)
             flags = call_allocation_flags(root)
             check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
             check_context_protocol_allocation(imre, root, run)
             check_boxed_literal_roots_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
+        check_boxed_json_callback_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
