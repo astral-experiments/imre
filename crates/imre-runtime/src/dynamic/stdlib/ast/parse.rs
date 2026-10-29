@@ -389,13 +389,12 @@ pub(super) fn parse_source(
     mode: &str,
     literal: bool,
 ) -> Result<Id> {
-    let mut lines = vec![0];
     let bytes = source.as_bytes();
-    for (i, &byte) in bytes.iter().enumerate() {
-        if byte == b'\n' || (byte == b'\r' && bytes.get(i + 1) != Some(&b'\n')) {
-            lines.push(i + 1);
-        }
-    }
+    let lines = crate::dynamic::source_code::line_starts(bytes.iter().enumerate().filter_map(
+        |(i, &byte)| {
+            (byte == b'\n' || (byte == b'\r' && bytes.get(i + 1) != Some(&b'\n'))).then_some(i + 1)
+        },
+    ))?;
     let load = ctx.builtins["ast._Load"];
     let store = ctx.builtins["ast._Store"];
     let mut parser = Parser {
