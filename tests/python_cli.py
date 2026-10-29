@@ -193,6 +193,19 @@ def check_boxed_call_allocation(imre, run, flags):
             0, expected, b"refused\n" if size else b"",
         ), result
 
+    for kind in ("list", "tuple"):
+        source = import_path + f"import boxed_iterator_collection as fixture; fixture.allocation({kind!r})"
+        for size in (0, 8192):
+            result = run(imre, "-B", "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_CALL_SIZE": str(size),
+                "IMRE_TEST_GETTER_ALLOCATION": "1",
+            })
+            expected = (b"caught ()\n" if size else b"value 513 True\n") + b"retry 513\n"
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if size else b"",
+            ), (kind, size, result)
+
     # Match the existing 113-word allocation probe with a fresh string of the same byte length.
     source = """import sys
 sys.path
