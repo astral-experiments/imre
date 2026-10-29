@@ -103,6 +103,38 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
+def check_boxed_json_callback_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "json_callback_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_json_callback_arguments.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_json_callback_arguments as fixture; "
+    source = root / "json_callback_probe.py"
+    source.write_text(imports + "fixture.current(int(sys.argv[1]))\n")
+    executable = root / "json_callback_probe"
+    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable, extra={
+        "IMRE_ENCODED_FLAGS": flags,
+    })
+    assert built.returncode == 0, built.stderr
+    # Refuse the singleton arguments for default, float repr, writer and sorting.
+    # Native allocation traces distinguish these from earlier output-buffer growth.
+    for mode in range(5):
+        target = (2, 2, 3, 2, 7)[mode]
+        for ordinal in (0, target, 37):
+            result = run(executable, str(mode), extra={
+                "IMRE_TEST_JSON_CALLBACK_NTH": str(ordinal),
+            })
+            expected = b"MemoryError True\nTrue\n" if ordinal == target else (
+                b"ok True\nTrue\n" if mode in (0, 3, 4) else b"ValueError True\nTrue\n"
+            )
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if ordinal == target else b"",
+            ), (mode, ordinal, result)
+
+
 def call_allocation_flags(root):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "itemgetter_refuse.o"
@@ -452,6 +484,7 @@ def main():
             check_raise_site_allocation(imre, root, run)
             check_boxed_literal_roots_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
+        check_boxed_json_callback_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
