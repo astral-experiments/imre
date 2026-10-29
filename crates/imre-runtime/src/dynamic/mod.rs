@@ -108,6 +108,16 @@ pub(crate) struct Context {
     slot_depth: usize,
 }
 
+/// Copy a function or module label without aborting on allocation failure.
+fn copy_label(value: &str) -> Result<String> {
+    let mut copied = String::new();
+    copied
+        .try_reserve_exact(value.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    copied.push_str(value);
+    Ok(copied)
+}
+
 /// Copy IDs or dictionary entry pairs while preserving a catchable allocation failure.
 fn copy_ids<T: Copy>(values: &[T]) -> Result<Vec<T>> {
     let mut copied = Vec::new();

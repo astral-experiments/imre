@@ -3068,6 +3068,7 @@ impl Context {
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
         let target = match self.heap.get(callable) {
+            Value::Native(name) => Value::Native(copy_label(name)?),
             Value::Class {
                 name,
                 scope,
@@ -3493,7 +3494,7 @@ impl Context {
                 ..
             } => {
                 let parameters = self.code_object(code).parameters;
-                let name = self.str_value(fields.qualname)?.to_owned();
+                let name = copy_label(self.str_value(fields.qualname)?)?;
                 if parameters == NONE {
                     if let Some((key, _)) = kwargs.first() {
                         return Err(Error::new(
@@ -3517,7 +3518,7 @@ impl Context {
                 // Root the scope, packed arguments, keyword names, and returning value.
                 self.heap
                     .reserve_temporaries(kwargs.len().saturating_add(4))?;
-                let module = self.scope_data(scope).module.clone();
+                let module = copy_label(&self.scope_data(scope).module)?;
                 let closure = allocator_api2::boxed::Box::try_new(value::ClosureScope::default())
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 let local = self.scope_with_closure(module, Some(scope), closure);
