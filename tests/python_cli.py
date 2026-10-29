@@ -868,6 +868,7 @@ def report(text):
             "boxed_module_type.py",
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
+            "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
             "boxed_mapping_abc.py",
             "boxed_dict_pop.py",
