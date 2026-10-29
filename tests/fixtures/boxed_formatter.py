@@ -131,3 +131,14 @@ def conversion_order():
         f"{Broken()!r:{spec()}}"
     except LookupError:
         print(events)
+
+
+def integer_allocation():
+    value = (1 << 8190) + 1
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        format(value, "")
+    except MemoryError as error:
+        print("caught", error.args)
+    print(value.bit_length(), len(format(value, "")), format(value, "") == str(value))

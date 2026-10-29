@@ -41,7 +41,8 @@ fn enter_ancestor(seen: &mut std::collections::HashSet<Id>, id: Id) -> Result<bo
     Ok(seen.insert(id))
 }
 
-fn rendered_integer(value: &crate::Int) -> Result<crate::Str> {
+/// Spell a boxed integer in decimal with checked allocations and Python's digit limit.
+pub(super) fn rendered_integer(value: &crate::Int) -> Result<crate::Str> {
     let limit = crate::integer_text::decimal_digit_limit();
     // Each decimal digit needs fewer than four bits. Reject very large inputs before converting.
     if limit == 0 || value.as_small().is_some() || value.big().bits() <= u64::from(limit) * 4 {

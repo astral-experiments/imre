@@ -69,6 +69,11 @@ def check_boxed_call_allocation(imre, run, flags):
         "IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_SIZE": "16381", "IMRE_TEST_GETTER_ALLOCATION": "1",
     })
     assert (result.returncode, result.stdout, result.stderr) == (0, b"() 16381 0\n16381\n", b"refused\n"), result
+    source = import_path + "import boxed_formatter as fixture; fixture.integer_allocation()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_SIZE": "2466", "IMRE_TEST_GETTER_ALLOCATION": "1",
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"caught ()\n8191 2466 True\n", b"refused\n"), result
     for module in (False, True):
         source = import_path + f"import boxed_list_pop as fixture; fixture.copy_allocation({module})"
         result = run(imre, "-B", "-c", source, extra={
