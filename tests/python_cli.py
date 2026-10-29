@@ -11,6 +11,57 @@ import tempfile
 from pathlib import Path
 
 
+def check_io_compaction_allocation(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "refuse_io_compaction.c"
+    wrapper = root / "refuse_io_compaction.o"
+    subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=malloc,--wrap=realloc,--wrap=calloc,--wrap=free",
+    ])
+    payload = root / "short-read.bin"
+    payload.write_bytes(b"0123456789abcdefGHIJKLMNOPQRSTUV")
+    for boxed in (False, True):
+        prefix = 'import sys; sys.path.append("unused")\n' if boxed else ""
+        source = prefix + (
+            f"stream = open({str(payload)!r}, 'rb')\n"
+            "print(stream.read(4096) == b'0123456789abcdefGHIJKLMNOPQRSTUV')\n"
+            "print(stream.read() == b'')\nstream.close()\n"
+        )
+        for refuse in (0, 1):
+            result = run(imre, "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_IO_COMPACTION_ALLOCATION": str(refuse),
+            })
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, b"True\nTrue\n", b"refused\n" if refuse else b"",
+            ), (boxed, refuse, result)
+        for receive_flags in (0, 2):
+            source = prefix + f"""import socket
+listener = socket.socket()
+listener.bind(("127.0.0.1", 0))
+listener.listen(1)
+sender = socket.socket()
+sender.connect(listener.getsockname())
+receiver, _ = listener.accept()
+sender.sendall(b"0123456789abcdefGHIJKLMNOPQRSTUV")
+sender.shutdown(socket.SHUT_WR)
+print(receiver.recv(4096, {receive_flags}) == b"0123456789abcdefGHIJKLMNOPQRSTUV")
+print(receiver.recv(1) == {b"0" if receive_flags else b""!r})
+receiver.close()
+sender.close()
+listener.close()
+"""
+            for refuse in (0, 1):
+                result = run(imre, "-c", source, extra={
+                    "IMRE_ENCODED_FLAGS": flags,
+                    "IMRE_TEST_IO_COMPACTION_ALLOCATION": str(refuse),
+                })
+                assert (result.returncode, result.stdout, result.stderr) == (
+                    0, b"True\nTrue\n", b"refused\n" if refuse else b"",
+                ), (boxed, receive_flags, refuse, result)
+
+
 def check_context_protocol_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "context_protocol_refuse.o"
@@ -216,6 +267,26 @@ def check_boxed_json_callback_allocation(imre, root, run):
             assert (result.returncode, result.stdout, result.stderr) == (
                 0, expected, b"refused\n" if ordinal == target else b"",
             ), (mode, ordinal, result)
+
+
+
+def check_weak_proxy_root_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "weak_proxy_root_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_weak_proxy_root.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "boxed_weak_proxy_root_allocation.py"
+    reference = run(sys.executable, "-B", source, "512")
+    assert reference.returncode == 0, reference
+    for ordinal in (0, 1):
+        result = run(imre, "-B", source, "512", extra={"IMRE_ENCODED_FLAGS": flags, "PROXY_ROOT_REFUSE_NTH": str(ordinal)})
+        expected = reference.stdout if not ordinal else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+        assert result.returncode == 0 and result.stdout == expected, (ordinal, result, reference)
+        refused = any(line.startswith(b"weak_proxy_root_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
+        assert refused == bool(ordinal), (ordinal, result)
 
 
 def call_allocation_flags(root):
@@ -520,6 +591,30 @@ print(sys.intern(value) is value, sys._is_interned(value))
         ), result
 
 
+def check_bound_method_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "bound_method_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_bound_method.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape in range(6):
+        reference = run(sys.executable, "-B", fixtures / "boxed_bound_method_allocation.py", str(shape))
+        assert reference.returncode == 0, reference
+        for target in [0, 1, "all"]:
+            extra = {"IMRE_ENCODED_FLAGS": flags, "BOUND_METHOD_REFUSE_NTH": str(target if target != "all" else 0)}
+            if target == "all":
+                extra["BOUND_METHOD_REFUSE_ALL"] = "1"
+            result = run(imre, "-B", fixtures / "boxed_bound_method_allocation.py", str(shape), extra=extra)
+            assert result.returncode == 0 and b"preserved True\n" in result.stdout, result
+            expected = reference.stdout if not target else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            assert result.stdout == expected, (result, reference)
+            if target:
+                assert result.stdout.startswith(b"kind MemoryError\n"), result
+                assert b"bound_method_allocation " in result.stderr and b" 1\n" in result.stderr, result
+
+
 def check_ffi_result_roots(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "ffi-result-roots.o"
@@ -676,7 +771,9 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_bound_method_allocation(imre, root, run)
             check_ffi_result_roots(imre, root, run)
+            check_weak_proxy_root_allocation(imre, root, run)
             check_select_result_allocation(imre, root, run)
             check_select_input_root_allocation(imre, root, run)
             check_poll_result_allocation(imre, root, run)
@@ -685,6 +782,7 @@ def main():
             check_argument_allocation(imre, run, flags)
             check_class_metadata_allocation(imre, root, run)
             check_raise_site_allocation(imre, root, run)
+            check_io_compaction_allocation(imre, root, run)
             check_context_protocol_allocation(imre, root, run)
             check_fixed_float_allocation(imre, root, run)
             check_boxed_literal_roots_allocation(imre, root, run)
