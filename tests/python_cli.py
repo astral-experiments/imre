@@ -537,6 +537,30 @@ def check_argument_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
 
 
+def check_class_metadata_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "class_metadata_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_class_metadata.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape in range(7):
+        reference = run(sys.executable, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape))
+        assert reference.returncode == 0, reference
+        for target in [0, 1, 2, "all"]:
+            extra = {"IMRE_ENCODED_FLAGS": flags, "CLASS_METADATA_REFUSE_NTH": str(target if target != "all" else 0)}
+            if target == "all":
+                extra["CLASS_METADATA_REFUSE_ALL"] = "1"
+            result = run(imre, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape), extra=extra)
+            assert result.returncode == 0 and b"metadata True True\n" in result.stdout, result
+            expected = reference.stdout if not target else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            assert result.stdout == expected, (result, reference)
+            if target:
+                assert result.stdout.startswith(b"kind MemoryError\n"), result
+                assert b"class_metadata_allocation " in result.stderr and b" 1\n" in result.stderr, result
+
+
 
 def check_marshal_allocation(exe):
     import resource
@@ -586,6 +610,7 @@ def main():
             check_poll_result_allocation(imre, root, run)
             flags = call_allocation_flags(root)
             check_argument_allocation(imre, run, flags)
+            check_class_metadata_allocation(imre, root, run)
             check_raise_site_allocation(imre, root, run)
             check_context_protocol_allocation(imre, root, run)
             check_fixed_float_allocation(imre, root, run)
