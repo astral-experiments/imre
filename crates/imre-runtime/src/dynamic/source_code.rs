@@ -1713,7 +1713,9 @@ impl Context {
     }
 
     fn source_expr(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
-        let value = self.source_expr_inner(code, scope, expr)?;
+        let value = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            self.source_expr_inner(code, scope, expr)
+        })?;
         self.heap.keep(value);
         Ok(value)
     }
