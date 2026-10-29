@@ -614,11 +614,94 @@ impl Context {
         result
     }
 
-    fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
+    /// Recognize a partial application of the builtin next to another sentinel iterator.
+    fn delegated_callable_next(&self, callable: Id) -> Option<(Id, [Id; 2], Option<Id>)> {
+        let Value::Partial {
+            function,
+            args,
+            keywords,
+            ..
+        } = self.heap.get(callable)
+        else {
+            return None;
+        };
+        if !matches!(self.heap.get(*function), Value::Native(name) if name == "next")
+            || !matches!(self.heap.get(*keywords), Value::Dict(entries) if entries.is_empty())
+        {
+            return None;
+        }
+        let Value::Tuple(args) = self.heap.get(*args) else {
+            return None;
+        };
+        let (iterator, default) = match args.as_slice() {
+            [iterator] => (*iterator, None),
+            [iterator, default]
+                if !matches!(self.heap.get(*default), Value::PartialPlaceholder) =>
+            {
+                (*iterator, Some(*default))
+            }
+            _ => return None,
+        };
+        match self.heap.get(iterator) {
+            Value::CallableIterator(Some(state)) => Some((iterator, *state, default)),
+            _ => None,
+        }
+    }
+
+    fn next_callable_item(
+        &mut self,
+        mut id: Id,
+        mut callable: Id,
+        mut sentinel: Id,
+    ) -> Result<Option<Id>> {
+        // Advancing partial(next, child) needs only the parent's sentinel check on return.
         // A reentrant callback can exhaust the parent and release its last reference to id.
         self.heap.keep(id);
-        match self.call(callable, Vec::new(), Vec::new()) {
-            Ok(item) => {
+        let mut parents = Vec::new();
+        while let Some((child, [next, stop], default)) = self.delegated_callable_next(callable) {
+            parents
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", "cannot advance iterator chain"))?;
+            // Reentrant callbacks may exhaust the parent before we compare its sentinel or return the default.
+            self.heap
+                .reserve_temporaries(2 + usize::from(default.is_some()))?;
+            self.heap.keep(child);
+            self.heap.keep(sentinel);
+            if let Some(value) = default {
+                self.heap.keep(value);
+            }
+            parents.push((id, sentinel, default));
+            id = child;
+            callable = next;
+            sentinel = stop;
+        }
+        let mut item = self.call(callable, Vec::new(), Vec::new()).map(Some);
+        loop {
+            item = self.finish_callable_item(id, sentinel, item);
+            let Some((parent, stop, default)) = parents.pop() else {
+                return item;
+            };
+            if let Some(value) = default {
+                match &item {
+                    Ok(None) => item = Ok(Some(value)),
+                    Err(error) if self.is_stop_iteration(error) => item = Ok(Some(value)),
+                    _ => {}
+                }
+            }
+            id = parent;
+            sentinel = stop;
+        }
+    }
+
+    /// Apply the sentinel comparison after a callable or delegated iterator returns.
+    fn finish_callable_item(
+        &mut self,
+        id: Id,
+        sentinel: Id,
+        result: Result<Option<Id>>,
+    ) -> Result<Option<Id>> {
+        match result {
+            Ok(Some(item)) => {
                 // A recursive call can exhaust the same iterator inside the callable.
                 if matches!(self.heap.get(id), Value::CallableIterator(None)) {
                     return Ok(None);
@@ -630,6 +713,7 @@ impl Context {
                     }
                 }
             }
+            Ok(None) => {}
             Err(error) if self.is_stop_iteration(&error) => {}
             Err(error) => return Err(error),
         }
@@ -831,7 +915,10 @@ impl Context {
             )
         };
         for i in 0..prefix {
-            unpacked.push(self.next_item(iter)?.ok_or_else(|| too_short(i))?);
+            let item = self.next_item(iter)?.ok_or_else(|| too_short(i))?;
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(item);
+            unpacked.push(item);
         }
         if let Some(star) = star {
             let tail = self.iterator(iter)?;
@@ -843,6 +930,8 @@ impl Context {
             while let Some(item) = self.next_item(tail)? {
                 rest.try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
+                self.heap.reserve_temporaries(1)?;
+                self.heap.keep(item);
                 rest.push(item);
             }
             let tail_start = rest
@@ -851,6 +940,7 @@ impl Context {
                 .ok_or_else(|| too_short(star + rest.len()))?;
             unpacked.push(NONE);
             unpacked.extend(rest.drain(tail_start..));
+            self.heap.reserve_temporaries(1)?;
             unpacked[star] = self.alloc(Value::List(rest));
         } else if self.next_item(iter)?.is_some() {
             let size = match self.heap.get(value) {
@@ -887,7 +977,56 @@ impl Context {
         Ok(None)
     }
 
+    /// Keep yielded values in a traced sequence while discarding each step's other temporaries.
+    fn collect_generator(&mut self, generator: Id, tuple: bool) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
+        self.heap.reserve_temporaries(2)?;
+        self.heap.keep(generator);
+        let buffer = self.alloc(if tuple {
+            Value::Tuple(Vec::new())
+        } else {
+            Value::List(Vec::new())
+        });
+        let step = self.heap.temporary_mark();
+        let result: Result<()> = (|| {
+            while let Some(item) = self.next_item(generator)? {
+                let (Value::List(items) | Value::Tuple(items)) = self.heap.get_mut(buffer) else {
+                    unreachable!()
+                };
+                items
+                    .try_reserve(1)
+                    .map_err(|_| crate::Error::memory_error())?;
+                items.push(item);
+                self.heap.release_temporaries_since(step);
+                self.heap.reserve_slot_or_request_collection();
+                self.collect_garbage();
+            }
+            Ok(())
+        })();
+        self.heap.release_temporaries_since(mark);
+        if let Err(error) = result {
+            for root in error.roots() {
+                self.heap.keep(root);
+            }
+            return Err(error);
+        }
+        self.heap.keep(buffer);
+        Ok(buffer)
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
+        if matches!(self.heap.get(id), Value::Generator { .. }) {
+            let buffer = self.collect_generator(id, false)?;
+            let Value::List(items) = self.heap.get_mut(buffer) else {
+                unreachable!()
+            };
+            let items = std::mem::take(items);
+            self.heap.reserve_temporaries(items.len())?;
+            for &item in &items {
+                self.heap.keep(item);
+            }
+            return Ok(items);
+        }
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
@@ -902,7 +1041,6 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Map { .. }
                 | Value::Filter { .. }
-                | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Count { .. }
@@ -1015,7 +1153,18 @@ impl Context {
             )),
         }
     }
-    fn scope(&mut self, module: impl Into<String>, parent: Option<Id>) -> Id {
+    fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
+        let closure = Default::default();
+        self.scope_with_closure(module.into(), parent, closure)
+    }
+
+    /// Allocate a scope using closure storage prepared by its caller.
+    fn scope_with_closure(
+        &mut self,
+        module: String,
+        parent: Option<Id>,
+        closure: allocator_api2::boxed::Box<value::ClosureScope>,
+    ) -> Id {
         self.alloc(Value::Scope(Scope {
             class_body: None,
             enum_namespace: None,
@@ -1025,13 +1174,13 @@ impl Context {
             class_namespace: None,
             first_argument: None,
             names: Default::default(),
-            closure: Default::default(),
+            closure,
             namespace: None,
             globals: Default::default(),
             exec_globals: None,
             exec_locals: None,
             parent,
-            module: module.into(),
+            module,
         }))
     }
     /// Comprehensions own their loop variables, but assignment expressions bind outside them.

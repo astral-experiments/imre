@@ -82,8 +82,10 @@ impl<'a> IntoIterator for &'a Entries {
 
 impl Entries {
     /// Copy a dense table with its cached key hashes and insertion positions.
-    pub(super) fn clone_dense(&self) -> Option<Self> {
-        (self.len() >= self.next.saturating_mul(2) / 3).then(|| self.clone())
+    pub(super) fn clone_dense(&self) -> super::Result<Option<Self>> {
+        (self.len() >= self.next.saturating_mul(2) / 3)
+            .then(|| self.try_clone())
+            .transpose()
     }
 
     pub(super) fn push(&mut self, value: (Id, Id), hash: i64) -> Result<()> {
@@ -91,39 +93,56 @@ impl Entries {
             order
                 .indices
                 .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            order.indices.push(self.values.len());
+                .map_err(|_| crate::Error::memory_error())?;
         }
-        // CPython compacts its entries when the index table runs out of usable slots.
-        // Existing iterators keep their numerical cursor in the compacted table.
+        self.values
+            .try_reserve(1)
+            .map_err(|_| crate::Error::memory_error())?;
+        let index = self.index.as_mut().expect("indexed dictionary");
+        index.reserve_hash()?;
+        // An existing iterator must keep its insertion position if growth fails.
         if self.next == self.usable {
-            self.usable = usable_slots(self.values.len() * 3);
+            let usable = usable_slots(self.values.len() * 3);
+            index.compact((usable + 1).next_power_of_two())?;
+            self.usable = usable;
             self.next = self.values.len();
             self.positions = None;
-            if let Some(index) = &mut self.index {
-                index.compact((self.usable + 1).next_power_of_two());
-            }
         }
         if let Some(positions) = &mut self.positions {
+            positions
+                .try_reserve(1)
+                .map_err(|_| crate::Error::memory_error())?;
             positions.push(self.next);
         }
-        self.index
-            .as_mut()
-            .expect("indexed dictionary")
-            .push(hash, self.next);
+        if let Some(order) = &mut self.order {
+            order.indices.push(self.values.len());
+        }
+        index.push(hash, self.next);
         self.next += 1;
         self.values.push(value);
         Ok(())
     }
 
-    pub(super) fn remove(&mut self, index: usize) -> (Id, Id) {
-        let position = self.positions.as_ref().map_or(index, |p| p[index]);
+    pub(super) fn prepare_removal(&mut self) -> Result<&mut Vec<usize>> {
+        Ok(match &mut self.positions {
+            Some(positions) => positions,
+            vacant @ None => {
+                let mut positions = Vec::new();
+                positions
+                    .try_reserve_exact(self.next)
+                    .map_err(|_| crate::Error::memory_error())?;
+                positions.extend(0..self.next);
+                vacant.insert(positions)
+            }
+        })
+    }
+
+    pub(super) fn remove(&mut self, index: usize) -> Result<(Id, Id)> {
+        let positions = self.prepare_removal()?;
+        let position = positions.remove(index);
         if let Some(keys) = &mut self.index {
             keys.remove(index, position);
         }
-        self.positions
-            .get_or_insert_with(|| (0..self.next).collect())
-            .remove(index);
         if let Some(order) = &mut self.order {
             order.indices.retain_mut(|dense| {
                 if *dense == index {
@@ -135,7 +154,7 @@ impl Entries {
                 true
             });
         }
-        self.values.remove(index)
+        Ok(self.values.remove(index))
     }
 
     /// Map the ordered view's rank to an entry in the underlying dict.

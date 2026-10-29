@@ -11,31 +11,61 @@ import tempfile
 from pathlib import Path
 
 
-def check_callable_label_allocation(imre, root, run):
+def check_context_protocol_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "callable_label_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "refuse_callable_label.c", "-o", wrapper], check=True)
+    wrapper = root / "context_protocol_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_context_protocol.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
-    for shape in range(10):
-        reference = run(sys.executable, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape))
-        assert reference.returncode == 0, reference
-        for target in [0, 1, 2, "all"]:
-            extra = {"IMRE_ENCODED_FLAGS": flags, "CALL_LABEL_REFUSE_NTH": str(target if target != "all" else 0)}
-            if target == "all":
-                extra["CALL_LABEL_REFUSE_ALL"] = "1"
-            result = run(imre, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape), extra=extra)
-            assert result.returncode == 0 and b"preserved True\n" in result.stdout, result
-            expected = reference.stdout if not any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines()) else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
-            assert result.stdout == expected, (result, reference)
-            activated = any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
-            expected_denial = target in (1, "all") or (shape >= 8 and target == 2)
-            assert activated == expected_denial, (shape, target, result)
-            if activated:
-                assert result.stdout.startswith(b"kind MemoryError\n"), result
-                assert b"call_label_allocation " in result.stderr, result
+    for shape, opcode in [(0, "lookup_enter"), (7, "lookup_exit")]:
+        for target in [0, 1]:
+            result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "CONTEXT_REFUSE_NTH": str(target),
+                "CONTEXT_REFUSE_OPCODE": opcode,
+            })
+            assert result.returncode == 0, result
+            if target:
+                assert result.stdout == b"kind MemoryError\n", result
+                assert b"context_allocation 1 " in result.stderr and b" 1\n" in result.stderr, result
+            else:
+                assert result.stdout.startswith(b"kind TypeError\ndetail "), result
+    for shape in [8, 9]:
+        result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), root / "context-output", extra={"IMRE_ENCODED_FLAGS": flags})
+        assert (result.returncode, result.stdout) == (0, b"written 4\nclosed True\ncontent True\n"), result
+
+
+def check_fixed_float_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "refuse_fixed_float.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_fixed_float_format.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_float_format,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "fixed_float_format_allocation.py"
+    for optimization in (0, 3):
+        executable = root / f"fixed-float-O{optimization}"
+        built = run(imre, "build", source, "--no-cache", "--opt-level", str(optimization), "-o", executable,
+                    extra={"IMRE_ENCODED_FLAGS": flags})
+        assert built.returncode == 0, built
+        for shape in (0, 3, 6):
+            for prefix in (0, 1):
+                arguments = ("1.25", str(shape), str(prefix))
+                reference = run(sys.executable, "-B", source, *arguments)
+                assert reference.returncode == 0 and not reference.stderr, reference
+                for policy in ("none", "buffer", "owner"):
+                    failed = policy == "owner" or (policy == "buffer" and shape != 6)
+                    result = run(executable, *arguments, extra={
+                        "FIXED_FLOAT_REFUSE": policy,
+                        "FIXED_FLOAT_CALL": str(1 + prefix),
+                    })
+                    expected = b"MemoryError\n" + reference.stdout.partition(b"\n")[2] if failed else reference.stdout
+                    assert (result.returncode, result.stdout, result.stderr) == (
+                        0, expected, b"fixed_float_allocation_refused\n" if failed else b"",
+                    ), (optimization, shape, prefix, policy, result)
 
 
 def check_boxed_literal_roots_allocation(imre, root, run):
@@ -85,6 +115,58 @@ def check_select_result_allocation(imre, root, run):
                     ), (optimization, shape, count, refused, result)
 
 
+def check_poll_result_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "refuse_poll_result.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_poll_result.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=poll,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "boxed_poll_result_allocation.py"
+    for optimization in (0, 3):
+        executable = root / f"poll-result-O{optimization}"
+        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+                    extra={"IMRE_ENCODED_FLAGS": flags})
+        assert built.returncode == 0, built
+        for count in (1, 2, 7):
+            reference = run(sys.executable, "-B", source, str(count), "select")
+            assert (reference.returncode, reference.stdout, reference.stderr) == (0, b"ok\nTrue\nTrue\n", b""), reference
+            first = 1 + (count == 2)
+            for nth in sorted({0, first, first + count - 1}):
+                result = run(executable, str(count), "select", extra={"POLL_RESULT_REFUSE_NTH": str(nth)})
+                assert (result.returncode, result.stdout, result.stderr) == (
+                    0, b"MemoryError\nTrue\n" if nth else reference.stdout,
+                    b"poll_result_allocation_refused\n" if nth else b"",
+                ), (optimization, count, nth, result)
+
+
+def check_select_input_root_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "refuse_select_input_roots.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_select_input_roots.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "boxed_select_input_root_allocation.py"
+    for optimization in (0, 3):
+        executable = root / f"select-input-roots-O{optimization}"
+        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+                    extra={"IMRE_ENCODED_FLAGS": flags})
+        assert built.returncode == 0, built
+        for shape in (1, 2):
+            arguments = (str(shape), "1023")
+            reference = run(sys.executable, "-B", source, *arguments)
+            assert (reference.returncode, reference.stdout, reference.stderr) == (0, b"ok\nTrue\nTrue\n", b""), reference
+            for size, nth in ((1024, 0), (1024, 2), (8192, 2)):
+                result = run(executable, *arguments, extra={"SELECT_ROOT_REFUSE_BYTES": str(size), "SELECT_ROOT_REFUSE_NTH": str(nth)})
+                assert (result.returncode, result.stdout, result.stderr) == (
+                    0, b"MemoryError\nTrue\n" if nth else reference.stdout,
+                    b"select_input_root_allocation_refused\n" if nth else b"",
+                ), (optimization, shape, size, nth, result)
+
+
 def check_raise_site_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "exceptions" / "refuse_raise_site.c"
     wrapper = root / "refuse_raise_site.o"
@@ -104,6 +186,38 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
+def check_boxed_json_callback_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "json_callback_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_json_callback_arguments.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_json_callback_arguments as fixture; "
+    source = root / "json_callback_probe.py"
+    source.write_text(imports + "fixture.current(int(sys.argv[1]))\n")
+    executable = root / "json_callback_probe"
+    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable, extra={
+        "IMRE_ENCODED_FLAGS": flags,
+    })
+    assert built.returncode == 0, built.stderr
+    # Refuse the singleton arguments for default, float repr, writer and sorting.
+    # Native allocation traces distinguish these from earlier output-buffer growth.
+    for mode in range(5):
+        target = (2, 2, 3, 2, 7)[mode]
+        for ordinal in (0, target, 37):
+            result = run(executable, str(mode), extra={
+                "IMRE_TEST_JSON_CALLBACK_NTH": str(ordinal),
+            })
+            expected = b"MemoryError True\nTrue\n" if ordinal == target else (
+                b"ok True\nTrue\n" if mode in (0, 3, 4) else b"ValueError True\nTrue\n"
+            )
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if ordinal == target else b"",
+            ), (mode, ordinal, result)
+
+
 def call_allocation_flags(root):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "itemgetter_refuse.o"
@@ -114,9 +228,48 @@ def call_allocation_flags(root):
     ])
 
 
+def check_callable_label_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "callable_label_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_callable_label.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape in range(10):
+        reference = run(sys.executable, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape))
+        assert reference.returncode == 0, reference
+        for target in [0, 1, 2, "all"]:
+            extra = {"IMRE_ENCODED_FLAGS": flags, "CALL_LABEL_REFUSE_NTH": str(target if target != "all" else 0)}
+            if target == "all":
+                extra["CALL_LABEL_REFUSE_ALL"] = "1"
+            result = run(imre, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape), extra=extra)
+            assert result.returncode == 0 and b"preserved True\n" in result.stdout, result
+            expected = reference.stdout if not any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines()) else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            assert result.stdout == expected, (result, reference)
+            activated = any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
+            expected_denial = target in (1, "all") or (shape >= 8 and target == 2)
+            assert activated == expected_denial, (shape, target, result)
+            if activated:
+                assert result.stdout.startswith(b"kind MemoryError\n"), result
+                assert b"call_label_allocation " in result.stderr, result
+
+
 def check_boxed_call_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_traceback_allocation as fixture; fixture.allocation()"
+    for size in (0, 160, 224):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        expected = b"MemoryError () ValueError invalid literal for int() with base 10: 'invalid'\n23\n" if size else b"ValueError\n23\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
+        ), result
+
     source = import_path + "import boxed_memory_error_kind as fixture; fixture.allocation()"
     for ordinal in (0, 1):
         result = run(imre, "-B", "-c", source, extra={
@@ -129,6 +282,18 @@ def check_boxed_call_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, expected, b"refused\n" if ordinal else b"",
         ), (ordinal, result)
+
+    source = import_path + "import boxed_call_labels as fixture; fixture.allocation()"
+    for size in (0, 152):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        expected = (b"caught ()\n" if size else b"value 3\n") + b"retry 3\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
+        ), (size, result)
 
     for kind, size, ordinal in (
         ("plain", 0, 1), ("plain", 56, 3), ("plain", 56, 4),
@@ -365,6 +530,29 @@ print(sys.intern(value) is value, sys._is_interned(value))
         ), result
 
 
+def check_ffi_result_roots(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "ffi-result-roots.o"
+    subprocess.run(["cc", "-c", fixtures / "ffi_result_roots_refuse.c", "-o", wrapper], check=True)
+    result_flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    source = import_path + "import boxed_ffi_result_roots as fixture; fixture.allocation()"
+    for ordinal in (0, 1):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": result_flags,
+            "IMRE_TEST_CALL_SIZE": "128",
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        expected = (b"caught ()\n" if ordinal else b"value 3\n") + b"retry 3 True\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+
+
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):
         set_stack = None
@@ -430,6 +618,30 @@ def check_argument_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
 
 
+def check_class_metadata_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "class_metadata_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_class_metadata.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape in range(7):
+        reference = run(sys.executable, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape))
+        assert reference.returncode == 0, reference
+        for target in [0, 1, 2, "all"]:
+            extra = {"IMRE_ENCODED_FLAGS": flags, "CLASS_METADATA_REFUSE_NTH": str(target if target != "all" else 0)}
+            if target == "all":
+                extra["CLASS_METADATA_REFUSE_ALL"] = "1"
+            result = run(imre, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape), extra=extra)
+            assert result.returncode == 0 and b"metadata True True\n" in result.stdout, result
+            expected = reference.stdout if not target else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            assert result.stdout == expected, (result, reference)
+            if target:
+                assert result.stdout.startswith(b"kind MemoryError\n"), result
+                assert b"class_metadata_allocation " in result.stderr and b" 1\n" in result.stderr, result
+
+
 
 def check_marshal_allocation(exe):
     import resource
@@ -474,13 +686,20 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_ffi_result_roots(imre, root, run)
             check_select_result_allocation(imre, root, run)
+            check_select_input_root_allocation(imre, root, run)
+            check_poll_result_allocation(imre, root, run)
             flags = call_allocation_flags(root)
-            check_argument_allocation(imre, run, flags)
-            check_raise_site_allocation(imre, root, run)
             check_callable_label_allocation(imre, root, run)
+            check_argument_allocation(imre, run, flags)
+            check_class_metadata_allocation(imre, root, run)
+            check_raise_site_allocation(imre, root, run)
+            check_context_protocol_allocation(imre, root, run)
+            check_fixed_float_allocation(imre, root, run)
             check_boxed_literal_roots_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
+        check_boxed_json_callback_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
@@ -925,6 +1144,20 @@ def report(text):
                         "--quiet", "--no-cache", "--runtime-imports", "-o", exe)
             assert built.returncode == 0, built.stderr
             check_marshal_allocation(exe)
+        if sys.platform == "linux":
+            import resource
+
+            source = root / "nested.py"
+            source.write_text("".join(" " * i + "if True:\n" for i in range(96)) + " " * 96 + "result = 7\n")
+            executable = root / "source-branches"
+            built = run(imre, "build", fixtures / "boxed_source_lower_stack.py", "--runtime-imports", "-o", executable)
+            assert built.returncode == 0, built.stderr
+
+            def small_stack():
+                resource.setrlimit(resource.RLIMIT_STACK, (96 * 1024, 96 * 1024))
+
+            result = subprocess.run([executable, source], capture_output=True, preexec_fn=small_stack)
+            assert (result.returncode, result.stdout) == (0, b"7\n"), result.stderr
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_literal_eval.py",
