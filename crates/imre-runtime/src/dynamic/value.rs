@@ -2000,6 +2000,21 @@ impl Heap {
         }
     }
 
+    /// Size the next streaming collection in proportion to the surviving heap.
+    pub(super) fn streaming_collection_limit(&self) -> usize {
+        (self.slots.len() - self.free.len()).saturating_mul(2)
+    }
+
+    /// Request collection before a streaming callback exhausts the heap.
+    pub(super) fn prepare_streaming_collection(&mut self, limit: usize) -> bool {
+        if self.free.is_empty() && (self.slots.len() >= limit || self.slots.try_reserve(1).is_err())
+        {
+            self.next_collection = self.slots.len();
+            return true;
+        }
+        false
+    }
+
     /// Drop unreachable values and preserve callbacks that must run after the sweep.
     pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<Vec<(Id, Id)>> {
         self.mark(globals);
