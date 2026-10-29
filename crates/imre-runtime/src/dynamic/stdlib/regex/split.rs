@@ -60,7 +60,22 @@ pub(super) fn split(
     let mut count = 0;
     let mut caps = pattern.regex.create_captures();
     while limit == 0 || count < limit {
-        if retry && !nonempty(&pattern, text, start, &mut caps)? {
+        let found = if retry {
+            match nonempty(&pattern, text, start, &mut caps) {
+                Ok(found) => found,
+                Err(message) => {
+                    return Err(super::pattern_error(
+                        ctx,
+                        pattern.source,
+                        pattern.flags,
+                        message,
+                    ));
+                }
+            }
+        } else {
+            true
+        };
+        if !found {
             if start == length {
                 break;
             }
@@ -116,7 +131,7 @@ pub(super) fn nonempty(
     text: &[u8],
     start: usize,
     caps: &mut Captures,
-) -> Result<bool> {
+) -> std::result::Result<bool, String> {
     if start == text.len() {
         return Ok(false);
     }
@@ -130,7 +145,7 @@ pub(super) fn nonempty(
                 .map_err(|e| e.to_string())
         })
         .as_ref()
-        .map_err(|e| Error::new("re.error", e.clone()))?;
+        .map_err(Clone::clone)?;
     enum Frame {
         Visit(StateID, usize),
         Restore(usize, Option<NonMaxUsize>),

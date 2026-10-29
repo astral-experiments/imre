@@ -528,7 +528,7 @@ pub(crate) fn compile(
         ));
     }
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
-    for name in ["platform", "stat", "zipimport"] {
+    for name in ["platform", "re", "stat", "zipimport"] {
         if !seen.contains(name)
             && let Some((file, source)) = crate::modules::bundled_runtime_source(name)
         {

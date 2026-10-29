@@ -114,7 +114,7 @@ impl Pattern {
             - 1
     }
 
-    fn matcher(&self, full: bool) -> Result<&Regex> {
+    fn matcher(&self, full: bool) -> std::result::Result<&Regex, String> {
         if !full {
             return Ok(&self.regex);
         }
@@ -129,7 +129,7 @@ impl Pattern {
                 build_regex(&format!(r"(?:{source})\z"), self.bytes, self.flags)
             })
             .as_ref()
-            .map_err(|message| Error::new("re.error", message.clone()))
+            .map_err(Clone::clone)
     }
 }
 
@@ -215,6 +215,53 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
     result
 }
 
+/// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
+fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(&'static str, usize)> {
+    use regex_syntax::ast::{ErrorKind, parse::ParserBuilder};
+    use std::borrow::Cow;
+
+    let text: Cow<'_, str> = match ctx.heap.get(source) {
+        Value::Bytes(bytes) => Cow::Owned(bytes.iter().copied().map(char::from).collect()),
+        _ => Cow::Borrowed(ctx.str_value(source).ok()?),
+    };
+    let error = ParserBuilder::new()
+        .ignore_whitespace(flags & VERBOSE != 0)
+        .build()
+        .parse(&text)
+        .err()?;
+    let message = match error.kind() {
+        ErrorKind::ClassUnclosed => "unterminated character set",
+        ErrorKind::GroupUnclosed => "missing ), unterminated subpattern",
+        ErrorKind::GroupUnopened => "unbalanced parenthesis",
+        ErrorKind::RepetitionMissing => "nothing to repeat",
+        ErrorKind::EscapeUnexpectedEof => "bad escape (end of pattern)",
+        _ => return None,
+    };
+    Some((message, text[..error.span().start.offset].chars().count()))
+}
+
+/// Construct the public exception with the original pattern and the engine's diagnostic.
+fn pattern_error(ctx: &mut Context, source: Id, flags: i64, message: String) -> Error {
+    let Some(&class) = ctx.classes.get("re.PatternError") else {
+        return Error::new("re.PatternError", message);
+    };
+    let (message, position) = match syntax_diagnostic(ctx, source, flags) {
+        Some((message, position)) => (ctx.text(message), ctx.int(position as i64)),
+        None => (ctx.text(message), NONE),
+    };
+    match ctx.call(class, vec![message, source, position], Vec::new()) {
+        Ok(id) => match ctx.heap.get(id) {
+            Value::Raised(error) => {
+                let mut error = error.clone();
+                error.tracing().instance = Some(id);
+                error
+            }
+            _ => Error::new("TypeError", "exceptions must derive from BaseException"),
+        },
+        Err(error) => error,
+    }
+}
+
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
@@ -267,7 +314,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let ascii = bytes || flags & ASCII != 0;
     let engine_source = if flags & VERBOSE != 0 {
         let mut source = imre_regex::translate_with_ascii(&source, true, ascii)
-            .map_err(|message| Error::new("re.error", message))?
+            .map_err(|message| pattern_error(ctx, id, flags, message))?
             .source;
         if flags & MULTILINE != 0 && source.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
             source.truncate(source.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
@@ -279,12 +326,12 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     };
     let engine_source = if flags & IGNORECASE != 0 && !bytes {
         casefold::expand(&engine_source, ascii)
-            .map_err(|message| Error::new("re.error", message))?
+            .map_err(|message| pattern_error(ctx, id, flags, message))?
     } else {
         engine_source
     };
     let regex = build_regex(&engine_source, bytes, flags)
-        .map_err(|message| Error::new("re.error", message))?;
+        .map_err(|message| pattern_error(ctx, id, flags, message))?;
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },
@@ -520,7 +567,9 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
         ));
     };
     let pattern = Rc::clone(pattern);
-    let regex = pattern.matcher(matches!(name, "pattern.fullmatch" | "re.fullmatch"))?;
+    let regex = pattern
+        .matcher(matches!(name, "pattern.fullmatch" | "re.fullmatch"))
+        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
     let subject = argument(args, 1)?;
     match name {
         "re.match" | "pattern.match" | "re.fullmatch" | "pattern.fullmatch" => {
@@ -535,7 +584,11 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
             let mut start = 0;
             let mut retry = false;
             loop {
-                if retry && !split::nonempty(&pattern, &text, start, &mut captures)? {
+                if retry
+                    && !split::nonempty(&pattern, &text, start, &mut captures).map_err(
+                        |message| pattern_error(ctx, pattern.source, pattern.flags, message),
+                    )?
+                {
                     if start == text.len() {
                         break;
                     }

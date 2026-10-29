@@ -1709,6 +1709,11 @@ impl Context {
                 self.modules.remove(name);
                 return Err(error);
             }
+            if name == "re"
+                && let Some(class) = self.scope_name(scope, "PatternError")
+            {
+                self.classes.insert("re.PatternError".into(), class);
+            }
             if name == "decimal"
                 && self.config["bundled_root"]
                     .as_str()
