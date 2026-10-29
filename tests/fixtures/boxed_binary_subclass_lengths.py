@@ -27,3 +27,14 @@ def current():
     assert len(data) == 0 and not data
     assert len(Sized(b"a")) == 0 and not Sized(b"a")
     assert len(Truthful()) == 0 and Truthful()
+
+    class Oversized(Buffer):
+        def __len__(self): return -(1 << 100)
+
+    for measure in (len, bool):
+        try:
+            measure(Oversized())
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("negative length accepted")
