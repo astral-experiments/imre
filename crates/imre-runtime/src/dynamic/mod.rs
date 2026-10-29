@@ -961,22 +961,23 @@ impl Context {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
             Value::Iterator { .. } => {
-                let values = match self.iterator_remaining(id)? {
-                    IteratorSlice::Values(values) => values.to_vec(),
-                    IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    remaining @ (IteratorSlice::Bytes(_)
+                let remaining = self.iterator_remaining(id)?;
+                let mut values = Vec::new();
+                values.try_reserve_exact(remaining.len()).map_err(|_| {
+                    Error::new("MemoryError", "iterator is too large to materialize")
+                })?;
+                match remaining {
+                    IteratorSlice::Values(items) => values.extend_from_slice(items),
+                    IteratorSlice::Reversed(items) => values.extend(items.iter().rev().copied()),
+                    IteratorSlice::Bytes(_)
                     | IteratorSlice::ReversedBytes(_)
-                    | IteratorSlice::ReversedText(_)) => {
-                        let mut values = Vec::new();
-                        values.try_reserve_exact(remaining.len()).map_err(|_| {
-                            Error::new("MemoryError", "iterator is too large to materialize")
-                        })?;
+                    | IteratorSlice::ReversedText(_) => {
                         while let Some(item) = self.next_item(id)? {
                             values.push(item);
                         }
                         return Ok(values);
                     }
-                };
+                }
                 if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
                     *sequence = None;
                 }
