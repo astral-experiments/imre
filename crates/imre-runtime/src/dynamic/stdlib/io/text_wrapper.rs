@@ -410,7 +410,7 @@ impl Wrapper {
                 codec,
                 w.newline.as_deref(),
                 end,
-            );
+            )?;
             if end {
                 let mut input = w.input.borrow_mut();
                 let part = input
