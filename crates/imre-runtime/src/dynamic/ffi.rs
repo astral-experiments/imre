@@ -1153,6 +1153,16 @@ pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usiz
     unsafe { (&*ctx).heap.temporary_mark() }
 }
 
+/// Drop the finished iteration's temporary handles before asking for the next item.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns the context and recorded this mark in its active frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.reserve_slot_or_request_collection();
+    ctx.collect_garbage();
+}
+
 /// Release a consumed truth operand on the branch that no longer needs it.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
