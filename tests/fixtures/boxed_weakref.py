@@ -249,3 +249,26 @@ def current():
         else:
             del target[Last()]
         print(operation, observer() is None)
+
+    class RepeatText(str):
+        pass
+
+    for operation in range(3):
+        holders = [RepeatText("repeat")]
+        repeated = proxy(holders[0])
+        watched = ref(holders[0])
+
+        class Count:
+            def __index__(self):
+                holders.clear()
+                print(watched() is not None)
+                return 2
+
+        if operation == 0:
+            print(repeated * Count())
+        elif operation == 1:
+            print(Count() * repeated)
+        else:
+            repeated *= Count()
+            print(repeated)
+        print(watched() is None)

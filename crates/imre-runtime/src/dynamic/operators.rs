@@ -3040,12 +3040,37 @@ impl Context {
         self.binary_operation(op, a, b, false)
     }
 
+    /// Keep upgraded operands alive until the forwarded operator finishes calling Python.
+    fn with_proxy_operands(
+        &mut self,
+        left: Id,
+        right: Id,
+        apply: impl FnOnce(&mut Self) -> Result<Id>,
+    ) -> Result<Id> {
+        self.heap.reserve_temporaries(2)?;
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(left);
+        self.heap.keep(right);
+        let result = apply(self);
+        self.heap.release_temporaries_since(mark);
+        if let Ok(value) = result {
+            self.heap.keep(value);
+        }
+        self.heap.weak_edge_removed(left);
+        self.heap.weak_edge_removed(right);
+        result
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
-        let (a, b) = if !self.heap.has_weak_values || matches!(op, "is" | "is not") {
-            (a, b)
-        } else {
-            (self.weak_proxy_target(a)?, self.weak_proxy_target(b)?)
-        };
+        if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
+            let left = self.weak_proxy_target(a)?;
+            let right = self.weak_proxy_target(b)?;
+            if left != a || right != b {
+                return self.with_proxy_operands(left, right, |ctx| {
+                    ctx.binary_operation(op, left, right, inplace)
+                });
+            }
+        }
         if op == "|" && matches!(self.heap.get(a), Value::Union(_) | Value::TypeVar(_)) {
             return super::union::make(self, &[a, b]);
         }
@@ -3592,7 +3617,8 @@ impl Context {
     pub(super) fn inplace(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         let target = self.weak_proxy_target(a)?;
         if target != a {
-            return self.inplace(op, target, self.weak_proxy_target(b)?);
+            let right = self.weak_proxy_target(b)?;
+            return self.with_proxy_operands(target, right, |ctx| ctx.inplace(op, target, right));
         }
         if let Some((_, _, slot)) = binary_slots(op)
             && let Some(result) = self.operator_slot(a, slot, b)?
