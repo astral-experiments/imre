@@ -53,9 +53,17 @@ struct LoopJumps {
     breaks: Vec<usize>,
 }
 
+/// Execution state shared by ordinary and resumed runtime-source instructions.
+struct SourceCursor<'a> {
+    ip: usize,
+    iterators: &'a mut Vec<Id>,
+    advanced: Option<Result<Option<Id>>>,
+}
+
 enum Step {
     Yield(Id, usize),
     Return(Id),
+    Advance(Id, usize),
 }
 
 fn unsupported(what: impl std::fmt::Display) -> Error {
@@ -1113,9 +1121,9 @@ impl Context {
                 running: false,
             }))
         } else {
-            match self.run_source(code, scope, owner, 0, &mut Vec::new())? {
+            match self.run_source(code, scope, owner, 0, &mut Vec::new(), None)? {
                 Step::Return(v) => Ok(v),
-                Step::Yield(..) => unreachable!("classified generator"),
+                Step::Yield(..) | Step::Advance(..) => unreachable!("classified generator"),
             }
         }
     }
@@ -1164,9 +1172,43 @@ impl Context {
         Ok(())
     }
 
-    pub(super) fn resume_source(&mut self, id: Id) -> Result<Option<Id>> {
-        self.heap.reserve_temporaries(1)?;
-        self.heap.keep(id);
+    pub(super) fn resume_source(&mut self, mut id: Id) -> Result<Option<Id>> {
+        let mut parents = Vec::new();
+        let mut advanced = None;
+        loop {
+            let result = match self.resume_source_frame(id, advanced.take()) {
+                Ok(Step::Advance(child, _)) => {
+                    if parents.try_reserve(1).is_err() {
+                        advanced = Some(Err(crate::Error::allocation().into()));
+                        continue;
+                    }
+                    parents.push(id);
+                    id = child;
+                    continue;
+                }
+                Ok(Step::Yield(value, _)) => Ok(Some(value)),
+                Ok(Step::Return(value)) if value == NONE || !parents.is_empty() => Ok(None),
+                Ok(Step::Return(value)) => Err(self.exception("StopIteration", &[value])),
+                Err(error) => Err(error),
+            };
+            let Some(parent) = parents.pop() else {
+                return result;
+            };
+            id = parent;
+            advanced = Some(result);
+        }
+    }
+
+    /// Resume one frame, retaining its running state while a delegated child executes.
+    fn resume_source_frame(
+        &mut self,
+        id: Id,
+        advanced: Option<Result<Option<Id>>>,
+    ) -> Result<Step> {
+        if advanced.is_none() {
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(id);
+        }
         let Value::Generator {
             owner,
             code,
@@ -1178,18 +1220,18 @@ impl Context {
         else {
             unreachable!()
         };
-        if *running {
+        if *running && advanced.is_none() {
             return Err(Error::new("ValueError", "generator already executing"));
         }
         let Some(ip) = offset.take() else {
-            return Ok(None);
+            return Ok(Step::Return(NONE));
         };
         *running = true;
         let (code, frame_scope, owner) = (*code, *scope, *owner);
         let mut active = std::mem::take(iterators);
         let result = self
             .prepare_generator(code)
-            .and_then(|()| self.run_source(code, frame_scope, owner, ip, &mut active))
+            .and_then(|()| self.run_source(code, frame_scope, owner, ip, &mut active, advanced))
             .map_err(|error| self.generator_error(error));
         let Value::Generator {
             running,
@@ -1202,12 +1244,12 @@ impl Context {
         else {
             unreachable!()
         };
-        *running = false;
+        *running = matches!(result, Ok(Step::Advance(..)));
         let completed = match result {
-            Ok(Step::Yield(value, ip)) => {
+            Ok(step @ (Step::Yield(_, ip) | Step::Advance(_, ip))) => {
                 *offset = Some(ip);
                 *iterators = active;
-                return Ok(Some(value));
+                return Ok(step);
             }
             Ok(Step::Return(value)) => Ok(value),
             Err(error) => Err(error),
@@ -1235,10 +1277,7 @@ impl Context {
             }
             self.collect_unreachable();
         }
-        match completed? {
-            NONE => Ok(None),
-            value => Err(self.exception("StopIteration", &[value])),
-        }
+        completed.map(Step::Return)
     }
 
     fn run_source(
@@ -1246,26 +1285,36 @@ impl Context {
         owner: Id,
         scope: Id,
         frame_owner: FrameOwner,
-        mut ip: usize,
+        ip: usize,
         iterators: &mut Vec<Id>,
+        advanced: Option<Result<Option<Id>>>,
     ) -> Result<Step> {
         let Body::Source(code) = self.code_object(owner).body.clone() else {
             unreachable!("source frame")
         };
-        self.heap.reserve_temporaries(2)?;
-        self.heap.keep(owner);
-        self.heap.enter(scope, owner, frame_owner);
+        if advanced.is_none() {
+            self.heap.reserve_temporaries(2)?;
+            self.heap.keep(owner);
+            self.heap.enter(scope, owner, frame_owner);
+        }
+        let mut cursor = SourceCursor {
+            ip,
+            iterators,
+            advanced,
+        };
         let result = (|| {
-            while let Some((line, op)) = code.instructions.get(ip) {
+            while let Some((line, op)) = code.instructions.get(cursor.ip) {
                 let loc = Location {
                     file: code.filename.to_string().into(),
                     line: *line,
                     span: None,
                 };
                 // The frame owns its code and scope. Active iterators must also survive nested calls.
-                self.checkpoint(iterators, loc, NONE);
-                ip += 1;
-                match self.source_step(&code, owner, scope, op, &mut ip, iterators) {
+                if cursor.advanced.is_none() {
+                    self.checkpoint(cursor.iterators, loc, NONE);
+                }
+                cursor.ip += 1;
+                match self.source_step(&code, owner, scope, op, &mut cursor) {
                     Ok(Some(step)) => return Ok(step),
                     Ok(None) => (),
                     Err(mut e) => {
@@ -1283,6 +1332,8 @@ impl Context {
         let (value, returning) = match &result {
             Ok(Step::Return(v)) => (*v, true),
             Ok(Step::Yield(v, _)) => (*v, false),
+            // The parent frame remains visible until the child returns its next item.
+            Ok(Step::Advance(..)) => return result,
             Err(_) => (NONE, false),
         };
         self.leave_frame(value, returning);
@@ -1426,9 +1477,13 @@ impl Context {
         owner: Id,
         scope: Id,
         op: &Instruction,
-        ip: &mut usize,
-        iterators: &mut Vec<Id>,
+        cursor: &mut SourceCursor<'_>,
     ) -> Result<Option<Step>> {
+        let SourceCursor {
+            ip,
+            iterators,
+            advanced,
+        } = cursor;
         let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
         match op {
             Instruction::Eval(e) => {
@@ -1514,7 +1569,17 @@ impl Context {
             Instruction::Next(target, end) => {
                 let iter = *iterators.last().expect("active source loop");
                 let owner = self.source_loop_owner(iter);
-                match self.next_item(iter)? {
+                let next = if let Some(result) = advanced.take() {
+                    result?
+                } else if code.generator
+                    && let Value::Generator { code, .. } = self.heap.get(iter)
+                    && !matches!(self.code_object(*code).body, Body::Native(_))
+                {
+                    return Ok(Some(Step::Advance(iter, *ip - 1)));
+                } else {
+                    self.next_item(iter)?
+                };
+                match next {
                     Some(v) => {
                         if let Some(target) = target {
                             self.bind_target(code, scope, target, v)?;
