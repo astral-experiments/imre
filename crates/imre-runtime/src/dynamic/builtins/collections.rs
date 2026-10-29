@@ -181,10 +181,15 @@ fn sort_list_items(
         keyed
             .try_reserve_exact(values.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
+        let mark = ctx.heap.temporary_mark();
         for &value in values.iter() {
             let sort_key = ctx.call(key, vec![value], vec![])?;
+            ctx.heap.release_temporaries_since(mark + keyed.len());
+            ctx.heap.reserve_temporaries(1)?;
             ctx.heap.keep(sort_key);
             keyed.push((sort_key, value));
+            ctx.heap.reserve_slot_or_request_collection();
+            ctx.collect_garbage();
         }
         sort_values(ctx, &mut keyed, reverse, |(key, _)| key)?;
         for (slot, (_, value)) in values.iter_mut().zip(keyed) {
