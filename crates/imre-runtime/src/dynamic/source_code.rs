@@ -281,6 +281,18 @@ impl Program {
         body: ast::Suite,
         lines: &[usize],
         function: bool,
+        active: Option<&mut LoopJumps>,
+    ) -> Result<()> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            self.lower_suite(body, lines, function, active)
+        })
+    }
+
+    fn lower_suite(
+        &mut self,
+        body: ast::Suite,
+        lines: &[usize],
+        function: bool,
         mut active: Option<&mut LoopJumps>,
     ) -> Result<()> {
         use ast::Stmt;

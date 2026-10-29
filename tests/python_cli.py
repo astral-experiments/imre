@@ -1088,6 +1088,20 @@ def report(text):
                         "--quiet", "--no-cache", "--runtime-imports", "-o", exe)
             assert built.returncode == 0, built.stderr
             check_marshal_allocation(exe)
+        if sys.platform == "linux":
+            import resource
+
+            source = root / "nested.py"
+            source.write_text("".join(" " * i + "if True:\n" for i in range(96)) + " " * 96 + "result = 7\n")
+            executable = root / "source-branches"
+            built = run(imre, "build", fixtures / "boxed_source_lower_stack.py", "--runtime-imports", "-o", executable)
+            assert built.returncode == 0, built.stderr
+
+            def small_stack():
+                resource.setrlimit(resource.RLIMIT_STACK, (96 * 1024, 96 * 1024))
+
+            result = subprocess.run([executable, source], capture_output=True, preexec_fn=small_stack)
+            assert (result.returncode, result.stdout) == (0, b"7\n"), result.stderr
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_literal_eval.py",
