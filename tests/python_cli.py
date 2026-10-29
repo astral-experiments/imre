@@ -11,6 +11,26 @@ import tempfile
 from pathlib import Path
 
 
+def check_boxed_literal_roots_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "literal_roots_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "literal_roots_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc",
+    ])
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_literal_roots as fixture; fixture.allocation()"
+    for ordinal in (0, 1):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        expected = (b"caught ()\n" if ordinal else b"value 3\n") + b"retry 3 True\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+
 def check_select_result_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "refuse_select_result.o"
@@ -358,6 +378,7 @@ def main():
             flags = call_allocation_flags(root)
             check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
+            check_boxed_literal_roots_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
 
         entry = root / "serve.py"
