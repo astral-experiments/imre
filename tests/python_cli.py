@@ -1044,6 +1044,22 @@ def report(text):
                 assert (retry.returncode, retry.stdout, retry.stderr) == (0, b"c\n", b"draw\ndraw\n"), retry
         plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
         compare("-IB", "-c", imports)
+        if sys.platform.startswith("linux"):
+            import resource
+
+            source = root / "nested-functions.py"
+            source.write_text("".join(" " * i + "def f():\n" for i in range(64)) + " " * 64 + "pass\n")
+            executable = root / "walk-statements"
+            fixture = fixtures / "boxed_ast_statement_stack.py"
+            built = run(imre, "build", fixture, "--runtime-imports", "-o", executable)
+            assert built.returncode == 0, built.stderr
+
+            def small_stack():
+                resource.setrlimit(resource.RLIMIT_STACK, (96 * 1024, 96 * 1024))
+
+            result = subprocess.run([executable, source], capture_output=True, preexec_fn=small_stack)
+            assert (result.returncode, result.stdout) == (0, b"130\n"), result.stderr
+
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
         for flags in ("-IB", "-IBOO"):
             compare(flags, "-c", imports + "arithmetic.current()")
