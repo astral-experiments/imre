@@ -163,23 +163,30 @@ impl Context {
 
     /// Keep each candidate alive across its predicate and return the original item.
     pub(super) fn next_filtered(&mut self, predicate: Id, input: Id) -> Result<Option<Id>> {
-        loop {
-            let mark = self.heap.temporary_mark();
+        let roots = self.heap.temporary_mark();
+        self.heap.keep(predicate);
+        self.heap.keep(input);
+        let step = self.heap.temporary_mark();
+        let mut limit = self.heap.streaming_collection_limit();
+        let result = (|| loop {
+            self.heap.release_temporaries_since(step);
+            self.collect_streaming_garbage(&mut limit);
             let Some(item) = self.next_result(input)? else {
                 return Ok(None);
             };
             self.heap.keep(item);
             let selected = if predicate == NONE {
-                self.truth(item)
+                self.truth(item)?
             } else {
-                self.call(predicate, vec![item], Vec::new())
-                    .and_then(|value| self.truth(value))
+                let value = self.call(predicate, vec![item], Vec::new())?;
+                self.truth(value)?
             };
-            self.heap.release_temporaries_since(mark);
-            if selected? {
+            if selected {
                 return Ok(Some(item));
             }
-        }
+        })();
+        self.heap.release_temporaries_since(roots);
+        result
     }
 
     /// Apply the shared iterator slots to a receiver of the defining builtin type.
