@@ -168,7 +168,7 @@ impl Context {
             "assign" | "assign_expr" | "assign_target" | "assign_named_target" => {
                 let mut scope = a;
                 if matches!(op, "assign_expr" | "assign_named_target") {
-                    while self.scope_data(scope).is_comprehension {
+                    while self.scope_data(scope).comprehension.is_some() {
                         scope = self
                             .scope_data(scope)
                             .parent

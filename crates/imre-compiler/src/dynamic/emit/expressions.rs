@@ -388,7 +388,9 @@ impl Function<'_, '_> {
         let first = self.expr(&generators[0].iter);
         let scope = self.op("comprehension_scope", &[&self.scope.clone()]);
         let previous = std::mem::replace(&mut self.scope, scope);
+        let class_locals = self.class_locals.take();
         self.comprehension_loop(generators, &first, &output, &element);
+        self.class_locals = class_locals;
         self.scope = previous;
         output
     }

@@ -16,6 +16,26 @@ def constant_factory():
 
 
 def current():
+    name = "enclosing"
+
+    class Owner:
+        name = "class"
+        source = [name]
+        pairs = [(name, item) for item in source]
+        readers = [lambda: name for item in source]
+
+    assert Owner.pairs == [("enclosing", "class")]
+    assert Owner.readers[0]() == "enclosing"
+
+    __class__ = "enclosing"
+    try:
+        class Unfinished:
+            values = [__class__ for _ in [0]]
+    except NameError:
+        pass
+    else:
+        raise AssertionError("captured the enclosing function's __class__")
+
     fn = make()
     print(fn.__code__.co_freevars, fn(), tuple(cell.cell_contents for cell in fn.__closure__))
     copied = types.FunctionType(fn.__code__, {}, closure=fn.__closure__[::-1])

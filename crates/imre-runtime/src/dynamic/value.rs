@@ -495,12 +495,18 @@ pub(super) struct ClassNamespace {
     pub slot_names: Option<std::rc::Rc<[String]>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ComprehensionKind {
+    ClassBody,
+    Ordinary,
+}
+
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
-    pub is_comprehension: bool,
+    pub comprehension: Option<ComprehensionKind>,
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
