@@ -59,9 +59,10 @@ pub(super) fn rendered_integer(value: &crate::Int) -> Result<crate::Str> {
     let mut error = Error::new("", detail.into_string());
     error
         .kind
+        .to_mut()
         .try_reserve_exact("ValueError".len())
         .map_err(render_allocation)?;
-    error.kind.push_str("ValueError");
+    error.kind.to_mut().push_str("ValueError");
     Err(error)
 }
 

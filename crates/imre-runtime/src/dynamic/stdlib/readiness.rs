@@ -60,7 +60,7 @@ fn fd(ctx: &mut Context, obj: Id) -> Result<Option<i32>> {
             .and_then(|v| ctx.as_int(v));
         number.map_err(|e| {
             if matches!(
-                e.kind.as_str(),
+                e.kind.as_ref(),
                 "AttributeError" | "TypeError" | "ValueError"
             ) {
                 Error::new(

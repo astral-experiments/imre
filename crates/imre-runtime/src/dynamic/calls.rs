@@ -977,7 +977,7 @@ impl Context {
             Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
             _ if let Some(actual) = error.class => self.subclass(actual, class),
             Value::Native(_) => {
-                let kind = error.kind.as_str();
+                let kind = error.kind.as_ref();
                 let builtin = self.builtins.get(kind).copied();
                 if self.classes.get(kind).copied() == builtin {
                     self.error_matches(kind, class)
@@ -3027,7 +3027,7 @@ impl Context {
                 if matches!(self.heap.get(result), Value::Instance { .. })
                     && let Err(error) = self.set_attr(result, "__orig_class__", callable)
                     && !alias.kind.is_typing_alias()
-                    && !matches!(error.kind.as_str(), "AttributeError" | "TypeError")
+                    && !matches!(error.kind.as_ref(), "AttributeError" | "TypeError")
                 {
                     return Err(error);
                 }
