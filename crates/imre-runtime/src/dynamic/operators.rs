@@ -2709,7 +2709,11 @@ impl Context {
         let storage = self.scalar_value(object);
         matches!(
             self.heap.get(storage),
-            Value::List(_) | Value::Tuple(_) | Value::Str(_) | Value::Bytes(_)
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::Str(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
         )
         .then_some(storage)
     }
@@ -2773,6 +2777,29 @@ impl Context {
                 Some(repeated) => self.alloc(Value::Bytes(repeated)),
                 None => storage,
             },
+            Value::ByteArray(data) if mode == RepeatMode::InPlace => {
+                if n != 1 && !data.is_empty() {
+                    let size = repeated_len(data.len(), n)?;
+                    self.check_bytearray_resize(storage)?;
+                    let Value::ByteArray(data) = self.heap.get_mut(storage) else {
+                        unreachable!()
+                    };
+                    if size == 0 {
+                        data.clear();
+                    } else {
+                        data.try_reserve_exact(size - data.len())
+                            .map_err(render_allocation)?;
+                        while data.len() < size {
+                            data.extend_from_within(..data.len().min(size - data.len()));
+                        }
+                    }
+                }
+                owner
+            }
+            Value::ByteArray(data) => {
+                let repeated = repeat_values(data, n)?;
+                self.alloc(Value::ByteArray(repeated))
+            }
             Value::Str(_) if n == 1 => storage,
             Value::Str(text) => self.text(crate::objects::repeat_str(text, &count)?.into_string()),
             _ => unreachable!("sequence repetition payload"),
@@ -3174,7 +3201,7 @@ impl Context {
                     };
                     let mode = if left
                         && inplace
-                        && matches!(self.heap.get(storage), Value::List(_))
+                        && matches!(self.heap.get(storage), Value::List(_) | Value::ByteArray(_))
                         && self.slot(owner, "__imul__").is_none()
                     {
                         RepeatMode::InPlace
@@ -3653,14 +3680,18 @@ impl Context {
     }
 }
 
-fn repeat_values(values: &[Id], times: isize) -> Result<Vec<Id>> {
-    if values.is_empty() || times <= 0 {
+/// Compute the new sequence length before allocating or asking a bytearray to resize.
+fn repeated_len(len: usize, times: isize) -> Result<usize> {
+    len.checked_mul(times.max(0) as usize)
+        .filter(|&size| size <= isize::MAX as usize)
+        .ok_or_else(|| Error::new("MemoryError", ""))
+}
+
+fn repeat_values<T: Copy>(values: &[T], times: isize) -> Result<Vec<T>> {
+    let size = repeated_len(values.len(), times)?;
+    if size == 0 {
         return Ok(Vec::new());
     }
-    let size = usize::try_from(times)
-        .ok()
-        .and_then(|n| values.len().checked_mul(n))
-        .ok_or_else(|| Error::new("MemoryError", ""))?;
     let mut output = Vec::new();
     output
         .try_reserve_exact(size)
