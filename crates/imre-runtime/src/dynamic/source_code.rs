@@ -164,6 +164,17 @@ impl<'a> CompiledStrings<'a, '_> {
     }
 }
 
+/// Collect source line offsets before constructing code or AST nodes.
+pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Result<Vec<usize>> {
+    let mut starts = Vec::new();
+    starts
+        .try_reserve_exact(1 + offsets.clone().count())
+        .map_err(|_| crate::Error::allocation())?;
+    starts.push(0);
+    starts.extend(offsets);
+    Ok(starts)
+}
+
 impl Program {
     /// Keep each code object's constants alive, including constants owned by unexecuted children.
     fn prepare_strings<'a>(
@@ -673,9 +684,7 @@ impl Context {
         let filename = filename_text;
         let parsed = ruff_python_parser::parse_module(&source)
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
-        let lines = std::iter::once(0)
-            .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
-            .collect::<Vec<_>>();
+        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
         code.lower(&parsed.syntax().body, &lines, false, None)?;
@@ -1134,9 +1143,7 @@ impl Context {
         let private_names = signature
             .private_scope
             .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
-        let lines = std::iter::once(0)
-            .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
-            .collect::<Vec<_>>();
+        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut program = Program::new(
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
