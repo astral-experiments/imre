@@ -593,7 +593,7 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
                     p.join(std::iter::once(crate::StrOwner::acquire_word(
                         child as usize,
                     )))
-                    .map(PurePath::into_object),
+                    .and_then(PurePath::into_object),
                     std::ptr::null(),
                 );
             }
@@ -761,7 +761,7 @@ pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object 
                 return path;
             }
             if let Storage::PurePath(p) = storage {
-                return finish(p.parent().map(PurePath::into_object), std::ptr::null());
+                return finish(p.parent().and_then(PurePath::into_object), std::ptr::null());
             }
             let Storage::Path { text, .. } = storage else {
                 fail("SystemError", "expected a path object");

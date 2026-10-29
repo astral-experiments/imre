@@ -126,7 +126,7 @@ impl Emitter<'_, '_> {
             PathOperation::PureNew(flavor) => {
                 let windows = u32::from(flavor == crate::ir::PathFlavor::Windows);
                 let operand =
-                    self.instruction(format!("call ptr @imre_pure_path_new(i32 {windows})"));
+                    self.checked_pointer(format!("call ptr @imre_pure_path_new(i32 {windows})"));
                 self.owned(Value {
                     ty: returns,
                     operand,

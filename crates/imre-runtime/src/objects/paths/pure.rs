@@ -206,7 +206,7 @@ impl PurePath {
             drive,
             root,
             tail,
-            text: StrOwner::new(text),
+            text: StrOwner::try_new(text).map_err(|_| Error::allocation())?,
             folded: OnceCell::new(),
             name: OnceCell::new(),
         })
@@ -460,7 +460,7 @@ impl PurePath {
             ));
         };
         *last = Str::try_new(name).map_err(|_| Error::allocation())?;
-        Ok(self.with_tail(tail)?.into_object())
+        self.with_tail(tail)?.into_object()
     }
 
     pub(super) fn as_posix(&self) -> Result<StrOwner> {
@@ -488,10 +488,11 @@ impl PurePath {
             "PurePosixPath"
         }
     }
-    pub(super) fn into_object(self) -> *const Object {
-        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-            Storage::PurePath(Box::new(self)),
-        ))))
+    pub(super) fn into_object(self) -> Result<*const Object> {
+        let path = allocator_api2::boxed::Box::try_new(self).map_err(|_| Error::allocation())?;
+        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::PurePath(path))))
+            .map(crate::ObjectOwner::into_raw)
+            .map_err(|_| Error::allocation())
     }
 }
 
@@ -535,7 +536,7 @@ impl Storage {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_pure_path_new(windows: u32) -> *const Object {
     super::finish(
-        PurePath::new(windows != 0, vec![]).map(PurePath::into_object),
+        PurePath::new(windows != 0, vec![]).and_then(PurePath::into_object),
         std::ptr::null(),
     )
 }
@@ -552,9 +553,9 @@ pub unsafe extern "C" fn imre_path_join_object(
     let result = unsafe {
         object(left).0.with(|a| {
             object(right).0.with(|b| match (a, b) {
-                (Storage::PurePath(a), Storage::PurePath(b)) if a.windows == b.windows => {
-                    a.join(b.raw.iter().cloned()).map(PurePath::into_object)
-                }
+                (Storage::PurePath(a), Storage::PurePath(b)) if a.windows == b.windows => a
+                    .join(b.raw.iter().cloned())
+                    .and_then(PurePath::into_object),
                 _ => {
                     let child = b.posix_spelling()?;
                     // SAFETY: the local Rc roots the spelling while the original path stays live.
