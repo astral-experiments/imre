@@ -284,7 +284,8 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
-pub(super) const BYTEARRAY_METHODS: &[&str] = &["__repr__", "append", "clear", "extend"];
+pub(super) const BYTEARRAY_METHODS: &[&str] =
+    &["__repr__", "append", "clear", "copy", "extend", "reverse"];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
@@ -856,8 +857,8 @@ pub(super) fn call(
             }
             "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
-            "bytearray" if matches!(method, "append" | "clear" | "extend") => {
-                text::mutate_bytearray(ctx, name, method, args, kwargs)
+            "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
+                text::bytearray_method(ctx, name, method, args, kwargs)
             }
             "tuple" if method == "__getitem__" => {
                 let (&receiver, args) = args.split_first().ok_or_else(|| {

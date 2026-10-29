@@ -229,8 +229,8 @@ pub(super) fn construct(
     }
 }
 
-/// Mutate the underlying byte storage, including for inherited bytearray methods.
-pub(super) fn mutate_bytearray(
+/// Apply a bytearray method to the underlying storage of an exact or subclass receiver.
+pub(super) fn bytearray_method(
     ctx: &mut Context,
     name: &str,
     method: &str,
@@ -249,7 +249,7 @@ pub(super) fn mutate_bytearray(
             ctx.type_name(receiver)
         )));
     };
-    if method == "clear" {
+    if matches!(method, "clear" | "copy" | "reverse") {
         if !kwargs.is_empty() {
             return Err(type_error(format!("{name}() takes no keyword arguments")));
         }
@@ -259,11 +259,19 @@ pub(super) fn mutate_bytearray(
                 args.len()
             )));
         }
-        if !data.is_empty() {
+        if method == "copy" {
+            let copy = super::super::copy_ids(data)?;
+            return Ok(ctx.alloc(Value::ByteArray(copy)));
+        }
+        if method == "clear" && !data.is_empty() {
             ctx.check_bytearray_resize(storage)?;
-            let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
-                unreachable!()
-            };
+        }
+        let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        if method == "reverse" {
+            data.reverse();
+        } else {
             data.clear();
         }
         return Ok(NONE);
