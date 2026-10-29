@@ -3454,7 +3454,9 @@ impl Context {
                 self.heap
                     .reserve_temporaries(kwargs.len().saturating_add(4))?;
                 let module = self.scope_data(scope).module.clone();
-                let local = self.scope(&module, Some(scope));
+                let closure = allocator_api2::boxed::Box::try_new(value::ClosureScope::default())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                let local = self.scope_with_closure(module, Some(scope), closure);
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
                     .map_err(|e| Error::new("SystemError", e.to_string()))?;
                 let names = |key: &str| -> Vec<String> {

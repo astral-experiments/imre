@@ -515,7 +515,7 @@ pub(super) struct Scope {
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
-    pub closure: Box<ClosureScope>,
+    pub closure: allocator_api2::boxed::Box<ClosureScope>,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
     pub exec_globals: Option<ExecGlobals>,
