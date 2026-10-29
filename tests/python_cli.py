@@ -270,6 +270,29 @@ def check_boxed_json_callback_allocation(imre, root, run):
 
 
 
+def check_noncallable_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "noncallable_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_noncallable.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape in [0, 4, 10, 11, 13, 15]:
+        for target in [0, 1, "all"]:
+            extra = {"IMRE_ENCODED_FLAGS": flags, "NONCALLABLE_REFUSE_NTH": str(target if target != "all" else 0)}
+            if target == "all":
+                extra["NONCALLABLE_REFUSE_ALL"] = "1"
+            result = run(imre, "-B", fixtures / "boxed_noncallable_allocation.py", str(shape), extra=extra)
+            assert result.returncode == 0 and result.stdout.endswith(b"preserved True\nretry True\n"), result
+            if target:
+                assert result.stdout.startswith(b"kind MemoryError\n"), result
+                assert b"noncallable_allocation 1 " in result.stderr and b" 1\n" in result.stderr, result
+            else:
+                reference = run(sys.executable, "-B", fixtures / "boxed_noncallable_allocation.py", str(shape))
+                assert result.stdout == reference.stdout and reference.returncode == 0, (result, reference)
+
+
 def check_weak_proxy_root_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "weak_proxy_root_refuse.o"
@@ -756,6 +779,7 @@ def main():
             check_bound_method_allocation(imre, root, run)
             check_ffi_result_roots(imre, root, run)
             check_weak_proxy_root_allocation(imre, root, run)
+            check_noncallable_allocation(imre, root, run)
             check_select_result_allocation(imre, root, run)
             check_select_input_root_allocation(imre, root, run)
             check_poll_result_allocation(imre, root, run)
