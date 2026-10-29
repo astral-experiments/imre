@@ -101,6 +101,7 @@ fn parse<T>(
     text: &str,
     mut build: impl FnMut(DecodedJson<T>) -> Result<T, Error>,
 ) -> Result<T, Problem> {
+    let digit_limit = crate::integer_text::decimal_digit_limit();
     let mut cursor = Cursor {
         source: text,
         pos: 0,
@@ -138,7 +139,17 @@ fn parse<T>(
                     "false" => DecodedJson::Bool(false),
                     "null" => DecodedJson::Null,
                     token if token.starts_with('"') => DecodedJson::String(string(token, start)?),
-                    token => DecodedJson::Number(number(token)),
+                    token => {
+                        if digit_limit != 0
+                            && token.len() > digit_limit as usize
+                            && !token.contains(['.', 'e', 'E'])
+                        {
+                            let digits = token.strip_prefix('-').unwrap_or(token);
+                            crate::integer_text::check_input_digits(digits, digit_limit)
+                                .map_err(Problem::Build)?;
+                        }
+                        DecodedJson::Number(number(token))
+                    }
                 }
             }
         };
