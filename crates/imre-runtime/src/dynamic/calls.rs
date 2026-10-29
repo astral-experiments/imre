@@ -14,6 +14,22 @@ struct InstanceLayout {
     active_slot: bool,
 }
 
+/// Build a non-callable diagnostic while keeping allocation failure catchable.
+fn non_callable_error(name: &str) -> Error {
+    let suffix = "' object is not callable";
+    let mut message = String::new();
+    if message
+        .try_reserve_exact(1 + name.len() + suffix.len())
+        .is_err()
+    {
+        return Error::new("MemoryError", "");
+    }
+    message.push('\'');
+    message.push_str(name);
+    message.push_str(suffix);
+    Error::new_static("TypeError", message)
+}
+
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
         if name == "__hash__" {
@@ -3067,6 +3083,20 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        // Binding a descriptor can call Python before it returns its target.
+        if matches!(self.heap.get(callable), Value::Instance { .. }) {
+            return self.with_slot_depth(
+                "maximum recursion depth exceeded while calling a Python object",
+                |ctx| ctx.call_instance(callable, args, kwargs),
+            );
+        }
+        if !self.callable(callable) {
+            let name = match self.heap.get(callable) {
+                Value::Weak(wr) if wr.kind == weakref::Kind::Proxy => "weakref.ProxyType",
+                _ => self.type_name(callable),
+            };
+            return Err(non_callable_error(name));
+        }
         let target = match self.heap.get(callable) {
             Value::Native(name) => Value::Native(copy_label(name)?),
             Value::Class {
@@ -3098,10 +3128,7 @@ impl Context {
             Value::Weak(wr) => match wr.kind {
                 weakref::Kind::Reference => wr.call(&args, &kwargs),
                 weakref::Kind::CallableProxy => self.call(wr.upgrade()?, args, kwargs),
-                weakref::Kind::Proxy => Err(Error::new(
-                    "TypeError",
-                    "'weakref.ProxyType' object is not callable",
-                )),
+                weakref::Kind::Proxy => Err(non_callable_error("weakref.ProxyType")),
             },
             Value::GenericAlias(alias) => {
                 let result = self.call(alias.origin, args, kwargs)?;
@@ -3674,15 +3701,7 @@ impl Context {
                 }
                 Ok(value)
             }
-            // Binding a descriptor can call Python before it returns its target.
-            Value::Instance { .. } => self.with_slot_depth(
-                "maximum recursion depth exceeded while calling a Python object",
-                |ctx| ctx.call_instance(callable, args, kwargs),
-            ),
-            _ => Err(Error::new(
-                "TypeError",
-                format!("'{}' object is not callable", self.type_name(callable)),
-            )),
+            _ => Err(non_callable_error(self.type_name(callable))),
         }
     }
 
@@ -3713,10 +3732,7 @@ impl Context {
         // next call checks the available stack again, including on cyclic chains.
         for _ in 0..32 {
             let Some(next) = self.bound_slot(callable, "__call__")? else {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("'{}' object is not callable", self.type_name(callable)),
-                ));
+                return Err(non_callable_error(self.type_name(callable)));
             };
             callable = next;
             if !matches!(self.heap.get(callable), Value::Instance { .. }) {
