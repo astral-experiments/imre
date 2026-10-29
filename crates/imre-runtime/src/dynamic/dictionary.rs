@@ -91,26 +91,31 @@ impl Entries {
             order
                 .indices
                 .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            order.indices.push(self.values.len());
+                .map_err(|_| crate::Error::memory_error())?;
         }
-        // CPython compacts its entries when the index table runs out of usable slots.
-        // Existing iterators keep their numerical cursor in the compacted table.
+        self.values
+            .try_reserve(1)
+            .map_err(|_| crate::Error::memory_error())?;
+        let index = self.index.as_mut().expect("indexed dictionary");
+        index.reserve_hash()?;
+        // An existing iterator must keep its insertion position if growth fails.
         if self.next == self.usable {
-            self.usable = usable_slots(self.values.len() * 3);
+            let usable = usable_slots(self.values.len() * 3);
+            index.compact((usable + 1).next_power_of_two())?;
+            self.usable = usable;
             self.next = self.values.len();
             self.positions = None;
-            if let Some(index) = &mut self.index {
-                index.compact((self.usable + 1).next_power_of_two());
-            }
         }
         if let Some(positions) = &mut self.positions {
+            positions
+                .try_reserve(1)
+                .map_err(|_| crate::Error::memory_error())?;
             positions.push(self.next);
         }
-        self.index
-            .as_mut()
-            .expect("indexed dictionary")
-            .push(hash, self.next);
+        if let Some(order) = &mut self.order {
+            order.indices.push(self.values.len());
+        }
+        index.push(hash, self.next);
         self.next += 1;
         self.values.push(value);
         Ok(())

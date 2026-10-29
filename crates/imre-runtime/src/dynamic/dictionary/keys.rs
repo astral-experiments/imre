@@ -125,17 +125,35 @@ impl KeyLookup {
 }
 
 impl Index {
-    fn new(hashes: Vec<i64>, positions: Option<&[usize]>, size: usize, generation: usize) -> Self {
+    fn new(hashes: Vec<i64>, positions: Option<&[usize]>, size: usize) -> Result<Self> {
         let mut index = Self {
-            slots: vec![EMPTY; size],
+            slots: Vec::new(),
             hashes,
-            generation,
+            generation: 0,
         };
-        for dense in 0..index.hashes.len() {
+        index.rebuild(positions, size)?;
+        Ok(index)
+    }
+
+    /// Reserve the slots before replacing the probe layout so a refusal preserves lookups.
+    fn rebuild(&mut self, positions: Option<&[usize]>, size: usize) -> Result<()> {
+        self.slots
+            .try_reserve_exact(size.saturating_sub(self.slots.len()))
+            .map_err(|_| crate::Error::memory_error())?;
+        self.slots.clear();
+        self.slots.resize(size, EMPTY);
+        for dense in 0..self.hashes.len() {
             let position = positions.map_or(dense, |p| p[dense]);
-            index.place(index.hashes[dense], position);
+            self.place(self.hashes[dense], position);
         }
-        index
+        Ok(())
+    }
+
+    /// Reserve the next hash before any insertion position becomes visible.
+    pub(super) fn reserve_hash(&mut self) -> Result<()> {
+        self.hashes
+            .try_reserve(1)
+            .map_err(|_| crate::Error::memory_error().into())
     }
 
     fn place(&mut self, hash: i64, position: usize) {
@@ -145,13 +163,10 @@ impl Index {
         self.slots[slot] = position;
     }
 
-    pub(super) fn compact(&mut self, size: usize) {
-        *self = Self::new(
-            std::mem::take(&mut self.hashes),
-            None,
-            size,
-            self.generation + 1,
-        );
+    pub(super) fn compact(&mut self, size: usize) -> Result<()> {
+        self.rebuild(None, size)?;
+        self.generation += 1;
+        Ok(())
     }
 
     pub(super) fn push(&mut self, hash: i64, position: usize) {
@@ -183,7 +198,12 @@ impl Entries {
         let old = std::mem::take(self);
         if let Some(index) = old.index {
             let size = (self.usable + 1).next_power_of_two();
-            self.index = Some(Index::new(Vec::new(), None, size, index.generation + 1));
+            let mut index = index;
+            index.hashes.clear();
+            index.slots.truncate(size);
+            index.slots.fill(EMPTY);
+            index.generation += 1;
+            self.index = Some(index);
         }
         old.values
     }
@@ -778,18 +798,21 @@ impl Context {
             return Ok(());
         }
         // Internal constructors can assemble a dictionary directly from builtin names.
-        let keys: Vec<_> = self
-            .stored_entries(dict)
-            .iter()
-            .map(|&(key, _)| key)
-            .collect();
-        let hashes = keys
-            .into_iter()
-            .map(|key| self.dictionary_hash(key))
-            .collect::<Result<Vec<_>>>()?;
+        let entries = self.stored_entries(dict);
+        let mut keys = Vec::new();
+        keys.try_reserve_exact(entries.len())
+            .map_err(|_| crate::Error::memory_error())?;
+        keys.extend(entries.iter().map(|&(key, _)| key));
+        let mut hashes = Vec::new();
+        hashes
+            .try_reserve_exact(keys.len())
+            .map_err(|_| crate::Error::memory_error())?;
+        for key in keys {
+            hashes.push(self.dictionary_hash(key)?);
+        }
         let entries = self.stored_entries_mut(dict);
         let size = (entries.usable + 1).next_power_of_two();
-        entries.index = Some(Index::new(hashes, entries.positions.as_deref(), size, 0));
+        entries.index = Some(Index::new(hashes, entries.positions.as_deref(), size)?);
         Ok(())
     }
 
