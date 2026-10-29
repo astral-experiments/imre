@@ -3013,7 +3013,11 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        match self.heap.get(callable).clone() {
+        let target = match self.heap.get(callable) {
+            Value::Native(name) => Value::Native(copy_label(name)?),
+            value => value.clone(),
+        };
+        match target {
             Value::Weak(wr) => match wr.kind {
                 weakref::Kind::Reference => wr.call(&args, &kwargs),
                 weakref::Kind::CallableProxy => self.call(wr.upgrade()?, args, kwargs),
@@ -3429,7 +3433,7 @@ impl Context {
                 ..
             } => {
                 let parameters = self.code_object(code).parameters;
-                let name = self.str_value(fields.qualname)?.to_owned();
+                let name = copy_label(self.str_value(fields.qualname)?)?;
                 if parameters == NONE {
                     if let Some((key, _)) = kwargs.first() {
                         return Err(Error::new(
@@ -3450,8 +3454,8 @@ impl Context {
                     let globals = self.module_globals(scope);
                     return self.exec_source(code, globals, None, Some(callable));
                 }
-                let module = self.scope_data(scope).module.clone();
-                let local = self.scope(&module, Some(scope));
+                let module = copy_label(&self.scope_data(scope).module)?;
+                let local = self.scope(module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
                     .map_err(|e| Error::new("SystemError", e.to_string()))?;
                 let names = |key: &str| -> Vec<String> {
