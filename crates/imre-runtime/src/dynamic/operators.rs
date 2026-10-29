@@ -2592,6 +2592,7 @@ impl Context {
             }
         })?;
         self.heap.keep(iterator);
+        let mark = self.heap.temporary_mark();
         while let Some(value) = self.next_item(iterator)? {
             if value == item {
                 return Ok(true);
@@ -2599,7 +2600,9 @@ impl Context {
             // Equality can resize the source and collect a removed candidate.
             self.heap.keep(value);
             let equal = self.binary("==", value, item)?;
-            if self.truth(equal)? {
+            let matched = self.truth(equal)?;
+            self.heap.release_temporaries_since(mark);
+            if matched {
                 return Ok(true);
             }
         }
