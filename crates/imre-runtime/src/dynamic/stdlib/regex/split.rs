@@ -151,6 +151,10 @@ pub(super) fn nonempty(
         Restore(usize, Option<NonMaxUsize>),
     }
     use Frame::{Restore, Visit};
+    let groups = nfa.group_info();
+    let eol_start = groups
+        .to_index(PatternID::ZERO, "imre.eol")
+        .and_then(|group| groups.slot(PatternID::ZERO, group));
     caps.clear();
     let mut stack = vec![Visit(nfa.start_anchored(), start)];
     let mut seen = HashSet::new();
@@ -182,6 +186,11 @@ pub(super) fn nonempty(
             }
             State::Capture { slot, next, .. } => {
                 let slot = slot.as_usize();
+                // The synthetic final newline cannot make an empty match nonempty.
+                // Discard this path before it visits states a consuming path may need.
+                if at == start && Some(slot) == eol_start {
+                    continue;
+                }
                 stack.push(Restore(slot, caps.slots()[slot]));
                 caps.slots_mut()[slot] = NonMaxUsize::new(at);
                 stack.push(Visit(*next, at));
@@ -189,14 +198,7 @@ pub(super) fn nonempty(
             }
             State::Match { pattern_id } if at > start => {
                 caps.set_pattern(Some(*pattern_id));
-                let eol = caps.group_info().to_index(*pattern_id, "imre.eol");
-                if eol
-                    .and_then(|i| caps.get_group(i))
-                    .is_none_or(|nl| nl.start > start)
-                {
-                    return Ok(true);
-                }
-                continue;
+                return Ok(true);
             }
             _ => continue,
         };
