@@ -124,7 +124,7 @@ impl Reader {
         codec: Codec,
         newline: Option<&str>,
         end: bool,
-    ) {
+    ) -> Result<()> {
         if self.cursor != 0 {
             self.text.drain(..self.cursor);
             self.boundaries.retain_mut(|b| {
@@ -148,8 +148,29 @@ impl Reader {
                     && codec
                         .decode(raw, None)
                         .is_ok_and(|strict| strict == decoded));
+        let universal = matches!(newline, None | Some(""));
+        let pending = usize::from(self.cr);
+        let length = decoded
+            .len()
+            .checked_add(pending)
+            .ok_or_else(crate::Error::allocation)?;
+        self.text
+            .try_reserve(length)
+            .map_err(|_| crate::Error::allocation())?;
+        let boundaries = if universal || single_byte {
+            decoded
+                .chars()
+                .filter(|&c| universal && c == '\r' || single_byte && !c.is_ascii())
+                .count()
+                + pending
+        } else {
+            0
+        };
+        self.boundaries
+            .try_reserve(boundaries)
+            .map_err(|_| crate::Error::allocation())?;
         self.mapped &= aligned || single_byte;
-        if matches!(newline, None | Some("")) {
+        if universal {
             let translate = newline.is_none();
             for c in decoded.chars() {
                 if self.cr {
@@ -186,6 +207,7 @@ impl Reader {
         } else {
             self.text.push_str(decoded);
         }
+        Ok(())
     }
     pub(super) fn take(
         &mut self,
