@@ -77,6 +77,26 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
+
+def check_weak_proxy_root_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "weak_proxy_root_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_weak_proxy_root.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "boxed_weak_proxy_root_allocation.py"
+    reference = run(sys.executable, "-B", source, "512")
+    assert reference.returncode == 0, reference
+    for ordinal in (0, 1):
+        result = run(imre, "-B", source, "512", extra={"IMRE_ENCODED_FLAGS": flags, "PROXY_ROOT_REFUSE_NTH": str(ordinal)})
+        expected = reference.stdout if not ordinal else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+        assert result.returncode == 0 and result.stdout == expected, (ordinal, result, reference)
+        refused = any(line.startswith(b"weak_proxy_root_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
+        assert refused == bool(ordinal), (ordinal, result)
+
+
 def call_allocation_flags(root):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "itemgetter_refuse.o"
@@ -420,6 +440,7 @@ def main():
 
         if sys.platform.startswith("linux"):
             check_select_result_allocation(imre, root, run)
+            check_weak_proxy_root_allocation(imre, root, run)
             flags = call_allocation_flags(root)
             check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
