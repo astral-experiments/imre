@@ -170,7 +170,7 @@ impl Emitter<'_, '_> {
                 positive_sign,
             } => Value {
                 ty: Type::Str,
-                operand: self.instruction(format!(
+                operand: self.checked_pointer(format!(
                     "call ptr @imre_float_format(double {}, i32 {precision}, i32 {})",
                     args[0].value.operand,
                     u32::from(*percent) | (u32::from(*positive_sign) << 8),

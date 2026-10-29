@@ -520,8 +520,10 @@ impl Context {
                         error.tracing().instance = Some(normalized);
                     }
                     let active = self.heap.active_exception();
-                    if active != NONE && error.tracing().instance != Some(active) {
-                        error.tracing().context = Some(active);
+                    if active != NONE
+                        && error.trace.as_ref().and_then(|trace| trace.instance) != Some(active)
+                    {
+                        error.context = active;
                     }
                 }
                 Err(error)
@@ -606,6 +608,8 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     let current = ctx.alloc(Value::Context(Default::default()));
     ctx.contexts.push(current);
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
+    // Resolving the handler after an allocation failure must not grow the builtin cache.
+    ctx.builtin("MemoryError");
     Box::into_raw(Box::new(ctx))
 }
 
@@ -671,6 +675,10 @@ fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
 }
 
 fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> Id {
+    let result = result.and_then(|id| {
+        ctx.heap.reserve_temporaries(1)?;
+        Ok(id)
+    });
     match result {
         Ok(id) => {
             ctx.heap.keep(id);
@@ -714,22 +722,31 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .ok_or_else(|| Error::new("ValueError", "invalid integer literal")),
         1 | 5 | 6 => {
             let id = std::str::from_utf8(data)
-                .map(|text| {
+                .map_err(|e| Error::new("UnicodeError", e.to_string()))
+                .and_then(|text| {
                     if kind == 1 {
                         return ctx.heap.string_literal(text);
                     }
                     if kind == 6 {
-                        return ctx.heap.code_name(text);
+                        return Ok(ctx.heap.code_name(text));
                     }
                     for name in text.split('\0') {
                         ctx.heap.code_name(name);
                     }
-                    NONE
-                })
-                .map_err(|e| Error::new("UnicodeError", e.to_string()));
+                    Ok(NONE)
+                });
             return finish(ctx, id);
         }
-        2 => Ok(Value::Bytes(data.to_vec())),
+        2 => {
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(data.len())
+                .map(|()| {
+                    bytes.extend_from_slice(data);
+                    Value::Bytes(bytes)
+                })
+                .map_err(|_| crate::Error::memory_error().into())
+        }
         3 => data
             .try_into()
             .map(|bytes| Value::Float(f64::from_le_bytes(bytes)))
@@ -1138,6 +1155,16 @@ pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usiz
     unsafe { (&*ctx).heap.temporary_mark() }
 }
 
+/// Drop the finished iteration's temporary handles before asking for the next item.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns the context and recorded this mark in its active frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.reserve_slot_or_request_collection();
+    ctx.collect_garbage();
+}
+
 /// Release a consumed truth operand on the branch that no longer needs it.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
@@ -1329,6 +1356,34 @@ mod tests {
     use std::rc::{Rc, Weak};
 
     #[test]
+    fn dictionary_view_intersection_collects_discarded_values() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the argument and configuration pointers outlive context initialization.
+        let mut ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+        ctx.heap
+            .enter(NONE, NONE, value::FrameOwner::Function(NONE));
+        let dict = ctx.alloc(Value::Dict(Default::default()));
+        let keys = ctx.alloc(Value::DictView {
+            dict,
+            kind: value::DictViewKind::Keys,
+            ordered: false,
+        });
+        let range = crate::dynamic::range::Range::new(0.into(), 16_384.into(), 1.into()).unwrap();
+        let source = ctx.alloc(Value::Range(range));
+
+        let mark = ctx.heap.temporary_mark();
+        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let probe = Rc::downgrade(&value);
+        ctx.alloc(Value::AttrGetter(value));
+        ctx.heap.release_temporaries_since(mark);
+
+        let selected = ctx.binary("&", keys, source).unwrap();
+        assert!(ctx.stored_entries(selected).is_empty());
+        assert!(probe.upgrade().is_none());
+    }
+
+    #[test]
     fn urlencode_collects_discarded_sequence_values() {
         let argv = [c"imre".as_ptr()];
         // SAFETY: the argument and configuration pointers outlive context initialization.
@@ -1354,6 +1409,22 @@ mod tests {
         assert!(encoded.starts_with("k=0&k=1&"));
         assert!(encoded.ends_with("k=16383"));
         assert!(probe.upgrade().is_none());
+    }
+
+    #[test]
+    fn memory_error_is_ready_before_python_runs() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the arguments outlive initialization, which returns an owned context.
+        let ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+
+        for name in [
+            "MemoryError",
+            "MemoryError.__new__",
+            "BaseException.__init__",
+        ] {
+            assert!(ctx.builtins.contains_key(name), "{name}");
+        }
     }
 
     #[test]

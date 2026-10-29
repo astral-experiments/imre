@@ -161,6 +161,14 @@ def current():
         while trace.tb_next is not None:
             trace = trace.tb_next
         print(trace.tb_frame.f_code is g["missing"].__code__, trace.tb_lineno, trace.tb_frame.f_code.co_filename)
+    try:
+        deep = compile("result = " + "1+" * 32768 + "1", "<deep-compile>", "exec")
+    except RecursionError:
+        pass
+    else:
+        assert deep.co_filename == "<deep-compile>"
+        del deep
+    print("deep compile returned")
     module = compile("from_source = 73\n", "<rebound>", "exec")
     measure.__code__ = module
     print(measure(), measure.__globals__["from_source"], measure.__code__ is module)

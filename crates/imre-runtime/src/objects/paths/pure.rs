@@ -420,9 +420,8 @@ impl PurePath {
         Ok(path)
     }
 
-    pub(super) fn name(&self) -> &StrOwner {
-        self.name
-            .get_or_init(|| StrOwner::new(self.tail.last().cloned().unwrap_or_default()))
+    pub(super) fn name(&self) -> Result<&StrOwner> {
+        super::cached_name(&self.name, || super::try_owned_string(self.basename()))
     }
 
     pub(super) fn basename(&self) -> &str {
@@ -588,22 +587,23 @@ pub unsafe extern "C" fn imre_path_as_posix(path: *const Object) -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_prefix(path: *const Object, part: u32) -> *const Str {
     // SAFETY: the prefix slices stay inside the borrow until an owned result exists.
-    unsafe {
+    let result = unsafe {
         object(path).0.with(|p| {
             let (drive, root) = p.drive_root();
-            let text = match part {
-                0 => Str::from(drive),
-                1 => Str::from(root),
-                2 => {
-                    let mut s = Str::from(drive);
-                    s.push_str(root);
-                    s
-                }
+            let (first, second) = match part {
+                0 => (drive, ""),
+                1 => (root, ""),
+                2 => (drive, root),
                 _ => unreachable!(),
             };
-            StrOwner::into_raw(StrOwner::new(text))
+            let mut text = Str::try_with_capacity(first.len().saturating_add(second.len()))
+                .map_err(|_| Error::allocation())?;
+            text.push_str(first);
+            text.push_str(second);
+            StrOwner::try_new(text).map_err(|_| Error::allocation())
         })
-    }
+    };
+    super::finish(result.map(StrOwner::into_raw), std::ptr::null())
 }
 
 #[cfg(test)]

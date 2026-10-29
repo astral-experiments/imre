@@ -4,6 +4,7 @@ pub(super) mod comparator;
 
 use crate::StrOwner;
 use std::cmp::Ordering;
+use std::fmt::{self, Write};
 
 use smallvec::SmallVec;
 
@@ -790,36 +791,55 @@ pub unsafe extern "C" fn imre_str_replace(
 ) -> *const Str {
     // SAFETY: inputs remain immutable and rooted through both sizing and copying.
     let (value, old, new) = unsafe { (&*value, &*old, &*new) };
-    let count = if old == new {
-        0
-    } else {
-        value.matches(old.as_str()).count()
-    };
-    if count == 0 {
-        // SAFETY: the caller roots the input; the unchanged result takes its own owner.
-        return StrOwner::into_raw(unsafe {
-            crate::StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
-        });
+    match replace_text(value, old, new, usize::MAX, old == new, |len| {
+        Str::try_with_capacity(len).ok()
+    }) {
+        Ok(Some(result)) => StrOwner::into_raw(StrOwner::new(result)),
+        Ok(None) => {
+            // SAFETY: the original string is rooted and the result takes its own owner.
+            StrOwner::into_raw(unsafe {
+                StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
+            })
+        }
+        Err(_) => {
+            super::exceptions::sequence_allocation_failed();
+            std::ptr::null()
+        }
     }
-    let length = value
+}
+
+/// Reserve the complete replacement once, counting empty matches at Unicode boundaries.
+/// An unchanged result lets the caller retain its original string.
+pub(crate) fn replace_text<'a, T: Extend<&'a str>>(
+    value: &'a str,
+    old: &str,
+    new: &'a str,
+    limit: usize,
+    same_pattern: bool,
+    buffer: impl FnOnce(usize) -> Option<T>,
+) -> crate::Result<Option<T>> {
+    let matches = || value.match_indices(old).take(limit);
+    if same_pattern || (old.is_empty() && new.is_empty()) {
+        return Ok(None);
+    }
+    let count = matches().count();
+    if count == 0 {
+        return Ok(None);
+    }
+    let retained = value.len() - count * old.len();
+    let mut result = new
         .len()
-        .checked_sub(old.len().checked_mul(count).unwrap())
-        .and_then(|length| {
-            new.len()
-                .checked_mul(count)
-                .and_then(|extra| length.checked_add(extra))
-        });
-    let Some(mut result) = string_buffer(length) else {
-        return std::ptr::null();
-    };
+        .checked_mul(count)
+        .and_then(|extra| retained.checked_add(extra))
+        .and_then(buffer)
+        .ok_or_else(Error::memory_error)?;
     let mut copied = 0;
-    for (index, _) in value.match_indices(old.as_str()) {
-        result.push_str(&value[copied..index]);
-        result.push_str(new);
+    for (index, _) in matches() {
+        result.extend([&value[copied..index], new]);
         copied = index + old.len();
     }
-    result.push_str(&value[copied..]);
-    StrOwner::into_raw(StrOwner::new(result))
+    result.extend([&value[copied..]]);
+    Ok(Some(result))
 }
 
 /// Formats a binary64 value with correctly rounded fixed decimal precision.
@@ -831,8 +851,27 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
         fail("SystemError", "unchecked float format precision");
     }
     // The low bit selects percentages. A zero high byte keeps the default sign.
-    let result = format_fixed_float(value, precision, flags & 1 != 0, (flags >> 8) as u8);
-    StrOwner::into_raw(StrOwner::new(result))
+    match format_fixed_float(value, precision, flags & 1 != 0, (flags >> 8) as u8)
+        .and_then(|text| StrOwner::try_new(text).map_err(|_| Error::allocation()))
+    {
+        Ok(owner) => StrOwner::into_raw(owner),
+        Err(error) => {
+            error.raise();
+            std::ptr::null()
+        }
+    }
+}
+
+/// Reserve each float-format chunk before appending so allocation failure stays recoverable.
+struct FloatText(Str);
+
+impl fmt::Write for FloatText {
+    /// Append a formatting chunk only after its UTF-8 bytes fit in the output buffer.
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        self.0.try_reserve(text.len()).map_err(|_| fmt::Error)?;
+        self.0.push_str(text);
+        Ok(())
+    }
 }
 
 /// Render a fixed-point or percentage field after its precision and sign have been checked.
@@ -841,7 +880,7 @@ pub(crate) fn format_fixed_float(
     precision: u32,
     percent: bool,
     positive_sign: u8,
-) -> Str {
+) -> crate::Result<Str> {
     let value = if percent { value * 100.0 } else { value };
     let mut result = if value.is_nan() {
         Str::from("nan")
@@ -853,15 +892,21 @@ pub(crate) fn format_fixed_float(
         })
     } else {
         let precision = precision as usize;
-        compact_str::format_compact!("{value:.precision$}")
+        let mut text = FloatText(Str::default());
+        write!(text, "{value:.precision$}").map_err(|_| Error::allocation())?;
+        text.0
     };
-    if positive_sign != 0 && !result.starts_with('-') {
+    let prefix = positive_sign != 0 && !result.starts_with('-');
+    result
+        .try_reserve(usize::from(prefix) + usize::from(percent))
+        .map_err(|_| Error::allocation())?;
+    if prefix {
         result.insert(0, char::from(positive_sign));
     }
     if percent {
         result.push('%');
     }
-    result
+    Ok(result)
 }
 
 /// Suspend the current native thread, rounding a positive timeout up to nanoseconds.

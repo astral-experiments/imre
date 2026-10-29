@@ -755,15 +755,29 @@ pub unsafe extern "C" fn imre_socket_recv(s: &Object, size: usize, flags: usize)
 pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
     let mut bytes = Vec::<u8>::new();
     if size != 0 {
-        bytes
-            .try_reserve_exact(size)
-            .map_err(|_| Error::allocation())?;
-        // SAFETY: the empty Vec owns size writable bytes in its reserved allocation.
+        if flags & libc::MSG_TRUNC != 0 {
+            // Linux TCP can report discarded bytes without touching the buffer.
+            // Request zeroed storage without writing every page of a large receive.
+            let layout = std::alloc::Layout::array::<u8>(size).map_err(|_| Error::allocation())?;
+            // SAFETY: size is nonzero and layout describes exactly size bytes.
+            let data = unsafe { std::alloc::alloc_zeroed(layout) };
+            if data.is_null() {
+                return Err(Error::allocation());
+            }
+            // SAFETY: the global allocator supplies an initialized allocation
+            // with the layout that Vec<u8> uses for this capacity.
+            bytes = unsafe { Vec::from_raw_parts(data, size, size) };
+        } else {
+            bytes
+                .try_reserve_exact(size)
+                .map_err(|_| Error::allocation())?;
+        }
+        // SAFETY: the allocation has at least size writable bytes.
         let received =
             unsafe { receive(fd(s), bytes.as_mut_ptr(), size, flags) }.map_err(errno_error)?;
         let n = received.min(size);
-        // SAFETY: even when recv reports the full packet length, the prefix
-        // retained here stays within the receive allocation.
+        // SAFETY: the kernel initialized the returned prefix or MSG_TRUNC
+        // selected initialized storage. A reported packet length can exceed size.
         unsafe {
             bytes.set_len(n);
         }
@@ -1001,6 +1015,34 @@ mod tests {
     }
 
     use super::is_reverse_owner;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn discarded_tcp_payload_returns_initialized_bytes() {
+        use std::io::Write;
+        use std::net::{TcpListener, TcpStream};
+        use std::os::fd::IntoRawFd;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (socket, _) = listener.accept().unwrap();
+        let receiver = super::handle(socket.into_raw_fd(), true)
+            .ok()
+            .expect("socket handle");
+        sender.write_all(&[0x5a; 258]).unwrap();
+        let scratch = vec![0xa5; 257];
+        std::hint::black_box(&scratch);
+        drop(scratch);
+        let received = super::recv(&receiver, 257, libc::MSG_TRUNC | libc::MSG_WAITALL)
+            .ok()
+            .expect("discarded receive");
+        assert_eq!(received.len(), 257);
+        assert!(received.iter().all(|&byte| byte == 0));
+        assert_eq!(
+            super::recv(&receiver, 1, 0).ok().expect("trailing byte"),
+            [0x5a]
+        );
+    }
 
     #[test]
     fn darwin_ptr_owner_leaves_real_host_aliases_available() {

@@ -370,7 +370,7 @@ impl Wrapper {
                 && let Some(part) =
                     w.input
                         .borrow_mut()
-                        .take(limit, line, w.newline.as_deref(), false)
+                        .take(limit, line, w.newline.as_deref(), false)?
             {
                 return Ok(ctx.text(part));
             }
@@ -414,7 +414,7 @@ impl Wrapper {
             if end {
                 let mut input = w.input.borrow_mut();
                 let part = input
-                    .take(limit, line, w.newline.as_deref(), true)
+                    .take(limit, line, w.newline.as_deref(), true)?
                     .unwrap_or_default();
                 if all {
                     input.discard();
@@ -495,7 +495,7 @@ pub(super) fn call(
             let closed = Wrapper::invoke_buffer(ctx, receiver, "close", vec![]);
             return match (flushed, closed) {
                 (Err(flush), Err(mut close)) => {
-                    close.tracing().context = Some(ctx.raised_instance(flush));
+                    close.context = ctx.raised_instance(flush);
                     Err(close)
                 }
                 (Err(flush), _) => Err(flush),

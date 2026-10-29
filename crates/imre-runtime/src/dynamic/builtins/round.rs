@@ -93,7 +93,7 @@ fn round_float(n: f64, places: i64) -> Result<f64> {
         return Ok(n.round_ties_even());
     }
     if places > 0 {
-        let decimal = crate::objects::format_fixed_float(n, places as u32, false, 0);
+        let decimal = crate::objects::format_fixed_float(n, places as u32, false, 0)?;
         return Ok(decimal.parse().expect("fixed-point decimal"));
     }
     let integer = crate::floats::float_to_integer(n)?;

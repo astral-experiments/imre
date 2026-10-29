@@ -2,32 +2,34 @@
 use crate::StrOwner;
 use std::borrow::Cow;
 
-use super::exceptions::{Error, Kind, finish};
+use super::exceptions::{Error, Kind, Result, finish};
 use super::paths::{Pattern, class_characters, class_end};
 use super::words::Words;
-use super::{Bytes, Object, Str, object};
+use super::{Bytes, Codec, Object, Str, object};
 
 pub(crate) fn compile(pattern: &str) -> impl Fn(&str) -> bool + use<> {
     let pattern = Pattern::component(pattern);
     move |name| pattern.matches(name)
 }
 
-pub(crate) fn byte_spelling(bytes: &[u8]) -> Cow<'_, str> {
+pub(crate) fn byte_spelling(bytes: &[u8]) -> Result<Cow<'_, str>> {
     if bytes.is_ascii() {
-        Cow::Borrowed(std::str::from_utf8(bytes).expect("ASCII is UTF-8"))
+        Ok(Cow::Borrowed(
+            std::str::from_utf8(bytes).expect("ASCII is UTF-8"),
+        ))
     } else {
-        Cow::Owned(bytes.iter().copied().map(char::from).collect())
+        Codec::Latin1.decode(bytes, None).map(Cow::Owned)
     }
 }
 
 /// Bytes patterns match single bytes, including values that also form valid UTF-8.
-unsafe fn spelling<'a>(raw: *const (), bytes: bool) -> Cow<'a, str> {
+unsafe fn spelling<'a>(raw: *const (), bytes: bool) -> Result<Cow<'a, str>> {
     if bytes {
         // SAFETY: the caller passes a rooted Bytes owner with the indicated tag.
         byte_spelling(unsafe { &*raw.cast::<Bytes>() })
     } else {
         // SAFETY: the caller passes a rooted Str owner with the indicated tag.
-        Cow::Borrowed(unsafe { &*raw.cast::<Str>() }.as_str())
+        Ok(Cow::Borrowed(unsafe { &*raw.cast::<Str>() }.as_str()))
     }
 }
 
@@ -51,14 +53,17 @@ pub unsafe extern "C" fn imre_fnmatch(
     if name_bytes != pat_bytes {
         return Error::new(Kind::TypeError, mixed_message(pat_bytes != 0)).returning(0);
     }
-    // SAFETY: both tags choose the actual immutable owner representations.
-    let (name, pat) = unsafe {
-        (
-            spelling(name, name_bytes != 0),
-            spelling(pat, pat_bytes != 0),
-        )
+    let matched = || {
+        // SAFETY: both tags choose the actual immutable owner representations.
+        let (name, pat) = unsafe {
+            (
+                spelling(name, name_bytes != 0)?,
+                spelling(pat, pat_bytes != 0)?,
+            )
+        };
+        Ok(u32::from(compile(&pat)(&name)))
     };
-    u32::from(compile(&pat)(&name))
+    finish(matched(), 0)
 }
 
 /// # Safety
@@ -71,9 +76,9 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
     pat_bytes: u32,
     inverse: u32,
 ) -> *const Object {
-    // SAFETY: the pattern's tag and the list layout were checked at the call site.
-    let matches = compile(&unsafe { spelling(pat, pat_bytes != 0) });
     let filter = |storage: &super::Storage| {
+        // SAFETY: the caller roots the pattern and checks its tag.
+        let matches = compile(&unsafe { spelling(pat, pat_bytes != 0)? });
         let source = storage.sequence()?;
         let mut output = Words::new(source.kind.raw());
         for &word in &source.values {
@@ -87,7 +92,7 @@ pub unsafe extern "C" fn imre_fnmatch_filter(
                 return Err(Error::new(Kind::TypeError, mixed_message(pat_bytes != 0)));
             }
             // SAFETY: the immutable list roots every element throughout this scan.
-            let name = unsafe { spelling(pointer as *const (), name_bytes) };
+            let name = unsafe { spelling(pointer as *const (), name_bytes) }?;
             if matches(&name) != (inverse != 0) {
                 output
                     .values
