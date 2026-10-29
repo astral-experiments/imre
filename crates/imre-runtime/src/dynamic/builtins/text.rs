@@ -1266,6 +1266,31 @@ pub(super) fn method(
         })?;
         return Ok(ctx.text(text.into_string()));
     }
+    if name == "replace" {
+        positional(name, kwargs)?;
+        arity(name, args, 2, 3)?;
+        let count = args
+            .get(2)
+            .map(|&x| ctx.as_integer(x))
+            .transpose()?
+            .unwrap_or(-1);
+        let value = crate::objects::replace_text(
+            ctx.str_value(receiver)?,
+            ctx.str_value(args[0])?,
+            ctx.str_value(args[1])?,
+            usize::try_from(count).unwrap_or(usize::MAX),
+            args[0] == args[1],
+            |length| {
+                let mut text = String::new();
+                text.try_reserve_exact(length).ok()?;
+                Some(text)
+            },
+        )?;
+        return Ok(match value {
+            Some(text) => ctx.text(text),
+            None => ctx.string_storage(receiver).unwrap(),
+        });
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => format_string(ctx, &source, args, kwargs),
@@ -1388,18 +1413,6 @@ pub(super) fn method(
                 }
             }
             Ok(FALSE)
-        }
-        "replace" => {
-            positional(name, kwargs)?;
-            arity(name, args, 2, 3)?;
-            let count = args
-                .get(2)
-                .map(|&x| ctx.as_integer(x))
-                .transpose()?
-                .unwrap_or(-1);
-            let old = ctx.str_value(args[0])?;
-            let new = ctx.str_value(args[1])?;
-            Ok(ctx.text(source.replacen(old, new, usize::try_from(count).unwrap_or(usize::MAX))))
         }
         "join" => {
             positional(name, kwargs)?;
