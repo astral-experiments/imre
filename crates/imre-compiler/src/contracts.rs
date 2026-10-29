@@ -497,6 +497,7 @@ impl Builtin {
             | Self::StringIntList
             | Self::EnumLookup(_)
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
+            Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
             | Self::DictIsOrdered
@@ -521,7 +522,6 @@ impl Builtin {
             | Self::ExceptionWithCause
             | Self::ExceptionOrigin(_)
             | Self::ExceptionSuppressContext
-            | Self::FloatFormat { .. }
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
