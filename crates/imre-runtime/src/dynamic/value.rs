@@ -124,6 +124,14 @@ impl Error {
         }
     }
 
+    /// Construct an error without copying a static exception name.
+    pub fn new_static(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind: std::borrow::Cow::Borrowed(kind),
+            ..Self::new("", message)
+        }
+    }
+
     /// Read the class handle of an exception constructed from a Python class.
     pub(super) fn class(&self) -> Option<Id> {
         (self.class != NONE).then_some(self.class)
