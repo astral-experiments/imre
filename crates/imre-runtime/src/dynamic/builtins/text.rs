@@ -363,7 +363,7 @@ fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
     if spec.is_empty() {
         if let Value::Int(number) = ctx.heap.get(value) {
-            return Ok(crate::integer_text::decimal_string(number)?.into_string());
+            return super::super::operators::rendered_integer(number).map(crate::Str::into_string);
         }
         return ctx.checked_format(value, false);
     }
