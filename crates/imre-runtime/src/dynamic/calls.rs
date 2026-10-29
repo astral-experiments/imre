@@ -3504,7 +3504,7 @@ impl Context {
                 pos.extend(positional);
                 let kwonly = names("kwonly")?;
                 for (n, &v) in pos.iter().zip(&args) {
-                    self.bind(local, n, v);
+                    self.bind_argument(local, n, v)?;
                 }
                 if let Some(n) = sig["varargs"].as_str() {
                     let extra = if pos.is_empty() {
@@ -3513,7 +3513,7 @@ impl Context {
                         copy_ids(args.get(pos.len()..).unwrap_or_default())?
                     };
                     let extra = self.alloc(Value::Tuple(extra));
-                    self.bind(local, n, extra);
+                    self.bind_argument(local, n, extra)?;
                 } else if args.len() > pos.len() {
                     return Err(Error::new(
                         "TypeError",
@@ -3529,7 +3529,7 @@ impl Context {
                                 format!("multiple values for {n:?}"),
                             ));
                         }
-                        self.bind(local, &n, v);
+                        self.bind_argument(local, &n, v)?;
                     } else if sig["kwargs"].is_string() {
                         let k = self.text(n);
                         extra.push((k, v));
@@ -3542,7 +3542,7 @@ impl Context {
                 }
                 if let Some(n) = sig["kwargs"].as_str() {
                     let v = self.dict(extra);
-                    self.bind(local, n, v);
+                    self.bind_argument(local, n, v)?;
                 }
                 let default_values = if defaults == NONE {
                     Vec::new()
@@ -3559,7 +3559,7 @@ impl Context {
                             .ok_or_else(|| {
                                 Error::new("TypeError", format!("{name} requires argument {n:?}"))
                             })?;
-                        self.bind(local, n, val);
+                        self.bind_argument(local, n, val)?;
                     }
                 }
                 for n in &kwonly {
@@ -3575,7 +3575,7 @@ impl Context {
                             .ok_or_else(|| {
                                 Error::new("TypeError", format!("{name} requires argument {n:?}"))
                             })?;
-                        self.bind(local, n, val);
+                        self.bind_argument(local, n, val)?;
                     }
                 }
                 if let Some(types) = sig["types"].as_object() {

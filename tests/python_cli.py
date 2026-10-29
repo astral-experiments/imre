@@ -146,6 +146,18 @@ def check_boxed_call_allocation(imre, run, flags):
             0, expected, b"refused\n" if size else b"",
         ), (size, ordinal, result)
 
+    source = import_path + "import boxed_call_parameters as fixture; fixture.allocation()"
+    for size, ordinal in ((0, 1), (56, 5), (52, 1)):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        expected = (b"caught ()\n" if size else b"value 3\n") + b"retry 3\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
+        ), (size, ordinal, result)
+
     imports = import_path + "import boxed_itemgetter as fixture; "
     # The first equal-sized allocation copies the call's positional arguments.
     for ordinal, expected in ((0, b"113\n"), (2, b"caught ()\n113\n")):
