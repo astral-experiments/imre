@@ -819,7 +819,10 @@ impl Context {
             )
         };
         for i in 0..prefix {
-            unpacked.push(self.next_item(iter)?.ok_or_else(|| too_short(i))?);
+            let item = self.next_item(iter)?.ok_or_else(|| too_short(i))?;
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(item);
+            unpacked.push(item);
         }
         if let Some(star) = star {
             let tail = self.iterator(iter)?;
@@ -831,6 +834,8 @@ impl Context {
             while let Some(item) = self.next_item(tail)? {
                 rest.try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
+                self.heap.reserve_temporaries(1)?;
+                self.heap.keep(item);
                 rest.push(item);
             }
             let tail_start = rest
@@ -839,6 +844,7 @@ impl Context {
                 .ok_or_else(|| too_short(star + rest.len()))?;
             unpacked.push(NONE);
             unpacked.extend(rest.drain(tail_start..));
+            self.heap.reserve_temporaries(1)?;
             unpacked[star] = self.alloc(Value::List(rest));
         } else if self.next_item(iter)?.is_some() {
             let size = match self.heap.get(value) {

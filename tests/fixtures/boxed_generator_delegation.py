@@ -152,6 +152,27 @@ def chained(values, box):
         yield local is box.value, box.value
 
 
+class ClearingTargets:
+    def __init__(self, source):
+        self.source = source
+        self.values = []
+
+    def __setitem__(self, index, value):
+        self.values.append(value)
+        if index == 0:
+            self.source.clear()
+            for i in range(9000):
+                garbage = [i, -i]
+
+
+def assigning_cleared_values(source, targets, starred):
+    if starred:
+        targets[0], *targets[1], targets[2] = source
+    else:
+        targets[0], targets[1], targets[2] = source
+    yield targets.values
+
+
 def current():
     try:
         first, second = three_then_error()
@@ -352,3 +373,8 @@ def current():
             next(stream)
         except LookupError as caught:
             print(caught is original, caught.__traceback__.tb_next.tb_frame.f_code.co_name, next(stream, "closed"))
+
+    for use_starred in [False, True]:
+        source = [[0], [1], [2]]
+        targets = ClearingTargets(source)
+        print(next(assigning_cleared_values(source, targets, use_starred)))
