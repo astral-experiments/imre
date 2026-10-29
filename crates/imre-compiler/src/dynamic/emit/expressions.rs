@@ -156,7 +156,8 @@ impl Function<'_, '_> {
                     None,
                     Body::Generator(&v.generators, &v.elt),
                 );
-                self.op("generator", &[&step, &iter])
+                let targets = self.comprehension_targets(&v.generators);
+                self.op("generator", &[&step, &iter, &targets])
             }
             ast::Expr::ListComp(v) => {
                 self.comprehension("list", &v.generators, Element::Value(&v.elt))
@@ -375,6 +376,17 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
+    /// Encode all loop bindings before any comprehension iteration begins.
+    fn comprehension_targets(&mut self, generators: &[ast::Comprehension]) -> String {
+        let mut names = std::collections::HashSet::new();
+        for clause in generators {
+            crate::frontend::target_names(&clause.target, &mut names);
+        }
+        let mut names: Vec<_> = names.into_iter().collect();
+        names.sort_unstable();
+        self.text(&names.join(" "))
+    }
+
     fn comprehension(
         &mut self,
         kind: &str,
@@ -386,7 +398,8 @@ impl Function<'_, '_> {
         }
         let output = self.op(kind, &[]);
         let first = self.expr(&generators[0].iter);
-        let scope = self.op("comprehension_scope", &[&self.scope.clone()]);
+        let targets = self.comprehension_targets(generators);
+        let scope = self.op("comprehension_scope", &[&self.scope.clone(), &targets]);
         let previous = std::mem::replace(&mut self.scope, scope);
         let class_locals = self.class_locals.take();
         self.comprehension_loop(generators, &first, &output, &element);

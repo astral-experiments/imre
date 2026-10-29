@@ -1012,7 +1012,12 @@ impl Context {
         }))
     }
     /// Comprehensions own their loop variables, but assignment expressions bind outside them.
-    fn comprehension_scope(&mut self, parent: Id) -> Id {
+    fn comprehension_scope(&mut self, parent: Id, targets: Id) -> Result<Id> {
+        let targets = self
+            .str_value(targets)?
+            .split_ascii_whitespace()
+            .map(str::to_owned)
+            .collect();
         let enclosing = self.scope_data(parent);
         let module = enclosing.module.clone();
         let (parent, kind) = if enclosing.class_body.is_some() {
@@ -1028,7 +1033,9 @@ impl Context {
             unreachable!()
         };
         frame.comprehension = Some(kind);
-        scope
+        frame.closure.declared = targets;
+        frame.closure.declared_complete = true;
+        Ok(scope)
     }
 
     fn scope_data(&self, scope: Id) -> &Scope {
@@ -1271,13 +1278,13 @@ impl Context {
             if let Some(id) = self.scope_name(scope, name) {
                 return Ok(id);
             }
+            if s.class_body.is_none() && s.closure.declared.contains(name) {
+                return Err(self.missing_binding(origin, scope, name));
+            }
             // An eager comprehension in a class cannot capture an outer function's __class__.
             if name == "__class__" && s.comprehension == Some(ComprehensionKind::ClassBody) {
                 scope = self.root_scope(scope);
                 continue;
-            }
-            if s.class_body.is_none() && s.closure.declared.contains(name) {
-                return Err(self.missing_binding(origin, scope, name));
             }
             if name == "__class__"
                 && s.class_body.is_none()

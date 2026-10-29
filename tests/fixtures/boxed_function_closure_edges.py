@@ -36,6 +36,17 @@ def current():
     else:
         raise AssertionError("captured the enclosing function's __class__")
 
+    value = 1
+    for read in (lambda: [value for _ in [0] if value for value in [2]],
+                 lambda: next(value for _ in [0] if value for value in [2])):
+        try:
+            read()
+        except UnboundLocalError:
+            pass
+        else:
+            raise AssertionError("read a comprehension target before assignment")
+    assert [value for value in [value]] == [1]
+
     fn = make()
     print(fn.__code__.co_freevars, fn(), tuple(cell.cell_contents for cell in fn.__closure__))
     copied = types.FunctionType(fn.__code__, {}, closure=fn.__closure__[::-1])
