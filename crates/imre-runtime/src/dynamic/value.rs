@@ -1431,13 +1431,13 @@ impl Heap {
         callback: Id,
         kind: super::weakref::Kind,
         subclass: Option<Id>,
-    ) -> Id {
+    ) -> Result<Id> {
         let references = self.weak_references(target);
         if subclass.is_none() && callback == NONE
             && let Some(&id) = references.iter().find(|&&id|
                 matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
         {
-            return id;
+            return Ok(id);
         }
         // Callback-free canonical references precede proxies, then callbacks in newest-first order.
         let index = references
@@ -1452,6 +1452,15 @@ impl Heap {
                 _ => true,
             })
             .unwrap_or(references.len());
+        let mut new_references = Vec::new();
+        if let Some(references) = self.weak.get_mut(&target) {
+            references.try_reserve(1)
+        } else {
+            self.weak
+                .try_reserve(1)
+                .and_then(|()| new_references.try_reserve(1))
+        }
+        .map_err(|_| Error::new("MemoryError", ""))?;
         let reference = super::weakref::Reference {
             target: Some(target),
             callback,
@@ -1467,11 +1476,14 @@ impl Heap {
         } else {
             self.alloc(Value::Weak(reference))
         };
-        self.weak.entry(target).or_default().insert(index, id);
+        self.weak
+            .entry(target)
+            .or_insert(new_references)
+            .insert(index, id);
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
         self.collect_next_statement = true;
-        id
+        Ok(id)
     }
 
     fn weak_edge(&self, value: Id) -> bool {
