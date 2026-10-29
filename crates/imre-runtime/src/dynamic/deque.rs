@@ -134,15 +134,29 @@ fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Result<()> {
         source
     };
     let iter = ctx.iterator(source)?;
-    while let Some(item) = ctx.next_item(iter)? {
-        let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
-            unreachable!()
-        };
-        if let Some(removed) = ring.push(left, true, || item)? {
-            ctx.heap.weak_edge_removed(removed);
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(queue);
+    ctx.heap.keep(iter);
+    let step = ctx.heap.temporary_mark();
+    let result = (|| {
+        loop {
+            ctx.heap.release_temporaries_since(step);
+            ctx.heap.reserve_slot_or_request_collection();
+            ctx.collect_garbage();
+            let Some(item) = ctx.next_item(iter)? else {
+                break;
+            };
+            let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
+                unreachable!()
+            };
+            if let Some(removed) = ring.push(left, true, || item)? {
+                ctx.heap.weak_edge_removed(removed);
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })();
+    ctx.heap.release_temporaries_since(roots);
+    result
 }
 
 /// Compare through live cursors so a callback can mutate either deque or raise.

@@ -1974,12 +1974,30 @@ impl Heap {
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+        self.collect_if_due(globals)
+    }
+
+    /// Collect when a discarded owner or the heap threshold requests a sweep.
+    pub(super) fn collect_if_due(
+        &mut self,
+        globals: impl Iterator<Item = Id>,
+    ) -> Option<Vec<(Id, Id)>> {
         if !std::mem::take(&mut self.collect_next_statement)
             && (self.slots.len() < self.next_collection || !self.free.is_empty())
         {
             return None;
         }
         self.collect(globals)
+    }
+
+    /// Collect early when a streaming consumer cannot reserve its next heap slot.
+    pub(super) fn reserve_slot_or_request_collection(&mut self) {
+        if self.slots.len() < self.next_collection
+            && self.free.is_empty()
+            && self.slots.try_reserve(1).is_err()
+        {
+            self.next_collection = self.slots.len();
+        }
     }
 
     /// Drop unreachable values and preserve callbacks that must run after the sweep.
