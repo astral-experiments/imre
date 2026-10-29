@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.1.4
+
+Released on 2026-10-29.
+
+- Prevent out-of-bounds reads on truncated datagrams and exposure of uninitialized
+  bytes on Linux TCP sockets when receiving with `MSG_TRUNC`.
+  ([#2875](https://github.com/astral-experiments/imre/pull/2875),
+  [#3005](https://github.com/astral-experiments/imre/pull/3005))
+- Raise a catchable `MemoryError` when Imre cannot allocate path components or
+  bind function arguments. If recording a traceback runs out of memory, the
+  original exception remains available through `MemoryError.__context__`.
+  ([#2975](https://github.com/astral-experiments/imre/pull/2975),
+  [#3038](https://github.com/astral-experiments/imre/pull/3038),
+  [#2467](https://github.com/astral-experiments/imre/pull/2467))
+- Avoid native stack overflows when `ast.parse()` converts nested statements,
+  when hashing deeply nested collection keys, and when runtime-loaded generators
+  resume one another.
+  ([#2936](https://github.com/astral-experiments/imre/pull/2936),
+  [#2963](https://github.com/astral-experiments/imre/pull/2963),
+  [#3033](https://github.com/astral-experiments/imre/pull/3033))
+- Import `difflib` and `textwrap` in runtime-loaded Python modules. On POSIX,
+  those modules can also wait for file descriptors with `select.select()` or
+  `select.poll()`.
+  ([#2488](https://github.com/astral-experiments/imre/pull/2488),
+  [#2797](https://github.com/astral-experiments/imre/pull/2797),
+  [#2776](https://github.com/astral-experiments/imre/pull/2776))
+- Use mapping patterns, keyword class patterns such as `case Point(x=value)`,
+  and generator expressions with multiple `for` clauses in runtime-loaded
+  Python modules.
+  ([#2442](https://github.com/astral-experiments/imre/pull/2442),
+  [#2446](https://github.com/astral-experiments/imre/pull/2446),
+  [#2431](https://github.com/astral-experiments/imre/pull/2431))
+- Stream JSON to Python text writers with `json.dump()` in runtime-loaded
+  modules, and enforce the configured integer digit limit when decoding JSON.
+  ([#2794](https://github.com/astral-experiments/imre/pull/2794),
+  [#2805](https://github.com/astral-experiments/imre/pull/2805))
+- Speed up native container access and decimal integer parsing. Across two
+  pinned Linux benchmark runs, median runtime fell 12% for telemetry and 16%
+  for Base45.
+  ([#2694](https://github.com/astral-experiments/imre/pull/2694))
+
+[Full history for 0.1.4](https://github.com/astral-experiments/imre/compare/0.1.3...0.1.4)
+
 ## 0.1.3
 
 Released on 2026-10-27.
