@@ -238,7 +238,7 @@ enum Storage {
         name: std::cell::OnceCell<StrOwner>,
     },
     PathInfo(Box<paths::Info>),
-    PurePath(Box<paths::PurePath>),
+    PurePath(allocator_api2::boxed::Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
     PatchSet(patchset::PatchSet),
     PatchedFile(patchset::PatchedFile),

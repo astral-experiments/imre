@@ -10776,7 +10776,31 @@ print(show("x"))
         }
     }
 
-    fn assert_checked_sorted_call(llvm: &str, function: &str) {
+    #[test]
+    fn empty_pure_paths_check_the_constructor_result() {
+        for class in ["PurePosixPath", "PureWindowsPath"] {
+            let llvm = compile(
+                &format!(
+                    "from pathlib import {class}\ndef probe() -> str:\n    return str({class}())\nprint(probe())\n"
+                ),
+                &CompileOptions::default(),
+            )
+            .unwrap();
+            assert_checked_pointer_call(&llvm, "imre_pure_path_new");
+            let mut lines = llvm.lines();
+            lines
+                .find(|line| line.contains(" = call ptr @fn_0("))
+                .unwrap();
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .contains("call i32 @imre_error_pending()")
+            );
+        }
+    }
+
+    fn assert_checked_pointer_call(llvm: &str, function: &str) {
         let pattern = format!(" = call ptr @{function}(");
         let mut lines = llvm.lines();
         let call = lines.find(|line| line.contains(&pattern)).unwrap();
@@ -10951,7 +10975,7 @@ check("a", "a")
             &CompileOptions::default(),
         )
         .unwrap();
-        assert_checked_sorted_call(&llvm, "imre_sorted_string_keys");
+        assert_checked_pointer_call(&llvm, "imre_sorted_string_keys");
         assert_eq!(llvm.matches("call ptr @imre_key_union(").count(), 2);
     }
 
@@ -10959,7 +10983,7 @@ check("a", "a")
     fn sorted_rows_require_only_generated_field_assignments() {
         let source = include_str!("../../../tests/fixtures/containers/sorted_rows.py");
         let llvm = compile(source, &CompileOptions::default()).unwrap();
-        assert_checked_sorted_call(&llvm, "imre_sorted_record_rows");
+        assert_checked_pointer_call(&llvm, "imre_sorted_record_rows");
         assert_eq!(
             llvm.matches("call ptr @imre_sorted_string_keys(").count(),
             1

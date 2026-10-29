@@ -197,6 +197,7 @@ impl Builtin {
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
+                    | PathOperation::PureNew(_)
                     | PathOperation::Join
                     | PathOperation::JoinObject
                     | PathOperation::Parent
@@ -237,7 +238,6 @@ impl Builtin {
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
-                    | PathOperation::PureNew(_)
                     | PathOperation::Drive
                     | PathOperation::Root
                     | PathOperation::Anchor
