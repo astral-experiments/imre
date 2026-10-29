@@ -81,19 +81,28 @@ def current():
 
     assert bytearray.append(data, Index()) is None and data[:] == b"\xff"
 
-    class ClearFlag:
+    class BufferFlag:
+        def __init__(self, operation):
+            self.operation = operation
+
         def __bool__(self):
-            data.clear()
+            self.operation()
             return False
 
     try:
-        b2a_base64(data, newline=ClearFlag())
+        b2a_base64(data, newline=BufferFlag(data.clear))
     except BufferError:
         assert data[:] == b"\xff"
     else:
         raise AssertionError("clear resized an exported bytearray")
     data.clear()
-    assert b2a_base64(data, newline=ClearFlag()) == b""
+    assert b2a_base64(data, newline=BufferFlag(data.clear)) == b""
+
+    data.extend(b"abc")
+    copy = bytearray.copy(data)
+    assert type(copy) is bytearray and copy == b"abc"
+    assert b2a_base64(data, newline=BufferFlag(data.reverse)) == b"Y2Jh"
+    assert data[:] == b"cba" and copy == b"abc"
 
     for rhs, name in (("text", "str"), (1, "int"), (None, "NoneType"), ([], "list"), (Chunk(), "Chunk")):
         try:
