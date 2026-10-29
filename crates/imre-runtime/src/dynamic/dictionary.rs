@@ -116,14 +116,26 @@ impl Entries {
         Ok(())
     }
 
-    pub(super) fn remove(&mut self, index: usize) -> (Id, Id) {
-        let position = self.positions.as_ref().map_or(index, |p| p[index]);
+    pub(super) fn prepare_removal(&mut self) -> Result<&mut Vec<usize>> {
+        Ok(match &mut self.positions {
+            Some(positions) => positions,
+            vacant @ None => {
+                let mut positions = Vec::new();
+                positions
+                    .try_reserve_exact(self.next)
+                    .map_err(|_| crate::Error::memory_error())?;
+                positions.extend(0..self.next);
+                vacant.insert(positions)
+            }
+        })
+    }
+
+    pub(super) fn remove(&mut self, index: usize) -> Result<(Id, Id)> {
+        let positions = self.prepare_removal()?;
+        let position = positions.remove(index);
         if let Some(keys) = &mut self.index {
             keys.remove(index, position);
         }
-        self.positions
-            .get_or_insert_with(|| (0..self.next).collect())
-            .remove(index);
         if let Some(order) = &mut self.order {
             order.indices.retain_mut(|dense| {
                 if *dense == index {
@@ -135,7 +147,7 @@ impl Entries {
                 true
             });
         }
-        self.values.remove(index)
+        Ok(self.values.remove(index))
     }
 
     /// Map the ordered view's rank to an entry in the underlying dict.

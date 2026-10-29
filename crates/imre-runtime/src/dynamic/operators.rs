@@ -2906,7 +2906,7 @@ impl Context {
                     let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
                         unreachable!()
                     };
-                    let (removed, _) = entries.remove(index);
+                    let (removed, _) = entries.remove(index)?;
                     ctx.heap.weak_edge_removed(removed);
                 }
                 Ok(())
