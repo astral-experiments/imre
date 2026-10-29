@@ -207,7 +207,7 @@ impl Context {
             let trace = error.tracing();
             let active = self.heap.active_exception();
             if trace.frames.is_empty() && active != NONE && trace.instance != Some(active) {
-                trace.context = Some(active);
+                trace.context.get_or_insert(active);
             }
             trace.frames.push((loc, frame));
         }

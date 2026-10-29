@@ -265,6 +265,15 @@ def current():
         print(str(error), error.__cause__ is cause, error.__context__ is cause)
         print(error.__suppress_context__, next(g, "closed"))
 
+    try:
+        raise LookupError("caller")
+    except LookupError as outer:
+        try:
+            next(stopped(cause))
+        except RuntimeError as error:
+            assert error.__context__ is error.__cause__ is cause
+            assert cause.__context__ is outer
+
     for error, explicit in ((ValueError("bad row"), cause), (cause, None)):
         g = raise_after_yield(error, explicit)
         print(next(g))
