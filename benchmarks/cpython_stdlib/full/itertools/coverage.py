@@ -224,7 +224,8 @@ def missing_itertools_import(directory, fixture, node):
     missing = next((name for name in names if name != "count"), None)
     if missing in {"accumulate", "combinations", "islice", "permutations", "product"}:
         errors.append(f'ModuleNotFoundError: parent of "itertools.{missing}" is not a package')
-        errors.append(f"ImportError: cannot import name '{missing}' from 'itertools' (unknown location)")
+        for origin in ("unknown location", "<imre stdlib>/itertools.py"):
+            errors.append(f"ImportError: cannot import name '{missing}' from 'itertools' ({origin})")
     for error in errors:
         if result.stderr == f"{prefix}{error}\n":
             return {"outcome": "blocked", "reason": f"case.py:1: {error}",
