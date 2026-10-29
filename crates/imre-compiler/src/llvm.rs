@@ -7,7 +7,7 @@ use crate::borrows::{self, FunctionBorrows};
 use crate::contracts::{
     BYTE_OUTPUT_APPEND, BYTE_OUTPUT_APPEND_PAIR, LIST_APPEND, LIST_APPEND_PAIR, LIST_BORROW_INDEX,
     LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET, LIST_SET_INDEX,
-    runtime_call_may_raise,
+    WEAK_PROXY_TARGET, runtime_call_may_raise,
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
@@ -6031,9 +6031,7 @@ impl Emitter<'_, '_> {
             Builtin::WeakProxyCallable => {
                 self.call("imre_weak_proxy_callable", returns, &[&args[0].value])
             }
-            Builtin::WeakProxyTarget => {
-                self.call("imre_weak_proxy_target", returns, &[&args[0].value])
-            }
+            Builtin::WeakProxyTarget => self.runtime_call(&WEAK_PROXY_TARGET, [&args[0].value]),
             Builtin::ContextVar(operation) => self.context_operation(*operation, &args, returns),
             Builtin::StringIo(operation) => {
                 use crate::ir::StringIoOperation as Op;
@@ -9408,7 +9406,6 @@ declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_box_value(i32, i64)
 declare ptr @imre_weak_proxy_new(ptr, i1 zeroext)
 declare zeroext i1 @imre_weak_proxy_callable(ptr)
-declare ptr @imre_weak_proxy_target(ptr)
 declare ptr @imre_contextvars_new(i1 zeroext)
 declare ptr @imre_contextvars_copy(ptr)
 declare ptr @imre_contextvars_var(ptr, i32, i64)
@@ -10080,6 +10077,7 @@ declare void @imre_list_release(ptr)
         output,
         "{BYTE_OUTPUT_APPEND}
 {BYTE_OUTPUT_APPEND_PAIR}
+{WEAK_PROXY_TARGET}
 {LIST_GET}
 {LIST_SET}
 {LIST_GET_INDEX}

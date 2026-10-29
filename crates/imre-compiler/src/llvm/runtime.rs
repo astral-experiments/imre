@@ -3,7 +3,8 @@
 use std::fmt;
 
 use crate::contracts::{
-    BorrowedIntOrError, OwnedIntOrError, RuntimeCall, RuntimeParam, StatusOrError,
+    BorrowedIntOrError, OwnedIntOrError, OwnedWeakTargetOrError, RuntimeCall, RuntimeParam,
+    StatusOrError,
 };
 use crate::ir::Type;
 
@@ -14,12 +15,20 @@ impl RuntimeParam {
         match self {
             Self::Value(ty) => ty.llvm(),
             Self::NativeIndex => "i64",
+            Self::WeakProxy => "ptr",
         }
     }
 
     fn format_operand(self, arg: &dyn RuntimeOperand, symbol: &str) -> String {
         let (actual, operand) = arg.runtime_operand();
-        assert_eq!(self, actual, "invalid argument to {symbol}");
+        assert!(
+            self == actual
+                || matches!(
+                    (self, actual),
+                    (Self::WeakProxy, Self::Value(Type::WeakProxy(_)))
+                ),
+            "invalid argument to {symbol}: expected {self:?}, got {actual:?}",
+        );
         format!("{} {operand}", self.llvm())
     }
 }
@@ -46,7 +55,12 @@ pub(super) trait RuntimeReturn {
     type Output;
 
     fn llvm(&self) -> &'static str;
-    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) -> Self::Output;
+    fn emit(
+        &self,
+        emitter: &mut Emitter<'_, '_>,
+        instruction: String,
+        args: &[&dyn RuntimeOperand],
+    ) -> Self::Output;
 }
 
 /// Register the transferred reference unless range analysis proves the word is immediate.
@@ -70,7 +84,12 @@ impl RuntimeReturn for OwnedIntOrError {
         Type::Int.llvm()
     }
 
-    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) -> OwnedIntWord {
+    fn emit(
+        &self,
+        emitter: &mut Emitter<'_, '_>,
+        instruction: String,
+        _: &[&dyn RuntimeOperand],
+    ) -> OwnedIntWord {
         OwnedIntWord(emitter.checked_int_list_word(instruction))
     }
 }
@@ -82,12 +101,44 @@ impl RuntimeReturn for BorrowedIntOrError {
         Type::Int.llvm()
     }
 
-    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) -> Operand {
+    fn emit(
+        &self,
+        emitter: &mut Emitter<'_, '_>,
+        instruction: String,
+        _: &[&dyn RuntimeOperand],
+    ) -> Operand {
         let word = emitter.checked_int_list_word(instruction);
         Operand {
             value: emitter.decode_word(word, Type::Int),
             ownership: Ownership::Borrowed,
         }
+    }
+}
+
+impl RuntimeReturn for OwnedWeakTargetOrError {
+    type Output = Value;
+
+    fn llvm(&self) -> &'static str {
+        "ptr"
+    }
+
+    fn emit(
+        &self,
+        emitter: &mut Emitter<'_, '_>,
+        instruction: String,
+        args: &[&dyn RuntimeOperand],
+    ) -> Value {
+        let (RuntimeParam::Value(Type::WeakProxy(class)), _) = args[0].runtime_operand() else {
+            unreachable!("validated weak proxy operand");
+        };
+        let operand = emitter.instruction(instruction);
+        let failed = emitter.instruction(format!("icmp eq ptr {operand}, null"));
+        emitter.check_failed(&failed);
+        emitter.owned(Value {
+            ty: Type::Class(class),
+            operand,
+            small_integer: false,
+        })
     }
 }
 
@@ -98,7 +149,7 @@ impl RuntimeReturn for StatusOrError {
         "i32"
     }
 
-    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) {
+    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String, _: &[&dyn RuntimeOperand]) {
         emitter.checked_status(instruction);
     }
 }
@@ -126,15 +177,15 @@ impl Emitter<'_, '_> {
         call: &RuntimeCall<R, N>,
         args: [&dyn RuntimeOperand; N],
     ) -> R::Output {
-        let args = call
+        let operands = call
             .params
             .into_iter()
             .zip(args)
             .map(|(param, arg)| param.format_operand(arg, call.symbol))
             .collect::<Vec<_>>()
             .join(", ");
-        let instruction = format!("call {} @{}({args})", call.result.llvm(), call.symbol);
-        call.result.emit(self, instruction)
+        let instruction = format!("call {} @{}({operands})", call.result.llvm(), call.symbol);
+        call.result.emit(self, instruction, &args)
     }
 }
 
