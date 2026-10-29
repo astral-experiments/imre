@@ -194,19 +194,14 @@ imre run totals.py -- 10 20 12
 # Output: Total: 42
 ```
 
-Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the compiled executable.
-
 Use `imre check --watch totals.py` to see diagnostics as you edit the script or its imports.
 
-`build` and `run` share cached executables and module objects by default with
-the bundled Linux toolchain. Source builds on x86-64 Debian and Ubuntu also
-support this cache with the distribution's Clang 18 toolchain. The build summary
-goes to stderr. Pass `-v` to see each module decision or `-q` to suppress
-progress. [Build cache and code generation](docs/subset.md#incremental-builds)
+Use `imre build` to create a native executable in the current directory. You can then run `./totals` directly.
 
 ```console
 imre build totals.py
 ./totals 10 20 12
+# Output: Total: 42
 ```
 
 ## License
