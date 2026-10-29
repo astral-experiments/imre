@@ -1143,20 +1143,24 @@ impl Context {
         if let Some(method) = self.bound_slot(obj, name)? {
             return Ok(method);
         }
-        self.builtin_attribute(obj, name).map_err(|_| {
-            let missing = if name == "__exit__" {
-                " (missed __exit__ method)"
-            } else {
-                ""
-            };
-            Error::new(
-                "TypeError",
-                format!(
-                    "'{}' object does not support the context manager protocol{missing}",
-                    self.type_name(obj)
-                ),
-            )
-        })
+        let base = self.scalar_value(obj);
+        if builtins::method_name(self.heap.get(base), name).is_some() {
+            return self.builtin_attribute(obj, name);
+        }
+        let suffix = if name == "__exit__" {
+            "' object does not support the context manager protocol (missed __exit__ method)"
+        } else {
+            "' object does not support the context manager protocol"
+        };
+        let kind = self.type_name(obj);
+        let mut message = String::new();
+        message
+            .try_reserve_exact(1 + kind.len() + suffix.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        message.push('\'');
+        message.push_str(kind);
+        message.push_str(suffix);
+        Err(Error::new_static("TypeError", message))
     }
 
     /// Resolve an immediately called attribute before its arguments are evaluated.

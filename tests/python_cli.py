@@ -11,6 +11,32 @@ import tempfile
 from pathlib import Path
 
 
+def check_context_protocol_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "context_protocol_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_context_protocol.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape, opcode in [(0, "lookup_enter"), (7, "lookup_exit")]:
+        for target in [0, 1]:
+            result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "CONTEXT_REFUSE_NTH": str(target),
+                "CONTEXT_REFUSE_OPCODE": opcode,
+            })
+            assert result.returncode == 0, result
+            if target:
+                assert result.stdout == b"kind MemoryError\n", result
+                assert b"context_allocation 1 " in result.stderr and b" 1\n" in result.stderr, result
+            else:
+                assert result.stdout.startswith(b"kind TypeError\ndetail "), result
+    for shape in [8, 9]:
+        result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), root / "context-output", extra={"IMRE_ENCODED_FLAGS": flags})
+        assert (result.returncode, result.stdout) == (0, b"written 4\nclosed True\ncontent True\n"), result
+
+
 def check_select_result_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "refuse_select_result.o"
@@ -403,6 +429,7 @@ def main():
             flags = call_allocation_flags(root)
             check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
+            check_context_protocol_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
 
         entry = root / "serve.py"

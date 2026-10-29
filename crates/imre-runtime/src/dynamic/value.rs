@@ -121,6 +121,14 @@ impl Error {
         }
     }
 
+    /// Construct an error without copying a static exception name.
+    pub fn new_static(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind: std::borrow::Cow::Borrowed(kind),
+            ..Self::new("", message)
+        }
+    }
+
     /// Attach the module and member names exposed on a Python import exception.
     pub fn with_import(
         mut self,
