@@ -367,7 +367,7 @@ pub(in super::super) fn remove_dict_item_hashed(
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
         unreachable!("dictionary payload")
     };
-    let (key, value) = entries.remove(index);
+    let (key, value) = entries.remove(index)?;
     ctx.heap.weak_edge_removed(key);
     ctx.heap.weak_edge_removed(value);
     Ok(Some(value))
@@ -918,7 +918,7 @@ pub(super) fn method(
                 let Value::Set { entries, .. } = ctx.heap.get_mut(receiver) else {
                     unreachable!()
                 };
-                let (key, value) = entries.remove(index);
+                let (key, value) = entries.remove(index)?;
                 ctx.heap.weak_edge_removed(key);
                 ctx.heap.weak_edge_removed(value);
             }
