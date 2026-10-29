@@ -790,36 +790,55 @@ pub unsafe extern "C" fn imre_str_replace(
 ) -> *const Str {
     // SAFETY: inputs remain immutable and rooted through both sizing and copying.
     let (value, old, new) = unsafe { (&*value, &*old, &*new) };
-    let count = if old == new {
-        0
-    } else {
-        value.matches(old.as_str()).count()
-    };
-    if count == 0 {
-        // SAFETY: the caller roots the input; the unchanged result takes its own owner.
-        return StrOwner::into_raw(unsafe {
-            crate::StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
-        });
+    match replace_text(value, old, new, usize::MAX, old == new, |len| {
+        Str::try_with_capacity(len).ok()
+    }) {
+        Ok(Some(result)) => StrOwner::into_raw(StrOwner::new(result)),
+        Ok(None) => {
+            // SAFETY: the original string is rooted and the result takes its own owner.
+            StrOwner::into_raw(unsafe {
+                StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
+            })
+        }
+        Err(_) => {
+            super::exceptions::sequence_allocation_failed();
+            std::ptr::null()
+        }
     }
-    let length = value
+}
+
+/// Reserve the complete replacement once, counting empty matches at Unicode boundaries.
+/// An unchanged result lets the caller retain its original string.
+pub(crate) fn replace_text<'a, T: Extend<&'a str>>(
+    value: &'a str,
+    old: &str,
+    new: &'a str,
+    limit: usize,
+    same_pattern: bool,
+    buffer: impl FnOnce(usize) -> Option<T>,
+) -> crate::Result<Option<T>> {
+    let matches = || value.match_indices(old).take(limit);
+    if same_pattern || (old.is_empty() && new.is_empty()) {
+        return Ok(None);
+    }
+    let count = matches().count();
+    if count == 0 {
+        return Ok(None);
+    }
+    let retained = value.len() - count * old.len();
+    let mut result = new
         .len()
-        .checked_sub(old.len().checked_mul(count).unwrap())
-        .and_then(|length| {
-            new.len()
-                .checked_mul(count)
-                .and_then(|extra| length.checked_add(extra))
-        });
-    let Some(mut result) = string_buffer(length) else {
-        return std::ptr::null();
-    };
+        .checked_mul(count)
+        .and_then(|extra| retained.checked_add(extra))
+        .and_then(buffer)
+        .ok_or_else(Error::memory_error)?;
     let mut copied = 0;
-    for (index, _) in value.match_indices(old.as_str()) {
-        result.push_str(&value[copied..index]);
-        result.push_str(new);
+    for (index, _) in matches() {
+        result.extend([&value[copied..index], new]);
         copied = index + old.len();
     }
-    result.push_str(&value[copied..]);
-    StrOwner::into_raw(StrOwner::new(result))
+    result.extend([&value[copied..]]);
+    Ok(Some(result))
 }
 
 /// Formats a binary64 value with correctly rounded fixed decimal precision.
