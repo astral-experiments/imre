@@ -23,4 +23,17 @@ def current():
 
     items *= Reflected()
     assert items is marker
+
+    class Buffer(bytearray):
+        pass
+
+    data = Buffer(b"ab")
+    clone = data * 1
+    assert type(clone) is bytearray and clone is not data and clone == b"ab"
+    assert 2 * data == b"abab"
+    alias = data
+    data *= 3
+    assert data is alias and data == b"ababab"
+    data *= -1
+    assert data is alias and data == b""
     print("repeated after index conversion")
