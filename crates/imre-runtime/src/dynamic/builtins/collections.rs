@@ -367,7 +367,7 @@ pub(in super::super) fn remove_dict_item_hashed(
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
         unreachable!("dictionary payload")
     };
-    let (key, value) = entries.remove(index);
+    let (key, value) = entries.remove(index)?;
     ctx.heap.weak_edge_removed(key);
     ctx.heap.weak_edge_removed(value);
     Ok(Some(value))
@@ -535,10 +535,27 @@ fn fromkeys(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         }
     } else {
         let iterator = ctx.iterator(keys)?;
+        let roots = ctx.heap.temporary_mark();
         ctx.heap.keep(iterator);
-        while let Some(key) = ctx.next_item(iterator)? {
-            ctx.put_item(result, key, value)?;
-        }
+        ctx.heap.keep(value);
+        let step = ctx.heap.temporary_mark();
+        let mut limit = ctx.heap.streaming_collection_limit();
+        let populated: Result<()> = (|| {
+            loop {
+                ctx.heap.release_temporaries_since(step);
+                let due = ctx.heap.prepare_streaming_collection(limit);
+                ctx.collect_garbage();
+                if due {
+                    limit = ctx.heap.streaming_collection_limit();
+                }
+                let Some(key) = ctx.next_item(iterator)? else {
+                    return Ok(());
+                };
+                ctx.put_item(result, key, value)?;
+            }
+        })();
+        ctx.heap.release_temporaries_since(roots);
+        populated?;
     }
     Ok(result)
 }
@@ -918,7 +935,7 @@ pub(super) fn method(
                 let Value::Set { entries, .. } = ctx.heap.get_mut(receiver) else {
                     unreachable!()
                 };
-                let (key, value) = entries.remove(index);
+                let (key, value) = entries.remove(index)?;
                 ctx.heap.weak_edge_removed(key);
                 ctx.heap.weak_edge_removed(value);
             }

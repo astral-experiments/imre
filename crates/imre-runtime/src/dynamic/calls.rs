@@ -104,6 +104,25 @@ impl Context {
             _ => None,
         }
     }
+    /// Prepare dictionary deletion before removing the oldest cached call.
+    fn evict_cached_call(&mut self, callable: Id, table: Id) -> Result<Option<value::CachedCall>> {
+        let Value::Cached { entries, .. } = self.heap.get(callable) else {
+            unreachable!()
+        };
+        if entries.len() < 128 {
+            return Ok(None);
+        }
+        let Value::Dict(table) = self.heap.get_mut(table) else {
+            unreachable!()
+        };
+        // The dictionary can refuse its first deletion. Keep the eviction order intact on failure.
+        table.prepare_removal()?;
+        let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
+            unreachable!()
+        };
+        Ok(Some(entries.remove(0)))
+    }
+
     /// Find the exception storage only when the object inherits StopIteration.
     fn stop_iteration_error(&mut self, object: Id) -> Option<&mut Error> {
         let Value::Raised(error) = self.heap.get(object) else {
@@ -3195,16 +3214,7 @@ impl Context {
                     {
                         return Ok(result);
                     }
-                    let evicted = {
-                        let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
-                            unreachable!()
-                        };
-                        if entries.len() >= 128 {
-                            Some(entries.remove(0))
-                        } else {
-                            None
-                        }
-                    };
+                    let evicted = self.evict_cached_call(callable, table)?;
                     if let Some(old) = evicted {
                         self.heap.keep(old.key);
                         if let Some(i) = self.find_dictionary_key(table, old.key, Some(old.hash))?.1
@@ -3212,7 +3222,7 @@ impl Context {
                             let Value::Dict(entries) = self.heap.get_mut(table) else {
                                 unreachable!()
                             };
-                            let (key, value) = entries.remove(i);
+                            let (key, value) = entries.remove(i)?;
                             self.heap.weak_edge_removed(key);
                             self.heap.weak_edge_removed(value);
                         }
@@ -3227,16 +3237,7 @@ impl Context {
                         }
                     }
                     loop {
-                        let old = {
-                            let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
-                                unreachable!()
-                            };
-                            if entries.len() >= 128 {
-                                Some(entries.remove(0))
-                            } else {
-                                None
-                            }
-                        };
+                        let old = self.evict_cached_call(callable, table)?;
                         let Some(old) = old else { break };
                         self.heap.keep(old.key);
                         if let Some(i) = self.find_dictionary_key(table, old.key, Some(old.hash))?.1
@@ -3244,7 +3245,7 @@ impl Context {
                             let Value::Dict(entries) = self.heap.get_mut(table) else {
                                 unreachable!()
                             };
-                            let (key, value) = entries.remove(i);
+                            let (key, value) = entries.remove(i)?;
                             self.heap.weak_edge_removed(key);
                             self.heap.weak_edge_removed(value);
                         }
