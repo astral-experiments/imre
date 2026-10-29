@@ -200,10 +200,13 @@ def current():
             return 0
         recursive.entered = True
         list(recursive.iterator)
+        for i in range(4096):
+            temporary = [i, i + 1]
         return 1
 
     recursive.entered = False
-    recursive.iterator = iter(recursive, 0)
+    from functools import partial
+    recursive.iterator = iter(partial(next, iter(recursive, 0)), 0)
     print(next(recursive.iterator, "exhausted"))
 
     for function in (iter, next):

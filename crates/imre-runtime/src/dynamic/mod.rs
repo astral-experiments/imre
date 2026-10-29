@@ -605,6 +605,8 @@ impl Context {
     }
 
     fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
+        // A reentrant callback can exhaust the parent and release its last reference to id.
+        self.heap.keep(id);
         match self.call(callable, Vec::new(), Vec::new()) {
             Ok(item) => {
                 // A recursive call can exhaust the same iterator inside the callable.
@@ -819,7 +821,10 @@ impl Context {
             )
         };
         for i in 0..prefix {
-            unpacked.push(self.next_item(iter)?.ok_or_else(|| too_short(i))?);
+            let item = self.next_item(iter)?.ok_or_else(|| too_short(i))?;
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(item);
+            unpacked.push(item);
         }
         if let Some(star) = star {
             let tail = self.iterator(iter)?;
@@ -831,6 +836,8 @@ impl Context {
             while let Some(item) = self.next_item(tail)? {
                 rest.try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
+                self.heap.reserve_temporaries(1)?;
+                self.heap.keep(item);
                 rest.push(item);
             }
             let tail_start = rest
@@ -839,6 +846,7 @@ impl Context {
                 .ok_or_else(|| too_short(star + rest.len()))?;
             unpacked.push(NONE);
             unpacked.extend(rest.drain(tail_start..));
+            self.heap.reserve_temporaries(1)?;
             unpacked[star] = self.alloc(Value::List(rest));
         } else if self.next_item(iter)?.is_some() {
             let size = match self.heap.get(value) {
@@ -900,7 +908,17 @@ impl Context {
         {
             let iter = self.iterator(id)?;
             let mut items = Vec::new();
+            if let Value::Repeat(repeat) = self.heap.get(iter)
+                && let Some(remaining) = repeat.remaining
+            {
+                items
+                    .try_reserve_exact(remaining)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+            }
             while let Some(item) = self.next_item(iter)? {
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
                 items.push(item);
             }
             return Ok(items);
@@ -961,22 +979,23 @@ impl Context {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
             Value::Iterator { .. } => {
-                let values = match self.iterator_remaining(id)? {
-                    IteratorSlice::Values(values) => values.to_vec(),
-                    IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    remaining @ (IteratorSlice::Bytes(_)
+                let remaining = self.iterator_remaining(id)?;
+                let mut values = Vec::new();
+                values.try_reserve_exact(remaining.len()).map_err(|_| {
+                    Error::new("MemoryError", "iterator is too large to materialize")
+                })?;
+                match remaining {
+                    IteratorSlice::Values(items) => values.extend_from_slice(items),
+                    IteratorSlice::Reversed(items) => values.extend(items.iter().rev().copied()),
+                    IteratorSlice::Bytes(_)
                     | IteratorSlice::ReversedBytes(_)
-                    | IteratorSlice::ReversedText(_)) => {
-                        let mut values = Vec::new();
-                        values.try_reserve_exact(remaining.len()).map_err(|_| {
-                            Error::new("MemoryError", "iterator is too large to materialize")
-                        })?;
+                    | IteratorSlice::ReversedText(_) => {
                         while let Some(item) = self.next_item(id)? {
                             values.push(item);
                         }
                         return Ok(values);
                     }
-                };
+                }
                 if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
                     *sequence = None;
                 }
@@ -1523,24 +1542,40 @@ impl Context {
     }
 
     /// Package resource lookups can initialize filesystem sources added after compilation.
-    fn find_module(&mut self, name: &str, filesystem: bool) -> Result<Option<Id>> {
-        if let Some(value) = self.modules.get(name) {
-            return Ok(Some(*value));
-        }
-        // Execute the package initializer before its child. A regular package
-        // constrains child modules to its __path__; namespace packages combine
-        // their locations in search order.
-        let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-            let id = self
-                .find_module(parent, filesystem)?
-                .ok_or_else(|| Self::missing_module(parent))?;
-            if let Some(id) = self.modules.get(name) {
-                return Ok(Some(*id));
+    fn find_module(&mut self, mut name: &str, filesystem: bool) -> Result<Option<Id>> {
+        let mut parents = Vec::new();
+        let mut module = loop {
+            if let Some(&id) = self.modules.get(name) {
+                break Some(id);
             }
-            Some((id, child))
-        } else {
-            None
+            let Some((parent, child)) = name.rsplit_once('.') else {
+                break self.load_module(name, filesystem, None)?;
+            };
+            // Each unresolved parent consumes three importlib frames.
+            self.check_call_depth(3 * (parents.len() + 1))?;
+            parents
+                .try_reserve(1)
+                .map_err(|_| crate::Error::allocation())?;
+            parents.push((name, parent, child));
+            name = parent;
         };
+        for (name, parent, child) in parents.into_iter().rev() {
+            let id = module.ok_or_else(|| Self::missing_module(parent))?;
+            module = self.load_module(name, filesystem, Some((id, child)))?;
+        }
+        Ok(module)
+    }
+
+    /// Run a module initializer after its parent has been resolved.
+    fn load_module(
+        &mut self,
+        name: &str,
+        filesystem: bool,
+        parent: Option<(Id, &str)>,
+    ) -> Result<Option<Id>> {
+        if let Some(&id) = self.modules.get(name) {
+            return Ok(Some(id));
+        }
         let mut locations = Vec::new();
         let source = if name == "__main__" {
             self.sources

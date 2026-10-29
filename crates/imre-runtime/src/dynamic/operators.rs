@@ -59,9 +59,10 @@ pub(super) fn rendered_integer(value: &crate::Int) -> Result<crate::Str> {
     let mut error = Error::new("", detail.into_string());
     error
         .kind
+        .to_mut()
         .try_reserve_exact("ValueError".len())
         .map_err(render_allocation)?;
-    error.kind.push_str("ValueError");
+    error.kind.to_mut().push_str("ValueError");
     Err(error)
 }
 
@@ -983,7 +984,7 @@ impl Context {
                 })
                 || self.is_builtin_error(error, "KeyError")
                 || error
-                    .class
+                    .class()
                     .is_some_and(|class| self.class_attr(class, "__str__").is_some())
             {
                 break;
@@ -1063,10 +1064,8 @@ impl Context {
     /// Resolve formatting methods on heap instances and exceptions that retain their Python class.
     fn format_slot(&self, id: Id, name: &str) -> Option<(Id, Id)> {
         let class = match self.heap.get(id) {
-            Value::Instance { class, .. }
-            | Value::Raised(Error {
-                class: Some(class), ..
-            }) => *class,
+            Value::Instance { class, .. } => *class,
+            Value::Raised(error) => error.class()?,
             _ => return None,
         };
         self.class_attr(class, name).map(|slot| (class, slot))
@@ -2591,6 +2590,7 @@ impl Context {
             }
         })?;
         self.heap.keep(iterator);
+        let mark = self.heap.temporary_mark();
         while let Some(value) = self.next_item(iterator)? {
             if value == item {
                 return Ok(true);
@@ -2598,7 +2598,9 @@ impl Context {
             // Equality can resize the source and collect a removed candidate.
             self.heap.keep(value);
             let equal = self.binary("==", value, item)?;
-            if self.truth(equal)? {
+            let matched = self.truth(equal)?;
+            self.heap.release_temporaries_since(mark);
+            if matched {
                 return Ok(true);
             }
         }
@@ -2826,7 +2828,7 @@ impl Context {
             a
         } else {
             self.alloc(Value::Set {
-                entries: entries.clone(),
+                entries: entries.try_clone()?,
                 frozen: *frozen,
             })
         };
@@ -2906,7 +2908,7 @@ impl Context {
                     let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
                         unreachable!()
                     };
-                    let (removed, _) = entries.remove(index);
+                    let (removed, _) = entries.remove(index)?;
                     ctx.heap.weak_edge_removed(removed);
                 }
                 Ok(())

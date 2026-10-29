@@ -93,7 +93,12 @@ pub(super) fn loads(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
                     "bad marshal data (bytes object size out of range)",
                 )
             })?;
-            let bytes = data[4..].get(..size).ok_or_else(too_short)?.to_vec();
+            let payload = data[4..].get(..size).ok_or_else(too_short)?;
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(size)
+                .map_err(|_| crate::Error::allocation())?;
+            bytes.extend_from_slice(payload);
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         b'0' => Err(Error::new(

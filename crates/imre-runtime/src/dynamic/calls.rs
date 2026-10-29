@@ -104,12 +104,31 @@ impl Context {
             _ => None,
         }
     }
+    /// Prepare dictionary deletion before removing the oldest cached call.
+    fn evict_cached_call(&mut self, callable: Id, table: Id) -> Result<Option<value::CachedCall>> {
+        let Value::Cached { entries, .. } = self.heap.get(callable) else {
+            unreachable!()
+        };
+        if entries.len() < 128 {
+            return Ok(None);
+        }
+        let Value::Dict(table) = self.heap.get_mut(table) else {
+            unreachable!()
+        };
+        // The dictionary can refuse its first deletion. Keep the eviction order intact on failure.
+        table.prepare_removal()?;
+        let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
+            unreachable!()
+        };
+        Ok(Some(entries.remove(0)))
+    }
+
     /// Find the exception storage only when the object inherits StopIteration.
     fn stop_iteration_error(&mut self, object: Id) -> Option<&mut Error> {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
-        let stop = error.class.map_or_else(
+        let stop = error.class().map_or_else(
             || error.kind == "StopIteration",
             |class| self.has_base(class, "StopIteration"),
         );
@@ -226,7 +245,7 @@ impl Context {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
-        self.class_attr(error.class?, name)
+        self.class_attr(error.class()?, name)
     }
 
     /// Bind an override only if it precedes the built-in numeric method in the MRO.
@@ -828,7 +847,7 @@ impl Context {
                 ..
             } => Ok(self.builtin("time.struct_time")),
             Value::Raised(error) => {
-                if let Some(class) = error.class {
+                if let Some(class) = error.class() {
                     return Ok(class);
                 }
                 let name = error.kind.clone();
@@ -975,9 +994,9 @@ impl Context {
     pub(super) fn raised_error_matches(&self, error: &Error, class: Id) -> bool {
         match self.heap.get(class) {
             Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
-            _ if let Some(actual) = error.class => self.subclass(actual, class),
+            _ if let Some(actual) = error.class() => self.subclass(actual, class),
             Value::Native(_) => {
-                let kind = error.kind.as_str();
+                let kind = error.kind.as_ref();
                 let builtin = self.builtins.get(kind).copied();
                 if self.classes.get(kind).copied() == builtin {
                     self.error_matches(kind, class)
@@ -1026,7 +1045,7 @@ impl Context {
 
     /// Includes runtime-loaded subclasses of the named builtin exception.
     pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
-        (error.class.is_none()
+        (error.class().is_none()
             && builtins::exception_subclass(&error.kind, kind).unwrap_or(error.kind == kind))
             || self
                 .builtins
@@ -1240,7 +1259,7 @@ impl Context {
         }
         if let Value::Raised(error) = self.heap.get(obj) {
             let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
-            if let Some(class) = error.class
+            if let Some(class) = error.class()
                 && let Some(member) = self.class_attr(class, name)
             {
                 let field = if self.data_descriptor(member) {
@@ -1305,7 +1324,7 @@ impl Context {
                 match name {
                     "__traceback__" => return self.exception_traceback(obj),
                     "__context__" => {
-                        return Ok(error.trace.as_ref().and_then(|t| t.context).unwrap_or(NONE));
+                        return Ok(error.context);
                     }
                     "__cause__" => {
                         return Ok(error.trace.as_ref().and_then(|t| t.cause).unwrap_or(NONE));
@@ -2662,7 +2681,7 @@ impl Context {
             let Value::Raised(error) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
-            error.tracing().context = (value != NONE).then_some(value);
+            error.context = value;
             return Ok(());
         }
         if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
@@ -3027,7 +3046,7 @@ impl Context {
                 if matches!(self.heap.get(result), Value::Instance { .. })
                     && let Err(error) = self.set_attr(result, "__orig_class__", callable)
                     && !alias.kind.is_typing_alias()
-                    && !matches!(error.kind.as_str(), "AttributeError" | "TypeError")
+                    && !matches!(error.kind.as_ref(), "AttributeError" | "TypeError")
                 {
                     return Err(error);
                 }
@@ -3193,16 +3212,7 @@ impl Context {
                     {
                         return Ok(result);
                     }
-                    let evicted = {
-                        let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
-                            unreachable!()
-                        };
-                        if entries.len() >= 128 {
-                            Some(entries.remove(0))
-                        } else {
-                            None
-                        }
-                    };
+                    let evicted = self.evict_cached_call(callable, table)?;
                     if let Some(old) = evicted {
                         self.heap.keep(old.key);
                         if let Some(i) = self.find_dictionary_key(table, old.key, Some(old.hash))?.1
@@ -3210,7 +3220,7 @@ impl Context {
                             let Value::Dict(entries) = self.heap.get_mut(table) else {
                                 unreachable!()
                             };
-                            let (key, value) = entries.remove(i);
+                            let (key, value) = entries.remove(i)?;
                             self.heap.weak_edge_removed(key);
                             self.heap.weak_edge_removed(value);
                         }
@@ -3225,16 +3235,7 @@ impl Context {
                         }
                     }
                     loop {
-                        let old = {
-                            let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
-                                unreachable!()
-                            };
-                            if entries.len() >= 128 {
-                                Some(entries.remove(0))
-                            } else {
-                                None
-                            }
-                        };
+                        let old = self.evict_cached_call(callable, table)?;
                         let Some(old) = old else { break };
                         self.heap.keep(old.key);
                         if let Some(i) = self.find_dictionary_key(table, old.key, Some(old.hash))?.1
@@ -3242,7 +3243,7 @@ impl Context {
                             let Value::Dict(entries) = self.heap.get_mut(table) else {
                                 unreachable!()
                             };
-                            let (key, value) = entries.remove(i);
+                            let (key, value) = entries.remove(i)?;
                             self.heap.weak_edge_removed(key);
                             self.heap.weak_edge_removed(value);
                         }
@@ -3450,6 +3451,9 @@ impl Context {
                     let globals = self.module_globals(scope);
                     return self.exec_source(code, globals, None, Some(callable));
                 }
+                // Root the scope, packed arguments, keyword names, and returning value.
+                self.heap
+                    .reserve_temporaries(kwargs.len().saturating_add(4))?;
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)

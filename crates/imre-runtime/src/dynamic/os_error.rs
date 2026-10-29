@@ -125,7 +125,7 @@ impl Context {
         }
         // The errno map has distinct small integer keys. A subclass can change its hash or equality.
         let hash = self.dictionary_hash(code).map_err(|error| {
-            if error.class.is_none() {
+            if error.class().is_none() {
                 self.key_hash_error(code, "dict key", error)
             } else {
                 error
@@ -196,8 +196,8 @@ impl Context {
             }
         }
         let mut error = Error::new("", "");
-        append(&mut error.kind, kind)?;
-        error.class = class;
+        append(error.kind.to_mut(), kind)?;
+        error.class = class.unwrap_or(NONE);
         error.args = Some(self.alloc(Value::Tuple(copy_ids(exposed)?)));
         if fields.errno.is_some()
             || fields.filename.is_some()
@@ -244,7 +244,7 @@ impl Context {
         if error.os_args.is_some() {
             return true;
         }
-        match error.class {
+        match error.class() {
             Some(class) => self
                 .find_in_mro(class, |base| match self.heap.get(base) {
                     Value::Native(name)
@@ -455,7 +455,7 @@ impl Context {
         };
         if !self.is_os_error(error)
             || error
-                .class
+                .class()
                 .is_some_and(|class| self.class_attr(class, "__str__").is_some())
         {
             return None;

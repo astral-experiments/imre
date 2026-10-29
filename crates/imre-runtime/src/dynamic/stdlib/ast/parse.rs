@@ -44,6 +44,10 @@ impl Parser<'_> {
     }
 
     fn suite(&mut self, body: ast::Suite) -> Result<Id> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.suite_inner(body))
+    }
+
+    fn suite_inner(&mut self, body: ast::Suite) -> Result<Id> {
         let values = body
             .into_iter()
             .map(|s| self.statement(s))
@@ -213,7 +217,11 @@ impl Parser<'_> {
         }
     }
 
-    fn expr(&mut self, mut e: ast::Expr) -> Result<Id> {
+    fn expr(&mut self, e: ast::Expr) -> Result<Id> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.expr_inner(e))
+    }
+
+    fn expr_inner(&mut self, mut e: ast::Expr) -> Result<Id> {
         use ast::Expr;
         // Postfix expressions can grow without parentheses. Move their operands
         // out of Ruff's tree so conversion and destruction both use bounded stack.
@@ -353,24 +361,24 @@ impl Parser<'_> {
 pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [src, filename, mode] =
         builtins::bind("parse", args, kwargs, ["source", "filename", "mode"])?;
-    let source = ctx
-        .str_value(src.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                "parse() missing 1 required positional argument: 'source'",
-            )
-        })?)?
-        .to_owned();
-    let filename = filename
-        .map(|f| ctx.str_value(f))
-        .transpose()?
-        .unwrap_or("<unknown>")
-        .to_owned();
-    let mode = mode
-        .map(|m| ctx.str_value(m))
-        .transpose()?
-        .unwrap_or("exec")
-        .to_owned();
+    let copy = |text: &str| crate::Str::try_new(text).map_err(|_| crate::Error::allocation());
+    let source = copy(ctx.str_value(src.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            "parse() missing 1 required positional argument: 'source'",
+        )
+    })?)?)?;
+    let filename = copy(
+        filename
+            .map(|f| ctx.str_value(f))
+            .transpose()?
+            .unwrap_or("<unknown>"),
+    )?;
+    let mode = copy(
+        mode.map(|m| ctx.str_value(m))
+            .transpose()?
+            .unwrap_or("exec"),
+    )?;
     parse_source(ctx, &source, &filename, &mode, false)
 }
 
@@ -381,13 +389,12 @@ pub(super) fn parse_source(
     mode: &str,
     literal: bool,
 ) -> Result<Id> {
-    let mut lines = vec![0];
     let bytes = source.as_bytes();
-    for (i, &byte) in bytes.iter().enumerate() {
-        if byte == b'\n' || (byte == b'\r' && bytes.get(i + 1) != Some(&b'\n')) {
-            lines.push(i + 1);
-        }
-    }
+    let lines = crate::dynamic::source_code::line_starts(bytes.iter().enumerate().filter_map(
+        |(i, &byte)| {
+            (byte == b'\n' || (byte == b'\r' && bytes.get(i + 1) != Some(&b'\n'))).then_some(i + 1)
+        },
+    ))?;
     let load = ctx.builtins["ast._Load"];
     let store = ctx.builtins["ast._Store"];
     let mut parser = Parser {
@@ -438,5 +445,31 @@ pub(super) fn parse_source(
             "ValueError",
             "ast.parse supports exec or eval mode",
         )),
+    }
+}
+
+#[cfg(test)]
+mod stack_tests {
+    #[test]
+    fn convert_nested_conditionals_on_a_small_stack() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let argv = [c"imre".as_ptr()];
+                // SAFETY: argv and the configuration outlive initialization, which returns an owned context.
+                let mut ctx = unsafe {
+                    Box::from_raw(crate::dynamic::ffi::imre_dyn_new(
+                        1,
+                        argv.as_ptr(),
+                        c"{\"paths\":[]}".as_ptr(),
+                    ))
+                };
+                ctx.module("ast").unwrap();
+                let source = format!("{}z", "x if y else ".repeat(512));
+                super::parse_source(&mut ctx, &source, "nested.py", "eval", false).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

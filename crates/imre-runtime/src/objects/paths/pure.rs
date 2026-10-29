@@ -229,6 +229,9 @@ impl PurePath {
             self.root.clone(),
             tail,
         )?;
+        p.raw
+            .try_reserve_exact(1)
+            .map_err(|_| Error::allocation())?;
         p.raw.push(StrOwner::clone(&p.text));
         Ok(p)
     }
@@ -410,13 +413,15 @@ impl PurePath {
                 .chain(self.tail.iter().skip(common).map(Str::as_str)),
         )?;
         let mut path = Self::parsed(self.windows, vec![], Str::default(), Str::default(), tail)?;
+        path.raw
+            .try_reserve_exact(1)
+            .map_err(|_| Error::allocation())?;
         path.raw.push(StrOwner::clone(&path.text));
         Ok(path)
     }
 
-    pub(super) fn name(&self) -> &StrOwner {
-        self.name
-            .get_or_init(|| StrOwner::new(self.tail.last().cloned().unwrap_or_default()))
+    pub(super) fn name(&self) -> Result<&StrOwner> {
+        super::cached_name(&self.name, || super::try_owned_string(self.basename()))
     }
 
     pub(super) fn basename(&self) -> &str {

@@ -256,7 +256,11 @@ impl Context {
             }
             "append" => {
                 match self.heap.get_mut(a) {
-                    Value::List(v) => v.push(b),
+                    Value::List(v) => {
+                        v.try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", ""))?;
+                        v.push(b);
+                    }
                     Value::Set { frozen: false, .. } => builtins::set_add(self, a, b)?,
                     _ => return Err(Error::new("TypeError", "expected a list or set")),
                 }
@@ -516,8 +520,10 @@ impl Context {
                         error.tracing().instance = Some(normalized);
                     }
                     let active = self.heap.active_exception();
-                    if active != NONE && error.tracing().instance != Some(active) {
-                        error.tracing().context = Some(active);
+                    if active != NONE
+                        && error.trace.as_ref().and_then(|trace| trace.instance) != Some(active)
+                    {
+                        error.context = active;
                     }
                 }
                 Err(error)
@@ -667,6 +673,10 @@ fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
 }
 
 fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> Id {
+    let result = result.and_then(|id| {
+        ctx.heap.reserve_temporaries(1)?;
+        Ok(id)
+    });
     match result {
         Ok(id) => {
             ctx.heap.keep(id);
@@ -689,6 +699,18 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 ) -> Id {
     // SAFETY: the emitter supplies a valid context and a constant of exactly len bytes.
     let (ctx, data) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    // Each literal roots its value and the returned handle; metadata roots every name.
+    let roots = if kind == 5 {
+        data.iter()
+            .filter(|&&byte| byte == 0)
+            .count()
+            .saturating_add(2)
+    } else {
+        2
+    };
+    if let Err(error) = ctx.heap.reserve_temporaries(roots) {
+        return finish(ctx, Err(error));
+    }
     let value = match kind {
         0 => std::str::from_utf8(data)
             .ok()
@@ -698,22 +720,31 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .ok_or_else(|| Error::new("ValueError", "invalid integer literal")),
         1 | 5 | 6 => {
             let id = std::str::from_utf8(data)
-                .map(|text| {
+                .map_err(|e| Error::new("UnicodeError", e.to_string()))
+                .and_then(|text| {
                     if kind == 1 {
                         return ctx.heap.string_literal(text);
                     }
                     if kind == 6 {
-                        return ctx.heap.code_name(text);
+                        return Ok(ctx.heap.code_name(text));
                     }
                     for name in text.split('\0') {
                         ctx.heap.code_name(name);
                     }
-                    NONE
-                })
-                .map_err(|e| Error::new("UnicodeError", e.to_string()));
+                    Ok(NONE)
+                });
             return finish(ctx, id);
         }
-        2 => Ok(Value::Bytes(data.to_vec())),
+        2 => {
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(data.len())
+                .map(|()| {
+                    bytes.extend_from_slice(data);
+                    Value::Bytes(bytes)
+                })
+                .map_err(|_| crate::Error::memory_error().into())
+        }
         3 => data
             .try_into()
             .map(|bytes| Value::Float(f64::from_le_bytes(bytes)))
@@ -1122,6 +1153,16 @@ pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usiz
     unsafe { (&*ctx).heap.temporary_mark() }
 }
 
+/// Drop the finished iteration's temporary handles before asking for the next item.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns the context and recorded this mark in its active frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.reserve_slot_or_request_collection();
+    ctx.collect_garbage();
+}
+
 /// Release a consumed truth operand on the branch that no longer needs it.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
@@ -1253,6 +1294,15 @@ impl Context {
         }
     }
 
+    /// Collect unreachable values before a native iterator step grows the heap.
+    pub(super) fn collect_streaming_garbage(&mut self, limit: &mut usize) {
+        let due = self.heap.prepare_streaming_collection(*limit);
+        self.collect_garbage();
+        if due {
+            *limit = self.heap.streaming_collection_limit();
+        }
+    }
+
     /// Run deferred callbacks when a native loop reaches a collection point.
     pub(super) fn collect_garbage(&mut self) {
         let (heap, roots) = self.heap_and_roots();
@@ -1302,6 +1352,34 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn urlencode_collects_discarded_sequence_values() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the argument and configuration pointers outlive context initialization.
+        let mut ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+        ctx.heap
+            .enter(NONE, NONE, value::FrameOwner::Function(NONE));
+        let range = crate::dynamic::range::Range::new(0.into(), 16_384.into(), 1.into()).unwrap();
+        let values = ctx.alloc(Value::Range(range));
+        let key = ctx.text("k");
+        let pair = ctx.alloc(Value::Tuple(vec![key, values]));
+        let query = ctx.alloc(Value::List(vec![pair]));
+        let encode = ctx.builtin("urllib.parse.urlencode");
+
+        let mark = ctx.heap.temporary_mark();
+        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let probe = Rc::downgrade(&value);
+        ctx.alloc(Value::AttrGetter(value));
+        ctx.heap.release_temporaries_since(mark);
+
+        let encoded = ctx.call(encode, vec![query, TRUE], Vec::new()).unwrap();
+        let encoded = ctx.str_value(encoded).unwrap();
+        assert!(encoded.starts_with("k=0&k=1&"));
+        assert!(encoded.ends_with("k=16383"));
+        assert!(probe.upgrade().is_none());
+    }
 
     #[test]
     fn surviving_function_and_cell_trace_only_the_captured_binding() {

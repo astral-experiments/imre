@@ -61,7 +61,6 @@ pub(super) struct Location {
 pub(super) struct Trace {
     pub frames: Vec<(Location, Id)>,
     pub instance: Option<Id>,
-    pub context: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
     /// Live members belong to the exception instance across traceback clones.
@@ -81,12 +80,15 @@ pub(super) struct ImportFields {
 
 #[derive(Clone, Debug)]
 pub(super) struct Error {
-    pub kind: String,
-    pub class: Option<Id>,
+    pub kind: std::borrow::Cow<'static, str>,
+    /// The Python exception class, or NONE for a native error.
+    pub class: Id,
     pub message: String,
     pub args: Option<Id>,
     pub decode: Option<Box<DecodeState>>,
     pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
+    // Keep the context reachable even if the optional traceback cannot be allocated.
+    pub context: Id,
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
     pub import: Option<crate::shared::Shared<ImportFields>>,
@@ -105,16 +107,26 @@ pub(super) struct DecodeState {
 impl Error {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
         Self {
-            kind: kind.to_owned(),
-            class: None,
+            kind: if kind == "MemoryError" {
+                std::borrow::Cow::Borrowed("MemoryError")
+            } else {
+                std::borrow::Cow::Owned(kind.to_owned())
+            },
+            class: NONE,
             message: message.into(),
             args: None,
             decode: None,
             os_args: None,
+            context: NONE,
             trace: None,
             exit_status: None,
             import: None,
         }
+    }
+
+    /// Read the class handle of an exception constructed from a Python class.
+    pub(super) fn class(&self) -> Option<Id> {
+        (self.class != NONE).then_some(self.class)
     }
 
     /// Attach the module and member names exposed on a Python import exception.
@@ -153,7 +165,8 @@ impl Error {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
             .into_iter()
-            .chain(self.class)
+            .chain(self.class())
+            .chain((self.context != NONE).then_some(self.context))
             .chain(
                 self.decode
                     .iter()
@@ -167,7 +180,6 @@ impl Error {
                     .map(|&(_, frame)| frame)
                     .chain((trace.stop_value != NONE).then_some(trace.stop_value))
                     .chain(trace.instance)
-                    .chain(trace.context)
                     .chain(trace.cause)
                     .chain(trace.import_message)
                     .chain(
@@ -180,6 +192,14 @@ impl Error {
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
             }))
+    }
+
+    /// Acquire the cold metadata while an error is already propagating.
+    fn try_tracing(&mut self) -> Option<&mut Trace> {
+        if self.trace.is_none() {
+            self.trace = Some(allocator_api2::boxed::Box::try_new(Trace::default()).ok()?);
+        }
+        self.trace.as_deref_mut()
     }
 
     pub(super) fn tracing(&mut self) -> &mut Trace {
@@ -204,12 +224,24 @@ impl Context {
                 loc.line = line;
                 loc.span = Some([start, split, end]);
             }
-            let trace = error.tracing();
             let active = self.heap.active_exception();
-            if trace.frames.is_empty() && active != NONE && trace.instance != Some(active) {
-                trace.context.get_or_insert(active);
+            if error.context == NONE
+                && active != NONE
+                && error
+                    .trace
+                    .as_ref()
+                    .is_none_or(|trace| trace.frames.is_empty() && trace.instance != Some(active))
+            {
+                error.context = active;
             }
-            trace.frames.push((loc, frame));
+            if let Some(trace) = error.try_tracing()
+                && trace.frames.try_reserve(1).is_ok()
+            {
+                trace.frames.push((loc, frame));
+                return;
+            }
+            let original = std::mem::replace(error, Error::new("MemoryError", ""));
+            error.context = self.raised_instance(original);
         }
     }
 
@@ -814,7 +846,7 @@ impl Value {
         match self {
             Self::Instance { class, .. } => Some(*class),
             Self::Module { constructor, .. } => *constructor,
-            Self::Raised(error) => error.class,
+            Self::Raised(error) => error.class(),
             _ => None,
         }
     }
@@ -1431,13 +1463,13 @@ impl Heap {
         callback: Id,
         kind: super::weakref::Kind,
         subclass: Option<Id>,
-    ) -> Id {
+    ) -> Result<Id> {
         let references = self.weak_references(target);
         if subclass.is_none() && callback == NONE
             && let Some(&id) = references.iter().find(|&&id|
                 matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
         {
-            return id;
+            return Ok(id);
         }
         // Callback-free canonical references precede proxies, then callbacks in newest-first order.
         let index = references
@@ -1452,6 +1484,15 @@ impl Heap {
                 _ => true,
             })
             .unwrap_or(references.len());
+        let mut new_references = Vec::new();
+        if let Some(references) = self.weak.get_mut(&target) {
+            references.try_reserve(1)
+        } else {
+            self.weak
+                .try_reserve(1)
+                .and_then(|()| new_references.try_reserve(1))
+        }
+        .map_err(|_| Error::new("MemoryError", ""))?;
         let reference = super::weakref::Reference {
             target: Some(target),
             callback,
@@ -1467,11 +1508,14 @@ impl Heap {
         } else {
             self.alloc(Value::Weak(reference))
         };
-        self.weak.entry(target).or_default().insert(index, id);
+        self.weak
+            .entry(target)
+            .or_insert(new_references)
+            .insert(index, id);
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
         self.collect_next_statement = true;
-        id
+        Ok(id)
     }
 
     fn weak_edge(&self, value: Id) -> bool {
@@ -1598,11 +1642,31 @@ impl Heap {
         )))
     }
 
-    pub fn string_literal(&mut self, text: &str) -> Id {
-        if text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            return self.code_name(text);
+    pub fn string_literal(&mut self, text: &str) -> Result<Id> {
+        let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if intern && let Some(entry) = self.interned.get_mut(text) {
+            entry.literal = true;
+            let id = entry.id;
+            self.keep(id);
+            return Ok(id);
         }
-        self.alloc(Value::Str(text.to_owned()))
+        let mut value = String::new();
+        value
+            .try_reserve_exact(text.len())
+            .map_err(|_| crate::Error::memory_error())?;
+        value.push_str(text);
+        if !intern {
+            return Ok(self.alloc(Value::Str(value)));
+        }
+        let owner = crate::objects::try_literal_string(text)?;
+        let owner = crate::sys::try_intern_owner(&owner).ok_or_else(crate::Error::memory_error)?;
+        self.interned
+            .try_reserve(1)
+            .map_err(|_| crate::Error::memory_error())?;
+        let id = self.alloc_slot(Value::Str(value));
+        self.interned
+            .insert(owner, InternedString { id, literal: true });
+        Ok(id)
     }
 
     /// Runtime-compiled ASCII constants are interned for the lifetime of their code.
@@ -2000,6 +2064,21 @@ impl Heap {
         }
     }
 
+    /// Size the next streaming collection in proportion to the surviving heap.
+    pub(super) fn streaming_collection_limit(&self) -> usize {
+        (self.slots.len() - self.free.len()).saturating_mul(2)
+    }
+
+    /// Request collection before a streaming callback exhausts the heap.
+    pub(super) fn prepare_streaming_collection(&mut self, limit: usize) -> bool {
+        if self.free.is_empty() && (self.slots.len() >= limit || self.slots.try_reserve(1).is_err())
+        {
+            self.next_collection = self.slots.len();
+            return true;
+        }
+        false
+    }
+
     /// Drop unreachable values and preserve callbacks that must run after the sweep.
     pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<Vec<(Id, Id)>> {
         self.mark(globals);
@@ -2017,10 +2096,29 @@ impl Heap {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
+        let live = &mut self.frames.last_mut().unwrap().live;
         self.weak.retain(|&target, refs| {
             refs.retain(|&id| self.slots[id as usize].marked());
             if self.slots[target as usize].marked() {
                 return !refs.is_empty();
+            }
+            let count = refs
+                .iter()
+                .filter(|&&id| {
+                    self.slots[id as usize]
+                        .value
+                        .as_ref()
+                        .unwrap()
+                        .weak_reference()
+                        .unwrap()
+                        .callback
+                        != NONE
+                })
+                .count();
+            let dispatch = callbacks.try_reserve(count).is_ok()
+                && live.try_reserve(count.saturating_mul(2)).is_ok();
+            if !dispatch {
+                eprintln!("Exception ignored while clearing object weakrefs: MemoryError");
             }
             for &id in refs.iter() {
                 let wr = self.slots[id as usize]
@@ -2031,8 +2129,9 @@ impl Heap {
                     .unwrap();
                 wr.target = None;
                 let callback = std::mem::replace(&mut wr.callback, NONE);
-                if callback != NONE {
+                if dispatch && callback != NONE {
                     callbacks.push((callback, id));
+                    live.extend([callback, id]);
                 }
             }
             false
@@ -2040,20 +2139,27 @@ impl Heap {
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
+        let mut reclaiming = true;
         for (id, slot) in self.slots.iter_mut().enumerate() {
             let dead = slot.trace.replace(UNMARKED) == UNMARKED;
-            if dead && slot.value.take().is_some() {
+            if dead && reclaiming && slot.value.is_some() {
+                if self.free.try_reserve(1).is_err() {
+                    // Finish clearing marks and deliver callbacks before the next sweep.
+                    reclaiming = false;
+                    continue;
+                }
+                slot.value = None;
                 self.immutable_hashes.remove(&(id as Id));
                 self.free.push(id);
             }
         }
-        self.next_collection = (self.slots.len() - self.free.len())
-            .saturating_mul(2)
-            .max(4096);
-        for &(callback, wr) in &callbacks {
-            self.keep(callback);
-            self.keep(wr);
-        }
+        self.next_collection = if reclaiming {
+            (self.slots.len() - self.free.len())
+                .saturating_mul(2)
+                .max(4096)
+        } else {
+            self.slots.len()
+        };
         (!callbacks.is_empty()).then_some(callbacks)
     }
 }

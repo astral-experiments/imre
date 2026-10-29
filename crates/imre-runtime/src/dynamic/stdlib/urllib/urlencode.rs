@@ -70,9 +70,8 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
                     "TypeError",
                     "not a valid non-string sequence or mapping object",
                 );
-                let trace = error.tracing();
-                trace.cause = Some(cause);
-                trace.context = Some(cause);
+                error.tracing().cause = Some(cause);
+                error.context = cause;
                 error
             })?;
             query
@@ -124,19 +123,34 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         };
         let mut append = |ctx: &mut Context, value: Id| -> Result<()> {
             let value = encoded(ctx, value, safe, encoding, errors, via)?;
+            let key = ctx.str_value(key)?;
+            let value = ctx.str_value(value)?;
+            let separators = 1 + usize::from(!joined.is_empty());
+            joined
+                .try_reserve(
+                    key.len()
+                        .saturating_add(value.len())
+                        .saturating_add(separators),
+                )
+                .map_err(|_| Error::new("MemoryError", ""))?;
             if !joined.is_empty() {
                 joined.push('&')
             }
-            joined.push_str(&key);
+            joined.push_str(key);
             joined.push('=');
-            joined.push_str(&value);
+            joined.push_str(value);
             Ok(())
         };
         if let Some(iter) = expanded {
             ctx.heap.reserve_temporaries(1)?;
             ctx.heap.keep(iter);
             let held = ctx.heap.temporary_mark();
-            while let Some(value) = ctx.next_result(iter)? {
+            let mut limit = ctx.heap.streaming_collection_limit();
+            loop {
+                ctx.collect_streaming_garbage(&mut limit);
+                let Some(value) = ctx.next_result(iter)? else {
+                    break;
+                };
                 ctx.heap.reserve_temporaries(1)?;
                 ctx.heap.keep(value);
                 append(ctx, value)?;
@@ -158,7 +172,7 @@ fn encoded(
     encoding: Option<Id>,
     errors: Option<Id>,
     via: Option<Id>,
-) -> Result<String> {
+) -> Result<Id> {
     let bytes = matches!(ctx.heap.get(ctx.scalar_value(value)), Value::Bytes(_));
     let id = if bytes || matches!(ctx.heap.get(value), Value::Str(_)) {
         value
@@ -193,5 +207,6 @@ fn encoded(
             if bytes { None } else { errors },
         )?
     };
-    Ok(ctx.str_value(value)?.to_owned())
+    ctx.str_value(value)?;
+    Ok(value)
 }

@@ -111,9 +111,8 @@ impl Context {
             ));
         }
         let wrapper = subclass.map(|class| self.instance(class, None));
-        Ok(self
-            .heap
-            .new_weak_reference(target, callback, kind, wrapper))
+        self.heap
+            .new_weak_reference(target, callback, kind, wrapper)
     }
 
     #[inline]
@@ -208,7 +207,7 @@ impl Context {
         match self.heap.get(value) {
             Value::Instance { class, .. } => self.class_instances_support_weakref(*class),
             Value::Raised(error) => error
-                .class
+                .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
             Value::Class { .. }
             | Value::Function { .. }
@@ -494,7 +493,12 @@ pub(super) fn call(
             if function.ends_with("count") {
                 Ok(ctx.int(refs.len() as i64))
             } else {
-                Ok(ctx.alloc(Value::List(refs.to_vec())))
+                let mut snapshot = Vec::new();
+                snapshot
+                    .try_reserve_exact(refs.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                snapshot.extend_from_slice(refs);
+                Ok(ctx.alloc(Value::List(snapshot)))
             }
         }
         "_weakref._remove_dead_weakref" => {

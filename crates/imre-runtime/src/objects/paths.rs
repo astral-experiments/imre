@@ -12,6 +12,7 @@ use std::rc::Rc;
 use num_traits::ToPrimitive;
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
+use super::text::try_owned_string;
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 mod components;
@@ -267,6 +268,17 @@ impl Drop for JoinedParts {
     }
 }
 
+fn cached_name(
+    cache: &std::cell::OnceCell<StrOwner>,
+    build: impl FnOnce() -> Result<StrOwner>,
+) -> Result<&StrOwner> {
+    if let Some(name) = cache.get() {
+        return Ok(name);
+    }
+    let name = build()?;
+    Ok(cache.get_or_init(|| name))
+}
+
 impl Storage {
     pub(super) fn path(&self) -> &str {
         self.path_text()
@@ -279,20 +291,20 @@ impl Storage {
         }
     }
 
-    fn path_name(&self) -> &StrOwner {
+    fn path_name(&self) -> Result<&StrOwner> {
         if let Self::PurePath(p) = self {
             return p.name();
         }
         let Self::Path { name: cached, .. } = self else {
             fail("SystemError", "expected a path object");
         };
-        cached.get_or_init(|| {
+        cached_name(cached, || {
             let text = self.path_value().components();
             let component = name(text);
             if component.len() == text.len() {
-                StrOwner::clone(text)
+                Ok(StrOwner::clone(text))
             } else {
-                StrOwner::new(Str::from(component))
+                try_owned_string(component)
             }
         })
     }
@@ -706,12 +718,8 @@ pub unsafe extern "C" fn imre_path_text(path: *const Object) -> *const Str {
 pub unsafe extern "C" fn imre_path_name(path: *const Object) -> *const Str {
     // SAFETY: spelling is fixed. The one per-path cached component and the
     // returned handle each own their reference across subsequent operations.
-    let text = unsafe {
-        object(path)
-            .0
-            .with(|storage| StrOwner::clone(storage.path_name()))
-    };
-    StrOwner::into_raw(text)
+    let text = unsafe { object(path).0.with(|storage| storage.path_name().cloned()) };
+    finish(text.map(StrOwner::into_raw), std::ptr::null())
 }
 
 /// # Safety
@@ -724,12 +732,12 @@ pub unsafe extern "C" fn imre_path_stem(path: *const Object) -> *const Str {
         object(path).0.with(|storage| {
             let component = storage.basename();
             match suffix_start(component) {
-                Some(end) => StrOwner::new(Str::from(&component[..end])),
-                None => StrOwner::clone(storage.path_name()),
+                Some(end) => try_owned_string(&component[..end]),
+                None => storage.path_name().cloned(),
             }
         })
     };
-    StrOwner::into_raw(stem)
+    finish(stem.map(StrOwner::into_raw), std::ptr::null())
 }
 
 /// # Safety
@@ -740,10 +748,10 @@ pub unsafe extern "C" fn imre_path_suffix(path: *const Object) -> *const Str {
     let text = unsafe {
         object(path).0.with(|storage| {
             let name = storage.basename();
-            Str::from(&name[suffix_start(name).unwrap_or(name.len())..])
+            try_owned_string(&name[suffix_start(name).unwrap_or(name.len())..])
         })
     };
-    StrOwner::into_raw(StrOwner::new(text))
+    finish(text.map(StrOwner::into_raw), std::ptr::null())
 }
 
 /// # Safety

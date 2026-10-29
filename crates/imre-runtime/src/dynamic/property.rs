@@ -52,7 +52,7 @@ impl Property {
             .map_or_else(String::new, |name| format!(" {}", ctx.repr(name)));
         let class = match ctx.heap.get(receiver) {
             Value::Instance { class, .. } => Some(*class),
-            Value::Raised(error) => error.class,
+            Value::Raised(error) => error.class(),
             _ => None,
         };
         let owner = if let Some(class) = class
