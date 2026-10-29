@@ -361,24 +361,24 @@ impl Parser<'_> {
 pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [src, filename, mode] =
         builtins::bind("parse", args, kwargs, ["source", "filename", "mode"])?;
-    let source = ctx
-        .str_value(src.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                "parse() missing 1 required positional argument: 'source'",
-            )
-        })?)?
-        .to_owned();
-    let filename = filename
-        .map(|f| ctx.str_value(f))
-        .transpose()?
-        .unwrap_or("<unknown>")
-        .to_owned();
-    let mode = mode
-        .map(|m| ctx.str_value(m))
-        .transpose()?
-        .unwrap_or("exec")
-        .to_owned();
+    let copy = |text: &str| crate::Str::try_new(text).map_err(|_| crate::Error::allocation());
+    let source = copy(ctx.str_value(src.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            "parse() missing 1 required positional argument: 'source'",
+        )
+    })?)?)?;
+    let filename = copy(
+        filename
+            .map(|f| ctx.str_value(f))
+            .transpose()?
+            .unwrap_or("<unknown>"),
+    )?;
+    let mode = copy(
+        mode.map(|m| ctx.str_value(m))
+            .transpose()?
+            .unwrap_or("exec"),
+    )?;
     parse_source(ctx, &source, &filename, &mode, false)
 }
 
