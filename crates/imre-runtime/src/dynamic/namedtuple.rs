@@ -5,6 +5,228 @@ use std::collections::HashSet;
 use super::{Context, Error, Id, NONE, Result, Value, builtins};
 use ruff_python_stdlib::{identifiers::is_identifier, keyword::is_keyword};
 
+pub(super) const GETTER: &str = "collections._tuplegetter";
+pub(super) const DOC_REPR: &str = "<member '__doc__' of 'collections._tuplegetter' objects>";
+pub(super) const GETTER_METHODS: &[&str] = &["__get__", "__set__", "__delete__", "__reduce__"];
+
+/// Return the shared native type attributes that describe the tuple field descriptor.
+pub(super) fn class_attribute(ctx: &mut Context, class: Id, name: &str) -> Option<Id> {
+    if name == "__base__" {
+        return Some(ctx.builtin("object"));
+    }
+    if !matches!(name, "__doc__" | "__bases__" | "__mro__") {
+        return None;
+    }
+    let key = format!("{GETTER}.{name}");
+    if let Some(value) = ctx.builtins.get(&key) {
+        return Some(*value);
+    }
+    let value = if name == "__doc__" {
+        Value::TupleGetterDoc
+    } else {
+        let object = ctx.builtin("object");
+        Value::Tuple(if name == "__bases__" {
+            vec![object]
+        } else {
+            vec![class, object]
+        })
+    };
+    let value = ctx.alloc(value);
+    ctx.builtins.insert(key, value);
+    Some(value)
+}
+
+/// Read the writable document through its member descriptor.
+pub(super) fn document(ctx: &Context, receiver: Id) -> Result<Id> {
+    if let Value::TupleGetter { doc, .. } = ctx.heap.get(receiver) {
+        Ok(doc.unwrap_or(NONE))
+    } else {
+        Err(doc_receiver_error(ctx, receiver))
+    }
+}
+
+fn doc_receiver_error(ctx: &Context, receiver: Id) -> Error {
+    Error::new(
+        "TypeError",
+        format!(
+            "descriptor '__doc__' for '{GETTER}' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        ),
+    )
+}
+
+/// Replace or delete the traced document before releasing its previous weak edge.
+pub(super) fn set_document(ctx: &mut Context, receiver: Id, value: Option<Id>) -> Result<Id> {
+    let Value::TupleGetter { doc, .. } = ctx.heap.get_mut(receiver) else {
+        return Err(doc_receiver_error(ctx, receiver));
+    };
+    if let Some(old) = std::mem::replace(doc, value) {
+        ctx.heap.weak_edge_removed(old);
+    }
+    Ok(NONE)
+}
+
+/// Implement direct calls to the tuple getter's document member descriptor.
+pub(super) fn doc_method(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&member, rest)) = args.split_first() else {
+        return Err(Error::new("TypeError", "missing member descriptor"));
+    };
+    if !matches!(ctx.heap.get(member), Value::TupleGetterDoc) || !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("invalid arguments to {name}"),
+        ));
+    }
+    match (name, rest) {
+        ("__get__", [obj] | [obj, _]) => {
+            if *obj != NONE {
+                document(ctx, *obj)
+            } else if rest.get(1).copied().unwrap_or(NONE) == NONE {
+                Err(Error::new("TypeError", "__get__(None, None) is invalid"))
+            } else {
+                Ok(member)
+            }
+        }
+        ("__set__", [obj, value]) => set_document(ctx, *obj, Some(*value)),
+        ("__delete__", [obj]) => set_document(ctx, *obj, None),
+        ("__reduce__", []) => {
+            let get = ctx.builtin("getattr");
+            let class = ctx.builtin(GETTER);
+            let doc = ctx.text("__doc__");
+            let args = ctx.alloc(Value::Tuple(vec![class, doc]));
+            Ok(ctx.alloc(Value::Tuple(vec![get, args])))
+        }
+        _ => Err(Error::new(
+            "TypeError",
+            format!("invalid arguments to {name}"),
+        )),
+    }
+}
+
+/// Bind read-only tuple positions in a new class namespace.
+pub(super) fn bind_fields(ctx: &mut Context, scope: Id, names: &[String]) {
+    for (index, field) in names.iter().enumerate() {
+        let doc = ctx.text(format!("Alias for field number {index}"));
+        let getter = ctx.alloc(Value::TupleGetter {
+            index: index as i64,
+            doc: Some(doc),
+        });
+        ctx.bind(scope, field, getter);
+    }
+}
+
+/// Construct the same descriptor as the collections module's field factory.
+pub(super) fn new_getter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [raw, doc] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("_tuplegetter expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_tuplegetter() takes no keyword arguments",
+        ));
+    }
+    let index = ctx
+        .index_integer(*raw)?
+        .to_i64()
+        .filter(|index| isize::try_from(*index).is_ok())
+        .ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+    Ok(ctx.alloc(Value::TupleGetter {
+        index,
+        doc: Some(*doc),
+    }))
+}
+
+/// Read the tuple payload without invoking the receiver's indexing override.
+pub(super) fn read_field(ctx: &Context, index: i64, receiver: Id) -> Result<Id> {
+    let object = ctx.scalar_value(receiver);
+    let pos = usize::try_from(index).ok();
+    let item = match ctx.heap.get(object) {
+        Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+            pos.and_then(|i| items.get(i)).copied()
+        }
+        Value::Instance { class, fields, .. }
+            if let Value::Class {
+                namedtuple_fields: Some(names),
+                ..
+            } = ctx.heap.get(*class) =>
+        {
+            pos.and_then(|i| names.get(i))
+                .and_then(|name| fields.get(name))
+                .copied()
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor for index '{index}' for tuple subclasses doesn't apply to '{}' object",
+                    ctx.type_name(receiver)
+                ),
+            ));
+        }
+    };
+    item.ok_or_else(|| Error::new("IndexError", "tuple index out of range"))
+}
+
+/// Dispatch explicit descriptor protocol calls with the receiver retained across allocation.
+pub(super) fn getter_method(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new("TypeError", "missing _tuplegetter receiver"));
+    };
+    let Value::TupleGetter { index, doc } = *ctx.heap.get(receiver) else {
+        return Err(Error::new("TypeError", "expected a _tuplegetter receiver"));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    match (name, rest) {
+        ("__get__", [instance] | [instance, _]) => {
+            if *instance != NONE {
+                read_field(ctx, index, *instance)
+            } else if rest.get(1).copied().unwrap_or(NONE) == NONE {
+                Err(Error::new("TypeError", "__get__(None, None) is invalid"))
+            } else {
+                Ok(receiver)
+            }
+        }
+        ("__set__", [_, _]) => Err(Error::new("AttributeError", "can't set attribute")),
+        ("__delete__", [_]) => Err(Error::new("AttributeError", "can't delete attribute")),
+        ("__reduce__", []) => {
+            let doc = doc
+                .ok_or_else(|| Error::new("SystemError", "NULL object passed to Py_BuildValue"))?;
+            let class = ctx.builtin(GETTER);
+            let index = ctx.int(index);
+            let values = ctx.alloc(Value::Tuple(vec![index, doc]));
+            Ok(ctx.alloc(Value::Tuple(vec![class, values])))
+        }
+        _ => Err(Error::new(
+            "TypeError",
+            format!("invalid arguments to {name}"),
+        )),
+    }
+}
+
 /// Consume the complete iterable before inspecting its length, including errors from its iterator.
 fn collect(ctx: &mut Context, source: Id) -> Result<Vec<Id>> {
     let iterator = ctx.iterator(source)?;
@@ -101,6 +323,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
             ),
         ));
     }
+    let has_defaults = defaults.is_some_and(|id| id != NONE);
     let defaults = match defaults {
         Some(id) if id != NONE => collect(ctx, id)?,
         _ => Vec::new(),
@@ -134,10 +357,8 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let fields = ctx.alloc(Value::Tuple(field_ids));
     ctx.bind(scope, "_fields", fields);
     ctx.bind(scope, "__match_args__", fields);
-    let collections = ctx.module("collections")?;
-    let repr_factory = ctx.lookup_attr(collections, "_namedtuple_repr")?;
-    let repr = ctx.call(repr_factory, vec![name, fields], Vec::new())?;
-    ctx.bind(scope, "__repr__", repr);
+    bind_fields(ctx, scope, &names);
+    bind_repr(ctx, scope, name, fields)?;
     let slots = ctx.alloc(Value::Tuple(Vec::new()));
     ctx.bind(scope, "__slots__", slots);
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
@@ -145,6 +366,8 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let make = ctx.builtin("_collections._make");
     let make = ctx.alloc(Value::ClassMethod(make));
     ctx.bind(scope, "_make", make);
+    let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
+    bind_new(ctx, scope, &typename, &names, defaults)?;
     let tuple = ctx.builtin("tuple");
     let class = ctx.allocate_class(typename, scope, vec![tuple])?;
     let Value::Class {
@@ -154,14 +377,141 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         unreachable!()
     };
     *namedtuple_fields = Some(names.into());
-    if !defaults.is_empty() {
-        let defaults = ctx.alloc(Value::Tuple(defaults));
-        let Value::Scope(scope) = ctx.heap.get_mut(scope) else {
-            unreachable!()
-        };
-        scope.class_namespace.as_mut().unwrap().namedtuple_defaults = Some(defaults);
-    }
     Ok(class)
+}
+
+/// Format the actual tuple payload against the declared field names.
+pub(super) fn bind_repr(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+    let module = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(module, "_namedtuple_repr")?;
+    let repr = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "__repr__", repr);
+    Ok(())
+}
+
+/// Assemble constructor source and documentation without aborting on an oversized field list.
+fn text_parts(parts: &[&str]) -> Result<String> {
+    let mut output = String::new();
+    for part in parts {
+        super::operators::append_rendered_text(&mut output, part)?;
+    }
+    Ok(output)
+}
+
+/// Give the generated function the declared parameter names and ordinary Python argument binding.
+pub(super) fn bind_new(
+    ctx: &mut Context,
+    scope: Id,
+    typename: &str,
+    names: &[String],
+    defaults: Option<Id>,
+) -> Result<()> {
+    let mut fields = String::new();
+    for name in names {
+        if !fields.is_empty() {
+            super::operators::append_rendered_text(&mut fields, ", ")?;
+        }
+        super::operators::append_rendered_text(&mut fields, name)?;
+    }
+    if names.len() == 1 {
+        super::operators::append_rendered_text(&mut fields, ",")?;
+    }
+    let new = ctx.builtin("tuple.__new__");
+    let allocate = ctx.text("_tuple_new");
+    let module = ctx.text("__name__");
+    let module_name = ctx.text(text_parts(&["namedtuple_", typename])?);
+    let builtins = ctx.text("__builtins__");
+    let empty = ctx.dict(Vec::new());
+    let globals = ctx.dict(vec![
+        (allocate, new),
+        (module, module_name),
+        (builtins, empty),
+    ]);
+    let source = ctx.text(text_parts(&[
+        "def __new__(_cls, ",
+        &fields,
+        "):\n    return _tuple_new(_cls, (",
+        &fields,
+        "))",
+    ])?);
+    ctx.exec_source(source, globals, None, None)?;
+    let new = ctx
+        .dict_named_item(globals, "__new__")
+        .expect("generated function");
+    ctx.heap.keep(new);
+    let key = ctx.text("__new__");
+    ctx.delete_item(globals, key)?;
+    let Value::Function { code, .. } = *ctx.heap.get(new) else {
+        unreachable!()
+    };
+    let lambda = ctx.text("<lambda>");
+    let Value::Code(code) = ctx.heap.get_mut(code) else {
+        unreachable!()
+    };
+    code.name = lambda;
+    code.qualname = lambda;
+    let qualname = ctx.text(text_parts(&[typename, ".__new__"])?);
+    let doc = ctx.text(text_parts(&[
+        "Create new instance of ",
+        typename,
+        "(",
+        &fields,
+        ")",
+    ])?);
+    ctx.set_attr(new, "__qualname__", qualname)?;
+    ctx.set_attr(new, "__doc__", doc)?;
+    if let Some(defaults) = defaults {
+        ctx.set_attr(new, "__defaults__", defaults)?;
+    }
+    let descriptor = super::static_method::construct(ctx, new)?;
+    ctx.bind(scope, "__new__", descriptor);
+    Ok(())
+}
+
+/// Allocate the requested tuple subtype from the iterable before invoking any initializer.
+pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&class, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "tuple.__new__(): not enough arguments",
+        ));
+    };
+    let tuple = ctx.builtin("tuple");
+    let names = ctx.namedtuple_fields(class);
+    if names.is_none() && !ctx.subclass(class, tuple) {
+        return Err(ctx.invalid_new_subtype("tuple", class));
+    }
+    if !kwargs.is_empty()
+        && (class == tuple
+            || ctx.class_attr(class, "__init__").is_none_or(|init| {
+                matches!(ctx.heap.get(init), Value::Native(name) if name == "object.__init__")
+            }))
+    {
+        return Err(Error::new("TypeError", "tuple() takes no keyword arguments"));
+    }
+    let storage = builtins::call(ctx, "tuple", args, &[])?;
+    if class == tuple {
+        return Ok(storage);
+    }
+    let Value::Tuple(items) = ctx.heap.get(storage) else {
+        unreachable!()
+    };
+    let (fields, scalar) = if let Some(names) = names {
+        let fields = names.iter().cloned().zip(items.iter().copied()).collect();
+        (fields, (names.len() != items.len()).then_some(storage))
+    } else {
+        (Default::default(), Some(storage))
+    };
+    Ok(ctx.alloc(Value::Instance {
+        class,
+        fields,
+        scalar,
+        namespace: None,
+        dictionary: None,
+        property: None,
+        weak_reference: None,
+        memory_stream: None,
+    }))
 }
 
 /// Build the descriptor's actual receiver class from the iterable's positional values.
@@ -181,5 +531,15 @@ pub(super) fn make(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
             format!("Expected {} arguments, got {}", names.len(), values.len()),
         ));
     }
-    ctx.call(class, values, Vec::new())
+    let fields = names.iter().cloned().zip(values).collect();
+    Ok(ctx.alloc(Value::Instance {
+        class,
+        namespace: None,
+        fields,
+        dictionary: None,
+        scalar: None,
+        property: None,
+        weak_reference: None,
+        memory_stream: None,
+    }))
 }

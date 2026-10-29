@@ -8,6 +8,25 @@ use num_traits::{Signed, Zero};
 use super::{Context, Error, Id, Result, Value};
 use crate::Int;
 
+pub(super) const METHODS: &[&str] = &[
+    "__bool__",
+    "__contains__",
+    "__eq__",
+    "__ge__",
+    "__getitem__",
+    "__gt__",
+    "__hash__",
+    "__iter__",
+    "__le__",
+    "__len__",
+    "__lt__",
+    "__ne__",
+    "__repr__",
+    "__reversed__",
+    "count",
+    "index",
+];
+
 #[derive(Clone)]
 pub(super) struct Range {
     pub(super) start: Int,
@@ -37,8 +56,42 @@ impl Range {
         })
     }
 
+    /// Compare the represented sequences without visiting their elements.
+    pub(super) fn equal(&self, other: &Self) -> bool {
+        if !self.len.cmp(&other.len).is_eq() {
+            return false;
+        }
+        match self.len.as_small() {
+            Some(0) => true,
+            len => {
+                self.start.cmp(&other.start).is_eq()
+                    && (len == Some(1) || self.step.cmp(&other.step).is_eq())
+            }
+        }
+    }
+
     pub(super) fn at(&self, index: &BigInt) -> Int {
         Int::new(self.start.big().as_ref() + self.step.big().as_ref() * index)
+    }
+
+    /// Return the position of an exact integer without traversing the range.
+    pub(super) fn index_of(&self, value: &Int) -> Option<Int> {
+        let value = value.big();
+        let start = self.start.big();
+        let stop = self.stop.big();
+        let step = self.step.big();
+        let in_bounds = if step.is_positive() {
+            start <= value && value < stop
+        } else {
+            stop < value && value <= start
+        };
+        if !in_bounds {
+            return None;
+        }
+        let delta = value.as_ref() - start.as_ref();
+        (&delta % step.as_ref())
+            .is_zero()
+            .then(|| Int::new(delta / step.as_ref()))
     }
 
     /// The reverse cursor starts at the last reachable element, even for an unaligned stop.
@@ -105,7 +158,7 @@ impl Cursor {
     }
 }
 
-/// Dispatch the bound range protocols through the same cursor as iter, reversed and next.
+/// Dispatch descriptors for ranges and their iterators.
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -113,10 +166,16 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let search = matches!(name, "count" | "index");
+    let wrapper = !matches!(name, "count" | "index" | "__reversed__" | "__length_hint__");
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            format!("descriptor '{name}' of '{owner}' object needs an argument"),
+            if !wrapper {
+                format!("unbound method {owner}.{name}() needs an argument")
+            } else {
+                format!("descriptor '{name}' of '{owner}' object needs an argument")
+            },
         ));
     };
     let applies = match ctx.heap.get(receiver) {
@@ -133,10 +192,9 @@ pub(super) fn method(
             ),
         ));
     }
-    let wrapper = matches!(name, "__iter__" | "__next__");
     if !kwargs.is_empty() {
         let label = if wrapper {
-            format!("wrapper {name}")
+            format!("wrapper {name}()")
         } else {
             format!("{owner}.{name}()")
         };
@@ -144,6 +202,47 @@ pub(super) fn method(
             "TypeError",
             format!("{label} takes no keyword arguments"),
         ));
+    }
+    if search {
+        let [item] = rest else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "range.{name}() takes exactly one argument ({} given)",
+                    rest.len()
+                ),
+            ));
+        };
+        let Value::Range(range) = ctx.heap.get(receiver) else {
+            unreachable!()
+        };
+        return search_range(ctx, range.clone(), *item, name == "index");
+    }
+    if matches!(
+        name,
+        "__eq__"
+            | "__ne__"
+            | "__lt__"
+            | "__le__"
+            | "__gt__"
+            | "__ge__"
+            | "__contains__"
+            | "__getitem__"
+    ) {
+        let [other] = rest else {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
+        };
+        return match name {
+            "__contains__" => ctx.contains(*other, receiver).map(super::builtins::boolean),
+            "__getitem__" => ctx.get_item(receiver, *other),
+            "__eq__" | "__ne__" if matches!(ctx.heap.get(*other), Value::Range(_)) => Ok(
+                super::builtins::boolean(ctx.equal(receiver, *other) == (name == "__eq__")),
+            ),
+            _ => Ok(super::value::NOT_IMPLEMENTED),
+        };
     }
     if !rest.is_empty() {
         let n = rest.len();
@@ -155,6 +254,16 @@ pub(super) fn method(
         return Err(Error::new("TypeError", message));
     }
     match (ctx.heap.get(receiver), name) {
+        (_, "__len__") => super::builtins::call(ctx, "len", &[receiver], &[]),
+        (_, "__bool__") => ctx.truth(receiver).map(super::builtins::boolean),
+        (_, "__hash__") => {
+            let hash = ctx.dictionary_hash(receiver)?;
+            Ok(ctx.int(hash))
+        }
+        (_, "__repr__") => {
+            let repr = ctx.checked_format(receiver, true)?;
+            Ok(ctx.text(repr))
+        }
         (Value::Range(range), "__reversed__") => {
             Ok(ctx.alloc(Value::RangeIterator(range.iter(true))))
         }
@@ -166,5 +275,43 @@ pub(super) fn method(
             .next_result(receiver)?
             .ok_or_else(|| Error::new("StopIteration", "")),
         _ => unreachable!("range protocol method"),
+    }
+}
+
+/// Compare non-integer needles element by element so their equality hooks can run.
+fn search_range(ctx: &mut Context, range: Range, item: Id, want_index: bool) -> Result<Id> {
+    if matches!(ctx.heap.get(item), Value::Int(_) | Value::Bool(_)) {
+        let index = range.index_of(&ctx.as_int(item)?);
+        return if want_index {
+            index
+                .map(|index| ctx.alloc(Value::Int(index)))
+                .ok_or_else(|| Error::new("ValueError", "range.index(x): x not in range"))
+        } else {
+            Ok(ctx.int(i64::from(index.is_some())))
+        };
+    }
+
+    let mut cursor = range.iter(false);
+    let mut count = BigInt::zero();
+    while let Some(value) = cursor.next()? {
+        let mark = ctx.heap.temporary_mark();
+        let candidate = ctx.alloc(Value::Int(value));
+        let equal = ctx.checked_equal(candidate, item)?;
+        ctx.heap.release_temporaries_since(mark);
+        if equal {
+            if want_index {
+                let index = range.len.big().as_ref() - cursor.remaining.big().as_ref() - 1;
+                return Ok(ctx.alloc(Value::Int(Int::new(index))));
+            }
+            count += 1;
+        }
+    }
+    if want_index {
+        Err(Error::new(
+            "ValueError",
+            "sequence.index(x): x not in sequence",
+        ))
+    } else {
+        Ok(ctx.alloc(Value::Int(Int::new(count))))
     }
 }

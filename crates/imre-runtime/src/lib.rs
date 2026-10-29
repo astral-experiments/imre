@@ -209,6 +209,7 @@ impl<T> StorageCell<T> {
     /// No mutable reference to this storage may be live. The closure must not
     /// reenter an operation on this cell, and no storage reference or buffer
     /// address may escape. All access must remain on the owning thread.
+    #[inline(always)]
     unsafe fn with<R>(&self, read: impl for<'a> FnOnce(&'a T) -> R) -> R {
         // SAFETY: the caller guarantees nonoverlapping, nonreentrant access.
         read(unsafe { &*self.0.get() })
@@ -219,6 +220,7 @@ impl<T> StorageCell<T> {
     /// reenter an operation on this cell, and no storage reference or buffer
     /// address may escape. All access must remain on the owning thread. Return
     /// displaced owners so they are dropped only after mutable access ends.
+    #[inline(always)]
     unsafe fn with_mut<R>(&self, write: impl for<'a> FnOnce(&'a mut T) -> R) -> R {
         // SAFETY: the caller guarantees exclusive, nonreentrant access.
         write(unsafe { &mut *self.0.get() })
@@ -1158,6 +1160,14 @@ fn parse_decimal_int(original: &str) -> Result<Option<Int>> {
 }
 
 fn parse_decimal_int_with_limit(original: &str, limit: u32) -> Result<Option<Int>> {
+    // A short ASCII integer needs no normalization. Its byte length also bounds
+    // its digit count, including leading zeros.
+    if (limit == 0 || original.len() <= limit as usize)
+        && let Ok(value) = original.parse::<i64>()
+        && let Some(value) = Int::small(value)
+    {
+        return Ok(Some(value));
+    }
     // CPython checks the prefix digit limit before detecting an embedded NUL.
     let (input, embedded_nul) = original
         .split_once('\0')

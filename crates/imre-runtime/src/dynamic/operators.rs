@@ -4,8 +4,27 @@ use num_traits::Signed;
 
 use super::*;
 
+/// An inherited numeric wrapper converts its argument as a direct method call.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RepeatMode {
+    Sequence,
+    InPlace,
+    Wrapper,
+}
+
 fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
+}
+
+/// Reserve the entire destination before copying either sequence's object references.
+fn concat_ids(left: &[Id], right: &[Id]) -> Result<Vec<Id>> {
+    let mut items = Vec::new();
+    items
+        .try_reserve_exact(left.len() + right.len())
+        .map_err(render_allocation)?;
+    items.extend_from_slice(left);
+    items.extend_from_slice(right);
+    Ok(items)
 }
 
 fn push_frame<T>(stack: &mut Vec<T>, value: T) -> Result<()> {
@@ -22,6 +41,31 @@ fn enter_ancestor(seen: &mut std::collections::HashSet<Id>, id: Id) -> Result<bo
     Ok(seen.insert(id))
 }
 
+/// Spell a boxed integer in decimal with checked allocations and Python's digit limit.
+pub(super) fn rendered_integer(value: &crate::Int) -> Result<crate::Str> {
+    let limit = crate::integer_text::decimal_digit_limit();
+    // Each decimal digit needs fewer than four bits. Reject very large inputs before converting.
+    if limit == 0 || value.as_small().is_some() || value.big().bits() <= u64::from(limit) * 4 {
+        let text = crate::integer_text::try_decimal_coefficient(value)
+            .ok_or_else(|| Error::new("MemoryError", ""))?;
+        if crate::integer_text::decimal_digits_allowed(
+            text.len() - usize::from(text.starts_with('-')),
+        ) {
+            return Ok(text);
+        }
+    }
+    let detail = crate::integer_text::output_limit_message(limit)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    let mut error = Error::new("", detail.into_string());
+    error
+        .kind
+        .to_mut()
+        .try_reserve_exact("ValueError".len())
+        .map_err(render_allocation)?;
+    error.kind.to_mut().push_str("ValueError");
+    Err(error)
+}
+
 pub(super) fn append_rendered_text(out: &mut String, text: &str) -> Result<()> {
     out.try_reserve(text.len()).map_err(render_allocation)?;
     out.push_str(text);
@@ -36,12 +80,19 @@ fn close_parens(out: &mut String, count: usize) -> Result<()> {
 
 enum RenderRoot<'a> {
     Object(Id),
-    BuiltinContainer { object: Id, storage: Id },
+    BuiltinContainer {
+        object: Id,
+        storage: Id,
+        with_factory: bool,
+    },
     Exception(&'a Error),
 }
 
 enum FormatPart {
     Value(Id, bool),
+    TypeArgument(Id, bool),
+    TypeList(Id, usize, usize),
+    TypeEnd(Id, &'static str, bool),
     Text(&'static str),
     SyntaxMessage(Id),
     SyntaxEnd(Id),
@@ -50,6 +101,7 @@ enum FormatPart {
     Sequence(Id, usize),
     Entries(Id, usize, bool),
     DefaultDictFactory(Id, usize),
+    DefaultDictName(Id, usize),
     DefaultDictEnd(String),
     SetMembers(Vec<Id>, usize),
     Fields(Id, usize),
@@ -74,11 +126,15 @@ impl FormatPart {
     fn keep_alive(&mut self, heap: &mut Heap) {
         match self {
             Self::Value(id, _)
+            | Self::TypeArgument(id, _)
+            | Self::TypeList(id, _, _)
+            | Self::TypeEnd(id, _, _)
             | Self::SyntaxMessage(id)
             | Self::SyntaxEnd(id)
             | Self::Sequence(id, _)
             | Self::Entries(id, _, _)
             | Self::DefaultDictFactory(id, _)
+            | Self::DefaultDictName(id, _)
             | Self::Fields(id, _)
             | Self::Leave(id, _)
             | Self::ContextEnd(id) => heap.keep(*id),
@@ -104,8 +160,22 @@ fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usiz
 }
 
 impl Context {
+    /// Expose a tuple subclass's stored positions even when its length differs from the named fields.
+    pub(super) fn tuple_backing(&self, value: Id) -> &Value {
+        let object = self.heap.get(value);
+        if let Value::Instance {
+            scalar: Some(storage),
+            ..
+        } = *object
+            && let tuple @ Value::Tuple(_) = self.heap.get(storage)
+        {
+            return tuple;
+        }
+        object
+    }
+
     pub(super) fn sequence(&self, id: Id) -> Option<Vec<Id>> {
-        match self.heap.get(id) {
+        match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some(v.clone())
             }
@@ -119,7 +189,7 @@ impl Context {
         }
     }
     fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
-        match self.heap.get(id) {
+        match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some((v.len(), v.get(index).copied()))
             }
@@ -136,14 +206,19 @@ impl Context {
     }
 
     pub(super) fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
+        Ok(self.index_result(value)?.map(|(_, number)| number))
+    }
+
+    /// Preserve the integer object returned by the index protocol for type-sensitive errors.
+    fn index_result(&mut self, value: Id) -> Result<Option<(Id, crate::Int)>> {
         if let Ok(integer) = self.as_int(value) {
-            return Ok(Some(integer));
+            return Ok(Some((value, integer)));
         }
         let Some(index) = self.bound_slot(value, "__index__")? else {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        self.as_int(result).map(Some).map_err(|_| {
+        self.as_int(result).map(|n| Some((result, n))).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
@@ -154,9 +229,22 @@ impl Context {
         })
     }
 
+    /// Convert a bytearray element using the index protocol and the inclusive byte bounds.
+    pub(super) fn byte_value(&mut self, value: Id) -> Result<u8> {
+        self.index_integer(value)?
+            .to_i64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))
+    }
+
     /// Resolve Python's integer-index protocol without rounding or truncating a numeric value.
     pub(super) fn index_integer(&mut self, value: Id) -> Result<crate::Int> {
-        self.index_value(value)?.ok_or_else(|| {
+        Ok(self.require_index_result(value)?.1)
+    }
+
+    /// Require an index and retain its Python type alongside its numeric value.
+    fn require_index_result(&mut self, value: Id) -> Result<(Id, crate::Int)> {
+        self.index_result(value)?.ok_or_else(|| {
             Error::new(
                 "TypeError",
                 format!(
@@ -169,28 +257,30 @@ impl Context {
 
     pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
         let Some(hook) = self.bound_slot(id, "__len__")? else {
-            return Ok(self
-                .sequence_payload(id)
-                .map(|(_, items)| items.len())
-                .or_else(|| {
-                    self.string_storage(id)
-                        .map(|text| self.str_value(text).unwrap().chars().count())
-                }));
+            return Ok(match self.heap.get(self.scalar_value(id)) {
+                Value::List(items) | Value::Tuple(items) => Some(items.len()),
+                Value::Str(text) => Some(text.chars().count()),
+                Value::Bytes(data) | Value::ByteArray(data) => Some(data.len()),
+                _ => None,
+            });
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
-        let length = self.index_integer(value)?;
+        let (index, length) = self.require_index_result(value)?;
+        if length.cmp(&crate::Int::from(0)).is_lt() {
+            return Err(Error::new("ValueError", "__len__() should return >= 0"));
+        }
         let length = length
             .to_i64()
             .and_then(|n| isize::try_from(n).ok())
             .ok_or_else(|| {
                 Error::new(
                     "OverflowError",
-                    "cannot fit 'int' into an index-sized integer",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        self.type_name(index)
+                    ),
                 )
             })?;
-        if length < 0 {
-            return Err(Error::new("ValueError", "__len__() should return >= 0"));
-        }
         Ok(Some(length as usize))
     }
 
@@ -232,7 +322,7 @@ impl Context {
                 ..
             } => !bindings.is_empty(),
             Value::Range(range) => range.len.as_small() != Some(0),
-            Value::Instance { .. } => {
+            Value::Instance { .. } | Value::Raised(_) => {
                 if let Some(hook) = self.bound_slot(id, "__bool__")? {
                     let value = self.call(hook, Vec::new(), Vec::new())?;
                     let Value::Bool(result) = self.heap.get(value) else {
@@ -322,8 +412,8 @@ impl Context {
                     break 'current true;
                 }
                 if check_special
-                    && (matches!(self.heap.get(a), Value::Instance { .. })
-                        || matches!(self.heap.get(b), Value::Instance { .. }))
+                    && (self.heap.get(a).instance_class().is_some()
+                        || self.heap.get(b).instance_class().is_some())
                 {
                     self.heap.keep(a);
                     self.heap.keep(b);
@@ -552,6 +642,7 @@ impl Context {
             (Value::Complex(z), _) => self.complex_equal(*z, right),
             (_, Value::Complex(z)) => self.complex_equal(*z, left),
             (Value::Calendar { value: a, .. }, Value::Calendar { value: b, .. }) => a.equal(b),
+            (Value::Range(a), Value::Range(b)) => a.equal(b),
             (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
                 crate::floats::compare(&self.as_int(b).unwrap(), *f) == 0
             }
@@ -744,23 +835,33 @@ impl Context {
             }
         }
     }
-    pub(super) fn compare(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
-        let unsupported = || {
-            Error::new(
-                "TypeError",
-                format!(
-                    "'{op}' not supported between instances of '{}' and '{}'",
-                    self.type_name(a),
-                    self.type_name(b)
-                ),
-            )
-        };
-        let (a, b) = (self.scalar_value(a), self.scalar_value(b));
-        let int_float = |integer, float| {
+    /// Identify operands that share the native list or tuple comparison slot.
+    fn same_sequence_family(&self, a: Id, b: Id) -> bool {
+        ["list", "tuple"].into_iter().any(|family| {
+            self.builtin_slot_accepts(a, family) && self.builtin_slot_accepts(b, family)
+        })
+    }
+
+    /// Report an ordering operation declined by both operands.
+    fn unsupported_order(&self, op: &str, a: Id, b: Id) -> Error {
+        Error::new(
+            "TypeError",
+            format!(
+                "'{op}' not supported between instances of '{}' and '{}'",
+                self.type_name(a),
+                self.type_name(b)
+            ),
+        )
+    }
+
+    /// Return the scalar ordering or the comparison result of the first unequal elements.
+    fn order(&mut self, op: &str, original_a: Id, original_b: Id) -> Result<Id> {
+        let (a, b) = (self.scalar_value(original_a), self.scalar_value(original_b));
+        let int_float = |integer, float| -> Result<Option<Ordering>> {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
             Ok((order != 2).then(|| order.cmp(&0)))
         };
-        match (self.heap.get(a), self.heap.get(b)) {
+        let ordering = match (self.heap.get(a), self.heap.get(b)) {
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => {
                 Ok(Some(self.as_int(a)?.cmp(&self.as_int(b)?)))
             }
@@ -779,23 +880,50 @@ impl Context {
                 Ok(Some(x.cmp(y)))
             }
             _ => {
-                if matches!(self.heap.get(a), Value::List(_))
-                    != matches!(self.heap.get(b), Value::List(_))
-                {
-                    return Err(unsupported());
+                if !self.same_sequence_family(a, b) {
+                    return Err(self.unsupported_order(op, original_a, original_b));
                 }
-                if let (Some(x), Some(y)) = (self.sequence(a), self.sequence(b)) {
-                    for (&i, &j) in x.iter().zip(&y) {
-                        if !self.checked_equal(i, j)? {
-                            return self.compare(op, i, j);
+                let mut i = 0;
+                let mark = self.heap.temporary_mark();
+                loop {
+                    let (_, left) = self.sequence_at(a, i).expect("sequence operand");
+                    let (_, right) = self.sequence_at(b, i).expect("sequence operand");
+                    let (Some(left), Some(right)) = (left, right) else {
+                        break;
+                    };
+                    if left != right {
+                        self.heap.reserve_temporaries(2)?;
+                        self.heap.keep(left);
+                        self.heap.keep(right);
+                        let equal = self.checked_equal(left, right)?;
+                        self.heap.release_temporaries_since(mark);
+                        if !equal {
+                            break;
                         }
                     }
-                    Ok(Some(x.len().cmp(&y.len())))
-                } else {
-                    Err(unsupported())
+                    i += 1;
                 }
+                // Equality can resize either list or replace the pair that compares unequal.
+                let (left_len, left) = self.sequence_at(a, i).expect("sequence operand");
+                let (right_len, right) = self.sequence_at(b, i).expect("sequence operand");
+                if let (Some(left), Some(right)) = (left, right) {
+                    self.heap.reserve_temporaries(2)?;
+                    self.heap.keep(left);
+                    self.heap.keep(right);
+                    return self.with_slot_depth("maximum comparison depth exceeded", |ctx| {
+                        ctx.binary(op, left, right)
+                    });
+                }
+                Ok(Some(left_len.cmp(&right_len)))
             }
-        }
+        }?;
+        Ok(builtins::boolean(ordering.is_some_and(|order| match op {
+            "<" => order.is_lt(),
+            "<=" => order.is_le(),
+            ">" => order.is_gt(),
+            ">=" => order.is_ge(),
+            _ => unreachable!("ordering operator"),
+        })))
     }
     pub(super) fn display(&self, id: Id) -> String {
         Self::render_containers(
@@ -897,7 +1025,30 @@ impl Context {
         object: Id,
         storage: Id,
     ) -> Result<String> {
-        self.checked_render(RenderRoot::BuiltinContainer { object, storage }, true)
+        self.checked_render(
+            RenderRoot::BuiltinContainer {
+                object,
+                storage,
+                with_factory: false,
+            },
+            true,
+        )
+    }
+
+    /// Render the native defaultdict slot while looking up hooks on its live children.
+    pub(super) fn checked_defaultdict_slot_repr(
+        &mut self,
+        object: Id,
+        storage: Id,
+    ) -> Result<String> {
+        self.checked_render(
+            RenderRoot::BuiltinContainer {
+                object,
+                storage,
+                with_factory: true,
+            },
+            true,
+        )
     }
 
     fn checked_render(&mut self, root: RenderRoot<'_>, quoted: bool) -> Result<String> {
@@ -920,13 +1071,67 @@ impl Context {
         self.class_attr(class, name).map(|slot| (class, slot))
     }
 
+    /// Write a set's type name or cycle marker and return the closer for a nonempty body.
+    fn begin_set_repr(
+        &self,
+        output: &mut String,
+        object: Id,
+        wrapped: bool,
+        empty: bool,
+        recursive: bool,
+    ) -> Result<Option<&'static str>> {
+        if empty || recursive {
+            append_rendered_text(output, self.type_name(object))?;
+            append_rendered_text(output, if recursive { "(...)" } else { "()" })?;
+            return Ok(None);
+        }
+        if wrapped {
+            append_rendered_text(output, self.type_name(object))?;
+            append_rendered_text(output, "(")?;
+        }
+        Ok(Some(if wrapped { "})" } else { "}" }))
+    }
+
+    /// Resolve inherited builtin container repr slots that can share the active worklist.
+    fn native_repr_storage(&self, object: Id) -> Option<(Id, bool)> {
+        let (_, slot) = self.format_slot(object, "__repr__")?;
+        let Value::Native(name) = self.heap.get(slot) else {
+            return None;
+        };
+        match name.as_str() {
+            "dict.__repr__" => self.dict_storage(object).map(|storage| (storage, false)),
+            "collections.defaultdict.__repr__" => self
+                .dict_storage(object)
+                .filter(|&storage| matches!(self.heap.get(storage), Value::DefaultDict { .. }))
+                .map(|storage| (storage, true)),
+            "list.__repr__" | "tuple.__repr__" | "set.__repr__" | "frozenset.__repr__" => {
+                let storage = self.scalar_value(object);
+                matches!(
+                    (name.as_str(), self.heap.get(storage)),
+                    ("list.__repr__", Value::List(_))
+                        | ("tuple.__repr__", Value::Tuple(_))
+                        | ("set.__repr__", Value::Set { frozen: false, .. })
+                        | ("frozenset.__repr__", Value::Set { frozen: true, .. })
+                )
+                .then_some((storage, false))
+            }
+            _ => None,
+        }
+    }
+
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
         let Some((class, slot)) = self.format_slot(id, "__repr__") else {
             return Ok(None);
         };
-        let hook = self.bind_attribute(slot, id, class)?;
-        let result = self.call(hook, Vec::new(), Vec::new())?;
+        let result = if matches!(self.heap.get(slot), Value::Native(symbol)
+            if super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol).is_some())
+        {
+            self.call(slot, vec![id], Vec::new())?
+        } else {
+            let hook = self.bind_attribute(slot, id, class)?;
+            self.call(hook, Vec::new(), Vec::new())?
+        };
         if self.str_value(result).is_err() {
             return Err(Error::new(
                 "TypeError",
@@ -1135,30 +1340,24 @@ impl Context {
         }
         match root {
             RenderRoot::Object(id) => push_frame(&mut work, Part::Value(id, quoted))?,
-            RenderRoot::BuiltinContainer { object, storage } => {
+            RenderRoot::BuiltinContainer {
+                object,
+                storage,
+                with_factory,
+            } => {
                 let (open, end, cycle, contents) = match ctx.heap.get(storage) {
                     Value::Set { entries, frozen } => {
-                        let name = ctx.type_name(object);
-                        let recursive = ancestors.contains(&object);
-                        if recursive || entries.is_empty() {
-                            append_rendered_text(&mut output, name)?;
-                            append_rendered_text(
-                                &mut output,
-                                if recursive { "(...)" } else { "()" },
-                            )?;
+                        let Some(end) = ctx.begin_set_repr(
+                            &mut output,
+                            object,
+                            *frozen || object != storage,
+                            entries.is_empty(),
+                            ancestors.contains(&object),
+                        )?
+                        else {
                             return Ok(output);
-                        }
-                        let wrapped = *frozen || object != storage;
-                        if wrapped {
-                            append_rendered_text(&mut output, name)?;
-                            append_rendered_text(&mut output, "(")?;
-                        }
-                        (
-                            "{",
-                            if wrapped { "})" } else { "}" },
-                            "set(...)",
-                            Part::set_members(entries)?,
-                        )
+                        };
+                        ("{", end, "set(...)", Part::set_members(entries)?)
                     }
                     Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                     Value::Tuple(items) => (
@@ -1172,14 +1371,17 @@ impl Context {
                     }
                     _ => unreachable!("native container repr slot"),
                 };
-                if !enter_ancestor(&mut ancestors, object)? {
-                    append_rendered_text(&mut output, cycle)?;
-                    return Ok(output);
+                if with_factory {
+                    push_frame(&mut work, Part::DefaultDictFactory(object, 0))?;
                 }
-                append_rendered_text(&mut output, open)?;
-                push_frame(&mut active, object)?;
-                push_frame(&mut work, Part::Leave(object, end))?;
-                push_frame(&mut work, contents)?;
+                if enter_ancestor(&mut ancestors, object)? {
+                    append_rendered_text(&mut output, open)?;
+                    push_frame(&mut active, object)?;
+                    push_frame(&mut work, Part::Leave(object, end))?;
+                    push_frame(&mut work, contents)?;
+                } else {
+                    append_rendered_text(&mut output, cycle)?;
+                }
             }
             RenderRoot::Exception(error) => {
                 ctx.render_exception(error, quoted, checked, &mut output, &mut work)?;
@@ -1200,6 +1402,12 @@ impl Context {
         let sequence_budget = stack_words.map(|words| words / SEQUENCE_FRAME_WORDS);
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
+        // Pinned CPython 3.14 uses 192 native bytes per nested builtin alias with
+        // an exact list of arguments. A Literal or Final adds three Python frames
+        // and 1,264 native bytes when formatting the same nesting on x86-64.
+        let type_budget = stack_words.unwrap_or(1024 * 1024);
+        let mut type_words = 0usize;
+        let mut typing_frames = 0usize;
         while let Some(part) = work.pop() {
             match part {
                 Part::Closing(count) => close_parens(&mut output, count)?,
@@ -1211,6 +1419,37 @@ impl Context {
                         .map_err(render_allocation)?;
                     write!(&mut output, " at {id:#x}>")
                         .expect("the hexadecimal object ID fits the reserved space");
+                }
+                Part::TypeEnd(_, end, python) => {
+                    type_words -= if python { 158 } else { 24 };
+                    if python {
+                        typing_frames -= 3;
+                    }
+                    append_rendered_text(&mut output, end)?;
+                }
+                Part::TypeArgument(id, direct_list) => {
+                    if direct_list && let Value::List(items) = ctx.heap.get(id) {
+                        append_rendered_text(&mut output, "[")?;
+                        push_frame(&mut work, Part::Text("]"))?;
+                        push_frame(&mut work, Part::TypeList(id, 0, items.len()))?;
+                    } else if !typing::append_type_label(&ctx, id, &mut output)? {
+                        push_frame(&mut work, Part::Value(id, true))?;
+                    }
+                }
+                Part::TypeList(id, index, len) => {
+                    if index < len {
+                        let Value::List(items) = ctx.heap.get(id) else {
+                            unreachable!()
+                        };
+                        let item = *items
+                            .get(index)
+                            .ok_or_else(|| Error::new("IndexError", "list index out of range"))?;
+                        if index != 0 {
+                            append_rendered_text(&mut output, ", ")?;
+                        }
+                        push_frame(&mut work, Part::TypeList(id, index + 1, len))?;
+                        push_frame(&mut work, Part::TypeArgument(item, false))?;
+                    }
                 }
                 Part::NamedTupleEnd => {
                     namedtuple_depth -= 1;
@@ -1276,14 +1515,12 @@ impl Context {
                 }
                 Part::DefaultDictFactory(id, start) => {
                     // A key or value repr may have replaced the factory while rendering the table.
-                    let Value::DefaultDict { factory, .. } = *ctx.heap.get(id) else {
-                        unreachable!()
-                    };
+                    let factory = ctx.defaultdict_factory(id).expect("defaultdict storage");
                     let mut contents = String::new();
                     append_rendered_text(&mut contents, &output[start..])?;
                     output.truncate(start);
-                    append_rendered_text(&mut output, "defaultdict(")?;
                     push_frame(&mut work, Part::DefaultDictEnd(contents))?;
+                    push_frame(&mut work, Part::DefaultDictName(id, start))?;
                     if enter_ancestor(&mut ancestors, factory)? {
                         push_frame(&mut active, factory)?;
                         push_frame(&mut work, Part::Leave(factory, ""))?;
@@ -1291,6 +1528,14 @@ impl Context {
                     } else {
                         append_rendered_text(&mut output, "...")?;
                     }
+                }
+                Part::DefaultDictName(id, start) => {
+                    let name = ctx.type_name(id);
+                    output
+                        .try_reserve(name.len().saturating_add(1))
+                        .map_err(render_allocation)?;
+                    output.insert(start, '(');
+                    output.insert_str(start, name);
                 }
                 Part::DefaultDictEnd(contents) => {
                     append_rendered_text(&mut output, ", ")?;
@@ -1336,14 +1581,95 @@ impl Context {
                 }
                 Part::Suffix(suffix) => append_rendered_text(&mut output, &suffix)?,
                 Part::Value(id, repr) => {
+                    let native_storage = if checked && repr {
+                        ctx.native_repr_storage(id)
+                    } else {
+                        None
+                    };
                     if checked
                         && repr
+                        && native_storage.is_none()
                         && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
                     {
                         append_rendered_text(&mut output, &text)?;
                         continue;
                     }
-                    match ctx.heap.get(id) {
+                    let (storage, with_factory) = native_storage.unwrap_or((id, true));
+                    match ctx.heap.get(storage) {
+                        Value::Union(union) => {
+                            type_words += 24;
+                            if type_words > type_budget {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            let Value::Tuple(args) = ctx.heap.get(union.args) else {
+                                unreachable!()
+                            };
+                            work.try_reserve(args.len().saturating_mul(2).saturating_add(1))
+                                .map_err(render_allocation)?;
+                            work.push(Part::TypeEnd(id, "", false));
+                            for (index, &arg) in args.iter().enumerate().rev() {
+                                work.push(if ctx.builtins.get("NoneType") == Some(&arg) {
+                                    Part::Text("None")
+                                } else {
+                                    Part::TypeArgument(arg, false)
+                                });
+                                if index != 0 {
+                                    work.push(Part::Text(" | "));
+                                }
+                            }
+                            continue;
+                        }
+                        Value::GenericAlias(alias) => {
+                            use typing::AliasKind;
+                            let python = alias.kind.is_typing_alias()
+                                || matches!(alias.kind, AliasKind::Literal(_));
+                            if python {
+                                ctx.check_call_depth(typing_frames + 2)?;
+                                typing_frames += 3;
+                            }
+                            type_words += if python { 158 } else { 24 };
+                            if type_words > type_budget {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            let Value::Tuple(args) = ctx.heap.get(alias.args) else {
+                                unreachable!()
+                            };
+                            work.try_reserve(args.len().saturating_mul(2).saturating_add(6))
+                                .map_err(render_allocation)?;
+                            work.push(Part::TypeEnd(id, "]", python));
+                            let callable =
+                                matches!(alias.kind, AliasKind::Callable | AliasKind::AbcCallable)
+                                    && args.first().is_some_and(|&arg| {
+                                        !matches!(ctx.heap.get(arg), Value::Ellipsis)
+                                    });
+                            if args.is_empty() {
+                                work.push(Part::Text("()"));
+                            }
+                            for (index, &arg) in args.iter().enumerate().rev() {
+                                work.push(Part::TypeArgument(
+                                    arg,
+                                    alias.kind == AliasKind::Builtin,
+                                ));
+                                if callable && index + 1 == args.len() {
+                                    work.push(Part::Text("], "));
+                                } else if index != 0 {
+                                    work.push(Part::Text(", "));
+                                }
+                            }
+                            work.push(Part::Text(if callable { "[[" } else { "[" }));
+                            work.push(match alias.kind {
+                                AliasKind::Callable => Part::Text("typing.Callable"),
+                                AliasKind::Literal(_) => Part::Text("typing.Literal"),
+                                _ => Part::TypeArgument(alias.origin, false),
+                            });
+                            continue;
+                        }
                         Value::Raised(error) => {
                             if !repr
                                 && let Some(fields) = error
@@ -1485,14 +1811,57 @@ impl Context {
                         }
                         _ => {}
                     }
-                    let (start, end, placeholder, contents) = match ctx.heap.get(id) {
-                        Value::List(_) => ("[", "]", "[...]", Part::Sequence(id, 0)),
+                    let (start, end, placeholder, contents) = match ctx.heap.get(storage) {
+                        Value::Int(value) => {
+                            let text = rendered_integer(value)?;
+                            append_rendered_text(&mut output, &text)?;
+                            continue;
+                        }
+                        Value::Range(range) => {
+                            append_rendered_text(&mut output, "range(")?;
+                            append_rendered_text(&mut output, &rendered_integer(&range.start)?)?;
+                            append_rendered_text(&mut output, ", ")?;
+                            append_rendered_text(&mut output, &rendered_integer(&range.stop)?)?;
+                            if range.step.as_small() != Some(1) {
+                                append_rendered_text(&mut output, ", ")?;
+                                append_rendered_text(&mut output, &rendered_integer(&range.step)?)?;
+                            }
+                            append_rendered_text(&mut output, ")")?;
+                            continue;
+                        }
+                        Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                         Value::Tuple(items) => (
                             "(",
                             if items.len() == 1 { ",)" } else { ")" },
                             "(...)",
-                            Part::Sequence(id, 0),
+                            Part::Sequence(storage, 0),
                         ),
+                        Value::TupleGetterDoc => {
+                            append_rendered_text(&mut output, super::namedtuple::DOC_REPR)?;
+                            continue;
+                        }
+                        Value::TupleGetter { index, doc } => {
+                            use std::fmt::Write;
+                            if !enter_ancestor(&mut ancestors, id)? {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            push_frame(&mut active, id)?;
+                            output
+                                .try_reserve("_tuplegetter(-9223372036854775808, ".len())
+                                .map_err(render_allocation)?;
+                            write!(&mut output, "_tuplegetter({index}, ")
+                                .expect("the signed field position fits the reserved space");
+                            push_frame(&mut work, Part::Leave(id, ")"))?;
+                            if let Some(doc) = doc {
+                                push_frame(&mut work, Part::Value(*doc, true))?;
+                            } else {
+                                append_rendered_text(&mut output, "<NULL>")?;
+                            }
+                            continue;
+                        }
                         Value::ItemGetter(keys) => {
                             // Multi-key getters expose this same tuple through __reduce__.
                             let (argument, start, end) = match *ctx.itemgetter_keys(*keys) {
@@ -1506,29 +1875,25 @@ impl Context {
                                 Part::Value(argument, true),
                             )
                         }
-                        Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
+                        Value::Dict(_) => ("{", "}", "{...}", Part::Entries(storage, 0, true)),
                         Value::DefaultDict { .. } => {
-                            push_frame(&mut work, Part::DefaultDictFactory(id, output.len()))?;
-                            ("{", "}", "{...}", Part::Entries(id, 0, true))
+                            if with_factory {
+                                push_frame(&mut work, Part::DefaultDictFactory(id, output.len()))?;
+                            }
+                            ("{", "}", "{...}", Part::Entries(storage, 0, true))
                         }
                         Value::Set { entries, frozen } => {
-                            if entries.is_empty() {
-                                append_rendered_text(
-                                    &mut output,
-                                    if *frozen { "frozenset()" } else { "set()" },
-                                )?;
+                            let Some(end) = ctx.begin_set_repr(
+                                &mut output,
+                                id,
+                                *frozen || id != storage,
+                                entries.is_empty(),
+                                ancestors.contains(&id),
+                            )?
+                            else {
                                 continue;
-                            }
-                            (
-                                if *frozen { "frozenset({" } else { "{" },
-                                if *frozen { "})" } else { "}" },
-                                if *frozen {
-                                    "frozenset(...)"
-                                } else {
-                                    "set(...)"
-                                },
-                                Part::Entries(id, 0, false),
-                            )
+                            };
+                            ("{", end, "set(...)", Part::Entries(storage, 0, false))
                         }
                         _ => {
                             append_rendered_text(
@@ -1542,7 +1907,7 @@ impl Context {
                         append_rendered_text(&mut output, placeholder)?;
                         continue;
                     }
-                    if matches!(ctx.heap.get(id), Value::List(_) | Value::Tuple(_))
+                    if matches!(ctx.heap.get(storage), Value::List(_) | Value::Tuple(_))
                         && sequence_budget.is_some_and(|limit| active.len() >= limit)
                     {
                         return Err(Error::new(
@@ -1556,7 +1921,7 @@ impl Context {
                     match contents {
                         Part::Entries(_, _, false) if checked => {
                             // CPython renders a snapshot so a hook can mutate the original set.
-                            let Value::Set { entries, .. } = ctx.heap.get(id) else {
+                            let Value::Set { entries, .. } = ctx.heap.get(storage) else {
                                 unreachable!()
                             };
                             push_frame(&mut work, Part::set_members(entries)?)?;
@@ -1817,8 +2182,7 @@ impl Context {
                 }
                 .to_owned()
             }),
-            Value::GenericAlias(alias) => alias.repr(self),
-            Value::Union(union) => super::union::repr(self, *union),
+            Value::GenericAlias(_) | Value::Union(_) => self.repr(id),
             Value::Class { name, scope, .. } if self.scope_data(*scope).module == "typing" => {
                 format!("<class 'typing.{name}'>")
             }
@@ -1850,7 +2214,9 @@ impl Context {
                 self.weakref_descriptor_owner(*owner)
             ),
             Value::Class { name, scope, .. } => self.class_repr(name, *scope),
-            Value::Native(name) => format!("<class '{name}'>"),
+            Value::Native(name) => super::wrapper_descriptor::BuiltinDescriptor::lookup(name)
+                .and_then(|slot| slot.method_repr())
+                .unwrap_or_else(|| format!("<class '{name}'>")),
             Value::Module {
                 constructor: Some(_),
                 ..
@@ -1892,8 +2258,24 @@ impl Context {
         }
         result
     }
+    /// Keep an upgraded proxy alive through a subscription that can call Python.
+    fn proxy_subscript<T>(
+        &mut self,
+        target: Id,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(target);
+        let result = operation(self);
+        self.heap.release_weak_target(mark, target);
+        result
+    }
+
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        let obj = self.weak_proxy_target(obj)?;
+        let target = self.weak_proxy_target(obj)?;
+        if target != obj {
+            return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
+        }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Get.apply(self, obj, key, false);
         }
@@ -2038,7 +2420,7 @@ impl Context {
     }
 
     pub(super) fn defaultdict_missing(&mut self, obj: Id, key: Id) -> Result<Id> {
-        let Value::DefaultDict { factory, .. } = *self.heap.get(obj) else {
+        let Some(factory) = self.defaultdict_factory(obj) else {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -2051,11 +2433,54 @@ impl Context {
             return Err(self.lookup_error("KeyError", key));
         }
         let value = self.call(factory, Vec::new(), Vec::new())?;
-        self.set_dictionary_key(obj, key, value, None, false)
+        let storage = self.dict_storage(obj).expect("validated defaultdict");
+        self.set_dictionary_key(storage, key, value, None, false)
+    }
+
+    /// Convert a scalar subscript before looking up a mutable sequence's current length.
+    fn mutation_index(&mut self, key: Id, kind: &str) -> Result<i64> {
+        let index = self.index_value(key)?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "{kind} indices must be integers or slices, not {}",
+                    self.type_name(key)
+                ),
+            )
+        })?;
+        index.to_i64().ok_or_else(|| {
+            Error::new(
+                "IndexError",
+                format!(
+                    "cannot fit '{}' into an index-sized integer",
+                    self.type_name(key)
+                ),
+            )
+        })
+    }
+
+    /// Resolve a list position after the index callback has had a chance to resize it.
+    fn list_mutation_position(&mut self, obj: Id, key: Id) -> Result<usize> {
+        let offset = self.mutation_index(key, "list")?;
+        let Value::List(items) = self.heap.get(obj) else {
+            unreachable!()
+        };
+        let len = items.len() as i64;
+        let index = if offset < 0 { offset + len } else { offset };
+        if !(0..len).contains(&index) {
+            return Err(Error::new(
+                "IndexError",
+                "list assignment index out of range",
+            ));
+        }
+        Ok(index as usize)
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
-        let obj = self.weak_proxy_target(obj)?;
+        let target = self.weak_proxy_target(obj)?;
+        if target != obj {
+            return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
+        }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Set(val)
                 .apply(self, obj, key, false)
@@ -2066,38 +2491,31 @@ impl Context {
             Value::Dict(_) | Value::DefaultDict { .. }
         ) {
             self.set_dictionary_key(obj, key, val, None, true)?;
-        } else if let Value::ByteArray(data) = self.heap.get(obj) {
+        } else if matches!(self.heap.get(obj), Value::ByteArray(_)) {
             if let Value::Slice(parts) = *self.heap.get(key) {
                 return self.set_slice(obj, parts, Some(val));
             }
-            let i = self.as_integer(key)?;
-            let i = if i < 0 { data.len() as i64 + i } else { i };
-            let byte = u8::try_from(self.as_integer(val)?)
-                .map_err(|_| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+            let i = self.mutation_index(key, "bytearray")?;
+            let byte = self.byte_value(val)?;
             let Value::ByteArray(data) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
+            let i = if i < 0 { data.len() as i64 + i } else { i };
             *data
                 .get_mut(i as usize)
                 .ok_or_else(|| Error::new("IndexError", "bytearray index out of range"))? = byte;
-        } else if let Value::List(items) = self.heap.get(obj) {
-            let i = self.as_integer(key)?;
-            let i = if i < 0 { items.len() as i64 + i } else { i };
+        } else if matches!(self.heap.get(obj), Value::List(_)) {
+            let i = self.list_mutation_position(obj, key)?;
             let Value::List(items) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
-            let entry = items
-                .get_mut(i as usize)
-                .ok_or_else(|| Error::new("IndexError", "list assignment index out of range"))?;
-            let previous = std::mem::replace(entry, val);
+            let previous = std::mem::replace(&mut items[i], val);
             if previous != val {
                 self.heap.weak_edge_removed(previous);
             }
         } else if let Some(setter) = self.bound_slot(obj, "__setitem__")? {
             self.call(setter, vec![key, val], Vec::new())?;
-        } else if let Some((storage, _)) = self.sequence_payload(obj)
-            && matches!(self.heap.get(storage), Value::List(_))
-        {
+        } else if let Some(storage) = self.mutable_sequence_storage(obj) {
             return self.put_item(storage, key, val);
         } else {
             return Err(Error::new(
@@ -2118,6 +2536,11 @@ impl Context {
         if let Value::Context(bindings) = self.heap.get(container) {
             self.context_key(item)?;
             return Ok(bindings.contains_key(&item));
+        }
+        if let Value::Range(range) = self.heap.get(container)
+            && matches!(self.heap.get(item), Value::Int(_) | Value::Bool(_))
+        {
+            return Ok(range.index_of(&self.as_int(item)?).is_some());
         }
         let scalar = self.scalar_value(container);
         if let Value::Str(hay) = self.heap.get(scalar) {
@@ -2291,34 +2714,105 @@ impl Context {
         Ok(())
     }
 
-    /// Returns the immutable sequence payload used by builtin repetition.
-    fn repeat_storage(&self, id: Id) -> Option<Id> {
-        if matches!(self.heap.get(id), Value::Bytes(_)) {
-            Some(id)
-        } else {
-            self.string_storage(id)
-        }
+    /// Locate builtin sequence storage without reading its elements before the multiplier runs.
+    fn repeat_storage(&self, object: Id) -> Option<Id> {
+        let storage = self.scalar_value(object);
+        matches!(
+            self.heap.get(storage),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::Str(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+        )
+        .then_some(storage)
     }
 
-    /// Uses the index protocol for either operand order.
-    fn repeat_immutable(&mut self, sequence: Id, multiplier: Id) -> Result<Id> {
-        let count = self.index_value(multiplier)?.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                format!(
-                    "can't multiply sequence by non-int of type '{}'",
-                    self.type_name(multiplier)
-                ),
-            )
-        })?;
-        Ok(match self.heap.get(sequence) {
+    /// Repeat the current contents after converting the multiplier through its index slot.
+    fn repeat_sequence(
+        &mut self,
+        owner: Id,
+        storage: Id,
+        multiplier: Id,
+        mode: RepeatMode,
+    ) -> Result<Id> {
+        let count = if mode == RepeatMode::Wrapper {
+            self.index_integer(multiplier)?
+        } else {
+            self.index_value(multiplier)?.ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "can't multiply sequence by non-int of type '{}'",
+                        self.type_name(multiplier)
+                    ),
+                )
+            })?
+        };
+        let n = count
+            .to_i64()
+            .and_then(|n| isize::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        self.type_name(multiplier)
+                    ),
+                )
+            })?;
+        Ok(match self.heap.get(storage) {
+            Value::List(items) if mode == RepeatMode::InPlace => {
+                if n <= 0 {
+                    builtins::clear_container(self, storage);
+                } else if n != 1 && !items.is_empty() {
+                    let repeated = repeat_values(items, n)?;
+                    let Value::List(items) = self.heap.get_mut(storage) else {
+                        unreachable!()
+                    };
+                    *items = repeated;
+                }
+                owner
+            }
+            Value::List(items) => {
+                let repeated = repeat_values(items, n)?;
+                self.alloc(Value::List(repeated))
+            }
+            Value::Tuple(items) if items.is_empty() || n == 1 => storage,
+            Value::Tuple(items) => {
+                let repeated = repeat_values(items, n)?;
+                self.alloc(Value::Tuple(repeated))
+            }
             Value::Bytes(data) => match crate::objects::repeat_bytes(data, &count)? {
                 Some(repeated) => self.alloc(Value::Bytes(repeated)),
-                None => sequence,
+                None => storage,
             },
-            Value::Str(_) if count.as_small() == Some(1) => sequence,
+            Value::ByteArray(data) if mode == RepeatMode::InPlace => {
+                if n != 1 && !data.is_empty() {
+                    let size = repeated_len(data.len(), n)?;
+                    self.check_bytearray_resize(storage)?;
+                    let Value::ByteArray(data) = self.heap.get_mut(storage) else {
+                        unreachable!()
+                    };
+                    if size == 0 {
+                        data.clear();
+                    } else {
+                        data.try_reserve_exact(size - data.len())
+                            .map_err(render_allocation)?;
+                        while data.len() < size {
+                            data.extend_from_within(..data.len().min(size - data.len()));
+                        }
+                    }
+                }
+                owner
+            }
+            Value::ByteArray(data) => {
+                let repeated = repeat_values(data, n)?;
+                self.alloc(Value::ByteArray(repeated))
+            }
+            Value::Str(_) if n == 1 => storage,
             Value::Str(text) => self.text(crate::objects::repeat_str(text, &count)?.into_string()),
-            _ => unreachable!("immutable repetition payload"),
+            _ => unreachable!("sequence repetition payload"),
         })
     }
 
@@ -2511,16 +3005,71 @@ impl Context {
         Ok(result)
     }
 
+    /// Return the original storage of an exact list or a list subclass.
+    fn list_storage(&self, obj: Id) -> Option<Id> {
+        let storage = self.scalar_value(obj);
+        matches!(self.heap.get(storage), Value::List(_)).then_some(storage)
+    }
+
+    /// A Python override participates in numeric addition before list concatenation.
+    fn list_overrides_add(&self, object: Id) -> bool {
+        self.slot(object, "__add__")
+            .is_some_and(|slot| self.builtins.get("list.__add__") != Some(&slot))
+    }
+
+    /// Concatenate the two reference arrays without invoking either operand's iterator.
+    pub(super) fn concat_list(&mut self, storage: Id, other: Id) -> Result<Id> {
+        let Value::List(left) = self.heap.get(storage) else {
+            unreachable!("list payload")
+        };
+        let Value::List(right) = self.heap.get(self.scalar_value(other)) else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "can only concatenate list (not \"{}\") to list",
+                    self.type_name(other)
+                ),
+            ));
+        };
+        let items = concat_ids(left, right)?;
+        Ok(self.alloc(Value::List(items)))
+    }
+
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         self.binary_operation(op, a, b, false)
     }
 
+    /// Keep upgraded operands alive until the forwarded operator finishes calling Python.
+    fn with_proxy_operands(
+        &mut self,
+        left: Id,
+        right: Id,
+        apply: impl FnOnce(&mut Self) -> Result<Id>,
+    ) -> Result<Id> {
+        self.heap.reserve_temporaries(2)?;
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(left);
+        self.heap.keep(right);
+        let result = apply(self);
+        self.heap.release_temporaries_since(mark);
+        if let Ok(value) = result {
+            self.heap.keep(value);
+        }
+        self.heap.weak_edge_removed(left);
+        self.heap.weak_edge_removed(right);
+        result
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
-        let (a, b) = if !self.heap.has_weak_values || matches!(op, "is" | "is not") {
-            (a, b)
-        } else {
-            (self.weak_proxy_target(a)?, self.weak_proxy_target(b)?)
-        };
+        if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
+            let left = self.weak_proxy_target(a)?;
+            let right = self.weak_proxy_target(b)?;
+            if left != a || right != b {
+                return self.with_proxy_operands(left, right, |ctx| {
+                    ctx.binary_operation(op, left, right, inplace)
+                });
+            }
+        }
         if op == "|" && matches!(self.heap.get(a), Value::Union(_) | Value::TypeVar(_)) {
             return super::union::make(self, &[a, b]);
         }
@@ -2611,25 +3160,36 @@ impl Context {
             "is not" => return Ok(truth(a != b)),
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
-            "<" | "<=" | ">" | ">=" => {
-                let Some(c) = self.compare(op, a, b)? else {
-                    return Ok(FALSE);
-                };
-                return Ok(truth(match op {
-                    "<" => c.is_lt(),
-                    "<=" => c.is_le(),
-                    ">" => c.is_gt(),
-                    _ => c.is_ge(),
-                }));
-            }
+            "<" | "<=" | ">" | ">=" => return self.order(op, a, b),
             "+" | "-"
                 if matches!(self.heap.get(a), Value::Complex(_))
                     || matches!(self.heap.get(b), Value::Complex(_)) =>
             {
                 return self.complex_sum(op == "+", a, b);
             }
+            "+" if self.string_storage(a).is_some() && self.string_storage(b).is_some() => {
+                return self.concat_strings(a, b);
+            }
+            "+" if let Some(storage) = self.list_storage(a) => {
+                if inplace && storage == a {
+                    builtins::call(self, "list.extend", &[storage, b], &[])?;
+                    return Ok(a);
+                }
+                if self.list_overrides_add(a) {
+                    // A Python __add__ disables the native sequence-concatenation fallback.
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return self.concat_list(storage, b);
+            }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
-                (Value::Str(x), Value::Str(y)) => return Ok(self.text(format!("{x}{y}"))),
                 (Value::Bytes(x), Value::Bytes(y) | Value::ByteArray(y)) => {
                     if y.is_empty() {
                         return Ok(a);
@@ -2656,39 +3216,54 @@ impl Context {
                         format!("can't concat {} to bytearray", self.type_name(b)),
                     ));
                 }
-                (Value::List(x), Value::List(y)) => {
-                    return Ok(self.alloc(Value::List([x.as_slice(), y.as_slice()].concat())));
-                }
                 (Value::Tuple(x), Value::Tuple(y)) => {
-                    return Ok(self.alloc(Value::Tuple([x.as_slice(), y.as_slice()].concat())));
+                    if x.is_empty() {
+                        return Ok(b);
+                    }
+                    if y.is_empty() {
+                        return Ok(a);
+                    }
+                    let items = concat_ids(x, y)?;
+                    return Ok(self.alloc(Value::Tuple(items)));
                 }
                 _ => {}
             },
-            "*" if let Some(sequence) = self.repeat_storage(a) => {
-                return self.repeat_immutable(sequence, b);
-            }
-            "*" if let Some(sequence) = self.repeat_storage(b) => {
-                return self.repeat_immutable(sequence, a);
+            "*" => {
+                let mut skipped_repeat = false;
+                for (owner, multiplier, left) in [(a, b, true), (b, a, false)] {
+                    let Some(storage) = self.repeat_storage(owner) else {
+                        continue;
+                    };
+                    let mode = if left
+                        && inplace
+                        && matches!(self.heap.get(storage), Value::List(_) | Value::ByteArray(_))
+                        && self.slot(owner, "__imul__").is_none()
+                    {
+                        RepeatMode::InPlace
+                    } else if self.slot(owner, "__mul__").is_none()
+                        && self.slot(owner, "__rmul__").is_none()
+                    {
+                        RepeatMode::Sequence
+                    } else {
+                        // A Python multiplication slot has already declined the operation.
+                        skipped_repeat = true;
+                        continue;
+                    };
+                    return self.repeat_sequence(owner, storage, multiplier, mode);
+                }
+                if skipped_repeat {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for *{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
             }
             _ => {}
-        }
-        if op == "*" {
-            let (sequence, count) = if matches!(self.heap.get(a), Value::List(_) | Value::Tuple(_))
-            {
-                (a, b)
-            } else {
-                (b, a)
-            };
-            if let Value::List(items) | Value::Tuple(items) = self.heap.get(sequence) {
-                let out = repeat_values(items, self.as_integer(count)?)?;
-                return Ok(
-                    self.alloc(if matches!(self.heap.get(sequence), Value::List(_)) {
-                        Value::List(out)
-                    } else {
-                        Value::Tuple(out)
-                    }),
-                );
-            }
         }
         if op == "@" {
             return Err(Error::new(
@@ -2881,7 +3456,28 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 
 impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+        // Without a Python addition hook, list concatenation waits for the reflected operand.
+        if name == "__add__"
+            && self.list_storage(obj).is_some()
+            && !self.list_overrides_add(obj)
+            && self.slot(obj, "__radd__").is_none()
+        {
+            return Ok(None);
+        }
         let Some(method) = self.bound_slot(obj, name)? else {
+            // Overriding one multiplication method installs a numeric slot for both directions.
+            if let Some(peer) = match name {
+                "__mul__" => Some("__rmul__"),
+                "__rmul__" => Some("__mul__"),
+                _ => None,
+            } && self.slot(obj, peer).is_some()
+                && let Some(storage) = self.repeat_storage(obj)
+            {
+                return self
+                    .repeat_sequence(obj, storage, other, RepeatMode::Wrapper)
+                    .map(Some);
+            }
+
             if name == "__ne__"
                 && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
             {
@@ -2891,6 +3487,24 @@ impl Context {
         };
         let result = self.call(method, vec![other], vec![])?;
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
+    }
+
+    /// Call a sequence subclass override or its inherited native comparison.
+    fn sequence_compare_slot(&mut self, name: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        if self.slot(a, name).is_some() {
+            return self.operator_slot(a, name, b);
+        }
+        let value = match name {
+            "__eq__" | "__ne__" => {
+                builtins::boolean(self.checked_equal_impl(a, b, false)? == (name == "__eq__"))
+            }
+            "__lt__" => self.order("<", a, b)?,
+            "__le__" => self.order("<=", a, b)?,
+            "__gt__" => self.order(">", a, b)?,
+            "__ge__" => self.order(">=", a, b)?,
+            _ => unreachable!("rich comparison slot"),
+        };
+        Ok(Some(value))
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
@@ -2944,13 +3558,32 @@ impl Context {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
-        let class = |id| match self.heap.get(id) {
-            Value::Instance { class, .. } => Some(*class),
-            _ => None,
-        };
-        let (ac, bc) = (class(a), class(b));
+        let (ac, bc) = (
+            self.heap.get(a).instance_class(),
+            self.heap.get(b).instance_class(),
+        );
         if ac.is_none() && bc.is_none() {
             return Ok(None);
+        }
+        if inplace.is_empty() && self.same_sequence_family(a, b) {
+            let ac = self.exact_type(a)?;
+            let bc = self.exact_type(b)?;
+            // The proper subtype's reflected slot has priority, even when it is inherited.
+            let slots = if ac != bc && self.direct_subclass(bc, ac) {
+                [(right, b, a), (left, a, b)]
+            } else {
+                [(left, a, b), (right, b, a)]
+            };
+            for (name, left, right) in slots {
+                if let Some(result) = self.sequence_compare_slot(name, left, right)? {
+                    return Ok(Some(result));
+                }
+            }
+            return match op {
+                "==" => Ok(Some(builtins::boolean(a == b))),
+                "!=" => Ok(Some(builtins::boolean(a != b))),
+                _ => Err(self.unsupported_order(op, a, b)),
+            };
         }
         if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
             && let Some(&decimal) = self.classes.get("decimal.Decimal")
@@ -2983,7 +3616,8 @@ impl Context {
     pub(super) fn inplace(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         let target = self.weak_proxy_target(a)?;
         if target != a {
-            return self.inplace(op, target, self.weak_proxy_target(b)?);
+            let right = self.weak_proxy_target(b)?;
+            return self.with_proxy_operands(target, right, |ctx| ctx.inplace(op, target, right));
         }
         if let Some((_, _, slot)) = binary_slots(op)
             && let Some(result) = self.operator_slot(a, slot, b)?
@@ -3009,30 +3643,14 @@ impl Context {
             *left = bytes;
             return Ok(a);
         }
-        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
-            builtins::call(self, "list.extend", &[a, b], &[])?;
-            return Ok(a);
-        }
-        if op == "*"
-            && let Value::List(values) = self.heap.get(a)
-        {
-            let values = repeat_values(values, self.as_integer(b)?)?;
-            let Value::List(items) = self.heap.get_mut(a) else {
-                unreachable!()
-            };
-            if values.is_empty() && self.sorting_lists.contains(&a) {
-                // The allocated callback buffer records a mutation until the sort restores it.
-                items.clear();
-            } else {
-                *items = values;
-            }
-            return Ok(a);
-        }
         self.binary_operation(op, a, b, true)
     }
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
-        let obj = self.weak_proxy_target(obj)?;
+        let target = self.weak_proxy_target(obj)?;
+        if target != obj {
+            return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));
+        }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Delete
                 .apply(self, obj, key, false)
@@ -3042,9 +3660,7 @@ impl Context {
             self.call(method, vec![key], vec![])?;
             return Ok(());
         }
-        if let Some((storage, _)) = self.sequence_payload(obj)
-            && matches!(self.heap.get(storage), Value::List(_))
-        {
+        if let Some(storage) = self.mutable_sequence_storage(obj) {
             return self.delete_item(storage, key);
         }
         if let Some(dict) = self.dict_storage(obj) {
@@ -3063,24 +3679,7 @@ impl Context {
                 if let Value::Slice(parts) = *self.heap.get(key) {
                     return self.set_slice(obj, parts, None);
                 }
-                let index = self.index_value(key)?.ok_or_else(|| {
-                    Error::new(
-                        "TypeError",
-                        format!(
-                            "bytearray indices must be integers or slices, not {}",
-                            self.type_name(key)
-                        ),
-                    )
-                })?;
-                let i = index.to_i64().ok_or_else(|| {
-                    Error::new(
-                        "IndexError",
-                        format!(
-                            "cannot fit '{}' into an index-sized integer",
-                            self.type_name(key)
-                        ),
-                    )
-                })?;
+                let i = self.mutation_index(key, "bytearray")?;
                 let len = self.bytes_like(obj)?.len() as i64;
                 let i = if i < 0 { i + len } else { i };
                 if !(0..len).contains(&i) {
@@ -3092,19 +3691,12 @@ impl Context {
                 };
                 data.remove(i as usize);
             }
-            Value::List(entries) => {
-                let i = self.as_integer(key)?;
-                let i = if i < 0 { entries.len() as i64 + i } else { i };
-                if !(0..entries.len() as i64).contains(&i) {
-                    return Err(Error::new(
-                        "IndexError",
-                        "list assignment index out of range",
-                    ));
-                }
+            Value::List(_) => {
+                let i = self.list_mutation_position(obj, key)?;
                 let Value::List(entries) = self.heap.get_mut(obj) else {
                     unreachable!()
                 };
-                let value = entries.remove(i as usize);
+                let value = entries.remove(i);
                 self.heap.weak_edge_removed(value);
             }
             _ => {
@@ -3121,14 +3713,18 @@ impl Context {
     }
 }
 
-fn repeat_values(values: &[Id], times: i64) -> Result<Vec<Id>> {
-    if values.is_empty() || times <= 0 {
+/// Compute the new sequence length before allocating or asking a bytearray to resize.
+fn repeated_len(len: usize, times: isize) -> Result<usize> {
+    len.checked_mul(times.max(0) as usize)
+        .filter(|&size| size <= isize::MAX as usize)
+        .ok_or_else(|| Error::new("MemoryError", ""))
+}
+
+fn repeat_values<T: Copy>(values: &[T], times: isize) -> Result<Vec<T>> {
+    let size = repeated_len(values.len(), times)?;
+    if size == 0 {
         return Ok(Vec::new());
     }
-    let size = usize::try_from(times)
-        .ok()
-        .and_then(|n| values.len().checked_mul(n))
-        .ok_or_else(|| Error::new("MemoryError", ""))?;
     let mut output = Vec::new();
     output
         .try_reserve_exact(size)

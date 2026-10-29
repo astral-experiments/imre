@@ -103,10 +103,22 @@ impl Function<'_, '_> {
                 value
             }
             ast::Expr::Call(v) => {
-                let callable = self.expr(&v.func);
-                let (args, kwargs) = self.arguments(&v.arguments);
+                let mark = self.temporary_mark();
+                let args = self.op("list", &[]);
+                let callable = if let Some(field) = imre_ast::direct_method(
+                    v,
+                    &self.source.method_imports,
+                    Some(&self.source.private_names),
+                ) {
+                    let receiver = self.expr(&field.value);
+                    let name = self.code_name(field.attr.as_str());
+                    self.op("method", &[&receiver, &name])
+                } else {
+                    self.expr(&v.func)
+                };
+                let kwargs = self.arguments(&args, &v.arguments);
                 let span = self.expression_span(expr, &v.func, b'(');
-                self.op_at("call", &[&callable, &args, &kwargs], span)
+                self.call_at(&callable, &args, &kwargs, &mark, span)
             }
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
@@ -116,15 +128,20 @@ impl Function<'_, '_> {
                 Body::Expression(&v.body),
             ),
             ast::Expr::FString(v) => {
-                let mut result = self.text("");
+                let mut parts = Vec::new();
                 for part in v.value.iter() {
-                    let part = match part {
-                        ast::FStringPartRef::Literal(lit) => self.text(&lit.value),
-                        ast::FStringPartRef::FString(s) => self.format_parts(&s.elements),
-                    };
-                    result = self.op("+", &[&result, &part]);
+                    match part {
+                        ast::FStringPartRef::Literal(lit) => {
+                            if !lit.value.is_empty() {
+                                parts.push(self.text(&lit.value));
+                            }
+                        }
+                        ast::FStringPartRef::FString(s) => {
+                            self.format_parts(&s.elements, &mut parts)
+                        }
+                    }
                 }
-                result
+                self.join_format_parts(parts)
             }
             ast::Expr::Generator(v) => {
                 if v.generators.iter().any(|generator| generator.is_async) {
@@ -139,7 +156,8 @@ impl Function<'_, '_> {
                     None,
                     Body::Generator(&v.generators, &v.elt),
                 );
-                self.op("generator", &[&step, &iter])
+                let targets = self.comprehension_targets(&v.generators);
+                self.op("generator", &[&step, &iter, &targets])
             }
             ast::Expr::ListComp(v) => {
                 self.comprehension("list", &v.generators, Element::Value(&v.elt))
@@ -225,17 +243,16 @@ impl Function<'_, '_> {
         target
     }
 
-    pub(super) fn arguments(&mut self, syntax: &ast::Arguments) -> (String, String) {
-        let args = self.op("list", &[]);
+    pub(super) fn arguments(&mut self, args: &str, syntax: &ast::Arguments) -> String {
         let kwargs = self.op("dict", &[]);
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
             if let ast::Expr::Starred(s) = arg {
                 let value = self.expr(&s.value);
-                self.op("extend", &[&args, &value]);
+                self.op("extend", &[args, &value]);
             } else {
                 let value = self.expr(arg);
-                self.op("append", &[&args, &value]);
+                self.op("append", &[args, &value]);
             }
         }
         for key in &syntax.keywords {
@@ -247,34 +264,52 @@ impl Function<'_, '_> {
                 self.op("keywords", &[&kwargs, &value]);
             }
         }
-        (args, kwargs)
+        kwargs
     }
 
-    fn format_parts(&mut self, elements: &[ast::InterpolatedStringElement]) -> String {
-        let mut out = self.text("");
+    /// Evaluate the fields and their conversions in source order before joining their text.
+    fn format_parts(
+        &mut self,
+        elements: &[ast::InterpolatedStringElement],
+        parts: &mut Vec<String>,
+    ) {
         for element in elements {
             let value = match element {
+                ast::InterpolatedStringElement::Literal(lit) if lit.value.is_empty() => continue,
                 ast::InterpolatedStringElement::Literal(lit) => self.text(&lit.value),
                 ast::InterpolatedStringElement::Interpolation(field) => {
                     if let Some(debug) = &field.debug_text {
-                        let prefix = self.text(debug.as_str());
-                        out = self.op("+", &[&out, &prefix]);
+                        parts.push(self.text(debug.as_str()));
                     }
-                    let v = self.expr(&field.expression);
-                    let conversion = field
-                        .conversion
-                        .to_char()
-                        .map_or_else(|| "0".into(), |c| self.text(&c.to_string()));
+                    let mut value = self.expr(&field.expression);
+                    let conversion = field.conversion.to_char().or_else(|| {
+                        (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r')
+                    });
+                    if let Some(c) = conversion {
+                        let conversion = self.text(&c.to_string());
+                        value = self.op("format_conversion", &[&value, &conversion]);
+                    }
                     let spec = match &field.format_spec {
-                        Some(s) => self.format_parts(&s.elements),
+                        Some(s) => {
+                            let mut spec = Vec::new();
+                            self.format_parts(&s.elements, &mut spec);
+                            self.join_format_parts(spec)
+                        }
                         None => self.text(""),
                     };
-                    self.op("format", &[&v, &conversion, &spec])
+                    self.op("format", &[&value, "0", &spec])
                 }
             };
-            out = self.op("+", &[&out, &value]);
+            parts.push(value);
         }
-        out
+    }
+
+    /// Preserve a lone formatted value and bypass string-subclass addition when joining fields.
+    fn join_format_parts(&mut self, parts: Vec<String>) -> String {
+        parts
+            .into_iter()
+            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
+            .unwrap_or_else(|| self.text(""))
     }
 
     /// Resume the innermost active loop, returning to its parent when it runs out of items.
@@ -341,6 +376,17 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
+    /// Encode all loop bindings before any comprehension iteration begins.
+    fn comprehension_targets(&mut self, generators: &[ast::Comprehension]) -> String {
+        let mut names = std::collections::HashSet::new();
+        for clause in generators {
+            crate::frontend::target_names(&clause.target, &mut names);
+        }
+        let mut names: Vec<_> = names.into_iter().collect();
+        names.sort_unstable();
+        self.text(&names.join(" "))
+    }
+
     fn comprehension(
         &mut self,
         kind: &str,
@@ -352,9 +398,12 @@ impl Function<'_, '_> {
         }
         let output = self.op(kind, &[]);
         let first = self.expr(&generators[0].iter);
-        let scope = self.op("comprehension_scope", &[&self.scope.clone()]);
+        let targets = self.comprehension_targets(generators);
+        let scope = self.op("comprehension_scope", &[&self.scope.clone(), &targets]);
         let previous = std::mem::replace(&mut self.scope, scope);
+        let class_locals = self.class_locals.take();
         self.comprehension_loop(generators, &first, &output, &element);
+        self.class_locals = class_locals;
         self.scope = previous;
         output
     }

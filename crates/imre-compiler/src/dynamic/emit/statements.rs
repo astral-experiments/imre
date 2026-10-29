@@ -315,14 +315,13 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let bases = if let Some(args) = v.arguments.as_deref() {
+                    let bases = self.op("list", &[]);
+                    if let Some(args) = v.arguments.as_deref() {
                         if !args.keywords.is_empty() {
                             self.unsupported("class keyword arguments");
                         }
-                        self.arguments(args).0
-                    } else {
-                        self.op("list", &[])
-                    };
+                        self.arguments(&bases, args);
+                    }
                     let init = self.define(
                         v.start(),
                         self.source.private_names.definition(&v.name),
@@ -340,7 +339,7 @@ impl Function<'_, '_> {
                         .as_deref()
                         .map_or_else(|| "0".into(), |e| self.expr(e));
                     self.live.push(value.clone());
-                    self.run_cleanups(0);
+                    self.run_cleanups(0, Some(&value));
                     self.live.pop();
                     self.end(&format!("ret i64 {value}"));
                 }
@@ -385,13 +384,17 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
                     if let Some(target) = self.loops.last() {
-                        let dest = if matches!(stmt, ast::Stmt::Break(_)) {
-                            &target.done
+                        let (dest, iterator) = if matches!(stmt, ast::Stmt::Break(_)) {
+                            (target.done.clone(), target.iterator.clone())
                         } else {
-                            &target.step
+                            (target.step.clone(), None)
+                        };
+                        self.run_cleanups(target.cleanup_depth, None);
+                        if let Some(iter) = iterator
+                            && !self.terminated
+                        {
+                            self.op("break_iter", &[&iter]);
                         }
-                        .clone();
-                        self.run_cleanups(target.cleanup_depth);
                         self.jump(&dest);
                     } else {
                         self.unsupported("loop control outside a loop");
@@ -534,6 +537,9 @@ impl Function<'_, '_> {
             signature["class_cell"] = json!(true);
         }
         let generator = if let Body::GeneratorFunction(stmts) = &body {
+            if !self.source.method_imports.is_empty() {
+                signature["method_imports"] = json!(self.source.method_imports);
+            }
             let first = stmts[0].start();
             if let Some(owner) = self.source.private_names.suite_owner(first) {
                 signature["private_scope"] = json!([owner, self.source.string_annotations]);
@@ -727,8 +733,7 @@ impl Function<'_, '_> {
                                 "2".to_owned() // An attribute or item setter may replace a writer.
                             }
                         };
-                        let (ptr, count) = self.live_handles();
-                        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+                        self.release_replaced(&replaced);
                     } else {
                         self.write(&p, value);
                     }
@@ -795,6 +800,7 @@ impl Function<'_, '_> {
         self.loops.push(LoopTarget {
             step: step.clone(),
             done: done.clone(),
+            iterator: iterator.map(str::to_owned),
             cleanup_depth: self.exits.len(),
         });
         self.statements(body);
@@ -848,15 +854,25 @@ impl Function<'_, '_> {
             }
             if let Some(name) = &h.name {
                 self.bind(name.as_str(), &exc);
+                let failed = self.name("b");
+                let outer = std::mem::replace(&mut self.error, failed.clone());
+                self.exits
+                    .push((Cleanup::ExceptionName(name.to_string()), outer.clone()));
+                self.statements(&h.body);
+                self.exits.pop();
+                self.error = outer;
+                if !self.terminated {
+                    self.clear_exception_name(name.as_str());
+                }
+                self.jump(&done);
+                self.label(&failed);
+                let error = self.op("take_error", &[]);
+                self.clear_exception_name(name.as_str());
+                self.raise(&error, None, true);
+            } else {
+                self.statements(&h.body);
+                self.jump(&done);
             }
-            self.statements(&h.body);
-            if !self.terminated
-                && let Some(name) = &h.name
-            {
-                let name = self.code_name(name.as_str());
-                self.op("clearname", &[&self.scope.clone(), &name]);
-            }
-            self.jump(&done);
             self.label(&next);
         }
         self.raise(&exc, None, true);
@@ -865,13 +881,23 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
+    /// Remove a handler's binding even if it was changed or deleted by its body.
+    fn clear_exception_name(&mut self, name: &str) {
+        let name = self.code_name(name);
+        self.op("clearname", &[&self.scope.clone(), &name]);
+    }
+
     /// Run the same cleanup for normal fallthrough, a pending exception and nonlocal exits.
     fn try_finally(&mut self, stmt: &ast::StmtTry) {
         let handler = self.name("b");
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.error, handler.clone());
         self.exits.push((
-            Cleanup::Finally(stmt.finalbody.as_slice().into()),
+            Cleanup::Finally {
+                body: stmt.finalbody.as_slice().into(),
+                loop_depth: self.loops.len(),
+                caught_depth: self.caught.len(),
+            },
             outer.clone(),
         ));
         if stmt.handlers.is_empty() {
@@ -889,9 +915,18 @@ impl Function<'_, '_> {
         self.label(&handler);
         let exception = self.op("take_error", &[]);
         self.live.push(exception.clone());
+        let enclosing = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+        self.exits.push((
+            Cleanup::PendingValue {
+                value: exception.clone(),
+                enclosing_exception: Some(enclosing),
+            },
+            self.error.clone(),
+        ));
         self.caught.push(exception.clone());
         self.statements(&stmt.finalbody);
         self.caught.pop();
+        self.exits.pop();
         self.live.pop();
         if !self.terminated {
             self.raise(&exception, None, true);
@@ -899,9 +934,16 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
+    /// Collect discarded owners while retaining the operands needed after the transfer.
+    fn release_replaced(&mut self, replaced: &str) {
+        let (ptr, count) = self.live_handles();
+        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+    }
+
     /// A return, break or continue inside a finally may replace the pending exit.
-    fn run_cleanups(&mut self, depth: usize) {
+    fn run_cleanups(&mut self, depth: usize, pending: Option<&str>) {
         let active = self.exits.clone();
+        let mut discarded = Vec::new();
         for index in (depth..active.len()).rev() {
             if self.terminated {
                 break;
@@ -910,12 +952,47 @@ impl Function<'_, '_> {
             let (cleanup, outer) = &active[index];
             let previous = std::mem::replace(&mut self.error, outer.clone());
             match cleanup {
-                Cleanup::With(exit) => {
-                    self.invoke(exit, &["0", "0", "0"]);
+                Cleanup::With { exit, caught } => {
+                    self.op("exit_context", &[exit, "0", caught]);
                 }
-                Cleanup::Finally(body) => self.statements(body),
+                Cleanup::ExceptionName(name) => self.clear_exception_name(name),
+                Cleanup::PendingValue {
+                    value,
+                    enclosing_exception,
+                } => {
+                    if let Some(caught) = enclosing_exception {
+                        self.op("restore_caught", &[caught]);
+                    }
+                    let slot = self.live.iter().rposition(|live| live == value).unwrap();
+                    discarded.push((slot, self.live.remove(slot)));
+                    self.release_replaced("2");
+                }
+                Cleanup::Finally {
+                    body,
+                    loop_depth,
+                    caught_depth,
+                } => {
+                    // Loops and handlers entered inside the try do not enclose its finally.
+                    let protected_loops = self.loops.split_off(*loop_depth);
+                    let protected_handlers = self.caught.split_off(*caught_depth);
+                    if let Some(value) = pending.filter(|value| *value != "0") {
+                        self.exits.push((
+                            Cleanup::PendingValue {
+                                value: value.into(),
+                                enclosing_exception: None,
+                            },
+                            outer.clone(),
+                        ));
+                    }
+                    self.statements(body);
+                    self.caught.extend(protected_handlers);
+                    self.loops.extend(protected_loops);
+                }
             }
             self.error = previous;
+        }
+        for (slot, value) in discarded.into_iter().rev() {
+            self.live.insert(slot, value);
         }
         self.exits = active;
     }
@@ -926,14 +1003,20 @@ impl Function<'_, '_> {
             return;
         };
         let manager = self.expr(&item.context_expr);
-        let enter = self.attr(&manager, "__enter__");
-        let exit = self.attr(&manager, "__exit__");
+        let enter = self.op("lookup_enter", &[&manager]);
+        let exit = self.op("lookup_exit", &[&manager]);
         let value = self.invoke(&enter, &[]);
         let handler = self.name("b");
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.error, handler.clone());
-        self.exits
-            .push((Cleanup::With(exit.clone()), outer.clone()));
+        let caught = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+        self.exits.push((
+            Cleanup::With {
+                exit: exit.clone(),
+                caught: caught.clone(),
+            },
+            outer.clone(),
+        ));
         self.live.push(exit.clone());
         if let Some(target) = &item.optional_vars {
             self.assign(target, &value);
@@ -943,12 +1026,12 @@ impl Function<'_, '_> {
         self.exits.pop();
         self.error = outer;
         if !self.terminated {
-            self.invoke(&exit, &["0", "0", "0"]);
+            self.op("exit_context", &[&exit, "0", &caught]);
             self.jump(&done);
         }
         self.label(&handler);
         let exc = self.op("take_error", &[]);
-        let result = self.op("exit_exception", &[&exit, &exc]);
+        let result = self.op("exit_context", &[&exit, &exc]);
         let suppress = self.truth(&result);
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);

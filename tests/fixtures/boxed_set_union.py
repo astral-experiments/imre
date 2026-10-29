@@ -2,6 +2,15 @@
 
 
 def current():
+    class Child(set):
+        pass
+
+    values = Child((1,))
+    values.add(2)
+    values.update(Child((3,)))
+    assert values.__contains__(2)
+    assert values.issuperset((1, 2, 3))
+
     for left_type in (set, frozenset):
         for right_type in (set, frozenset):
             left = left_type(["GET"])

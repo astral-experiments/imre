@@ -40,6 +40,7 @@ mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
 mod secrets;
+mod select;
 mod socket;
 mod structure;
 mod traceback;
@@ -80,6 +81,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "operator"
             | "platform"
             | "site"
+            | "select"
             | "selectors"
             | "struct"
             | "base64"
@@ -296,6 +298,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
         return ctx.module(&format!("{module}.{name}"));
     }
+    // os defines the three standard origins itself. The other flags come from posix.
+    if matches!(module, "os" | "posix")
+        && (module == "os" || !matches!(name, "SEEK_SET" | "SEEK_CUR" | "SEEK_END"))
+        && let Some(value) = crate::objects::os::descriptor_constant(name)
+    {
+        return Ok(ctx.int(i64::from(value)));
+    }
     let id = match (module, name) {
         ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -320,6 +329,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
+        ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "FunctionType") => ctx.builtin("function"),
         ("types", "BuiltinFunctionType") => ctx.builtin("builtin_function_or_method"),
@@ -328,15 +338,18 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
+        ("itertools", "_chain_allocate") => ctx.builtin("itertools._chain_allocate"),
         ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
         (
             "_collections",
             "_count_elements"
             | "_ordered_dict_equal"
+            | "_ordered_dict_move_to_end"
             | "_ordered_dict_popitem"
             | "_ordered_dict_repr"
             | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
+        ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
@@ -397,6 +410,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.int(i64::from(value))
         }
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
+        ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
+        ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
+            ctx.int(i64::from(flag))
+        }
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
@@ -467,6 +484,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
+        ("os" | "posix", name) if os::is_descriptor_function(name) => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
             ctx.builtin("posix._path_normpath")
         }
@@ -516,7 +536,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
-        | ("json", "dumps" | "loads")
+        | ("json", "dump" | "dumps" | "loads")
         | ("random", "random")
         | ("codecs", "lookup" | "register_error" | "lookup_error")
         | ("marshal", "loads")
@@ -661,6 +681,90 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "collections.defaultdict.__repr__" {
+        let Some((&object, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "descriptor '__repr__' of 'collections.defaultdict' object needs an argument",
+            ));
+        };
+        let Some(storage) = ctx
+            .dict_storage(object)
+            .filter(|&storage| matches!(ctx.heap.get(storage), Value::DefaultDict { .. }))
+        else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__repr__' requires a 'collections.defaultdict' object but received a '{}'",
+                    ctx.type_name(object)
+                ),
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "wrapper __repr__() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", args.len()),
+            ));
+        }
+        let text = ctx.checked_defaultdict_slot_repr(object, storage)?;
+        return Ok(ctx.text(text));
+    }
+    if matches!(
+        name,
+        "collections.defaultdict" | "collections.defaultdict.__init__"
+    ) {
+        let (receiver, args) = if name == "collections.defaultdict.__init__" {
+            let Some((&object, args)) = args.split_first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    "descriptor '__init__' of 'collections.defaultdict' object needs an argument",
+                ));
+            };
+            if ctx.defaultdict_factory(object).is_none() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "descriptor '__init__' requires a 'collections.defaultdict' object but received a '{}'",
+                        ctx.type_name(object)
+                    ),
+                ));
+            }
+            (Some(object), args)
+        } else {
+            (None, args)
+        };
+        let factory = args.first().copied().unwrap_or(NONE);
+        if factory != NONE && !ctx.callable(factory) {
+            return Err(Error::new(
+                "TypeError",
+                "first argument must be callable or None",
+            ));
+        }
+        let dict = if let Some(object) = receiver {
+            ctx.replace_defaultdict_factory(object, factory);
+            ctx.dict_storage(object)
+                .expect("validated defaultdict storage")
+        } else {
+            ctx.alloc(Value::DefaultDict {
+                factory,
+                entries: Default::default(),
+            })
+        };
+        if args.len() > 2 {
+            return Err(Error::new(
+                "TypeError",
+                format!("dict expected at most 1 argument, got {}", args.len() - 1),
+            ));
+        }
+        builtins::update_dict(ctx, dict, args.get(1).copied(), kwargs)?;
+        return Ok(if receiver.is_some() { NONE } else { dict });
+    }
     if matches!(name, "sys.intern" | "sys._is_interned") {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -832,6 +936,11 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
+    if let Some(op) = name.strip_prefix("posix.")
+        && os::is_descriptor_function(op)
+    {
+        return os::descriptor(ctx, op, args, kwargs);
+    }
     if matches!(name, "posix.putenv" | "posix.unsetenv") {
         return os::change_environment(ctx, name, args, kwargs);
     }
@@ -850,11 +959,45 @@ pub(super) fn call(
     if name == "collections.namedtuple" {
         return super::namedtuple::factory(ctx, args, kwargs);
     }
+    if let Some(method) = name.strip_prefix("member_descriptor.") {
+        return super::namedtuple::doc_method(ctx, method, args, kwargs);
+    }
+    if name == super::namedtuple::GETTER {
+        return super::namedtuple::new_getter(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("collections._tuplegetter.") {
+        return super::namedtuple::getter_method(ctx, method, args, kwargs);
+    }
     if name == "_collections._make" {
         return super::namedtuple::make(ctx, args, kwargs);
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
+    }
+    if name == "itertools._chain_allocate" {
+        let [base, class, source] = args else {
+            return Err(Error::new(
+                "TypeError",
+                "invalid chain allocation arguments",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "chain allocation takes no keyword arguments",
+            ));
+        }
+        let valid = matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+            if *class == *base || ancestors.contains(base));
+        if !valid {
+            return Err(Error::new("TypeError", "expected a chain subclass"));
+        }
+        let result = ctx.instance(*class, None);
+        if let Value::Instance { fields, .. } = ctx.heap.get_mut(result) {
+            fields.insert("_sources".to_owned(), *source);
+            fields.insert("_active".to_owned(), NONE);
+        }
+        return Ok(result);
     }
     if name == "itertools._chain_get" || name == "itertools._chain_set" {
         if !kwargs.is_empty()
@@ -997,6 +1140,9 @@ pub(super) fn call(
             return op.call(ctx, name, args, kwargs);
         }
     }
+    if let Some(method) = name.strip_prefix("select.") {
+        return select::call(ctx, method, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);
     }
@@ -1135,15 +1281,23 @@ pub(super) fn call(
         name,
         "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode"
     );
+    const JSON_DUMP_KEYWORDS: &[&str] = &[
+        "fp",
+        "obj",
+        "default",
+        "ensure_ascii",
+        "allow_nan",
+        "indent",
+        "sort_keys",
+        "separators",
+    ];
     let (max_args, keywords): (usize, &[&str]) = match name {
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.loads" => (1, &["s"]),
-        "json.dumps" => (
-            1,
-            &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
-        ),
+        "json.dump" => (2, JSON_DUMP_KEYWORDS),
+        "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
         "hashlib.sha1" | "hashlib.sha256" => (1, &["data", "usedforsecurity"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
@@ -1174,7 +1328,6 @@ pub(super) fn call(
         | "struct.calcsize"
         | "_string.formatter_parser"
         | "_string.formatter_field_name_split"
-        | "collections.defaultdict"
         | "collections.defaultdict.copy"
         | "collections.defaultdict.__copy__"
         | "collections.defaultdict.__reduce__"
@@ -1380,17 +1533,14 @@ pub(super) fn call(
             value.map_or(NONE, |value| ctx.text(value))
         }
         "struct.calcsize" => {
-            let size = system::struct_calcsize(ctx.str_value(argument(args, 0)?)?)
-                .map_err(|e| Error::new("struct.error", e))?;
-            ctx.int(size as i64)
+            let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
+            ctx.int(layout.size as i64)
         }
         "struct.unpack" => {
-            let format = ctx.str_value(argument(args, 0)?)?;
-            let Value::Bytes(bytes) = ctx.heap.get(argument(args, 1)?) else {
-                return Err(Error::new("TypeError", "expected bytes"));
-            };
-            let values =
-                system::struct_unpack(format, bytes).map_err(|e| Error::new("struct.error", e))?;
+            let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
+            let values = layout
+                .unpack(ctx.bytes_like(argument(args, 1)?)?)
+                .map_err(|e| Error::new("struct.error", e))?;
             structure::unsigned_tuple(ctx, values)
         }
         "json.loads" => {
@@ -1402,15 +1552,25 @@ pub(super) fn call(
             })?;
             json::loads(ctx, input)?
         }
-        "json.dumps" => {
+        "json.dump" | "json.dumps" => {
+            let function = name.strip_prefix("json.").unwrap();
             let input = option(args, 0, kwargs, "obj")?.ok_or_else(|| {
                 Error::new(
                     "TypeError",
-                    "dumps() missing 1 required positional argument: 'obj'",
+                    format!("{function}() missing 1 required positional argument: 'obj'"),
                 )
             })?;
-            let text = json::dumps(ctx, input, kwargs)?;
-            ctx.text(text)
+            let stream = if function == "dump" {
+                Some(option(args, 1, kwargs, "fp")?.ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        "dump() missing 1 required positional argument: 'fp'",
+                    )
+                })?)
+            } else {
+                None
+            };
+            json::encode(ctx, input, kwargs, stream)?
         }
         "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools.lru_cache" => {
@@ -1429,35 +1589,24 @@ pub(super) fn call(
             }
         }
         "functools._cached" => ctx.cached_function(argument(args, 0)?),
-        "collections.defaultdict" => {
-            let factory = args.first().copied().unwrap_or(NONE);
-            if factory != NONE && !ctx.callable(factory) {
-                return Err(Error::new(
-                    "TypeError",
-                    "first argument must be callable or None",
-                ));
-            }
-            ctx.alloc(Value::DefaultDict {
-                factory,
-                entries: Default::default(),
-            })
-        }
         "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;
-            let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) else {
-                return Err(Error::new(
-                    "TypeError",
-                    "defaultdict.copy requires a defaultdict",
-                ));
-            };
-            ctx.alloc(source.clone())
+            if let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) {
+                ctx.alloc(source.clone())
+            } else {
+                let factory = ctx.defaultdict_factory(receiver).ok_or_else(|| {
+                    Error::new("TypeError", "defaultdict.copy requires a defaultdict")
+                })?;
+                let class = ctx.exact_type(receiver)?;
+                ctx.call(class, vec![factory, receiver], Vec::new())?
+            }
         }
         "collections.defaultdict.__missing__" => {
             ctx.defaultdict_missing(argument(args, 0)?, argument(args, 1)?)?
         }
         "collections.defaultdict.__reduce__" => {
             let receiver = argument(args, 0)?;
-            let Value::DefaultDict { factory, .. } = *ctx.heap.get(receiver) else {
+            let Some(factory) = ctx.defaultdict_factory(receiver) else {
                 return Err(Error::new(
                     "TypeError",
                     "defaultdict.__reduce__ requires a defaultdict",

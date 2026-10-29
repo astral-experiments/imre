@@ -25,6 +25,7 @@ pub(crate) struct Shared<T>(NonNull<Allocation<T>>);
 
 pub(crate) struct Weak<T>(Option<NonNull<Allocation<T>>>);
 
+#[inline]
 fn increment(count: &Cell<usize>) {
     count.set(
         count
@@ -117,6 +118,16 @@ impl<T> Shared<T> {
         Weak(Some(this.0))
     }
 
+    /// # Safety
+    /// The strong count must have just reached zero. The value is still initialized.
+    #[inline(never)]
+    unsafe fn drop_slow(&mut self) {
+        // Keep the allocation alive while dropping the value, including on unwind.
+        let _implicit = Weak(Some(self.0));
+        // SAFETY: the last strong owner has exclusive access to the initialized value.
+        unsafe { (*self.0.as_ref().value.get()).assume_init_drop() };
+    }
+
     pub(crate) fn try_unwrap(this: Self) -> Result<T, Self> {
         // SAFETY: this strong owner keeps the allocation alive.
         let allocation = unsafe { this.0.as_ref() };
@@ -172,17 +183,15 @@ impl<T> Clone for Shared<T> {
 }
 
 impl<T> Drop for Shared<T> {
+    #[inline]
     fn drop(&mut self) {
         // SAFETY: self owns exactly one strong count.
         let allocation = unsafe { self.0.as_ref() };
         let count = allocation.strong.get() - 1;
         allocation.strong.set(count);
         if count == 0 {
-            // SAFETY: the value cannot be read or upgraded after strong reaches
-            // zero. The implicit weak count roots the allocation during drop.
-            let _implicit = Weak(Some(self.0));
-            // SAFETY: the implicit weak guard also releases storage on unwind.
-            unsafe { (*allocation.value.get()).assume_init_drop() };
+            // SAFETY: this was the last strong owner of the initialized value.
+            unsafe { self.drop_slow() };
         }
     }
 }

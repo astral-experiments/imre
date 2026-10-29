@@ -1,4 +1,4 @@
-use super::wrapper_descriptor::Wrapper;
+use super::wrapper_descriptor::BuiltinDescriptor;
 use super::*;
 
 pub(super) enum MappingOperation {
@@ -23,8 +23,10 @@ impl Context {
             return self
                 .find_in_mro(class, |base| {
                     let slot = self.own_class_attr(base, name);
-                    (slot.is_some() || matches!(self.heap.get(base), Value::Native(_)))
-                        .then_some(slot)
+                    // Modules and exceptions inherit object.__hash__ after any intervening mixins.
+                    let native_hash = matches!(self.heap.get(base), Value::Native(kind)
+                        if kind != "module" && !builtins::is_exception(kind));
+                    (slot.is_some() || native_hash).then_some(slot)
                 })
                 .flatten();
         }
@@ -48,8 +50,18 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
-            Value::Native(kind) if name == "__hash__" && kind == "object" => {
-                self.builtins.get("object.__hash__").copied()
+            Value::Native(kind) if kind == "object" => match name {
+                "__hash__" => self.builtins.get("object.__hash__").copied(),
+                "__format__" => self.builtins.get("object.__format__").copied(),
+                _ => None,
+            },
+            Value::Native(kind) if kind == "collections.defaultdict" => {
+                let owner = match name {
+                    "__init__" | "__missing__" | "__repr__" | "copy" | "__copy__"
+                    | "__reduce__" => kind.as_str(),
+                    _ => "dict",
+                };
+                self.builtins.get(&format!("{owner}.{name}")).copied()
             }
             Value::Native(kind) if builtins::is_enum_base(kind) => {
                 self.builtins.get(&format!("enum.Enum.{name}")).copied()
@@ -78,12 +90,14 @@ impl Context {
                         | "list"
                         | "tuple"
                         | "int"
+                        | "float"
+                        | "bytes"
+                        | "bytearray"
                         | "str"
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (name == "__repr__"
-                    && matches!(kind.as_str(), "set" | "frozenset" | "bytes" | "bytearray")) =>
+                ) || (name == "__repr__" && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -352,19 +366,8 @@ impl Context {
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
-        let class = match self.heap.get(object) {
-            Value::Instance { class, .. }
-            | Value::Module {
-                constructor: Some(class),
-                ..
-            } => *class,
-            Value::Raised(error)
-                if matches!(name, "__dir__" | "__str__")
-                    && let Some(class) = error.class() =>
-            {
-                class
-            }
-            _ => return Ok(None),
+        let Some(class) = self.heap.get(object).instance_class() else {
+            return Ok(None);
         };
         self.class_attr(class, name)
             .map(|slot| self.bind_attribute(slot, object, class))
@@ -393,7 +396,11 @@ impl Context {
     fn native_data_descriptor(&self, descriptor: Id) -> bool {
         matches!(
             self.heap.get(descriptor),
-            Value::Property(_) | Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_)
+            Value::Property(_)
+                | Value::TupleGetter { .. }
+                | Value::TupleGetterDoc
+                | Value::GetSetDescriptor { .. }
+                | Value::WeakrefDescriptor(_)
         )
     }
 
@@ -431,12 +438,16 @@ impl Context {
             return Ok(callable);
         }
         if let Value::Native(symbol) = self.heap.get(value)
-            && let Some(slot) = Wrapper::lookup(symbol)
+            && let Some(slot) = BuiltinDescriptor::lookup(symbol)
         {
             return slot.bind(self, value, receiver);
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
+                Value::TupleGetterDoc => return super::namedtuple::document(self, receiver),
+                Value::TupleGetter { index, .. } => {
+                    return super::namedtuple::read_field(self, *index, receiver);
+                }
                 Value::Property(property) => return property.read(self, receiver),
                 Value::WeakrefDescriptor(owner) => return self.weakref_list(*owner, receiver),
                 Value::GetSetDescriptor { get, .. } => {
@@ -463,10 +474,13 @@ impl Context {
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "module.__init__"
+                            | "bytes.decode"
+                            | "bytes.rfind"
+                            | "bytes.rsplit"
+                            | "bytes.rstrip"
+                            | "int.bit_length"
                             | "int.to_bytes"
-                            | "list.append"
                             | "list.index"
-                            | "list.pop"
                             | "list.clear"
                             | "list.copy"
                             | "list.reverse"
@@ -478,6 +492,7 @@ impl Context {
                         .is_some_and(|method| {
                             method != "__new__" && weakref::REFERENCE_METHODS.contains(&method)
                         })
+                        || name.starts_with("collections.defaultdict.")
                         || name.starts_with("property.")
                         || name.starts_with("dict.")
                         || name.starts_with("abc.")
@@ -523,6 +538,12 @@ impl Context {
             }
             // Without a Python class member, object.__class__ is a data descriptor.
             (None, _) if name == "__class__" => Ok(class),
+            (None, _)
+                if self.exposes_defaultdict_factory(object, name)
+                    && let Some(factory) = self.defaultdict_factory(object) =>
+            {
+                Ok(factory)
+            }
             (None, _)
                 if name == "__callback__"
                     && let Some(wr) = self.heap.get(object).weak_reference() =>
@@ -632,14 +653,19 @@ impl Context {
             _ => false,
         }
     }
-    pub(super) fn namedtuple_fields(&self, class: Id) -> Option<Vec<String>> {
+    pub(super) fn namedtuple_fields(&self, class: Id) -> Option<std::rc::Rc<[String]>> {
         match self.heap.get(class) {
             Value::Class {
                 namedtuple_fields, ..
-            } => namedtuple_fields.as_deref().map(<[String]>::to_vec),
+            } => namedtuple_fields.clone(),
             _ => None,
         }
     }
+    /// Check whether an inline value is an immutable tuple position.
+    fn has_namedtuple_field(&self, class: Id, name: &str) -> bool {
+        matches!(self.heap.get(class), Value::Class { namedtuple_fields: Some(names), .. } if names.iter().any(|field| field == name))
+    }
+
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
         Some(match self.heap.get(obj) {
             Value::None
@@ -690,6 +716,8 @@ impl Context {
             Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
             Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
+            Value::TupleGetter { .. } => super::namedtuple::GETTER,
+            Value::TupleGetterDoc => "member_descriptor",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
@@ -703,11 +731,15 @@ impl Context {
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
-                Value::Native(symbol) if Wrapper::lookup(symbol).is_some() => "method-wrapper",
+                Value::Native(symbol)
+                    if BuiltinDescriptor::lookup(symbol).is_some_and(|slot| !slot.method) =>
+                {
+                    "method-wrapper"
+                }
                 Value::Native(_) => "builtin_function_or_method",
                 _ => return None,
             },
-            Value::Native(name) if Wrapper::lookup(name).is_some() => "wrapper_descriptor",
+            Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
             Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
                 if name == "typing.Any" {
                     return Some("typing._AnyMeta");
@@ -731,10 +763,13 @@ impl Context {
                             | "builtin_function_or_method"
                             | "method-wrapper"
                             | "wrapper_descriptor"
+                            | "method_descriptor"
                             | "getset_descriptor"
+                            | "member_descriptor"
                             | "mappingproxy"
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
+                            | super::namedtuple::GETTER
                             | "operator.itemgetter"
                             | "collections.defaultdict"
                             | "array.array"
@@ -761,12 +796,9 @@ impl Context {
                     || builtins::constructor_owner(name).is_some()
                     || matches!(
                         name.as_str(),
-                        "binascii.a2b_base64"
-                            | "binascii.b2a_base64"
-                            | "posix.fspath"
-                            | "posix._path_normpath"
-                            | "zlib.adler32"
+                        "binascii.a2b_base64" | "binascii.b2a_base64" | "zlib.adler32"
                     )
+                    || name.starts_with("posix.")
                     || name.starts_with("_weakref.")
                 {
                     "builtin_function_or_method"
@@ -892,6 +924,8 @@ impl Context {
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
+            | (super::namedtuple::GETTER, Value::TupleGetter { .. })
+            | ("member_descriptor", Value::TupleGetterDoc)
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
@@ -943,7 +977,7 @@ impl Context {
             Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
             _ if let Some(actual) = error.class() => self.subclass(actual, class),
             Value::Native(_) => {
-                let kind = error.kind.as_str();
+                let kind = error.kind.as_ref();
                 let builtin = self.builtins.get(kind).copied();
                 if self.classes.get(kind).copied() == builtin {
                     self.error_matches(kind, class)
@@ -1104,8 +1138,46 @@ impl Context {
         }
     }
 
+    /// Bind a context manager's special method on its type before entering the suite.
+    pub(super) fn context_method(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if let Some(method) = self.bound_slot(obj, name)? {
+            return Ok(method);
+        }
+        self.builtin_attribute(obj, name).map_err(|_| {
+            let missing = if name == "__exit__" {
+                " (missed __exit__ method)"
+            } else {
+                ""
+            };
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{}' object does not support the context manager protocol{missing}",
+                    self.type_name(obj)
+                ),
+            )
+        })
+    }
+
+    /// Resolve an immediately called attribute before its arguments are evaluated.
+    pub(super) fn lookup_method(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if let Value::Instance { class, .. } = *self.heap.get(obj)
+            && self.class_attr(class, "__getattr__").is_none()
+            && self.class_attr(class, "__getattribute__").is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
+        {
+            self.default_attr_for_call(obj, name, true)
+        } else {
+            self.lookup_attr(obj, name)
+        }
+    }
+
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        self.default_attr_for_call(obj, name, false)
+    }
+
+    /// Keep non-data wrapper receiver checks at call time for direct method calls.
+    fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
@@ -1137,7 +1209,13 @@ impl Context {
             if name == "__dict__" && member.is_none() && layout.dictionary {
                 return Ok(self.instance_dictionary(obj, class));
             }
-            let inline = inline.filter(|_| !layout.declared_slot);
+            if let Some(member) = member
+                && self.native_data_descriptor(member)
+            {
+                return self.bind_attribute(member, obj, class);
+            }
+            let inline =
+                inline.filter(|_| !layout.declared_slot && !self.has_namedtuple_field(class, name));
             let field = if inline.is_some()
                 || namespace.is_none()
                 || member.is_some_and(|member| self.data_descriptor(member))
@@ -1146,6 +1224,18 @@ impl Context {
             } else {
                 self.dictionary_field(namespace, name)?
             };
+            if for_call
+                && field.is_none()
+                && let Some(member) = member
+                && let Value::Native(symbol) = self.heap.get(member)
+                && BuiltinDescriptor::lookup(symbol).is_some()
+            {
+                return Ok(self.alloc(Value::Method {
+                    callable: member,
+                    receiver: obj,
+                    explicit: false,
+                }));
+            }
             return self.instance_attribute(obj, class, field, name);
         }
         if let Value::Raised(error) = self.heap.get(obj) {
@@ -1279,6 +1369,14 @@ impl Context {
                     _ => 2,
                 }]);
             }
+            Value::Range(range) if matches!(name, "start" | "stop" | "step") => {
+                let bound = match name {
+                    "start" => range.start,
+                    "stop" => range.stop,
+                    _ => range.step,
+                };
+                return Ok(self.alloc(Value::Int(bound)));
+            }
             Value::Native(ref class) if class == "module" => match name {
                 "__doc__" => return Ok(self.text(module_type::DOC)),
                 "__init__" | "__new__" => return Ok(self.builtin(&format!("module.{name}"))),
@@ -1286,6 +1384,17 @@ impl Context {
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
+            Value::TupleGetterDoc => match name {
+                "__name__" => return Ok(self.text("__doc__")),
+                "__qualname__" => return Ok(self.text("_tuplegetter.__doc__")),
+                "__doc__" => return Ok(NONE),
+                "__objclass__" => return Ok(self.builtin(super::namedtuple::GETTER)),
+                _ => {}
+            },
+            Value::Native(class) if class == "member_descriptor" && name == "__module__" => {
+                return Ok(self.text("builtins"));
+            }
+            Value::TupleGetter { doc, .. } if name == "__doc__" => return Ok(doc.unwrap_or(NONE)),
             Value::WeakrefDescriptor(owner) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text("__weakref__")),
@@ -1309,12 +1418,7 @@ impl Context {
                     return Ok(attribute);
                 }
             }
-            Value::Native(symbol)
-                if matches!(
-                    symbol.as_str(),
-                    "posix.fspath" | "posix._path_normpath" | "zlib.adler32"
-                ) =>
-            {
+            Value::Native(symbol) if symbol.starts_with("posix.") || symbol == "zlib.adler32" => {
                 let (module, function) = symbol.split_once('.').unwrap();
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function)),
@@ -1379,21 +1483,25 @@ impl Context {
             Value::Method {
                 callable, receiver, ..
             } if let Value::Native(ref symbol) = *self.heap.get(callable)
-                && let Some(slot) = Wrapper::lookup(symbol) =>
+                && let Some(slot) = BuiltinDescriptor::lookup(symbol) =>
             {
                 if name == "__self__" {
                     return Ok(receiver);
                 }
-                if let Some(value) = slot.attribute(self, name) {
+                if let Some(value) = slot.attribute(self, name, Some(receiver)) {
                     return Ok(value);
                 }
             }
-            Value::Native(ref symbol) if let Some(slot) = Wrapper::lookup(symbol) => {
-                if let Some(value) = slot.attribute(self, name) {
+            Value::Native(ref symbol) if let Some(slot) = BuiltinDescriptor::lookup(symbol) => {
+                if let Some(value) = slot.attribute(self, name, None) {
                     return Ok(value);
                 }
                 if name == "__get__" {
-                    let callable = self.builtin("wrapper_descriptor.__get__");
+                    let callable = self.builtin(if slot.method {
+                        "method_descriptor.__get__"
+                    } else {
+                        "wrapper_descriptor.__get__"
+                    });
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
@@ -1448,25 +1556,38 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | super::namedtuple::GETTER
                         | super::deque::CLASS
                         | super::deque::ITERATOR
                         | super::deque::REVERSE_ITERATOR
                 ) =>
             {
                 let (module, short) = class.rsplit_once('.').unwrap();
+                if class == super::namedtuple::GETTER
+                    && let Some(value) = super::namedtuple::class_attribute(self, obj, name)
+                {
+                    return Ok(value);
+                }
                 match name {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(short));
                     }
                     "__module__" => return Ok(self.text(module)),
+                    _ if class == super::namedtuple::GETTER
+                        && super::namedtuple::GETTER_METHODS.contains(&name) =>
+                    {
+                        return Ok(self.builtin(&format!("{class}.{name}")));
+                    }
                     _ if class == super::deque::CLASS && super::deque::METHODS.contains(&name) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}
                 }
             }
-            Value::Native(class) if class == "tuple" && name == "__getitem__" => {
-                return Ok(self.builtin("tuple.__getitem__"));
+            Value::Native(class)
+                if class == "tuple" && matches!(name, "__new__" | "__getitem__") =>
+            {
+                return Ok(self.builtin(&format!("tuple.{name}")));
             }
             Value::Native(class) if matches!(class.as_str(), "map" | "filter") => match name {
                 "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
@@ -1610,8 +1731,17 @@ impl Context {
                 }
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
-            Value::Native(class) if class == "collections.defaultdict" && name == "__missing__" => {
-                return Ok(self.builtin("collections.defaultdict.__missing__"));
+            Value::Native(class)
+                if name == "fromkeys"
+                    && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
+            {
+                return Ok(self.bind_dict_fromkeys(obj));
+            }
+            Value::Native(class)
+                if class == "collections.defaultdict"
+                    && let Some(member) = self.own_class_attr(obj, name) =>
+            {
+                return Ok(member);
             }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),
@@ -1702,20 +1832,28 @@ impl Context {
                 return Ok(self.token_missing);
             }
             Value::Native(class)
+                if name == "__format__" && self.builtin_type_name(obj) == Some("type") =>
+            {
+                let owner = builtins::format_owner(&class);
+                return Ok(self.builtin(&format!("{owner}.__format__")));
+            }
+            Value::Native(class)
                 if matches!(class.as_str(), "bytes" | "bytearray")
                     && matches!(name, "__repr__" | "maketrans" | "translate") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
-            Value::Native(class) if class == "bytes" && name == "__mod__" => {
-                return Ok(self.builtin("bytes.__mod__"));
-            }
             Value::Bytes(_) if name == "maketrans" => return Ok(self.builtin("bytes.maketrans")),
             Value::ByteArray(_) if name == "maketrans" => {
                 return Ok(self.builtin("bytearray.maketrans"));
             }
-            Value::Native(class) if class == "bool" && name == "to_bytes" => {
-                return Ok(self.builtin("int.to_bytes"));
+            Value::Native(class)
+                if class == "bool" && matches!(name, "bit_length" | "to_bytes") =>
+            {
+                return Ok(self.builtin(&format!("int.{name}")));
+            }
+            Value::Native(class) if class == "method_descriptor" && name == "__get__" => {
+                return Ok(self.builtin("method_descriptor.__get__"));
             }
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
@@ -1734,12 +1872,6 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("{class}.__reduce__")));
             }
-            Value::Native(class)
-                if name == "fromkeys"
-                    && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
-            {
-                return Ok(self.bind_dict_fromkeys(obj));
-            }
             Value::Dict(_) | Value::DefaultDict { .. } if name == "fromkeys" => {
                 let owner = self.exact_type(obj)?;
                 return Ok(self.bind_dict_fromkeys(owner));
@@ -1751,21 +1883,14 @@ impl Context {
                 return Ok(self.builtin("set.discard"));
             }
             Value::Native(class)
-                if class == "list"
-                    && matches!(
-                        name,
-                        "clear" | "copy" | "index" | "pop" | "reverse" | "sort"
-                    ) =>
-            {
-                return Ok(self.builtin(&format!("list.{name}")));
-            }
-            Value::Native(class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || builtins::is_enum_base(&class)
                     || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
-                    || (class == "int" && name == "to_bytes")
+                    || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
+                    || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
+                    || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -1786,16 +1911,20 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
-            Value::Native(class)
-                if class == "slice" && matches!(name, "indices" | "__reduce__") =>
-            {
+            Value::Native(class) if class == "slice" && super::slice::METHODS.contains(&name) => {
                 return Ok(self.builtin(&format!("slice.{name}")));
+            }
+            Value::Native(class)
+                if class == super::namedtuple::GETTER
+                    && super::namedtuple::GETTER_METHODS.contains(&name) =>
+            {
+                return Ok(self.builtin(&format!("{}.{name}", super::namedtuple::GETTER)));
             }
             Value::Native(class) if class == "operator.itemgetter" && name == "__reduce__" => {
                 return Ok(self.builtin("operator.itemgetter.__reduce__"));
             }
             Value::Native(class)
-                if (class == "range" && matches!(name, "__iter__" | "__reversed__"))
+                if (class == "range" && super::range::METHODS.contains(&name))
                     || (matches!(class.as_str(), "range_iterator" | "longrange_iterator")
                         && matches!(name, "__iter__" | "__next__" | "__length_hint__")) =>
             {
@@ -1930,6 +2059,15 @@ impl Context {
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
         let base = self.scalar_value(obj);
+        if name == "__format__" {
+            let owner = builtins::format_owner(self.type_name(base));
+            let callable = self.builtin(&format!("{owner}.__format__"));
+            return Ok(self.alloc(Value::Method {
+                callable,
+                receiver: obj,
+                explicit: false,
+            }));
+        }
         if name == "maketrans" && matches!(self.heap.get(base), Value::Str(_)) {
             return Ok(self.builtin("str.maketrans"));
         }
@@ -1969,7 +2107,7 @@ impl Context {
                 None,
             );
         }
-        if matches!(self.heap.get(obj), Value::Slice(_))
+        if matches!(self.heap.get(obj), Value::Range(_) | Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
             return Err(Error::new("AttributeError", "readonly attribute"));
@@ -1997,6 +2135,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
+            return super::namedtuple::set_document(self, obj, None).map(|_| ());
+        }
         if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, None);
             return Ok(());
@@ -2006,6 +2147,12 @@ impl Context {
         }
         let exception_member = self.exception_member(obj, name);
         let member = self.writable_attribute_member(obj, name);
+        if member.is_none()
+            && self.exposes_defaultdict_factory(obj, name)
+            && self.replace_defaultdict_factory(obj, NONE)
+        {
+            return Ok(());
+        }
         if name == "__callback__"
             && member.is_none()
             && self.heap.get(obj).weak_reference().is_some()
@@ -2016,6 +2163,12 @@ impl Context {
             && self.data_descriptor(descriptor)
         {
             match *self.heap.get(descriptor) {
+                Value::TupleGetterDoc => {
+                    return super::namedtuple::set_document(self, obj, None).map(|_| ());
+                }
+                Value::TupleGetter { .. } => {
+                    return Err(Error::new("AttributeError", "can't delete attribute"));
+                }
                 Value::Property(property) => return property.remove(self, obj),
                 Value::WeakrefDescriptor(owner) => return Err(self.readonly_weakref(owner)),
                 Value::GetSetDescriptor { set: Some(set), .. } => {
@@ -2157,12 +2310,6 @@ impl Context {
                 Err(error)
             }
             Value::Instance { class, .. } if self.builtins.get("object") != Some(&class) => {
-                if self
-                    .namedtuple_fields(class)
-                    .is_some_and(|fields| fields.iter().any(|field| field == name))
-                {
-                    return Err(Error::new("AttributeError", "can't delete attribute"));
-                }
                 let layout = self.instance_layout(class, name);
                 if name == "__dict__" && member.is_none() {
                     if !layout.dictionary {
@@ -2179,7 +2326,9 @@ impl Context {
                 {
                     return self.update_dictionary_field(obj, storage, name, None);
                 }
-                if layout.declared_slot && !layout.active_slot {
+                if (layout.declared_slot && !layout.active_slot)
+                    || self.has_namedtuple_field(class, name)
+                {
                     return Err(self.missing_attribute(obj, name));
                 }
                 let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
@@ -2264,6 +2413,12 @@ impl Context {
             return None;
         }
         Some(member)
+    }
+
+    /// A declared instance slot shadows the mapping's inherited factory member.
+    fn exposes_defaultdict_factory(&self, obj: Id, name: &str) -> bool {
+        name == "default_factory"
+            && !matches!(*self.heap.get(obj), Value::Instance { class, .. } if self.instance_layout(class, name).active_slot)
     }
 
     /// Move ordinary fields out of the inline storage while keeping declared slots in place.
@@ -2432,7 +2587,7 @@ impl Context {
             }
             return Ok(());
         }
-        if matches!(self.heap.get(obj), Value::Slice(_))
+        if matches!(self.heap.get(obj), Value::Range(_) | Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
             return Err(Error::new("AttributeError", "readonly attribute"));
@@ -2446,6 +2601,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
+            return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
+        }
         if name == "__callback__"
             && self.slot(obj, name).is_none()
             && self.heap.get(obj).weak_reference().is_some()
@@ -2547,6 +2705,12 @@ impl Context {
                     format!("attribute '{name}' of '{owner}' objects is not writable"),
                 ));
             }
+            if matches!(self.heap.get(descriptor), Value::TupleGetterDoc) {
+                return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
+            }
+            if matches!(self.heap.get(descriptor), Value::TupleGetter { .. }) {
+                return Err(Error::new("AttributeError", "can't set attribute"));
+            }
             if let Some(setter) = self.slot(descriptor, "__set__") {
                 self.call(setter, vec![descriptor, obj, value], Vec::new())?;
                 return Ok(());
@@ -2555,13 +2719,6 @@ impl Context {
                 "AttributeError",
                 format!("attribute {name:?} cannot be set"),
             ));
-        }
-        if let Value::Instance { class, .. } = self.heap.get(obj)
-            && self
-                .namedtuple_fields(*class)
-                .is_some_and(|fields| fields.iter().any(|field| field == name))
-        {
-            return Err(Error::new("AttributeError", "can't set attribute"));
         }
         if self.update_syntax_member(obj, name, value) {
             return Ok(());
@@ -2637,6 +2794,12 @@ impl Context {
         {
             return self.update_exception_field(obj, name, Some(value));
         }
+        if member.is_none()
+            && self.exposes_defaultdict_factory(obj, name)
+            && self.replace_defaultdict_factory(obj, value)
+        {
+            return Ok(());
+        }
         self.check_instance_field(obj, name)?;
         if let Value::Instance {
             class, namespace, ..
@@ -2658,8 +2821,7 @@ impl Context {
             }
             if !layout.active_slot {
                 let storage = namespace.or_else(|| {
-                    layout
-                        .declared_slot
+                    (layout.declared_slot || self.has_namedtuple_field(class, name))
                         .then(|| self.instance_dictionary(obj, class))
                 });
                 if let Some(storage) = storage {
@@ -2669,10 +2831,6 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
-            Value::DefaultDict { factory, .. } if name == "default_factory" => {
-                let old = std::mem::replace(factory, value);
-                self.heap.weak_edge_removed(old);
-            }
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
@@ -2792,6 +2950,23 @@ impl Context {
         }))
     }
 
+    /// Describe a receiver rejected by a builtin allocator.
+    pub(super) fn invalid_new_subtype(&self, kind: &str, class: Id) -> Error {
+        let message = match self.heap.get(class) {
+            Value::Class { name, .. } => {
+                format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
+            }
+            Value::Native(name) if builtins::is_builtin_type(name) => {
+                format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
+            }
+            _ => format!(
+                "{kind}.__new__(X): X is not a type object ({})",
+                self.type_name(class)
+            ),
+        };
+        Error::new("TypeError", message)
+    }
+
     /// Allocate the immutable string or bytes payload while retaining the Python class.
     pub(super) fn new_string(
         &mut self,
@@ -2802,19 +2977,7 @@ impl Context {
     ) -> Result<Id> {
         let base = self.builtin(kind);
         if !self.subclass(class, base) {
-            let message = match self.heap.get(class) {
-                Value::Class { name, .. } => {
-                    format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
-                }
-                Value::Native(name) if builtins::is_builtin_type(name) => {
-                    format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
-                }
-                _ => format!(
-                    "{kind}.__new__(X): X is not a type object ({})",
-                    self.type_name(class)
-                ),
-            };
-            return Err(Error::new("TypeError", message));
+            return Err(self.invalid_new_subtype(kind, class));
         }
         let text = builtins::call(self, kind, args, kwargs)?;
         if class == base {
@@ -2864,16 +3027,22 @@ impl Context {
                 if matches!(self.heap.get(result), Value::Instance { .. })
                     && let Err(error) = self.set_attr(result, "__orig_class__", callable)
                     && !alias.kind.is_typing_alias()
-                    && !matches!(error.kind.as_str(), "AttributeError" | "TypeError")
+                    && !matches!(error.kind.as_ref(), "AttributeError" | "TypeError")
                 {
                     return Err(error);
                 }
                 Ok(result)
             }
             Value::Native(name) if name == "wrapper_descriptor.__get__" => {
-                wrapper_descriptor::descriptor_get(self, &args, &kwargs)
+                wrapper_descriptor::descriptor_get(self, "wrapper_descriptor", &args, &kwargs)
+            }
+            Value::Native(name) if name == "method_descriptor.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "method_descriptor", &args, &kwargs)
             }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
+            Value::Native(name) if name == "tuple.__new__" => {
+                super::namedtuple::allocate(self, &args, &kwargs)
+            }
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
@@ -2884,6 +3053,7 @@ impl Context {
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
+                            | "float.__format__"
                     )
                     || !name.contains('.')
                     || matches!(
@@ -3161,62 +3331,16 @@ impl Context {
                         "Can't instantiate typing.Generic directly",
                     ));
                 }
-                if let Some(names) = self.namedtuple_fields(callable) {
-                    if args.len() > names.len() {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!("too many arguments to {name}"),
-                        ));
-                    }
-                    let mut fields: indexmap::IndexMap<_, _> =
-                        names.iter().cloned().zip(args).collect();
-                    for (k, v) in kwargs {
-                        if !names.contains(&k) || fields.insert(k.clone(), v).is_some() {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!("invalid argument {k:?} to {name}"),
-                            ));
-                        }
-                    }
-                    if fields.len() != names.len()
-                        && let Some(defaults) = self.find_in_mro(callable, |base| {
-                            let Value::Class { scope, .. } = *self.heap.get(base) else {
-                                return None;
-                            };
-                            self.scope_data(scope)
-                                .class_namespace
-                                .as_ref()?
-                                .namedtuple_defaults
-                        })
-                        && let Value::Tuple(defaults) = self.heap.get(defaults)
-                    {
-                        for (name, value) in names.iter().rev().zip(defaults.iter().rev()) {
-                            fields.entry(name.clone()).or_insert(*value);
-                        }
-                    }
-                    if fields.len() != names.len() {
-                        return Err(Error::new("TypeError", format!("missing field for {name}")));
-                    }
-                    return Ok(self.alloc(Value::Instance {
-                        namespace: None,
-                        class: callable,
-                        fields,
-                        dictionary: None,
-                        scalar: None,
-                        property: None,
-                        weak_reference: None,
-                        memory_stream: None,
-                    }));
-                }
                 let new = self.class_attr(callable, "__new__").or_else(|| {
-                    self.has_base(callable, "int")
-                        .then(|| self.builtin("int.__new__"))
+                    [("int", "int.__new__"), ("tuple", "tuple.__new__")]
+                        .into_iter()
+                        .find(|(base, _)| self.has_base(callable, base))
+                        .map(|(_, new)| self.builtin(new))
                 });
                 let string_base = ["str", "bytes"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
-                let tuple_subclass = self.has_base(callable, "tuple");
                 let collection_kind = ["set", "frozenset", "bytearray"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
@@ -3240,13 +3364,17 @@ impl Context {
                         .collect::<Vec<_>>();
                     self.new_float(&positional, &kwargs)?
                 } else {
-                    let dictionary = self
-                        .has_base(callable, "dict")
-                        .then(|| self.dict(Vec::new()));
+                    let dictionary = if self.has_base(callable, "collections.defaultdict") {
+                        Some(self.alloc(Value::DefaultDict {
+                            factory: NONE,
+                            entries: Default::default(),
+                        }))
+                    } else {
+                        self.has_base(callable, "dict")
+                            .then(|| self.dict(Vec::new()))
+                    };
                     let storage = if self.has_base(callable, "list") {
                         Some(self.alloc(Value::List(Vec::new())))
-                    } else if tuple_subclass {
-                        Some(builtins::call(self, "tuple", &args, &kwargs)?)
                     } else if let Some(kind) = collection_kind {
                         let custom_init = self.class_attr(callable, "__init__").is_some();
                         let items = if kind != "frozenset" && custom_init {
@@ -3281,7 +3409,6 @@ impl Context {
                 } else if new.is_none()
                     && string_base.is_none()
                     && !float_subclass
-                    && !tuple_subclass
                     && collection_kind.is_none()
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
@@ -3452,26 +3579,33 @@ impl Context {
                 }
                 Ok(value)
             }
-            Value::Instance { .. } => {
-                // Binding a descriptor can call Python before it returns its target.
-                let exhausted = stacker::remaining_stack()
-                    .map_or(self.slot_depth >= 128, |remaining| remaining < 64 * 1024);
-                if exhausted {
-                    return Err(Error::new(
-                        "RecursionError",
-                        "maximum recursion depth exceeded while calling a Python object",
-                    ));
-                }
-                self.slot_depth += 1;
-                let result = self.call_instance(callable, args, kwargs);
-                self.slot_depth -= 1;
-                result
-            }
+            // Binding a descriptor can call Python before it returns its target.
+            Value::Instance { .. } => self.with_slot_depth(
+                "maximum recursion depth exceeded while calling a Python object",
+                |ctx| ctx.call_instance(callable, args, kwargs),
+            ),
             _ => Err(Error::new(
                 "TypeError",
                 format!("'{}' object is not callable", self.type_name(callable)),
             )),
         }
+    }
+
+    /// Guard nested native slots that can recurse without entering a Python frame.
+    pub(super) fn with_slot_depth<T>(
+        &mut self,
+        message: &'static str,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if stacker::remaining_stack()
+            .map_or(self.slot_depth >= 128, |remaining| remaining < 64 * 1024)
+        {
+            return Err(Error::new("RecursionError", message));
+        }
+        self.slot_depth += 1;
+        let result = operation(self);
+        self.slot_depth -= 1;
+        result
     }
 
     fn call_instance(

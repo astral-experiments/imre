@@ -170,10 +170,11 @@ impl Index {
 
 impl Entries {
     /// Identify changes to insertion positions even when the live size is restored.
-    pub(in super::super) fn order_state(&self) -> (usize, usize) {
+    pub(in super::super) fn order_state(&self) -> (usize, usize, usize) {
         (
             self.next,
             self.index.as_ref().map_or(0, |index| index.generation),
+            self.order.as_ref().map_or(0, |order| order.revision),
         )
     }
 
@@ -274,6 +275,25 @@ impl Context {
         }
     }
 
+    /// Resolve a move after evaluating its direction, preserving the resident key.
+    pub(in super::super) fn move_dictionary_key(
+        &mut self,
+        dict: Id,
+        key: Id,
+        last: bool,
+    ) -> Result<()> {
+        let entries = self.stored_entries(dict);
+        let Some(end) = entries.len().checked_sub(1) else {
+            return Err(self.lookup_error("KeyError", key));
+        };
+        if entries[entries.ordered_dense(if last { end } else { 0 })].0 == key {
+            return Ok(());
+        }
+        let (_, dense) = self.find_dictionary_key(dict, key, None)?;
+        let dense = dense.ok_or_else(|| self.lookup_error("KeyError", key))?;
+        self.stored_entries_mut(dict).move_to_end(dense, last)
+    }
+
     fn stored_entries_mut(&mut self, dict: Id) -> &mut Entries {
         match self.heap.get_mut(dict) {
             Value::Set { entries, .. }
@@ -347,7 +367,7 @@ impl Context {
     }
 
     fn tuple_keys(&self, key: Id) -> Option<Vec<Id>> {
-        match self.heap.get(key) {
+        match self.tuple_backing(key) {
             Value::Tuple(values) | Value::NamedTuple { values, .. } => Some(values.clone()),
             Value::Instance { class, fields, .. } => self
                 .namedtuple_fields(*class)
@@ -371,7 +391,7 @@ impl Context {
             }
             return self.weak_reference_hash(key, wr);
         }
-        if let Value::Instance { class, .. } = *self.heap.get(key)
+        if let Some(class) = self.heap.get(key).instance_class()
             && let Some(slot) = self.class_attr(class, "__hash__")
         {
             if slot == NONE {
@@ -482,7 +502,7 @@ impl Context {
                 Value::Native(_)
                     if matches!(
                         self.builtin_type_name(key),
-                        Some("type" | "wrapper_descriptor")
+                        Some("type" | "wrapper_descriptor" | "method_descriptor")
                     ) =>
                 {
                     Self::identity_hash(key)
@@ -813,7 +833,7 @@ impl Context {
             }
             Ok(resident)
         } else {
-            entries.push((key, value), hash);
+            entries.push((key, value), hash)?;
             Ok(key)
         }
     }
@@ -839,7 +859,7 @@ impl Context {
             }
             return Ok(value);
         }
-        entries.push((key, value), hash);
+        entries.push((key, value), hash)?;
         Ok(value)
     }
 }

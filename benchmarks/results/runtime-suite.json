@@ -1,8 +1,8 @@
 {
-  "revision": "ae741a30f326d73b5827e70c619d64c16d395e5b",
+  "revision": "865cdc42f9db6bc3c7971b9b3c86eb115d08c075",
   "dirty": false,
-  "date_utc": "2026-10-24",
-  "os": "Linux 6.8.0-147-generic x86_64",
+  "date_utc": "2026-10-28",
+  "os": "Linux 7.0.0-38-generic x86_64",
   "cpu": {
     "model": "AMD EPYC-Milan Processor",
     "allowed_cpus_before_pinning": [
@@ -63,30 +63,30 @@
   },
   "rustc": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
   "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
-  "imre": "imre 0.1.2 (Ruff/ty 0.0.14; LLVM AOT)",
+  "imre": "imre 0.1.3 (Ruff/ty 0.0.14; LLVM AOT)",
   "binaries_sha256": {
     "cpython": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
-    "compiler": "8eb6cb90772a6534c040ac7db7c0c213701f146a015881df74c75fba60868647",
-    "runtime": "53494d7f8c500e3a557774a48e9036a2419269b81709f39b5ccaf66ff5a1b438",
+    "compiler": "7d3971ad3cfb794ad4ea7d0649f163613de7e35f2c6f292eb4dbcc4ca1725843",
+    "runtime": "fa0ced58e13a77da6e00c0ee556b589602298f26bdf1f5838588d8fb3a706c50",
     "inventory_reconciliation": {
-      "rust": "8d9e14e87b2267b52cc8f9ab462dbded7f9b3aa3f5e9fed4e8375ac3c9c2d10c",
-      "imre": "54714cbc549c2a41b9d398243265bbec217732f8bee27e74e0b44f1b1fca92c3"
+      "rust": "7f18e795a052383ac9594a452dc45f56fddfa2fc7450d2eb9cf2aab360d1fdb5",
+      "imre": "5ef6b17b2ae616c12de04b6c9afffb33c9292529a1e04753224ad325e855eb80"
     },
     "base45_codec": {
-      "rust": "170f0c75525577ad611563108c3c76d2f56779dab5544a985a63e9efea4c0816",
-      "imre": "8df9b86cf766d40218212baf7f1feeaa31a6c42a2992a24b9f70daf1169151bb"
+      "rust": "57acde5a08293c5c731383438654bc0c48db5d7a62275c0fe59b2371db352310",
+      "imre": "4fc7a8c6a2f08d970f6028837639e6b83ee47a64fec43977ea35de0ae74366b8"
     },
     "luhn_checksum": {
-      "rust": "eb4732e1e555c27c57dbf669ca15be140a503a5ddbffe31dd8444551997a9689",
-      "imre": "8bc140dce8bff1dcea690750ed3d37a831876773f278338c1ef52e73b3e34d23"
+      "rust": "b2f41b1419de0d238cc0284792e7bd094102dcad1ee194bb0a0250375f32c68c",
+      "imre": "a7807705821de53cd1cfbd42c45ef4d1c55f024163a9df007f828bb4c9f8dde0"
     },
     "telemetry_comparison": {
-      "rust": "f3c95257b1a18346b300b17453e6817530ab0165e964dee400a4e1e197655ab0",
-      "imre": "658ccccfd26fd88b36842b622b1d846f24475c5783f72687e9bee707e263a07d"
+      "rust": "6744d1ba0e7f3adc3e5c03eea3fa51fe5a427fd79f67e28a3a790063589ceb60",
+      "imre": "8ba7c96471348b37c669a05ca8e772a5be6afa12b5f552f5929b02004ec9799a"
     },
     "conformance_report": {
-      "rust": "cad70e06166801f7fcd5e75e31483596e31b26b1ff05dc757eb2a74e150124af",
-      "imre": "9a91d41310cc65e7eb51cf796fe7ff4d930a10b26d5bf65fd71b79854948df45"
+      "rust": "f0a3b09e69a18c1204e2344e70a4ff9f19c58e40a297aa29e55f690a4349880c",
+      "imre": "c7218a2a23df9112e9158652c8e013dd6608ebea1c7aa2addc8a1ef68865efe8"
     }
   },
   "cases": [
@@ -99,76 +99,76 @@
       "report_sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "warmups_ns": [
         {
-          "imre": 33480888,
-          "rust": 25947529,
-          "cpython": 87513393
+          "imre": 44355395,
+          "rust": 59254119,
+          "cpython": 188672244
         },
         {
-          "imre": 34877773,
-          "cpython": 79665227,
-          "rust": 26172658
+          "imre": 41213256,
+          "cpython": 93764068,
+          "rust": 27807182
         }
       ],
       "samples_ns": [
         {
-          "rust": 26530857,
-          "cpython": 78948250,
-          "imre": 33509793
+          "rust": 26339449,
+          "cpython": 95825143,
+          "imre": 43231584
         },
         {
-          "rust": 25426768,
-          "imre": 32463741,
-          "cpython": 79388681
+          "rust": 29063970,
+          "imre": 41454115,
+          "cpython": 93082037
         },
         {
-          "cpython": 81600346,
-          "rust": 27837663,
-          "imre": 33432107
+          "cpython": 82093944,
+          "rust": 26699480,
+          "imre": 39884382
         },
         {
-          "cpython": 85872483,
-          "imre": 33982624,
-          "rust": 25851781
+          "cpython": 87658101,
+          "imre": 41467861,
+          "rust": 28050103
         },
         {
-          "imre": 32792715,
-          "rust": 25440003,
-          "cpython": 81150698
+          "imre": 42091782,
+          "rust": 27010409,
+          "cpython": 82421063
         },
         {
-          "imre": 34037856,
-          "cpython": 81466776,
-          "rust": 25829649
+          "imre": 42273130,
+          "cpython": 97230611,
+          "rust": 29881232
         },
         {
-          "rust": 25559575,
-          "cpython": 79864919,
-          "imre": 33183734
+          "rust": 26968631,
+          "cpython": 155380763,
+          "imre": 45934886
         },
         {
-          "rust": 26137123,
-          "imre": 32720291,
-          "cpython": 80297225
+          "rust": 28726354,
+          "imre": 40447031,
+          "cpython": 123607870
         },
         {
-          "cpython": 79067723,
-          "rust": 25743609,
-          "imre": 32450216
+          "cpython": 93603217,
+          "rust": 34838641,
+          "imre": 42148867
         },
         {
-          "cpython": 79795520,
-          "imre": 33560567,
-          "rust": 28138765
+          "cpython": 83908151,
+          "imre": 42531580,
+          "rust": 27092742
         },
         {
-          "imre": 32666891,
-          "rust": 25296655,
-          "cpython": 80141164
+          "imre": 41534845,
+          "rust": 26500840,
+          "cpython": 84897524
         },
         {
-          "imre": 33166972,
-          "cpython": 79393521,
-          "rust": 26376338
+          "imre": 40766344,
+          "cpython": 82304777,
+          "rust": 27634532
         }
       ]
     },
@@ -181,76 +181,76 @@
       "report_sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "warmups_ns": [
         {
-          "imre": 115100600,
-          "rust": 60343604,
-          "cpython": 157808176
+          "imre": 75055482,
+          "rust": 48196134,
+          "cpython": 121537506
         },
         {
-          "imre": 60284313,
-          "cpython": 133645693,
-          "rust": 47519318
+          "imre": 74322257,
+          "cpython": 198359477,
+          "rust": 57041019
         }
       ],
       "samples_ns": [
         {
-          "rust": 47831881,
-          "cpython": 121405829,
-          "imre": 59886462
+          "rust": 48579188,
+          "cpython": 150188589,
+          "imre": 88139276
         },
         {
-          "rust": 78972825,
-          "imre": 60481331,
-          "cpython": 117373368
+          "rust": 48130784,
+          "imre": 76711855,
+          "cpython": 119326362
         },
         {
-          "cpython": 117566768,
-          "rust": 47645253,
-          "imre": 62196098
+          "cpython": 118942996,
+          "rust": 48705874,
+          "imre": 72078010
         },
         {
-          "cpython": 115556048,
-          "imre": 60602857,
-          "rust": 46676276
+          "cpython": 116448031,
+          "imre": 72076487,
+          "rust": 46548989
         },
         {
-          "imre": 59151271,
-          "rust": 46462217,
-          "cpython": 115919377
+          "imre": 70576525,
+          "rust": 48107631,
+          "cpython": 117534155
         },
         {
-          "imre": 63737944,
-          "cpython": 118106215,
-          "rust": 47973334
+          "imre": 72360755,
+          "cpython": 122832917,
+          "rust": 51099158
         },
         {
-          "rust": 47762422,
-          "cpython": 124913230,
-          "imre": 59949980
+          "rust": 137013744,
+          "cpython": 162709876,
+          "imre": 75554111
         },
         {
-          "rust": 48271751,
-          "imre": 59874930,
-          "cpython": 115045246
+          "rust": 50255439,
+          "imre": 81118048,
+          "cpython": 122814553
         },
         {
-          "cpython": 116133516,
-          "rust": 48062561,
-          "imre": 60274014
+          "cpython": 119504872,
+          "rust": 50041640,
+          "imre": 72923413
         },
         {
-          "cpython": 157110513,
-          "imre": 68875646,
-          "rust": 51442194
+          "cpython": 125080221,
+          "imre": 71729551,
+          "rust": 49094547
         },
         {
-          "imre": 63374747,
-          "rust": 99724631,
-          "cpython": 124554281
+          "imre": 73005355,
+          "rust": 47375647,
+          "cpython": 115109992
         },
         {
-          "imre": 84784233,
-          "cpython": 119134112,
-          "rust": 48783075
+          "imre": 70438850,
+          "cpython": 189344185,
+          "rust": 52553646
         }
       ]
     },
@@ -263,76 +263,76 @@
       "report_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
       "warmups_ns": [
         {
-          "imre": 15371917,
-          "rust": 9521095,
-          "cpython": 192054159
+          "imre": 19007361,
+          "rust": 10099098,
+          "cpython": 228567138
         },
         {
-          "imre": 14660009,
-          "cpython": 193716990,
-          "rust": 18304877
+          "imre": 24221255,
+          "cpython": 189953299,
+          "rust": 9771409
         }
       ],
       "samples_ns": [
         {
-          "rust": 17602517,
-          "cpython": 196943227,
-          "imre": 14322179
+          "rust": 9268592,
+          "cpython": 191371990,
+          "imre": 16349784
         },
         {
-          "rust": 8820178,
-          "imre": 17071326,
-          "cpython": 194387190
+          "rust": 9524801,
+          "imre": 16044156,
+          "cpython": 262932096
         },
         {
-          "cpython": 193910249,
-          "rust": 9234842,
-          "imre": 14370109
+          "cpython": 236333473,
+          "rust": 10202351,
+          "imre": 17657489
         },
         {
-          "cpython": 190784291,
-          "imre": 26375678,
-          "rust": 15031562
+          "cpython": 200457973,
+          "imre": 17165642,
+          "rust": 10202702
         },
         {
-          "imre": 14570292,
-          "rust": 9012989,
-          "cpython": 187516999
+          "imre": 16534196,
+          "rust": 9491218,
+          "cpython": 190972686
         },
         {
-          "imre": 23416279,
-          "cpython": 187308410,
-          "rust": 9098698
+          "imre": 19972386,
+          "cpython": 211663632,
+          "rust": 9769055
         },
         {
-          "rust": 8764265,
-          "cpython": 187685272,
-          "imre": 14484351
+          "rust": 9234580,
+          "cpython": 191618859,
+          "imre": 16741613
         },
         {
-          "rust": 8990597,
-          "imre": 13984730,
-          "cpython": 190261117
+          "rust": 9502858,
+          "imre": 15614606,
+          "cpython": 187074199
         },
         {
-          "cpython": 196905466,
-          "rust": 9440124,
-          "imre": 14666693
+          "cpython": 214783620,
+          "rust": 11268347,
+          "imre": 17696041
         },
         {
-          "cpython": 206624503,
-          "imre": 14535837,
-          "rust": 9471543
+          "cpython": 255220901,
+          "imre": 18072291,
+          "rust": 10143983
         },
         {
-          "imre": 14239394,
-          "rust": 9048274,
-          "cpython": 190016870
+          "imre": 17022968,
+          "rust": 10341279,
+          "cpython": 228785403
         },
         {
-          "imre": 14428087,
-          "cpython": 189435046,
-          "rust": 9269908
+          "imre": 16655113,
+          "cpython": 200875740,
+          "rust": 9695318
         }
       ]
     },
@@ -345,76 +345,76 @@
       "report_sha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
       "warmups_ns": [
         {
-          "imre": 13085172,
-          "rust": 3762446,
-          "cpython": 150955245
+          "imre": 15095359,
+          "rust": 5773437,
+          "cpython": 151766145
         },
         {
-          "imre": 12747574,
-          "cpython": 149126014,
-          "rust": 5339087
+          "imre": 14006692,
+          "cpython": 150045362,
+          "rust": 5713515
         }
       ],
       "samples_ns": [
         {
-          "rust": 4914957,
-          "cpython": 164641217,
-          "imre": 21900079
+          "rust": 4941138,
+          "cpython": 150310978,
+          "imre": 13526167
         },
         {
-          "rust": 7698287,
-          "imre": 19897747,
-          "cpython": 154573783
+          "rust": 5186634,
+          "imre": 13360479,
+          "cpython": 170331304
         },
         {
-          "cpython": 148580686,
-          "rust": 5139373,
-          "imre": 13046621
+          "cpython": 187575803,
+          "rust": 6018743,
+          "imre": 14728797
         },
         {
-          "cpython": 150476502,
-          "imre": 13279865,
-          "rust": 4890580
+          "cpython": 163376277,
+          "imre": 13962862,
+          "rust": 5718695
         },
         {
-          "imre": 13185940,
-          "rust": 4822183,
-          "cpython": 151351373
+          "imre": 13560082,
+          "rust": 5905963,
+          "cpython": 149767385
         },
         {
-          "imre": 13267653,
-          "cpython": 149872816,
-          "rust": 4896171
+          "imre": 13691998,
+          "cpython": 148985058,
+          "rust": 6025255
         },
         {
-          "rust": 4676421,
-          "cpython": 158042572,
-          "imre": 16826398
+          "rust": 9084762,
+          "cpython": 151092402,
+          "imre": 13638237
         },
         {
-          "rust": 3700722,
-          "imre": 12570162,
-          "cpython": 153075949
+          "rust": 5168210,
+          "imre": 13332147,
+          "cpython": 154450502
         },
         {
-          "cpython": 152837204,
-          "rust": 5232307,
-          "imre": 13227257
+          "cpython": 152666691,
+          "rust": 5708877,
+          "imre": 13770253
         },
         {
-          "cpython": 149547861,
-          "imre": 13706911,
-          "rust": 6954379
+          "cpython": 185873044,
+          "imre": 20821128,
+          "rust": 6331706
         },
         {
-          "imre": 21880435,
-          "rust": 7364945,
-          "cpython": 154783594
+          "imre": 14139450,
+          "rust": 5509806,
+          "cpython": 195080212
         },
         {
-          "imre": 13505446,
-          "cpython": 150852473,
-          "rust": 5321875
+          "imre": 23916850,
+          "cpython": 160796374,
+          "rust": 5299434
         }
       ]
     },
@@ -427,76 +427,76 @@
       "report_sha256": "f890328da9d59387ab85e47a841425449c07c60f3f09774d431b45d140ddab00",
       "warmups_ns": [
         {
-          "imre": 12954279,
-          "rust": 9539029,
-          "cpython": 128128975
+          "imre": 16741092,
+          "rust": 9999926,
+          "cpython": 134636128
         },
         {
-          "imre": 14277432,
-          "cpython": 129334243,
-          "rust": 9655186
+          "imre": 28052428,
+          "cpython": 127585744,
+          "rust": 9940554
         }
       ],
       "samples_ns": [
         {
-          "rust": 9620982,
-          "cpython": 127440723,
-          "imre": 13521685
+          "rust": 9682995,
+          "cpython": 130006632,
+          "imre": 16637570
         },
         {
-          "rust": 9460183,
-          "imre": 13787213,
-          "cpython": 125939904
+          "rust": 10800125,
+          "imre": 15863980,
+          "cpython": 124391799
         },
         {
-          "cpython": 124535113,
-          "rust": 12266826,
-          "imre": 16456160
+          "cpython": 125743144,
+          "rust": 10189296,
+          "imre": 16052251
         },
         {
-          "cpython": 124887893,
-          "imre": 13306435,
-          "rust": 9702164
+          "cpython": 129706082,
+          "imre": 16540801,
+          "rust": 9752463
         },
         {
-          "imre": 13318197,
-          "rust": 9665975,
-          "cpython": 124147160
+          "imre": 16133893,
+          "rust": 9798058,
+          "cpython": 152255547
         },
         {
-          "imre": 13249629,
-          "cpython": 124977929,
-          "rust": 9587209
+          "imre": 17695589,
+          "cpython": 161554017,
+          "rust": 10429815
         },
         {
-          "rust": 9445314,
-          "cpython": 124211730,
-          "imre": 13043695
+          "rust": 10825983,
+          "cpython": 128243620,
+          "imre": 18629737
         },
         {
-          "rust": 15982175,
-          "imre": 13310693,
-          "cpython": 123589851
+          "rust": 15143790,
+          "imre": 19561783,
+          "cpython": 127811364
         },
         {
-          "cpython": 125867148,
-          "rust": 9826986,
-          "imre": 12845956
+          "cpython": 137606680,
+          "rust": 13442863,
+          "imre": 15899456
         },
         {
-          "cpython": 126064375,
-          "imre": 13050949,
-          "rust": 9309773
+          "cpython": 126022785,
+          "imre": 16441155,
+          "rust": 10131320
         },
         {
-          "imre": 12543312,
-          "rust": 9219504,
-          "cpython": 125690479
+          "imre": 22068791,
+          "rust": 9682213,
+          "cpython": 124392300
         },
         {
-          "imre": 13299862,
-          "cpython": 125027402,
-          "rust": 9382097
+          "imre": 15979284,
+          "cpython": 125844173,
+          "rust": 10626811
         }
       ]
     },
@@ -509,76 +509,76 @@
       "report_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
       "warmups_ns": [
         {
-          "imre": 33927931,
-          "rust": 24869118,
-          "cpython": 256531331
+          "imre": 51877768,
+          "rust": 30532865,
+          "cpython": 334039510
         },
         {
-          "imre": 35400389,
-          "cpython": 258002325,
-          "rust": 26140209
+          "imre": 47212294,
+          "cpython": 390224053,
+          "rust": 30350568
         }
       ],
       "samples_ns": [
         {
-          "rust": 24422857,
-          "cpython": 265506308,
-          "imre": 35035768
+          "rust": 29646546,
+          "cpython": 289487308,
+          "imre": 47961348
         },
         {
-          "rust": 25025981,
-          "imre": 36095604,
-          "cpython": 254940866
+          "rust": 30215846,
+          "imre": 48404382,
+          "cpython": 294114781
         },
         {
-          "cpython": 255189539,
-          "rust": 24702387,
-          "imre": 33925597
+          "cpython": 291174047,
+          "rust": 28877855,
+          "imre": 47824664
         },
         {
-          "cpython": 253936692,
-          "imre": 34805108,
-          "rust": 25288831
+          "cpython": 365867755,
+          "imre": 62632427,
+          "rust": 29695727
         },
         {
-          "imre": 34492123,
-          "rust": 24799839,
-          "cpython": 274160267
+          "imre": 80597477,
+          "rust": 29218070,
+          "cpython": 300900252
         },
         {
-          "imre": 34064497,
-          "cpython": 258653449,
-          "rust": 53940492
+          "imre": 46628898,
+          "cpython": 276954638,
+          "rust": 28871693
         },
         {
-          "rust": 25930026,
-          "cpython": 258848433,
-          "imre": 35868831
+          "rust": 28958916,
+          "cpython": 275255795,
+          "imre": 48030216
         },
         {
-          "rust": 25911581,
-          "imre": 39209011,
-          "cpython": 260929854
+          "rust": 28129213,
+          "imre": 46086828,
+          "cpython": 279579694
         },
         {
-          "cpython": 260650012,
-          "rust": 26804487,
-          "imre": 34857185
+          "cpython": 280102388,
+          "rust": 30025240,
+          "imre": 48613080
         },
         {
-          "cpython": 261231658,
-          "imre": 37664732,
-          "rust": 25196708
+          "cpython": 380835106,
+          "imre": 58501427,
+          "rust": 29938519
         },
         {
-          "imre": 35302664,
-          "rust": 25223659,
-          "cpython": 255550862
+          "imre": 156252878,
+          "rust": 35640844,
+          "cpython": 317408051
         },
         {
-          "imre": 33402501,
-          "cpython": 253718369,
-          "rust": 25508771
+          "imre": 53794495,
+          "cpython": 282074518,
+          "rust": 42662867
         }
       ]
     }

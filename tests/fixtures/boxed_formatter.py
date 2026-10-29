@@ -16,6 +16,53 @@ class Child(Tagged):
 
 
 def current():
+    conversion_order()
+    class Text(str):
+        def __add__(self, other): raise AssertionError("unexpected addition")
+        def __radd__(self, other): raise AssertionError("unexpected reflected addition")
+
+    class Field:
+        def __format__(self, spec):
+            specs.append(spec)
+            return result
+
+    class Number(int):
+        def __str__(self):
+            return "count"
+
+    result = Text("formatted")
+    spec = Text("x")
+    specs = []
+    field = Field()
+    assert format(field, spec) is result and specs[0] is spec
+    assert f"{field}" is result and "{}".format(field) is result
+    assert f"[{field}{field}]" == "[formattedformatted]"
+    assert specs == ["x", "", "", "", ""]
+    assert format(Number(31)) == "count" and format(Number(31), "x") == "1f"
+    label = "abc"
+    assert f"{label=}" == "label='abc'" and f"{label=:}" == "label=abc"
+
+    class Wrapped(Number):
+        def __format__(self, spec):
+            return "[" + super().__format__(spec) + "]"
+
+    wrapped = Wrapped(31)
+    assert format(wrapped, "x") == "[1f]"
+    assert int.__format__(wrapped, "x") == "1f"
+    assert object.__format__(wrapped, "") == "count"
+    assert type(None).__format__(None, "") == "None"
+    assert str.__format__.__get__(result, Text)("s") is result
+
+    class Word:
+        def __str__(self):
+            return "label"
+
+        def __repr__(self):
+            return "café"
+
+    word = Word()
+    assert "{!s}/{!r}/{!a}".format(word, word, word) == r"label/café/caf\xe9"
+
     wrapper = classmethod(len)
     assert wrapper.__func__ is len and wrapper.__wrapped__ is len
     assert type(Child.native) is type(Child.owner)
@@ -84,3 +131,50 @@ def current():
             print("%*s" % args)
         except (TypeError, OverflowError) as error:
             print(type(error).__name__)
+
+    class Lookup:
+        def __getitem__(self, key):
+            return key.upper()
+
+    assert "%(left)s:%(right)s" % Lookup() == "LEFT:RIGHT"
+
+    class Label:
+        def __str__(self):
+            return "text"
+
+        def __repr__(self):
+            return "café"
+
+    label = Label()
+    print("%s %r %a" % (label, label, label), "%5.3a" % label)
+
+
+def conversion_order():
+    events = []
+    class Value:
+        def __repr__(self):
+            events.append("repr")
+            return "猫"
+    class Broken:
+        def __repr__(self):
+            events.append("raise")
+            raise LookupError
+    def spec():
+        events.append("spec")
+        return ""
+    print(f"{Value()!r:{spec()}}", events)
+    try:
+        f"{Broken()!r:{spec()}}"
+    except LookupError:
+        print(events)
+
+
+def integer_allocation():
+    value = (1 << 8190) + 1
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        format(value, "")
+    except MemoryError as error:
+        print("caught", error.args)
+    print(value.bit_length(), len(format(value, "")), format(value, "") == str(value))

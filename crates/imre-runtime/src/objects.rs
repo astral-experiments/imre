@@ -56,8 +56,8 @@ mod join_buffer;
 mod joined_lines;
 mod json;
 pub(crate) use json::{
-    DecodedJson, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
-    write_string as write_json_string,
+    DecodedJson, Indent as JsonIndent, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
+    write_fragment as write_json_fragment, write_string as write_json_string,
 };
 mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source};
@@ -67,7 +67,7 @@ pub(crate) use logging::record::{brace_integer_field, percent_float_field, perce
 mod mappings;
 mod module_specs;
 mod namespaces;
-mod os;
+pub(crate) mod os;
 pub(crate) use os::os_separator;
 mod patchset;
 mod paths;
@@ -238,7 +238,7 @@ enum Storage {
         name: std::cell::OnceCell<StrOwner>,
     },
     PathInfo(Box<paths::Info>),
-    PurePath(Box<paths::PurePath>),
+    PurePath(allocator_api2::boxed::Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
     PatchSet(patchset::PatchSet),
     PatchedFile(patchset::PatchedFile),

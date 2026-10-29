@@ -10,6 +10,24 @@ fn flag(v: bool) -> Id {
 }
 
 impl Context {
+    /// Call with packed operands and drop their temporary roots after a successful return.
+    fn call_packed(
+        &mut self,
+        callable: Id,
+        arguments: Id,
+        keywords: Id,
+        mark: Option<usize>,
+    ) -> Result<Id> {
+        let args = self.items(arguments)?;
+        let kwargs = self.keyword_args(keywords)?;
+        let result = self.call(callable, args, kwargs)?;
+        // Older compiled modules identify the boundary by their fresh argument list.
+        if let Some(mark) = mark.or_else(|| self.heap.argument_mark(arguments)) {
+            self.finish_call_operands(mark, result);
+        }
+        Ok(result)
+    }
+
     /// Instantiate exception classes used by raise and its explicit cause.
     fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
         let base = self.builtin("BaseException");
@@ -115,6 +133,16 @@ impl Context {
         Ok(self.alloc(Value::Tuple(fields)))
     }
 
+    /// Apply a replacement field conversion before evaluating its nested format specification.
+    fn format_conversion(&mut self, value: Id, conversion: Id) -> Result<Id> {
+        let conversion = self
+            .str_value(conversion)?
+            .chars()
+            .next()
+            .unwrap_or_default();
+        builtins::format_conversion(self, value, conversion)
+    }
+
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
             "match_class" => self.match_class(a, b, c),
@@ -140,7 +168,7 @@ impl Context {
             "assign" | "assign_expr" | "assign_target" | "assign_named_target" => {
                 let mut scope = a;
                 if matches!(op, "assign_expr" | "assign_named_target") {
-                    while self.scope_data(scope).is_comprehension {
+                    while self.scope_data(scope).comprehension.is_some() {
                         scope = self
                             .scope_data(scope)
                             .parent
@@ -149,8 +177,7 @@ impl Context {
                 }
                 let name = self.str_value(b)?.to_owned();
                 let value = self.enum_assignment(scope, &name, c)?;
-                let replaced = self.replacing_writer(scope, &name, value);
-                self.bind_source_name(scope, &name, value)?;
+                let replaced = self.store_source_name(scope, &name, value)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
                     Ok(flag(replaced))
                 } else {
@@ -176,15 +203,21 @@ impl Context {
                 }
                 Ok(NONE)
             }
-            "comprehension_scope" => Ok(self.comprehension_scope(a)),
+            "comprehension_scope" => self.comprehension_scope(a, b),
             "import" => {
                 let name = self.str_value(b)?.to_owned();
                 self.module(&name)
             }
             "from" => self.import_from(a, b),
-            "attr" => {
+            "lookup_enter" => self.context_method(a, "__enter__"),
+            "lookup_exit" => self.context_method(a, "__exit__"),
+            "attr" | "method" => {
                 let name = self.str_value(b)?.to_owned();
-                self.lookup_attr(a, &name)
+                if op == "method" {
+                    self.lookup_method(a, &name)
+                } else {
+                    self.lookup_attr(a, &name)
+                }
             }
             "setattr" => {
                 let name = self.str_value(b)?.to_owned();
@@ -223,7 +256,11 @@ impl Context {
             }
             "append" => {
                 match self.heap.get_mut(a) {
-                    Value::List(v) => v.push(b),
+                    Value::List(v) => {
+                        v.try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", ""))?;
+                        v.push(b);
+                    }
                     Value::Set { frozen: false, .. } => builtins::set_add(self, a, b)?,
                     _ => return Err(Error::new("TypeError", "expected a list or set")),
                 }
@@ -257,22 +294,20 @@ impl Context {
                 Ok(a)
             }
             "unpack" => {
-                let mut values = self.items(a)?;
                 let count = usize::try_from(self.as_integer(b)?)
                     .map_err(|_| Error::new("ValueError", "invalid unpack length"))?;
-                if c == NONE {
-                    if count != values.len() {
-                        return Err(Error::new("ValueError", "wrong number of values to unpack"));
-                    }
+                let star = if c == NONE {
+                    None
                 } else {
                     let star = usize::try_from(self.as_integer(c)?)
                         .map_err(|_| Error::new("ValueError", "invalid starred target"))?;
-                    if star >= count || values.len() < count - 1 {
-                        return Err(Error::new("ValueError", "not enough values to unpack"));
+                    if star >= count {
+                        return Err(Error::new("ValueError", "invalid starred target"));
                     }
-                    self.group_starred_items(&mut values, star, count - star - 1);
-                }
-                Ok(self.alloc(Value::List(values)))
+                    Some(star)
+                };
+                let items = self.unpack_items(a, count, star)?;
+                Ok(self.alloc(Value::List(items)))
             }
             "unpack_take" => {
                 let index = usize::try_from(self.as_integer(b)?).expect("compiled unpack index");
@@ -282,17 +317,7 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "call" => {
-                let args = self.items(b)?;
-                let kwargs = self.keyword_args(c)?;
-                let result = self.call(a, args, kwargs)?;
-                if matches!(self.heap.get(a), Value::Native(name) if name == "bool")
-                    && let Some(mark) = self.heap.argument_mark(b)
-                {
-                    self.discard_truth(mark);
-                }
-                Ok(result)
-            }
+            "call" => self.call_packed(a, b, c, None),
             "class" => self.class(a, b, c),
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
@@ -334,9 +359,13 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "generator" => self.generator(a, b),
+            "generator" => self.generator(a, b, c),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
+            "break_iter" => {
+                self.release_loop_iterator(a);
+                Ok(NONE)
+            }
             "more" | "more_else" => {
                 let more = self.iterator_has_item(a)?;
                 if !more && op == "more_else" {
@@ -386,41 +415,15 @@ impl Context {
                 let class = (op == "~").then(|| self.flag_class(a)).flatten();
                 self.flag_or_integer(class, result)
             }
+            "format_conversion" => self.format_conversion(a, b),
+            "format_concat" => self.concat_strings(a, b),
             "format" => {
-                let mut value = a;
-                if b != NONE {
-                    let conv = self.str_value(b)?;
-                    let s = match conv {
-                        "r" => self.checked_format(a, true)?,
-                        "s" => self.checked_format(a, false)?,
-                        "a" => self
-                            .checked_format(a, true)?
-                            .chars()
-                            .flat_map(|c| {
-                                if c.is_ascii() {
-                                    c.to_string()
-                                } else if (c as u32) <= 0xff {
-                                    format!("\\x{:02x}", c as u32)
-                                } else if (c as u32) <= 0xffff {
-                                    format!("\\u{:04x}", c as u32)
-                                } else {
-                                    format!("\\U{:08x}", c as u32)
-                                }
-                                .chars()
-                                .collect::<Vec<_>>()
-                            })
-                            .collect(),
-                        _ => return Err(Error::new("ValueError", "unsupported conversion")),
-                    };
-                    value = self.text(s);
-                }
-                let spec = if c == NONE {
-                    String::new()
+                let value = if b == NONE {
+                    a
                 } else {
-                    self.str_value(c)?.to_owned()
+                    self.format_conversion(a, b)?
                 };
-                let s = builtins::format_value(self, value, &spec)?;
-                Ok(self.text(s))
+                builtins::format_value(self, value, (c != NONE).then_some(c))
             }
             "take_error" => {
                 let error = self
@@ -429,6 +432,11 @@ impl Context {
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
                 self.heap.release_unbound_writers();
                 Ok(self.raised_instance(error))
+            }
+            "restore_caught" => {
+                let enclosing = self.heap.caught_exception(a);
+                self.heap.replace_active(enclosing);
+                Ok(NONE)
             }
             "matches" => {
                 if let Value::Raised(error) = self.heap.get(a) {
@@ -443,11 +451,20 @@ impl Context {
                 }
                 self.exact_type(a)
             }
-            "exit_exception" => {
-                let class = self.exact_type(b)?;
-                let traceback = self.exception_traceback(b)?;
-                let prior = self.heap.replace_active(b);
+            "exit_context" | "exit_exception" => {
+                let (class, traceback, active) = if b == NONE {
+                    (NONE, NONE, self.heap.caught_exception(c))
+                } else {
+                    (self.exact_type(b)?, self.exception_traceback(b)?, b)
+                };
+                let prior = self.heap.replace_active(active);
                 let result = self.call(a, vec![class, b, traceback], Vec::new());
+                // The exceptional exit's truth test still runs inside the handler.
+                let result = if b == NONE {
+                    result
+                } else {
+                    result.and_then(|value| self.truth(value).map(flag))
+                };
                 self.heap.replace_active(prior);
                 result
             }
@@ -678,6 +695,18 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 ) -> Id {
     // SAFETY: the emitter supplies a valid context and a constant of exactly len bytes.
     let (ctx, data) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    // Each literal roots its value and the returned handle; metadata roots every name.
+    let roots = if kind == 5 {
+        data.iter()
+            .filter(|&&byte| byte == 0)
+            .count()
+            .saturating_add(2)
+    } else {
+        2
+    };
+    if let Err(error) = ctx.heap.reserve_temporaries(roots) {
+        return finish(ctx, Err(error));
+    }
     let value = match kind {
         0 => std::str::from_utf8(data)
             .ok()
@@ -751,6 +780,25 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     }
     // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
     finish_at(ctx, result, unsafe { span.as_ref() })
+}
+
+/// Invoke a compiled call using the root mark taken before its operands were evaluated.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    args: Id,
+    kwargs: Id,
+    mark: usize,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: the generated caller owns the context and supplies a null or static position.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.call_packed(callable, args, kwargs, Some(mark));
+    finish_at(ctx, result, span)
 }
 
 /// Preserve the native function ABI used by previously compiled modules.
@@ -1178,7 +1226,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 
 impl Context {
     /// Check the old binding without calling a Python mapping's lookup hook.
-    fn replacing_writer(&self, scope: Id, name: &str, value: Id) -> bool {
+    pub(super) fn replacing_writer(&self, scope: Id, name: &str, value: Id) -> bool {
         if !self.heap.has_file_writers() {
             return false;
         }
@@ -1223,6 +1271,14 @@ impl Context {
         }
     }
 
+    /// Run deferred callbacks when a native loop reaches a collection point.
+    pub(super) fn collect_garbage(&mut self) {
+        let (heap, roots) = self.heap_and_roots();
+        if let Some(callbacks) = heap.collect_if_due(roots) {
+            self.run_weak_callbacks(callbacks);
+        }
+    }
+
     /// Flush unreachable file owners before the caller evaluates its next operand.
     pub(super) fn leave_frame(&mut self, result: Id, returning: bool) {
         if self.heap.leave(result, returning) {
@@ -1231,8 +1287,13 @@ impl Context {
     }
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
-    fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth(mark) {
+    pub(super) fn discard_truth(&mut self, mark: usize) {
+        self.finish_call_operands(mark, NONE);
+    }
+
+    /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
+    pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
+        if self.heap.discard_operands(mark, result) {
             self.collect_unreachable();
         }
     }

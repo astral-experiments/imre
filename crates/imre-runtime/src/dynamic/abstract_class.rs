@@ -24,15 +24,27 @@ impl Context {
         }
         for &method in methods {
             let name = self.str_value(method)?;
-            if matches!(name, "__iter__" | "__next__")
-                && matches!(self.heap.get(class), Value::Native(kind) if super::builtins::is_iterator_type(kind))
-            {
-                continue;
-            }
-            let value = self
-                .class_attr(class, name)
-                .or_else(|| self.own_class_attr(class, name));
-            if value.is_none_or(|value| value == NONE) {
+            let declared = self.find_in_mro(class, |base| {
+                if let Some(slot) = self.own_class_attr(base, name) {
+                    return Some(slot != NONE);
+                }
+                let Value::Native(kind) = self.heap.get(base) else {
+                    return None;
+                };
+                let present = match kind.as_str() {
+                    "str" | "bytes" | "bytearray" | "list" | "tuple" | "range" | "dict" | "set"
+                    | "frozenset" | "dict_keys" | "dict_items" | "mappingproxy" => {
+                        matches!(name, "__iter__" | "__len__" | "__contains__")
+                    }
+                    "memoryview" | "dict_values" => matches!(name, "__iter__" | "__len__"),
+                    _ => {
+                        super::builtins::is_iterator_type(kind)
+                            && matches!(name, "__iter__" | "__next__")
+                    }
+                };
+                present.then_some(true)
+            });
+            if declared != Some(true) {
                 return Ok(NOT_IMPLEMENTED);
             }
         }

@@ -60,6 +60,32 @@ def byte_chunks():
         yield b'a\x00' b'\xff', br'\n', b''
 
 
+def removed(items, pairs):
+    for first, second in pairs:
+        del items[first], items[second]
+        yield list(items)
+
+
+def checked_members(values):
+    for value in values:
+        assert value in {0, 1}, value
+        yield value
+
+
+def loop_jumps(rows):
+    for row in rows:
+        for value in row:
+            if value < 0:
+                break
+            if value == 0:
+                continue
+            yield value
+        else:
+            yield "exhausted"
+    else:
+        yield "done"
+
+
 def totals(values, cells, trace):
     total = 0
     for value in values:
@@ -79,10 +105,32 @@ def boolean_values(items, trace):
         yield (item and visited(trace, 'and', 7)) or visited(trace, 'or', 9)
 
 
+def three_then_error():
+    yield 1
+    yield 2
+    yield 3
+    raise AssertionError("unpacking requested a fourth item")
+
+
 def unpacked(rows):
     for row in rows:
         left, [middle, right] = row
         yield left, middle, right
+
+
+class RestartTail:
+    def __init__(self):
+        self.calls = 0
+        self.stream = iter((1, 2, 3))
+
+    def __iter__(self):
+        self.calls += 1
+        if self.calls == 1:
+            return self
+        return iter([7, 8])
+
+    def __next__(self):
+        return next(self.stream)
 
 
 def starred(rows):
@@ -105,6 +153,13 @@ def chained(values, box):
 
 
 def current():
+    try:
+        first, second = three_then_error()
+    except ValueError as error:
+        assert str(error) == "too many values to unpack (expected 2)"
+    else:
+        raise AssertionError("expected too many values")
+
     class Box:
         pass
 
@@ -123,10 +178,30 @@ def current():
     assert pulls == ["outer"]
     assert next(values) == 1 and pulls == ["outer", 1]
     print(list(byte_chunks()))
+    prefix, *tail, final = RestartTail()
+    assert (prefix, tail, final) == (1, [7], 8)
+    assert list(starred([RestartTail()])) == [(1, [7], 8)]
+    selected = checked_members([1, 2])
+    assert next(selected) == 1
+    try:
+        next(selected)
+    except AssertionError as error:
+        assert error.args == (2,)
+    else:
+        raise AssertionError("expected failed membership assertion")
+    assert list(loop_jumps([[0, 1], [2, -1, 3], []])) == [1, "exhausted", 2, "exhausted", "done"]
     assert list(values) == [2] and pulls == ["outer", 1, 2]
 
     trace = []
     print(list(totals([3, -1, 5], [0], trace)), trace)
+
+    items = {1: 10, 2: 20, 3: 30}
+    deletions = removed(items, [(2, 3), (1, 4)])
+    print(next(deletions))
+    try:
+        next(deletions)
+    except KeyError as error:
+        print(error.args, items)
 
     saved = -1
     assert any((saved := item) for item in [0, 4, 9]) and saved == 4
@@ -189,6 +264,15 @@ def current():
     except RuntimeError as error:
         print(str(error), error.__cause__ is cause, error.__context__ is cause)
         print(error.__suppress_context__, next(g, "closed"))
+
+    try:
+        raise LookupError("caller")
+    except LookupError as outer:
+        try:
+            next(stopped(cause))
+        except RuntimeError as error:
+            assert error.__context__ is error.__cause__ is cause
+            assert cause.__context__ is outer
 
     for error, explicit in ((ValueError("bad row"), cause), (cause, None)):
         g = raise_after_yield(error, explicit)

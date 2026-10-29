@@ -2,8 +2,21 @@
 use num_bigint::BigInt;
 use num_traits::Signed;
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, value::NOT_IMPLEMENTED};
 use crate::Int;
+
+pub(super) const METHODS: &[&str] = &[
+    "__eq__",
+    "__ge__",
+    "__gt__",
+    "__hash__",
+    "__le__",
+    "__lt__",
+    "__ne__",
+    "__reduce__",
+    "__repr__",
+    "indices",
+];
 
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
@@ -38,17 +51,48 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let wrapper = !matches!(name, "indices" | "__reduce__");
     let Some((&receiver, rest)) = args.split_first() else {
-        return Err(Error::new("TypeError", "slice method needs a receiver"));
+        let message = if wrapper {
+            format!("descriptor '{name}' of 'slice' object needs an argument")
+        } else {
+            format!("unbound method slice.{name}() needs an argument")
+        };
+        return Err(Error::new("TypeError", message));
     };
     let Value::Slice(parts) = *ctx.heap.get(receiver) else {
-        return Err(Error::new("TypeError", "expected a slice"));
+        let kind = ctx.type_name(receiver);
+        let message = if wrapper {
+            format!("descriptor '{name}' requires a 'slice' object but received a '{kind}'")
+        } else {
+            format!("descriptor '{name}' for 'slice' objects doesn't apply to a '{kind}' object")
+        };
+        return Err(Error::new("TypeError", message));
     };
     if !kwargs.is_empty() {
+        let label = if wrapper {
+            format!("wrapper {name}")
+        } else {
+            format!("slice.{name}")
+        };
         return Err(Error::new(
             "TypeError",
-            format!("slice.{name}() takes no keyword arguments"),
+            format!("{label}() takes no keyword arguments"),
         ));
+    }
+    if matches!(name, "__hash__" | "__repr__") {
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", rest.len()),
+            ));
+        }
+        if name == "__hash__" {
+            let hash = ctx.dictionary_hash(receiver)?;
+            return Ok(ctx.int(hash));
+        }
+        let text = ctx.checked_format(receiver, true)?;
+        return Ok(ctx.text(text));
     }
     if name == "__reduce__" {
         if !rest.is_empty() {
@@ -64,16 +108,33 @@ pub(super) fn method(
         let fields = ctx.alloc(Value::Tuple(parts.to_vec()));
         return Ok(ctx.alloc(Value::Tuple(vec![class, fields])));
     }
-    let [length] = rest else {
-        return Err(Error::new(
-            "TypeError",
+    let [other] = rest else {
+        let message = if wrapper {
+            format!("expected 1 argument, got {}", rest.len())
+        } else {
             format!(
                 "slice.indices() takes exactly one argument ({} given)",
                 rest.len()
-            ),
-        ));
+            )
+        };
+        return Err(Error::new("TypeError", message));
     };
-    let length = ctx.index_integer(*length)?;
+    if wrapper {
+        let Value::Slice(right) = *ctx.heap.get(*other) else {
+            return Ok(NOT_IMPLEMENTED);
+        };
+        let op = match name {
+            "__eq__" => "==",
+            "__ne__" => "!=",
+            "__lt__" => "<",
+            "__le__" => "<=",
+            "__gt__" => ">",
+            "__ge__" => ">=",
+            _ => unreachable!("slice comparison"),
+        };
+        return compare(ctx, op, parts, right);
+    }
+    let length = ctx.index_integer(*other)?;
     if length.big().is_negative() {
         return Err(Error::new("ValueError", "length should not be negative"));
     }

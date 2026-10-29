@@ -1,4 +1,25 @@
 def current():
+    class F(frozenset):
+        pass
+
+    nested = F()
+    for _ in range(1200):
+        nested = F((nested,))
+    assert len(repr(nested)) == 6003
+
+    class NestedDict(dict):
+        pass
+    class NestedList(list):
+        pass
+    class NestedTuple(tuple):
+        pass
+    mapping = sequence = items = None
+    for _ in range(160):
+        mapping = NestedDict({0: mapping})
+        sequence = NestedList([sequence])
+        items = NestedTuple((items,))
+    assert [len(repr(value)) for value in (mapping, sequence, items)] == [804, 324, 484]
+
     items = []
     items.append(items)
     print(repr(items), str(items))
@@ -145,3 +166,27 @@ def defaultdict_allocation():
     else:
         print("value", len(text), len(visits))
     print("retry", len(repr(value)), len(visits))
+
+
+def integer_allocation(wide):
+    value = -((1 << 4097) - 37) if wide else 23
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        text = str(value)
+    except MemoryError as error:
+        print("caught", error.args)
+    else:
+        print("value", len(text), text[:5], text[-5:])
+    text = str(value)
+    print("retry", len(text), text[:5], text[-5:])
+
+
+def integer_digit_limit(limit):
+    over = 10 ** (limit or 700)
+    for value in (over - 1, over, -over, 1 << 19000):
+        for convert in (str, repr, lambda number: repr([number]), lambda number: str(ValueError(number))):
+            try:
+                print(len(convert(value)))
+            except ValueError as error:
+                print(error.args)

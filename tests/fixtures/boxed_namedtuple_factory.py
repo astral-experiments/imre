@@ -15,7 +15,70 @@ class BrokenBlock:
         raise LookupError("error after the last field")
 
 
+def layout_read_allocation():
+    import os
+
+    # Match the allocation size recognized by the boxed-call malloc wrapper.
+    field = "f" * (113 * 8)
+    row = namedtuple("Row", (field, "kept"))(7, 9)
+    marker = {}
+    os.putenv("IMRE_TEST_GETTER_ALLOCATION", "1")
+    marker[0] = 1
+    text = repr(row)
+    os.unsetenv("IMRE_TEST_GETTER_ALLOCATION")
+    assert text == f"Row({field}=7, kept=9)"
+    print(row.kept)
+
+
 def current():
+    Fields = namedtuple("Fields", "left right")
+    getter = Fields.right
+    assert getter.__get__((2, 3), tuple) == 3
+    assert getter.__get__(Fields(4, 5)) == 5
+
+    class Shift(Fields):
+        def __new__(cls, left, right):
+            return super().__new__(cls, left + 1, right + 2)
+
+    class Foreign(Fields):
+        def __new__(cls, left):
+            return left
+
+        def __init__(self, left):
+            raise AssertionError("foreign result was initialized")
+
+    assert tuple(Shift(2, 3)) == (3, 5)
+    assert tuple(Shift._make((2, 3))) == (2, 3)
+    assert Foreign(9) == 9
+    class Tagged(tuple):
+        def __init__(self, values, *, tag):
+            self.tag = tag
+
+    tagged = Tagged((1, 2), tag="set by init")
+    assert tagged == (1, 2) and tagged.tag == "set by init"
+    assert tuple.__new__(Tagged, (3,), tag="unused") == (3,)
+
+    short = tuple.__new__(Fields, (7,))
+    assert {short: "one"}[(7,)] == "one" and short.left == 7
+    try:
+        short.right
+    except IndexError:
+        pass
+    else:
+        raise AssertionError("missing tuple position")
+
+    class Shadow(Fields):
+        left = "shadow"
+
+    shadow = Shadow(3, 4)
+    assert shadow.left == "shadow"
+    shadow.left = 8
+    assert shadow.left == 8 and Fields.left.__get__(shadow) == 3
+
+    getter.__doc__ = "right coordinate"
+    assert repr(getter) == "_tuplegetter(1, 'right coordinate')"
+    assert type(getter).__doc__.__get__(getter) == "right coordinate"
+
     Match = namedtuple("Match", "a b size")
     blocks = [(0, 0, 5), (6, 5, 0)]
     longest = Match(0, 0, 5)
@@ -91,3 +154,25 @@ def current():
         namedtuple("Broken", broken_fields())
     except ValueError as error:
         print(str(error))
+
+    calls = []
+
+    class Initialized(Match):
+        def __init__(self, a, b, size):
+            calls.append((self.a, a, b, size))
+
+    value = Initialized(1, 2, size=3)
+    print(value.a, calls)
+    value = Initialized._make((4, 5, 6))
+    print(type(value) is Initialized, calls)
+
+    class Positional(tuple):
+        pass
+
+    class Remapped(Match):
+        def __iter__(self):
+            return iter((31, 47, 59))
+
+    for pair in (Positional((1, 2, 3)), Remapped(1, 2, 3)):
+        print("%s/%s/%s" % pair, b"%o/%o/%o" % pair, tuple(iter(pair)))
+    print(repr(Remapped(1, 2, 3)))

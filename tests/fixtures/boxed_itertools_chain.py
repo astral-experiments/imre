@@ -35,7 +35,21 @@ def current():
 
     assert list(PrivateState([1], [2])) == [1, 2]
 
+    class Constructor(chain):
+        def __new__(cls, *args):
+            raise AssertionError("__new__")
+
+        def __init__(self, *args):
+            raise AssertionError("__init__")
+
+        def __setattr__(self, name, value):
+            raise AssertionError(name)
+
+    cursor = Constructor.from_iterable([[3], [4]])
+    assert type(cursor) is Constructor and list(cursor) == [3, 4]
+
     import itertools
     itertools._chain_get = None
     itertools._chain_set = None
-    assert list(chain([7], [8])) == [7, 8]
+    itertools._chain_allocate = None
+    assert list(chain.from_iterable([[7], [8]])) == [7, 8]

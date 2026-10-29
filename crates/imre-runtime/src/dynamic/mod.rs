@@ -38,8 +38,8 @@ use std::path::PathBuf;
 
 use crate::objects::exceptions::string_repr;
 use value::{
-    Code, DictIterator, DictViewKind, Error, FALSE, FrameOwner, Heap, Id, NONE, Result, Scope,
-    TRUE, Value,
+    Code, ComprehensionKind, DictIterator, DictViewKind, Error, FALSE, FrameOwner, Heap, Id, NONE,
+    Result, Scope, TRUE, Value,
 };
 
 struct SourceModule {
@@ -108,7 +108,8 @@ pub(crate) struct Context {
     slot_depth: usize,
 }
 
-fn copy_ids(values: &[Id]) -> Result<Vec<Id>> {
+/// Copy IDs or dictionary entry pairs while preserving a catchable allocation failure.
+fn copy_ids<T: Copy>(values: &[T]) -> Result<Vec<T>> {
     let mut copied = Vec::new();
     copied
         .try_reserve_exact(values.len())
@@ -158,6 +159,14 @@ impl Context {
         }
     }
 
+    /// Return the native mutable sequence for an inherited subscript assignment or deletion.
+    fn mutable_sequence_storage(&self, object: Id) -> Option<Id> {
+        let storage = self.scalar_value(object);
+        (storage != object
+            && matches!(self.heap.get(storage), Value::List(_) | Value::ByteArray(_)))
+        .then_some(storage)
+    }
+
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
@@ -165,7 +174,9 @@ impl Context {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
-            ("str", Value::Str(_))
+            ("int", Value::Int(_) | Value::Bool(_))
+            | ("float", Value::Float(_))
+            | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("set", Value::Set { frozen: false, .. })
@@ -261,6 +272,23 @@ impl Context {
         }
     }
 
+    /// Concatenate two string payloads, bypassing Python addition hooks.
+    fn concat_strings(&mut self, left: Id, right: Id) -> Result<Id> {
+        let left = self.str_value(left)?;
+        let right = self.str_value(right)?;
+        let size = left
+            .len()
+            .checked_add(right.len())
+            .ok_or_else(|| Error::new("OverflowError", "strings are too large to concatenate"))?;
+        let mut result = String::new();
+        result
+            .try_reserve_exact(size)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        result.push_str(left);
+        result.push_str(right);
+        Ok(self.text(result))
+    }
+
     fn str_value(&self, id: Id) -> Result<&str> {
         let id = self
             .string_storage(id)
@@ -311,6 +339,15 @@ impl Context {
         )
     }
 
+    /// Select the inherited binary iterator for an exact value or a subclass with native storage.
+    fn binary_iterator_kind(&self, id: Id) -> Option<&'static str> {
+        match self.heap.get(self.scalar_value(id)) {
+            Value::Bytes(_) => Some("bytes_iterator"),
+            Value::ByteArray(_) => Some("bytearray_iterator"),
+            _ => None,
+        }
+    }
+
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
@@ -332,8 +369,6 @@ impl Context {
             }
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
-            Value::Bytes(_) => (id, "bytes_iterator"),
-            Value::ByteArray(_) => (id, "bytearray_iterator"),
             Value::Range(ref range) => {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
             }
@@ -353,8 +388,9 @@ impl Context {
                     running: false,
                 }));
             }
-            Value::Instance { class, .. }
-                if let Some(slot) = self.class_attr(class, "__iter__") =>
+            ref value
+                if let Some(class) = value.instance_class()
+                    && let Some(slot) = self.class_attr(class, "__iter__") =>
             {
                 if slot == NONE {
                     return Err(Error::new(
@@ -375,6 +411,7 @@ impl Context {
                     ),
                 ));
             }
+            _ if let Some(kind) = self.binary_iterator_kind(id) => (id, kind),
             Value::Instance { .. } if let Some((storage, _)) = self.sequence_payload(id) => {
                 return self.iterator(storage);
             }
@@ -401,7 +438,13 @@ impl Context {
             kind,
             entries.len(),
             ordered.then(|| entries.order_state()),
-            reverse.then(|| entries.insertion_end()),
+            reverse.then(|| {
+                if ordered {
+                    entries.len()
+                } else {
+                    entries.insertion_end()
+                }
+            }),
         );
         self.alloc(Value::DictIterator(iter))
     }
@@ -409,10 +452,10 @@ impl Context {
     /// Compiled loops test for an item before consuming it. User code must advance only once.
     fn loop_iterator(&mut self, iterable: Id) -> Result<Id> {
         let source = self.iterator(iterable)?;
+        let value = self.heap.get(source);
         if matches!(
-            self.heap.get(source),
-            Value::Instance { .. }
-                | Value::ReverseSequence { .. }
+            value,
+            Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::MappingViewIterator { .. }
@@ -424,7 +467,8 @@ impl Context {
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
-        ) {
+        ) || value.instance_class().is_some()
+        {
             return Ok(self.alloc(Value::LoopIterator {
                 source,
                 peeked: None,
@@ -447,7 +491,7 @@ impl Context {
         let Some(sequence) = sequence else {
             return Ok(IteratorSlice::Values(&[]));
         };
-        Ok(match self.heap.get(*sequence) {
+        Ok(match self.heap.get(self.scalar_value(*sequence)) {
             Value::List(values) | Value::Tuple(values) if *reverse => {
                 IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
             }
@@ -561,6 +605,8 @@ impl Context {
     }
 
     fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
+        // A reentrant callback can exhaust the parent and release its last reference to id.
+        self.heap.keep(id);
         match self.call(callable, Vec::new(), Vec::new()) {
             Ok(item) => {
                 // A recursive call can exhaust the same iterator inside the callable.
@@ -612,12 +658,7 @@ impl Context {
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::MappingViewIterator { .. } => return self.next_mapping_view_item(id),
-            Value::DictIterator(iter) => {
-                let mut iter = *iter;
-                let item = iter.next(self);
-                *self.heap.get_mut(id) = Value::DictIterator(iter);
-                return item;
-            }
+            Value::DictIterator(iter) => return (*iter).next(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
                 let input = *input;
@@ -763,11 +804,77 @@ impl Context {
         item
     }
 
-    /// Replace the middle of a checked unpacking result with a fresh list.
-    fn group_starred_items(&mut self, items: &mut Vec<Id>, star: usize, trailing: usize) {
-        let end = items.len() - trailing;
-        let middle = items.drain(star..end).collect();
-        items.insert(star, self.alloc(Value::List(middle)));
+    /// Consume the values required by an assignment, probing one extra item for fixed targets.
+    fn unpack_items(&mut self, value: Id, count: usize, star: Option<usize>) -> Result<Vec<Id>> {
+        let required = count - usize::from(star.is_some());
+        let prefix = star.unwrap_or(count);
+        let iter = self.iterator(value)?;
+        let mut unpacked = Vec::new();
+        unpacked
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let too_short = |got| {
+            let qualifier = if star.is_some() { "at least " } else { "" };
+            Error::new(
+                "ValueError",
+                format!("not enough values to unpack (expected {qualifier}{required}, got {got})"),
+            )
+        };
+        for i in 0..prefix {
+            unpacked.push(self.next_item(iter)?.ok_or_else(|| too_short(i))?);
+        }
+        if let Some(star) = star {
+            let tail = self.iterator(iter)?;
+            let default = self.int(8);
+            let hint = self.length_hint(iter, Some(default))?;
+            let mut rest = Vec::new();
+            rest.try_reserve_exact(self.as_integer(hint)? as usize)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            while let Some(item) = self.next_item(tail)? {
+                rest.try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                rest.push(item);
+            }
+            let tail_start = rest
+                .len()
+                .checked_sub(required - star)
+                .ok_or_else(|| too_short(star + rest.len()))?;
+            unpacked.push(NONE);
+            unpacked.extend(rest.drain(tail_start..));
+            unpacked[star] = self.alloc(Value::List(rest));
+        } else if self.next_item(iter)?.is_some() {
+            let size = match self.heap.get(value) {
+                Value::List(items) | Value::Tuple(items) => Some(items.len()),
+                Value::Dict(items) => Some(items.len()),
+                _ => None,
+            };
+            let detail = size.map_or_else(String::new, |n| format!(", got {n}"));
+            return Err(Error::new(
+                "ValueError",
+                format!("too many values to unpack (expected {count}{detail})"),
+            ));
+        }
+        Ok(unpacked)
+    }
+
+    /// Read positional tuple storage without calling a subclass's sequence slots.
+    fn tuple_items(&self, id: Id) -> Result<Option<Vec<Id>>> {
+        if let Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
+            self.heap.get(self.scalar_value(id))
+        {
+            return copy_ids(items).map(Some);
+        }
+        if let Value::Instance { class, fields, .. } = self.heap.get(id)
+            && let Some(names) = self.namedtuple_fields(*class)
+        {
+            let mut items = Vec::new();
+            items
+                .try_reserve_exact(names.len())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            items.extend(names.iter().map(|name| fields[name]));
+            return Ok(Some(items));
+        }
+        Ok(None)
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
@@ -795,7 +902,17 @@ impl Context {
         {
             let iter = self.iterator(id)?;
             let mut items = Vec::new();
+            if let Value::Repeat(repeat) = self.heap.get(iter)
+                && let Some(remaining) = repeat.remaining
+            {
+                items
+                    .try_reserve_exact(remaining)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+            }
             while let Some(item) = self.next_item(iter)? {
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
                 items.push(item);
             }
             return Ok(items);
@@ -817,10 +934,11 @@ impl Context {
         if let Value::MappingProxy(dict) = *self.heap.get(id) {
             return self.items(dict);
         }
-        if let Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
-            self.heap.get(self.scalar_value(id))
-        {
+        if let Value::List(items) = self.heap.get(self.scalar_value(id)) {
             return copy_ids(items);
+        }
+        if let Some(items) = self.tuple_items(id)? {
+            return Ok(items);
         }
         match self.heap.get(id).clone() {
             Value::Set { entries, .. }
@@ -855,36 +973,29 @@ impl Context {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
             Value::Iterator { .. } => {
-                let values = match self.iterator_remaining(id)? {
-                    IteratorSlice::Values(values) => values.to_vec(),
-                    IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    remaining @ (IteratorSlice::Bytes(_)
+                let remaining = self.iterator_remaining(id)?;
+                let mut values = Vec::new();
+                values.try_reserve_exact(remaining.len()).map_err(|_| {
+                    Error::new("MemoryError", "iterator is too large to materialize")
+                })?;
+                match remaining {
+                    IteratorSlice::Values(items) => values.extend_from_slice(items),
+                    IteratorSlice::Reversed(items) => values.extend(items.iter().rev().copied()),
+                    IteratorSlice::Bytes(_)
                     | IteratorSlice::ReversedBytes(_)
-                    | IteratorSlice::ReversedText(_)) => {
-                        let mut values = Vec::new();
-                        values.try_reserve_exact(remaining.len()).map_err(|_| {
-                            Error::new("MemoryError", "iterator is too large to materialize")
-                        })?;
+                    | IteratorSlice::ReversedText(_) => {
                         while let Some(item) = self.next_item(id)? {
                             values.push(item);
                         }
                         return Ok(values);
                     }
-                };
+                }
                 if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
                     *sequence = None;
                 }
                 Ok(values)
             }
-            Value::Instance { class, fields, .. } if self.namedtuple_fields(class).is_some() => {
-                Ok(self
-                    .namedtuple_fields(class)
-                    .unwrap()
-                    .into_iter()
-                    .map(|k| fields[&k])
-                    .collect())
-            }
-            Value::Instance { .. } if self.slot(id, "__iter__").is_some() => {
+            Value::Instance { .. } if self.binary_iterator_kind(id).is_some() => {
                 let iter = self.iterator(id)?;
                 self.items(iter)
             }
@@ -899,7 +1010,7 @@ impl Context {
             class_body: None,
             enum_namespace: None,
             is_abstract: false,
-            is_comprehension: false,
+            comprehension: None,
             class_cell: None,
             class_namespace: None,
             first_argument: None,
@@ -914,14 +1025,30 @@ impl Context {
         }))
     }
     /// Comprehensions own their loop variables, but assignment expressions bind outside them.
-    fn comprehension_scope(&mut self, parent: Id) -> Id {
-        let module = self.scope_data(parent).module.clone();
+    fn comprehension_scope(&mut self, parent: Id, targets: Id) -> Result<Id> {
+        let targets = self
+            .str_value(targets)?
+            .split_ascii_whitespace()
+            .map(str::to_owned)
+            .collect();
+        let enclosing = self.scope_data(parent);
+        let module = enclosing.module.clone();
+        let (parent, kind) = if enclosing.class_body.is_some() {
+            (
+                enclosing.parent.expect("class has an enclosing scope"),
+                ComprehensionKind::ClassBody,
+            )
+        } else {
+            (parent, ComprehensionKind::Ordinary)
+        };
         let scope = self.scope(&module, Some(parent));
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.is_comprehension = true;
-        scope
+        frame.comprehension = Some(kind);
+        frame.closure.declared = targets;
+        frame.closure.declared_complete = true;
+        Ok(scope)
     }
 
     fn scope_data(&self, scope: Id) -> &Scope {
@@ -1167,6 +1294,11 @@ impl Context {
             if s.class_body.is_none() && s.closure.declared.contains(name) {
                 return Err(self.missing_binding(origin, scope, name));
             }
+            // An eager comprehension in a class cannot capture an outer function's __class__.
+            if name == "__class__" && s.comprehension == Some(ComprehensionKind::ClassBody) {
+                scope = self.root_scope(scope);
+                continue;
+            }
             if name == "__class__"
                 && s.class_body.is_none()
                 && let Some(cell) = s.class_cell
@@ -1191,6 +1323,27 @@ impl Context {
         }
         Err(self.missing_binding(origin, scope, name))
     }
+    /// Resolve the factory in the mapping payload of an exact or derived defaultdict.
+    fn defaultdict_factory(&self, object: Id) -> Option<Id> {
+        let Value::DefaultDict { factory, .. } = self.heap.get(self.dict_storage(object)?) else {
+            return None;
+        };
+        Some(*factory)
+    }
+
+    /// Replace the factory without exposing it through the subclass instance dictionary.
+    fn replace_defaultdict_factory(&mut self, object: Id, value: Id) -> bool {
+        let Some(storage) = self.dict_storage(object) else {
+            return false;
+        };
+        let Value::DefaultDict { factory, .. } = self.heap.get_mut(storage) else {
+            return false;
+        };
+        let old = std::mem::replace(factory, value);
+        self.heap.weak_edge_removed(old);
+        true
+    }
+
     fn builtin(&mut self, name: &str) -> Id {
         if let Some(&value) = self.builtins.get(name) {
             return value;
@@ -1202,13 +1355,28 @@ impl Context {
             self.builtin(builtins::exception_initializer(name));
         }
         let methods = match name {
-            "object" => &["__hash__"],
+            "object" => &["__hash__", "__format__"],
             "dict" => builtins::DICT_METHODS,
-            "list" => &["__repr__", "__init__", "append"],
+            "collections.defaultdict" => {
+                self.builtin("dict");
+                &[
+                    "__init__",
+                    "__missing__",
+                    "__repr__",
+                    "copy",
+                    "__copy__",
+                    "__reduce__",
+                ]
+            }
+            "list" => builtins::LIST_METHODS,
+            "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
-            "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],
+            "set" | "frozenset" => &["__repr__"],
+            "bytearray" => builtins::BYTEARRAY_METHODS,
             "property" => property::METHODS,
-            "int" => &["to_bytes"],
+            "int" => &["bit_length", "to_bytes", "__format__"],
+            "float" => &["__format__"],
+            "bytes" => builtins::BYTES_METHODS,
             "str" => {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
@@ -1523,7 +1691,12 @@ impl Context {
                 }
             }
             "ast" => stdlib::ast::install(self, scope),
-            "selectors" => stdlib::readiness::initialize(self, scope),
+            "selectors" => {
+                if let Err(error) = stdlib::readiness::initialize(self, scope) {
+                    self.modules.remove(name);
+                    return Err(error);
+                }
+            }
             "sys" => {
                 for (name, original, stderr) in [
                     ("stdout", "__stdout__", false),
@@ -1589,6 +1762,11 @@ impl Context {
             if let Err(error) = result {
                 self.modules.remove(name);
                 return Err(error);
+            }
+            if name == "re"
+                && let Some(class) = self.scope_name(scope, "PatternError")
+            {
+                self.classes.insert("re.PatternError".into(), class);
             }
             if name == "decimal"
                 && self.config["bundled_root"]

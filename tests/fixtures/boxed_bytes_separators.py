@@ -18,6 +18,12 @@ def current():
             print(str(error))
 
     print(cookie.rsplit(sep=bytearray(b"."), maxsplit=Index()))
+    for split in ("a:b:c".split, "a:b:c".rsplit):
+        print(split(":", maxsplit=Index()))
+        try:
+            split(":", Broken())
+        except ValueError as error:
+            print(str(error))
     print(cookie.rsplit(b"?", 1)[0] is cookie)
     for text, sep in ((b"aaa", b"aa"), (b",,a,", b","), (b"", b"!"),
                       (b" \ta\x0b\xff\x0c ", None), (b"\x85\x1c", None), (b"", None)):

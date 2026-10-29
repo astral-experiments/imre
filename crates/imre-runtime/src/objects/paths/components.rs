@@ -79,7 +79,7 @@ pub unsafe extern "C" fn imre_path_relative_to(
                     .with(|o| o.parsed(|o| p.relative_to(o, walk_up != 0)))
             })?;
             Ok(if matches!(s, Storage::PurePath(_)) {
-                relative.into_object()
+                relative.into_object()?
             } else {
                 new_path(relative.text)
             })

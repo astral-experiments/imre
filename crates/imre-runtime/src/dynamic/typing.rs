@@ -60,29 +60,45 @@ impl AliasKind {
     }
 }
 
-/// Render a type used in a generic alias or a union.
-pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
-    match ctx.heap.get(id) {
-        Value::Ellipsis => "...".to_owned(),
-        Value::Native(name) => name.clone(),
+/// Recognize the original special form even when its public module name is rebound.
+fn is_special_form(ctx: &Context, id: Id) -> bool {
+    ctx.module_value("typing", "_SpecialForm")
+        .is_some_and(|class| ctx.instance_of(id, class))
+}
+
+/// Append a type argument's special spelling if it has one.
+pub(super) fn append_type_label(ctx: &Context, id: Id, out: &mut String) -> Result<bool> {
+    use super::operators::append_rendered_text;
+
+    let label = match ctx.heap.get(id) {
+        Value::Ellipsis => "...",
+        Value::Native(name) => name,
         Value::Class { name, scope, .. } => {
             let class_name = |attr| {
                 ctx.own_class_attr(id, attr)
                     .and_then(|id| ctx.str_value(id).ok())
             };
             let module = class_name("__module__").unwrap_or(&ctx.scope_data(*scope).module);
-            let qualname = class_name("__qualname__").unwrap_or(name);
-            if module == "builtins" {
-                qualname.to_owned()
-            } else {
-                format!("{module}.{qualname}")
+            if module != "builtins" {
+                append_rendered_text(out, module)?;
+                append_rendered_text(out, ".")?;
             }
+            class_name("__qualname__").unwrap_or(name)
         }
-        Value::Instance { .. } if ctx.module_value("typing", "Final") == Some(id) => {
-            "typing.Final".to_owned()
+        Value::Instance { .. } if is_special_form(ctx, id) => {
+            let Some(name) = ctx
+                .raw_instance_field(id, "_name")
+                .and_then(|field| ctx.str_value(field).ok())
+            else {
+                return Ok(false);
+            };
+            append_rendered_text(out, "typing.")?;
+            name
         }
-        _ => ctx.repr(id),
-    }
+        _ => return Ok(false),
+    };
+    append_rendered_text(out, label)?;
+    Ok(true)
 }
 
 impl Alias {
@@ -96,29 +112,6 @@ impl Alias {
             (a, b) if a == b => Some((self.args, other.args)),
             _ => None,
         }
-    }
-
-    pub(super) fn repr(&self, ctx: &Context) -> String {
-        let Value::Tuple(args) = ctx.heap.get(self.args) else {
-            unreachable!()
-        };
-        let mut args: Vec<_> = args.iter().map(|&id| type_repr(ctx, id)).collect();
-        let origin = match self.kind {
-            AliasKind::Callable => "typing.Callable".to_owned(),
-            AliasKind::Literal(_) => "typing.Literal".to_owned(),
-            _ => type_repr(ctx, self.origin),
-        };
-        let params = if matches!(self.kind, AliasKind::Callable | AliasKind::AbcCallable)
-            && args.first().is_none_or(|arg| arg != "...")
-        {
-            let result = args.pop().expect("a callable has a result");
-            format!("[{}], {result}", args.join(", "))
-        } else if args.is_empty() {
-            "()".to_owned()
-        } else {
-            args.join(", ")
-        };
-        format!("{origin}[{params}]")
     }
 }
 
@@ -336,10 +329,12 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         && matches!(alias.kind, AliasKind::Literal(_))
         && matches!(ctx.heap.get(alias.parameters), Value::Tuple(params) if params.is_empty())
     {
-        return Some(Err(Error::new(
-            "TypeError",
-            format!("{} is not a generic class", alias.repr(ctx)),
-        )));
+        return Some(ctx.checked_format(target, true).and_then(|name| {
+            Err(Error::new(
+                "TypeError",
+                format!("{name} is not a generic class"),
+            ))
+        }));
     }
     if matches!(ctx.heap.get(target), Value::Class { .. })
         && ctx.class_attr(target, "__class_getitem__").is_some()
@@ -581,11 +576,10 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         unreachable!()
     };
     let (origin, kind) = (alias.origin, alias.kind);
-    if matches!(kind, AliasKind::Literal(_)) || ctx.module_value("typing", "Final") == Some(origin)
-    {
+    if matches!(kind, AliasKind::Literal(_)) || is_special_form(ctx, origin) {
         return Err(Error::new(
             "TypeError",
-            format!("Cannot subclass {}", alias.repr(ctx)),
+            format!("Cannot subclass {}", ctx.checked_format(id, true)?),
         ));
     }
     let mut result = vec![origin];
@@ -1006,31 +1000,52 @@ impl Context {
 
     /// Freeze the declared field names or inherit the first named-tuple layout in the MRO.
     fn namedtuple_layout(
-        &self,
+        &mut self,
+        name: &str,
         bases: &[Id],
         ancestors: &[Id],
         scope: Id,
-    ) -> Option<std::rc::Rc<[String]>> {
+    ) -> Result<Option<std::rc::Rc<[String]>>> {
         if bases.iter().any(|&base| {
             matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
         }) {
-            let annotations = self.scope_data(scope).names.get("__annotations__")?;
-            let fields = self.dict_entries(*annotations)?;
-            return Some(
-                fields
-                    .iter()
-                    .filter_map(|&(key, _)| self.str_value(key).ok().map(str::to_owned))
-                    .collect(),
-            );
+            let fields = self.scope_data(scope).names.get("__annotations__")
+                .and_then(|&annotations| self.dict_entries(annotations))
+                .unwrap_or_default();
+            let named_fields: std::rc::Rc<[String]> = fields
+                .iter()
+                .filter_map(|&(key, _)| self.str_value(key).ok().map(str::to_owned))
+                .collect();
+            let mut defaults = Vec::new();
+            for field in named_fields.iter() {
+                if !ruff_python_stdlib::identifiers::is_identifier(field) {
+                    return Err(Error::new("ValueError", format!("invalid named tuple field {field:?}")));
+                }
+                if let Some(value) = self.scope_name(scope, field) {
+                    defaults.push(value);
+                } else if !defaults.is_empty() {
+                    return Err(Error::new("TypeError", format!("non-default field {field} cannot follow default fields")));
+                }
+            }
+            let defaults = self.alloc(Value::Tuple(defaults));
+            super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
+            if self.scope_name(scope, "__repr__").is_none() {
+                let fields = named_fields.iter().map(|field| self.text(field)).collect();
+                let fields = self.alloc(Value::Tuple(fields));
+                let name = self.text(name);
+                super::namedtuple::bind_repr(self, scope, name, fields)?;
+            }
+            super::namedtuple::bind_fields(self, scope, &named_fields);
+            return Ok(Some(named_fields));
         }
-        ancestors
+        Ok(ancestors
             .iter()
             .find_map(|&base| match self.heap.get(base) {
                 Value::Class {
                     namedtuple_fields, ..
                 } => namedtuple_fields.clone(),
                 _ => None,
-            })
+            }))
     }
 
     fn declared_slot_names(&mut self, scope: Id) -> Result<Option<std::rc::Rc<[String]>>> {
@@ -1081,7 +1096,13 @@ impl Context {
             if let Value::Native(name) = self.heap.get(base)
                 && matches!(
                     name.as_str(),
-                    "typing.TypeVar" | "slice" | "NoneType" | "NotImplementedType" | "ellipsis"
+                    "typing.TypeVar"
+                        | "slice"
+                        | "NoneType"
+                        | "NotImplementedType"
+                        | "ellipsis"
+                        | super::namedtuple::GETTER
+                        | "member_descriptor"
                 )
             {
                 return Err(Error::new(
@@ -1098,7 +1119,7 @@ impl Context {
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
         let slot_names = self.declared_slot_names(scope)?;
-        let namedtuple_fields = self.namedtuple_layout(&bases, &ancestors, scope);
+        let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         let class = self.alloc(Value::Class {
             namedtuple_fields,
             name,

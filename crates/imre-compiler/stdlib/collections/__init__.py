@@ -1,22 +1,11 @@
 """Dictionary and mapping classes for the runtime collections module."""
 
 import operator as _operator
-from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_popitem, _ordered_dict_repr, _ordered_dict_view
+from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_move_to_end, _ordered_dict_popitem, _ordered_dict_repr, _ordered_dict_view
 from _collections_abc import MutableMapping as _MutableMapping, MutableSequence as _MutableSequence
 from itertools import repeat as _repeat
 
 _MutableSequence.register(deque)
-
-
-def _namedtuple_repr(typename, field_names):
-    repr_fmt = '(' + ', '.join(f'{name}=%r' for name in field_names) + ')'
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + repr_fmt % self
-
-    __repr__.__qualname__ = f'{typename}.__repr__'
-    return __repr__
 
 
 def _elements(items):
@@ -84,6 +73,9 @@ class OrderedDict(dict):
     def __ne__(self, other):
         equal = self.__eq__(other)
         return NotImplemented if equal is NotImplemented else not equal
+
+    def move_to_end(self, /, key, last=True):
+        return _ordered_dict_move_to_end(self, key, last)
 
     def popitem(self, /, last=True):
         return _ordered_dict_popitem(self, last)

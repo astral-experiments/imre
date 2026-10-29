@@ -118,21 +118,11 @@ fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]
         unreachable!()
     };
     ring.maxlen = maxlen;
-    clear(ctx, queue);
+    builtins::clear_container(ctx, queue);
     if let Some(source) = iterable {
         extend(ctx, queue, source, false)?;
     }
     Ok(())
-}
-
-/// Remove the ring's traced edges after detaching all its items.
-fn clear(ctx: &mut Context, queue: Id) {
-    let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
-        unreachable!()
-    };
-    for item in ring.take_items() {
-        ctx.heap.weak_edge_removed(item);
-    }
 }
 
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
@@ -144,15 +134,29 @@ fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Result<()> {
         source
     };
     let iter = ctx.iterator(source)?;
-    while let Some(item) = ctx.next_item(iter)? {
-        let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
-            unreachable!()
-        };
-        if let Some(removed) = ring.push(left, true, || item)? {
-            ctx.heap.weak_edge_removed(removed);
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(queue);
+    ctx.heap.keep(iter);
+    let step = ctx.heap.temporary_mark();
+    let result = (|| {
+        loop {
+            ctx.heap.release_temporaries_since(step);
+            ctx.heap.reserve_slot_or_request_collection();
+            ctx.collect_garbage();
+            let Some(item) = ctx.next_item(iter)? else {
+                break;
+            };
+            let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
+                unreachable!()
+            };
+            if let Some(removed) = ring.push(left, true, || item)? {
+                ctx.heap.weak_edge_removed(removed);
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })();
+    ctx.heap.release_temporaries_since(roots);
+    result
 }
 
 /// Compare through live cursors so a callback can mutate either deque or raise.
@@ -513,7 +517,7 @@ pub(super) fn method(
     }
     match name {
         "clear" => {
-            clear(ctx, receiver);
+            builtins::clear_container(ctx, receiver);
             Ok(NONE)
         }
         "copy" | "__copy__" => {

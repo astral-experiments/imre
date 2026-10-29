@@ -36,6 +36,15 @@ class Mapping:
 
 
 def current():
+    class Payload(bytes):
+        def rstrip(self):
+            return "override"
+
+    value = Payload(b"a ")
+    assert bytes.rstrip(value) == b"a" and value.rstrip() == "override"
+    assert bytes.decode(value) == "a " and bytes.rfind(value, b"a") == 0
+    assert bytes.rsplit(value) == [b"a"]
+
     operand = Binary()
     operand.__bytes__ = lambda: b"shadow"
     for field in (b"%b", b"%s"):

@@ -64,6 +64,26 @@ class ClosingWriterSize:
 
 
 def exercise(path):
+    events = []
+
+    class Byte:
+        def __index__(self):
+            events.append("index")
+            return 65
+
+    def elements():
+        yield Byte()
+        events.append("second")
+        yield 256
+        events.append("past invalid byte")
+
+    for convert in (bytes, bytearray, bytearray().extend):
+        events.clear()
+        try:
+            convert(elements())
+        except ValueError:
+            print(events)
+
     with open(path, "rb") as reader:
         reader.read(1)
         try:
@@ -210,6 +230,20 @@ def exercise(path):
             print("extended slice length mismatch")
         target[::-2] = b""
         print(repr(target), repr(bytearray(b"'")), io.DEFAULT_BUFFER_SIZE)
+
+    target = bytearray(b"ab")
+
+    class Last:
+        def __index__(self):
+            return -1
+
+    class Replacement:
+        def __index__(self):
+            target.extend(b"cd")
+            return ord("x")
+
+    target[Last()] = Replacement()
+    print(bytes(target))
 
     target = bytearray(b"ab")
     visited = []

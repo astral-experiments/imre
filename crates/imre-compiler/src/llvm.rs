@@ -7,7 +7,7 @@ use crate::borrows::{self, FunctionBorrows};
 use crate::contracts::{
     BYTE_OUTPUT_APPEND, BYTE_OUTPUT_APPEND_PAIR, LIST_APPEND, LIST_APPEND_PAIR, LIST_BORROW_INDEX,
     LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET, LIST_SET_INDEX,
-    runtime_call_may_raise,
+    WEAK_PROXY_TARGET, runtime_call_may_raise,
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
@@ -6031,9 +6031,7 @@ impl Emitter<'_, '_> {
             Builtin::WeakProxyCallable => {
                 self.call("imre_weak_proxy_callable", returns, &[&args[0].value])
             }
-            Builtin::WeakProxyTarget => {
-                self.call("imre_weak_proxy_target", returns, &[&args[0].value])
-            }
+            Builtin::WeakProxyTarget => self.runtime_call(&WEAK_PROXY_TARGET, [&args[0].value]),
             Builtin::ContextVar(operation) => self.context_operation(*operation, &args, returns),
             Builtin::StringIo(operation) => {
                 use crate::ir::StringIoOperation as Op;
@@ -9408,7 +9406,6 @@ declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_box_value(i32, i64)
 declare ptr @imre_weak_proxy_new(ptr, i1 zeroext)
 declare zeroext i1 @imre_weak_proxy_callable(ptr)
-declare ptr @imre_weak_proxy_target(ptr)
 declare ptr @imre_contextvars_new(i1 zeroext)
 declare ptr @imre_contextvars_copy(ptr)
 declare ptr @imre_contextvars_var(ptr, i32, i64)
@@ -10080,6 +10077,7 @@ declare void @imre_list_release(ptr)
         output,
         "{BYTE_OUTPUT_APPEND}
 {BYTE_OUTPUT_APPEND_PAIR}
+{WEAK_PROXY_TARGET}
 {LIST_GET}
 {LIST_SET}
 {LIST_GET_INDEX}
@@ -10776,7 +10774,31 @@ print(show("x"))
         }
     }
 
-    fn assert_checked_sorted_call(llvm: &str, function: &str) {
+    #[test]
+    fn empty_pure_paths_check_the_constructor_result() {
+        for class in ["PurePosixPath", "PureWindowsPath"] {
+            let llvm = compile(
+                &format!(
+                    "from pathlib import {class}\ndef probe() -> str:\n    return str({class}())\nprint(probe())\n"
+                ),
+                &CompileOptions::default(),
+            )
+            .unwrap();
+            assert_checked_pointer_call(&llvm, "imre_pure_path_new");
+            let mut lines = llvm.lines();
+            lines
+                .find(|line| line.contains(" = call ptr @fn_0("))
+                .unwrap();
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .contains("call i32 @imre_error_pending()")
+            );
+        }
+    }
+
+    fn assert_checked_pointer_call(llvm: &str, function: &str) {
         let pattern = format!(" = call ptr @{function}(");
         let mut lines = llvm.lines();
         let call = lines.find(|line| line.contains(&pattern)).unwrap();
@@ -10951,7 +10973,7 @@ check("a", "a")
             &CompileOptions::default(),
         )
         .unwrap();
-        assert_checked_sorted_call(&llvm, "imre_sorted_string_keys");
+        assert_checked_pointer_call(&llvm, "imre_sorted_string_keys");
         assert_eq!(llvm.matches("call ptr @imre_key_union(").count(), 2);
     }
 
@@ -10959,7 +10981,7 @@ check("a", "a")
     fn sorted_rows_require_only_generated_field_assignments() {
         let source = include_str!("../../../tests/fixtures/containers/sorted_rows.py");
         let llvm = compile(source, &CompileOptions::default()).unwrap();
-        assert_checked_sorted_call(&llvm, "imre_sorted_record_rows");
+        assert_checked_pointer_call(&llvm, "imre_sorted_record_rows");
         assert_eq!(
             llvm.matches("call ptr @imre_sorted_string_keys(").count(),
             1

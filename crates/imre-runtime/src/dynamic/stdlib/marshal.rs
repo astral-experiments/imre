@@ -36,6 +36,9 @@ fn read_long(data: &[u8]) -> Result<Int> {
             ));
         }
         // Each wire digit is exactly three base-32 digits.
+        digits
+            .try_reserve(3)
+            .map_err(|_| Error::new("MemoryError", ""))?;
         digits.extend([
             (digit & 31) as u8,
             ((digit >> 5) & 31) as u8,
@@ -43,22 +46,8 @@ fn read_long(data: &[u8]) -> Result<Int> {
         ]);
     }
     let sign = if size < 0 { Sign::Minus } else { Sign::Plus };
-    Ok(Int::new(
-        BigInt::from_radix_le(sign, &digits, 32).expect("five-bit digits"),
-    ))
-}
-
-fn buffer(ctx: &Context, input: Id) -> Result<&[u8]> {
-    match ctx.heap.get(input) {
-        Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
-        _ => Err(Error::new(
-            "TypeError",
-            format!(
-                "a bytes-like object is required, not '{}'",
-                ctx.type_name(input)
-            ),
-        )),
-    }
+    Int::try_new(BigInt::from_radix_le(sign, &digits, 32).expect("five-bit digits"))
+        .map_err(|_| Error::new("MemoryError", ""))
 }
 
 /// Read one scalar from CPython's marshal format and ignore trailing bytes.
@@ -80,10 +69,10 @@ pub(super) fn loads(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
                 format!("loads() got an unexpected keyword argument '{key}'"),
             ));
         }
-        buffer(ctx, *input)?;
+        ctx.bytes_like(*input)?;
         allow_code = ctx.truth_with_buffer_export(*input, *value)?;
     }
-    let data = buffer(ctx, *input)?;
+    let data = ctx.bytes_like(*input)?;
     let (&tag, data) = data
         .split_first()
         .ok_or_else(|| Error::new("EOFError", "EOF read where object expected"))?;
@@ -104,7 +93,12 @@ pub(super) fn loads(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
                     "bad marshal data (bytes object size out of range)",
                 )
             })?;
-            let bytes = data[4..].get(..size).ok_or_else(too_short)?.to_vec();
+            let payload = data[4..].get(..size).ok_or_else(too_short)?;
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(size)
+                .map_err(|_| crate::Error::allocation())?;
+            bytes.extend_from_slice(payload);
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         b'0' => Err(Error::new(

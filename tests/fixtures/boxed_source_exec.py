@@ -176,6 +176,8 @@ def current():
         return __import__(name, globals_, locals_, fromlist, level)
     imported = {"__builtins__": {"__import__": importer}}
     separate = {}
+    exec("def modules():\n    import sys, collections.abc as abc\n    yield sys.__name__, abc.__name__", imported)
+    assert list(imported["modules"]()) == [("sys", "collections.abc")]
     exec("from sys import argv", imported, separate)
     exec("def read():\n    from sys import argv\n    return argv", imported)
     print(imported["read"]() is separate["argv"])

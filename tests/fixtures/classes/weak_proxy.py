@@ -37,9 +37,11 @@ def retained_method() -> Callable[[int], int]:
     return weakref.proxy(app).advance
 
 
-def drop_last(owners: list[App]) -> int:
+def drop_last(owners: list[App], fail: bool = False) -> int:
     owners.clear()
     print("argument ran")
+    if fail:
+        raise ValueError("argument raised")
     return 41
 
 
@@ -50,6 +52,20 @@ def call_order() -> None:
         print(proxy(drop_last(owners)))
     except ReferenceError as error:
         print(str(error))
+
+
+def method_order() -> None:
+    for fail in (False, True):
+        owners = [App(True)]
+        proxy = weakref.proxy(owners[0])
+        try:
+            print(proxy.advance(drop_last(owners, fail)))
+        except ValueError as error:
+            print(str(error))
+        try:
+            proxy.advance(drop_last(owners))
+        except ReferenceError:
+            print("expired before argument")
 
 
 class AsyncApp:
@@ -117,6 +133,7 @@ try:
 except TypeError as error:
     print(str(error))
 call_order()
+method_order()
 advance = retained_method()
 print(advance(9))
 asyncio.run(async_call())

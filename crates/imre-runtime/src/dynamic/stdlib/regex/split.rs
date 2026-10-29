@@ -60,7 +60,22 @@ pub(super) fn split(
     let mut count = 0;
     let mut caps = pattern.regex.create_captures();
     while limit == 0 || count < limit {
-        if retry && !nonempty(&pattern, text, start, &mut caps)? {
+        let found = if retry {
+            match nonempty(&pattern, text, start, &mut caps) {
+                Ok(found) => found,
+                Err(message) => {
+                    return Err(super::pattern_error(
+                        ctx,
+                        pattern.source,
+                        pattern.flags,
+                        message,
+                    ));
+                }
+            }
+        } else {
+            true
+        };
+        if !found {
             if start == length {
                 break;
             }
@@ -116,26 +131,34 @@ pub(super) fn nonempty(
     text: &[u8],
     start: usize,
     caps: &mut Captures,
-) -> Result<bool> {
+) -> std::result::Result<bool, String> {
     if start == text.len() {
         return Ok(false);
     }
-    let nfa = pattern
-        .split_retry
-        .get_or_init(|| {
-            NFA::compiler()
-                .syntax(syntax(pattern.bytes, pattern.flags))
-                .configure(NFA::config().utf8(!pattern.bytes))
-                .build(&pattern.engine_source)
-                .map_err(|e| e.to_string())
-        })
-        .as_ref()
-        .map_err(|e| Error::new("re.error", e.clone()))?;
+    let nfa = if let Some(nfa) = pattern.regex.guarded_nfa() {
+        nfa
+    } else {
+        pattern
+            .split_retry
+            .get_or_init(|| {
+                NFA::compiler()
+                    .syntax(syntax(pattern.bytes, pattern.flags))
+                    .configure(NFA::config().utf8(!pattern.bytes))
+                    .build(&pattern.engine_source)
+                    .map_err(|e| e.to_string())
+            })
+            .as_ref()
+            .map_err(Clone::clone)?
+    };
     enum Frame {
         Visit(StateID, usize),
         Restore(usize, Option<NonMaxUsize>),
     }
     use Frame::{Restore, Visit};
+    let groups = nfa.group_info();
+    let eol_start = groups
+        .to_index(PatternID::ZERO, "imre.eol")
+        .and_then(|group| groups.slot(PatternID::ZERO, group));
     caps.clear();
     let mut stack = vec![Visit(nfa.start_anchored(), start)];
     let mut seen = HashSet::new();
@@ -167,6 +190,11 @@ pub(super) fn nonempty(
             }
             State::Capture { slot, next, .. } => {
                 let slot = slot.as_usize();
+                // The synthetic final newline cannot make an empty match nonempty.
+                // Discard this path before it visits states a consuming path may need.
+                if at == start && Some(slot) == eol_start {
+                    continue;
+                }
                 stack.push(Restore(slot, caps.slots()[slot]));
                 caps.slots_mut()[slot] = NonMaxUsize::new(at);
                 stack.push(Visit(*next, at));
@@ -174,14 +202,7 @@ pub(super) fn nonempty(
             }
             State::Match { pattern_id } if at > start => {
                 caps.set_pattern(Some(*pattern_id));
-                let eol = caps.group_info().to_index(*pattern_id, "imre.eol");
-                if eol
-                    .and_then(|i| caps.get_group(i))
-                    .is_none_or(|nl| nl.start > start)
-                {
-                    return Ok(true);
-                }
-                continue;
+                return Ok(true);
             }
             _ => continue,
         };

@@ -35,6 +35,14 @@ struct DiagnosticRules {
     rules: Arc<RuleSelection>,
 }
 
+// Layout hints are optional. Abandon a growing inferred type before it exhausts the stack.
+const MAX_HINT_CYCLE_ITERATIONS: u8 = 16;
+struct LayoutHintLimit;
+
+thread_local! {
+    static READING_LAYOUT_HINT: Cell<bool> = const { Cell::new(false) };
+}
+
 #[salsa::db]
 #[derive(Clone)]
 struct Database {
@@ -68,6 +76,23 @@ impl Session {
     }
 
     pub(crate) fn new(root: &Path, extension_roots: &[PathBuf]) -> Result<Self, String> {
+        let storage = salsa::Storage::new(Some(Box::new(|event| {
+            if let salsa::EventKind::WillIterateCycle { iteration, .. } = event.kind
+                && iteration >= MAX_HINT_CYCLE_ITERATIONS
+                && READING_LAYOUT_HINT.get()
+            {
+                std::panic::resume_unwind(Box::new(LayoutHintLimit));
+            }
+        })));
+        Self::with_storage(root, extension_roots, storage)
+    }
+
+    /// Initialize the project inputs and rule set over independent Salsa storage.
+    fn with_storage(
+        root: &Path,
+        extension_roots: &[PathBuf],
+        storage: salsa::Storage<Database>,
+    ) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
         let system = InMemorySystem::default();
         system
@@ -251,7 +276,7 @@ impl Session {
             rules.disable(registry.get(name).expect("registered ty lint"));
         }
         let db = Database {
-            storage: salsa::Storage::default(),
+            storage,
             files: Files::default(),
             system,
             vendored,
@@ -362,7 +387,8 @@ impl Session {
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
-        let mut copy = Self::new(&self.root, &self.extension_roots)?;
+        let mut copy =
+            Self::with_storage(&self.root, &self.extension_roots, salsa::Storage::default())?;
         for &file in &self.files {
             let path = file
                 .path(&self.db)
@@ -502,17 +528,30 @@ impl Session {
     }
 
     /// Get a scalar layout hint for an append operand in its own lexical scope.
-    pub(crate) fn scalar_type(
-        &self,
-        module: usize,
-        value: &ruff_python_ast::Expr,
-    ) -> Option<crate::ir::Type> {
+    pub(crate) fn scalar_type(&self, module: usize, value: &Expr) -> Option<crate::ir::Type> {
         use crate::ir::Type;
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
 
+        if matches!(
+            value,
+            Expr::Tuple(_) | Expr::List(_) | Expr::Set(_) | Expr::Dict(_)
+        ) {
+            return None;
+        }
         self.hint_reads.set(self.hint_reads.get() + 1);
         let file = self.db.program_file(self.files[module]);
-        let ty = value.inferred_type(&SemanticModel::new(&self.db, file))?;
+        // Inferring one expression visits its scope. An unrelated loop can grow a
+        // nested tuple type at every iteration, even for a simple scalar operand.
+        let previous = READING_LAYOUT_HINT.replace(true);
+        let inferred = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            value.inferred_type(&SemanticModel::new(&self.db, file))
+        }));
+        READING_LAYOUT_HINT.set(previous);
+        let ty = match inferred {
+            Ok(ty) => ty?,
+            Err(payload) if payload.is::<LayoutHintLimit>() => return None,
+            Err(payload) => std::panic::resume_unwind(payload),
+        };
         if !matches!(
             ty,
             Ty::LiteralValue(_) | Ty::NominalInstance(_) | Ty::Union(_)

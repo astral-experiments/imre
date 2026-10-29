@@ -6,6 +6,30 @@ def exercise(path):
             saved.append(stream)
         return stream
 
+    from collections import deque
+
+    for make in (list, dict.fromkeys, deque):
+        for keep in (False, True):
+            saved = []
+            values = make([buffered(saved if keep else None)])
+            with open(path, "rb") as reader:
+                assert (values.clear(), reader.read()) == (None, b"" if keep else b"loop")
+            if saved:
+                assert not saved[0].closed
+                saved[0].close()
+
+    with open(path, "rb") as reader:
+        assert ({0: buffered()}.clear(), reader.read()) == (None, b"loop")
+
+    def observe_loop_exit(reader, saved, stop_early):
+        for value in [None, buffered(saved)]:
+            if value is None:
+                yield None
+                if stop_early:
+                    break
+            value = None
+        yield reader.read()
+
     for keep in (False, True):
         saved = []
         entries = {"writer": buffered(saved if keep else None), b"loop": 1, b"": 2}
@@ -14,6 +38,15 @@ def exercise(path):
         assert (b"loop" in entries) == keep
         if keep:
             saved[0].close()
+
+        for stop_early in (False, True):
+            saved = []
+            with open(path, "rb") as reader:
+                assert list(observe_loop_exit(reader, saved if keep else None, stop_early)) == [
+                    None, b"" if keep else b"loop"
+                ]
+            if keep:
+                saved[0].close()
 
         saved = []
         for stream in [buffered()]:
@@ -36,6 +69,27 @@ def exercise(path):
             raise AssertionError("expected unpacking failure")
         if keep:
             saved[0].close()
+
+    def suspended_writer(saved):
+        owner = buffered(saved)
+        yield None
+
+    for keep in (False, True):
+        saved = []
+        iterator = suspended_writer(saved if keep else None)
+        assert next(iterator) is None
+        with open(path, "rb") as reader:
+            assert reader.read() == b""
+            assert (next(iterator, None), reader.read()) == (None, b"" if keep else b"loop")
+        if keep:
+            saved[0].close()
+
+        with open(path, "rb") as reader:
+            assert (list(suspended_writer(saved if keep else None)), reader.read()) == (
+                [None], b"" if keep else b"loop"
+            )
+        if keep:
+            saved[-1].close()
 
     def finish():
         stream = buffered()
@@ -66,6 +120,22 @@ def exercise(path):
     held = buffered()
     held = None
     checked_index()
+
+    def replace_local(reader, saved):
+        owner = buffered(saved)
+        yield reader.read()
+        owner = None
+        yield reader.read()
+
+    for keep in (False, True):
+        saved = []
+        with open(path, "rb") as reader:
+            assert list(replace_local(reader, saved if keep else None)) == [
+                b"", b"" if keep else b"loop"
+            ]
+        if keep:
+            saved[0].close()
+
     held = buffered()
     with open(path, "rb") as reader:
         assert ((held := None), reader.read()) == (None, b"loop")
@@ -74,6 +144,22 @@ def exercise(path):
         earlier = (held, (held := None), reader.read())
     assert earlier[2] == b""
     earlier[0].close()
+
+    def writer_phases(saved):
+        writer = buffered(saved)
+        yield 0
+        yield 1
+
+    for keep in (False, True):
+        saved = []
+        for phase in writer_phases(saved if keep else None):
+            with open(path, "rb") as reader:
+                assert reader.read() == b""
+            break
+        with open(path, "rb") as reader:
+            assert reader.read() == (b"" if keep else b"loop")
+        if keep:
+            saved[0].close()
 
     sample = "Málaga 東京🧪e\u0301\n"
     with open(path, "w") as ready:
@@ -151,6 +237,79 @@ def exercise(path):
     for mode in ("r", "rt"):
         with open(path, mode, encoding="utf-8") as reader:
             print(repr(reader.read()), repr(reader.readline()))
+
+    def truth_values(value):
+        writer = buffered()
+        yield value
+        yield value
+        writer.close()
+
+    def exhausted_writer():
+        if False:
+            yield None
+        return buffered()
+
+    with open(path, "rb") as reader:
+        assert (any(exhausted_writer()), reader.read()) == (False, b"loop")
+
+    with open(path, "rb") as reader:
+        assert (any(([buffered()], [True])[1]), reader.read()) == (True, b"loop")
+
+    def ignore(files):
+        return 7
+
+    def first(files):
+        return files[0]
+
+    with open(path, "rb") as reader:
+        assert (ignore([buffered()]), reader.read()) == (7, b"loop")
+    with open(path, "rb") as reader:
+        stream, seen = first([buffered()]), reader.read()
+        assert not stream.closed and seen == b""
+        stream.close()
+    with open(path, "rb") as reader:
+        owners = [buffered()]
+        stream, code, seen = owners[0], ignore(owners.pop()), reader.read()
+        assert not stream.closed and (code, seen) == (7, b"")
+        stream.close()
+
+    class WriterCheck:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __call__(self):
+            return self.stream.closed
+
+    with open(path, "rb") as reader:
+        assert (WriterCheck(buffered())(), reader.read()) == (False, b"loop")
+    with open(path, "rb") as reader:
+        saved = WriterCheck(buffered())
+        assert (saved(), reader.read()) == (False, b"")
+        saved.stream.close()
+
+    def fill(owners):
+        owners.append(buffered())
+        return 1
+
+    with open(path, "rb") as reader:
+        assert (fill([]), reader.read()) == (1, b"loop")
+    with open(path, "rb") as reader:
+        saved = []
+        assert (fill(saved), reader.read()) == (1, b"")
+        saved[0].close()
+
+    def read_after(predicate, value, reader):
+        yield predicate(truth_values(value)), reader.read()
+
+    for predicate, value in ((any, True), (all, False)):
+        with open(path, "rb") as reader:
+            assert (predicate(truth_values(value)), reader.read()) == (value, b"loop")
+        with open(path, "rb") as reader:
+            assert list(read_after(predicate, value, reader)) == [(value, b"loop")]
+        with open(path, "rb") as reader:
+            iterator = truth_values(value)
+            assert (predicate(iterator), reader.read()) == (value, b"")
+            assert list(iterator) == [value]
 
 
 def full_device():

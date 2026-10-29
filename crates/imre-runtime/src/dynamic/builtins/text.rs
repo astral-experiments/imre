@@ -10,6 +10,7 @@ use ruff_python_literal::format::{
     FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
 };
 
+use super::super::operators::append_rendered_text;
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
@@ -151,10 +152,12 @@ pub(super) fn construct(
             }
             let (name, method) = match string_hook {
                 Some(method) => ("__str__", Some(method)),
-                None if ctx.string_storage(value).is_none() => {
-                    ("__repr__", ctx.bound_slot(value, "__repr__")?)
+                None if matches!(ctx.heap.get(value), Value::Raised(_))
+                    || ctx.string_storage(value).is_some() =>
+                {
+                    ("__str__", None)
                 }
-                None => ("__str__", None),
+                None => ("__repr__", ctx.bound_slot(value, "__repr__")?),
             };
             if let Some(method) = method {
                 let result = ctx.call(method, Vec::new(), Vec::new())?;
@@ -227,19 +230,95 @@ pub(super) fn construct(
     }
 }
 
-pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
-    if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(obj) {
-        return Ok(data.clone());
+/// Apply a bytearray method to the underlying storage of an exact or subclass receiver.
+pub(super) fn bytearray_method(
+    ctx: &mut Context,
+    name: &str,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(type_error(format!(
+            "unbound method {name}() needs an argument"
+        )));
+    };
+    let storage = ctx.scalar_value(receiver);
+    let Value::ByteArray(data) = ctx.heap.get(storage) else {
+        return Err(type_error(format!(
+            "descriptor '{method}' for 'bytearray' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        )));
+    };
+    if matches!(method, "clear" | "copy" | "reverse") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!("{name}() takes no keyword arguments")));
+        }
+        if !args.is_empty() {
+            return Err(type_error(format!(
+                "{name}() takes no arguments ({} given)",
+                args.len()
+            )));
+        }
+        if method == "copy" {
+            let copy = super::super::copy_ids(data)?;
+            return Ok(ctx.alloc(Value::ByteArray(copy)));
+        }
+        if method == "clear" && !data.is_empty() {
+            ctx.check_bytearray_resize(storage)?;
+        }
+        let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        if method == "reverse" {
+            data.reverse();
+        } else {
+            data.clear();
+        }
+        return Ok(NONE);
     }
-    ctx.items(obj)?
-        .into_iter()
-        .map(|id| {
-            ctx.as_int(id)?
-                .to_i64()
-                .and_then(|n| u8::try_from(n).ok())
-                .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))
-        })
-        .collect()
+    let argument = one_positional_arg(name, args, kwargs)?;
+    let byte;
+    let extra = if method == "append" {
+        byte = [ctx.byte_value(argument)?];
+        Cow::Borrowed(byte.as_slice())
+    } else {
+        Cow::Owned(bytes_from_iterable(ctx, argument)?)
+    };
+    if !extra.is_empty() {
+        ctx.check_bytearray_resize(storage)?;
+        let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        data.try_reserve(extra.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        data.extend_from_slice(&extra);
+    }
+    Ok(NONE)
+}
+
+pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
+    if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(ctx.scalar_value(obj)) {
+        return super::super::copy_ids(data);
+    }
+    let iter = ctx.iterator(obj)?;
+    ctx.heap.keep(iter);
+    let mark = ctx.heap.temporary_mark();
+    let mut bytes = Vec::new();
+    while let Some(item) = ctx.next_item(iter)? {
+        ctx.heap.keep(item);
+        let byte = ctx
+            .index_integer(item)?
+            .to_i64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))?;
+        bytes
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        bytes.push(byte);
+        ctx.heap.release_temporaries_since(mark);
+    }
+    Ok(bytes)
 }
 
 pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
@@ -281,32 +360,99 @@ fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
     })
 }
 
-/// Apply a scalar format specifier used by both f-strings and str.format.
-pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
+/// Apply the type's format method and return its string, including a string subclass.
+pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<Id>) -> Result<Id> {
+    if let Some(spec) = spec
+        && ctx.string_storage(spec).is_none()
+    {
+        return Err(type_error(format!(
+            "format() argument 2 must be str, not {}",
+            ctx.type_name(spec)
+        )));
+    }
+    if let Some(method) = ctx.bound_slot(value, "__format__")? {
+        let spec = match spec {
+            Some(spec) => spec,
+            None => ctx
+                .heap
+                .source_string_constant("")
+                .ok_or_else(|| Error::new("MemoryError", ""))?,
+        };
+        let result = ctx.call(method, super::super::copy_ids(&[spec])?, Vec::new())?;
+        if ctx.string_storage(result).is_none() {
+            return Err(type_error(format!(
+                "__format__ must return a str, not {}",
+                ctx.type_name(result)
+            )));
+        }
+        return Ok(result);
+    }
+    let owner = format_owner(ctx.type_name(ctx.scalar_value(value)));
+    builtin_format(ctx, owner, value, spec)
+}
+
+/// Render with the selected base method without redispatching to the receiver's override.
+pub(super) fn builtin_format(
+    ctx: &mut Context,
+    owner: &str,
+    value: Id,
+    spec: Option<Id>,
+) -> Result<Id> {
+    let spec = spec
+        .map(|spec| ctx.str_value(spec))
+        .transpose()?
+        .unwrap_or("");
     if spec.is_empty() {
         if let Value::Int(number) = ctx.heap.get(value) {
-            return Ok(crate::integer_text::decimal_string(number)?.into_string());
+            let text = super::super::operators::rendered_integer(number)?;
+            return Ok(ctx.text(text.into_string()));
         }
-        return ctx.checked_format(value, false);
+        return super::call(ctx, "str", &[value], &[]);
     }
-    if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
-        return Ok(ctx.display(value));
+    if owner == "object" {
+        return Err(type_error(format!(
+            "unsupported format string passed to {}.__format__",
+            ctx.type_name(value)
+        )));
+    }
+    if ctx.string_storage(value).is_some() && spec == "s" {
+        return Ok(value);
     }
     if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
         let number = float_operand(ctx, value)?
             .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
-        return Ok(
+        return Ok(ctx.text(
             crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
-        );
+        ));
     }
-    if matches!(ctx.heap.get(value), Value::Bool(_) | Value::Int(_)) {
-        return Ok(crate::objects::brace_integer_field(
-            spec,
-            ctx.as_int(value)?,
-            ctx.type_name(value),
-        )?);
+    if matches!(
+        ctx.heap.get(ctx.scalar_value(value)),
+        Value::Bool(_) | Value::Int(_)
+    ) {
+        let text =
+            crate::objects::brace_integer_field(spec, ctx.as_int(value)?, ctx.type_name(value))?;
+        return Ok(ctx.text(text));
     }
     Err(type_error(format!("unsupported format string {spec:?}")))
+}
+
+/// Convert a brace or f-string field before rendering any nested format specification.
+pub(in super::super) fn format_conversion(ctx: &mut Context, value: Id, conv: char) -> Result<Id> {
+    Ok(match conv {
+        's' => super::call(ctx, "str", &[value], &[])?,
+        'r' => super::call(ctx, "repr", &[value], &[])?,
+        'a' => {
+            let repr = super::call(ctx, "repr", &[value], &[])?;
+            let text = ctx.str_value(repr)?;
+            if text.is_ascii() {
+                repr
+            } else {
+                let escaped = ascii(text);
+                ctx.text(escaped)
+            }
+        }
+        _ => return Err(Error::new("ValueError", "unknown format conversion")),
+    })
 }
 
 fn format_string(
@@ -314,7 +460,7 @@ fn format_string(
     source: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
-) -> Result<String> {
+) -> Result<Id> {
     #[derive(Default)]
     struct Indices {
         next: usize,
@@ -327,9 +473,10 @@ fn format_string(
         kwargs: &[(String, Id)],
         indices: &mut Indices,
         nested: bool,
-    ) -> Result<String> {
+    ) -> Result<Id> {
         let parsed =
             FormatString::from_raw_str(s).map_err(|e| Error::new("ValueError", e.to_string()))?;
+        let single = parsed.format_parts.len() == 1;
         let mut output = String::new();
         for part in parsed.format_parts {
             let FormatPart::Field {
@@ -339,7 +486,7 @@ fn format_string(
             } = part
             else {
                 if let FormatPart::Literal(text) = part {
-                    output.push_str(&text);
+                    append_rendered_text(&mut output, &text)?;
                 }
                 continue;
             };
@@ -397,13 +544,7 @@ fn format_string(
                 }
             }
             if let Some(conv) = conversion_spec {
-                let s = match conv {
-                    's' => ctx.display(value),
-                    'r' => ctx.repr(value),
-                    'a' => ascii(&ctx.repr(value)),
-                    _ => return Err(Error::new("ValueError", "unknown format conversion")),
-                };
-                value = ctx.text(s);
+                value = format_conversion(ctx, value, conv)?;
             }
             let spec = if format_spec.contains(['{', '}']) {
                 if nested {
@@ -412,13 +553,17 @@ fn format_string(
                         "format specifier nested too deeply",
                     ));
                 }
-                render(ctx, &format_spec, args, kwargs, indices, true)?
+                Some(render(ctx, &format_spec, args, kwargs, indices, true)?)
             } else {
-                format_spec
+                (!format_spec.is_empty()).then(|| ctx.text(format_spec))
             };
-            output.push_str(&format_value(ctx, value, &spec)?);
+            let rendered = format_value(ctx, value, spec)?;
+            if single {
+                return Ok(rendered);
+            }
+            append_rendered_text(&mut output, ctx.str_value(rendered)?)?;
         }
-        Ok(output)
+        Ok(ctx.text(output))
     }
     render(ctx, source, args, kwargs, &mut Indices::default(), false)
 }
@@ -437,13 +582,10 @@ fn ascii(s: &str) -> String {
     out
 }
 
-fn percent_args(ctx: &mut Context, rhs: Id) -> Result<std::vec::IntoIter<Id>> {
-    let values = match ctx.heap.get(rhs) {
-        Value::Tuple(values) | Value::NamedTuple { values, .. } => values.clone(),
-        Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
-            ctx.items(rhs)?
-        }
-        _ => vec![rhs],
+fn percent_args(ctx: &Context, rhs: Id) -> Result<std::vec::IntoIter<Id>> {
+    let values = match ctx.tuple_items(rhs)? {
+        Some(values) => values,
+        None => super::super::copy_ids(&[rhs])?,
     };
     Ok(values.into_iter())
 }
@@ -714,10 +856,11 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     let parsed = format
         .parse::<CFormatString>()
         .map_err(|e| Error::new("ValueError", e.to_string()))?;
-    let mapping = matches!(
-        ctx.heap.get(rhs),
-        Value::Dict(_) | Value::DefaultDict { .. }
-    );
+    let mapping = bytes_fields::is_mapping(ctx, rhs)
+        || matches!(
+            ctx.heap.get(ctx.scalar_value(rhs)),
+            Value::Bytes(_) | Value::ByteArray(_)
+        );
     let mut args = percent_args(ctx, rhs)?;
     let mut output = String::new();
     let mut positions = format.char_indices().enumerate();
@@ -784,12 +927,12 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     continue;
                 }
                 let rendered: Cow<'_, str> = match spec.format_char {
-                    's' => match ctx.heap.get(arg) {
-                        Value::Str(s) => Cow::Borrowed(s),
-                        _ => ctx.display(arg).into(),
-                    },
+                    's' => {
+                        let text = super::call(ctx, "str", &[arg], &[])?;
+                        Cow::Borrowed(ctx.str_value(text)?)
+                    }
                     'r' => ctx.checked_format(arg, true)?.into(),
-                    'a' => ascii(&ctx.repr(arg)).into(),
+                    'a' => ascii(&ctx.checked_format(arg, true)?).into(),
                     'c' => match ctx.heap.get(arg) {
                         Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
                         _ => u32::try_from(ctx.as_integer(arg)?)
@@ -839,6 +982,24 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     Ok(ctx.text(output))
 }
 
+/// Convert a split limit through the index protocol, treating negative limits as unlimited.
+fn split_limit(ctx: &mut Context, max: Option<Id>) -> Result<usize> {
+    let Some(id) = max else {
+        return Ok(usize::MAX);
+    };
+    let count = ctx
+        .index_integer(id)?
+        .to_i64()
+        .and_then(|value| isize::try_from(value).ok())
+        .ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+    Ok(usize::try_from(count).unwrap_or(usize::MAX))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -873,8 +1034,8 @@ pub(super) fn method(
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {
             type_error("str.__new__(): not enough arguments")
-        } else if owner == "str" {
-            type_error(format!("unbound method str.{name}() needs an argument"))
+        } else if matches!(owner, "str" | "bytes") {
+            type_error(format!("unbound method {owner}.{name}() needs an argument"))
         } else {
             type_error("missing string receiver")
         }
@@ -882,6 +1043,18 @@ pub(super) fn method(
     if name == "__new__" {
         return ctx.new_string(owner, receiver, args, kwargs);
     }
+    let receiver = if owner == "bytes" {
+        let storage = ctx.scalar_value(receiver);
+        if !matches!(ctx.heap.get(storage), Value::Bytes(_)) {
+            return Err(type_error(format!(
+                "descriptor '{name}' for 'bytes' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            )));
+        }
+        storage
+    } else {
+        receiver
+    };
     if owner == "str" && ctx.str_value(receiver).is_err() {
         return Err(type_error(format!(
             "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
@@ -1001,7 +1174,7 @@ pub(super) fn method(
         return Ok(ctx.alloc(Value::Int(found)));
     }
     if name == "rstrip"
-        && let Value::Bytes(data) = ctx.heap.get(ctx.scalar_value(receiver))
+        && let Value::Bytes(data) = ctx.heap.get(receiver)
     {
         if !kwargs.is_empty() {
             return Err(type_error("bytes.rstrip() takes no keyword arguments"));
@@ -1021,28 +1194,13 @@ pub(super) fn method(
             .unwrap_or(b" \t\n\x0b\x0c\r");
         return Ok(match crate::objects::rstrip_bytes(data, chars)? {
             Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
-            None => ctx.scalar_value(receiver),
+            None => receiver,
         });
     }
     if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
         let [sep, max] =
             super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
-        let limit = match max {
-            None => usize::MAX,
-            Some(id) => {
-                let index = ctx.index_integer(id)?;
-                let count = index
-                    .to_i64()
-                    .and_then(|value| isize::try_from(value).ok())
-                    .ok_or_else(|| {
-                        Error::new(
-                            "OverflowError",
-                            "Python int too large to convert to C ssize_t",
-                        )
-                    })?;
-                usize::try_from(count).unwrap_or(usize::MAX)
-            }
-        };
+        let limit = split_limit(ctx, max)?;
         let separator = sep
             .filter(|&id| id != NONE)
             .map(|id| ctx.bytes_like(id))
@@ -1108,12 +1266,50 @@ pub(super) fn method(
         })?;
         return Ok(ctx.text(text.into_string()));
     }
+    if name == "join" {
+        positional(name, kwargs)?;
+        arity(name, args, 1, 1)?;
+        let collected;
+        let values = match ctx.heap.get(args[0]) {
+            Value::List(items) | Value::Tuple(items) => items.as_slice(),
+            _ => {
+                collected = ctx.items(args[0])?;
+                &collected
+            }
+        };
+        if let [item] = values {
+            return ctx
+                .string_storage(*item)
+                .ok_or_else(|| type_error("expected str"));
+        }
+        let sep = ctx.str_value(receiver)?;
+        let mut length = sep
+            .len()
+            .checked_mul(values.len().saturating_sub(1))
+            .ok_or_else(crate::Error::memory_error)?;
+        for &item in values {
+            length = length
+                .checked_add(ctx.str_value(item)?.len())
+                .ok_or_else(crate::Error::memory_error)?;
+        }
+        if length == 0 && sep.is_empty() {
+            return Ok(ctx.string_storage(receiver).unwrap());
+        }
+        let mut output = String::new();
+        output
+            .try_reserve_exact(length)
+            .map_err(|_| crate::Error::memory_error())?;
+        for (index, &item) in values.iter().enumerate() {
+            if index != 0 {
+                output.push_str(sep);
+            }
+            output.push_str(ctx.str_value(item)?);
+        }
+        return Ok(ctx.text(output));
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
-        "format" => {
-            let result = format_string(ctx, &source, args, kwargs)?;
-            Ok(ctx.text(result))
-        }
+        "format" => format_string(ctx, &source, args, kwargs),
         "partition" | "rpartition" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!(
@@ -1146,20 +1342,16 @@ pub(super) fn method(
         }
         "split" | "rsplit" => {
             let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;
+            let limit = split_limit(ctx, max)?;
             let sep = sep
                 .filter(|&x| x != NONE)
                 .map(|x| ctx.str_value(x).map(str::to_owned))
                 .transpose()?;
-            let max = max.map(|x| ctx.as_integer(x)).transpose()?.unwrap_or(-1);
             let mut values = Vec::new();
             let reverse = name == "rsplit";
-            split_parts(
-                &source,
-                sep.as_deref(),
-                usize::try_from(max).unwrap_or(usize::MAX),
-                reverse,
-                |field| values.push(ctx.text(field)),
-            )
+            split_parts(&source, sep.as_deref(), limit, reverse, |field| {
+                values.push(ctx.text(field))
+            })
             .map_err(|message| Error::new("ValueError", message))?;
             if reverse {
                 values.reverse();
@@ -1249,16 +1441,6 @@ pub(super) fn method(
             let old = ctx.str_value(args[0])?;
             let new = ctx.str_value(args[1])?;
             Ok(ctx.text(source.replacen(old, new, usize::try_from(count).unwrap_or(usize::MAX))))
-        }
-        "join" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            let values = ctx.items(args[0])?;
-            let parts = values
-                .iter()
-                .map(|&id| ctx.str_value(id))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(ctx.text(parts.join(&source)))
         }
         "capitalize" | "lower" | "upper" => {
             positional(name, kwargs)?;

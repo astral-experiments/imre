@@ -17,7 +17,78 @@ class DrainingIndex:
         return 0
 
 
+def copy_allocation(module):
+    import copy
+
+    item = object()
+    values = [item] * 1024
+    copier = copy.copy if module else list.copy
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        copier(values)
+    except MemoryError as error:
+        print("caught", error.args)
+    result = copier(values)
+    print(len(values), len(result), result is not values, values[0] is item, result[-1] is item)
+
+
+def growth_allocation(name, bound):
+    class Values(list):
+        pass
+
+    values = Values()
+    first = object()
+    last = object()
+    for _ in range(128):
+        list.append(values, first)
+    grow = getattr(values if bound else list, name)
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        if name == "append":
+            if bound:
+                grow(last)
+            else:
+                grow(values, last)
+        elif bound:
+            grow(128, last)
+        else:
+            grow(values, 128, last)
+    except MemoryError as error:
+        print("caught", error.args)
+    print(len(values), values[0] is first, values[-1] is last)
+    if name == "append":
+        values.append(last)
+    else:
+        values.insert(128, last)
+    print("retry", len(values), values[-1] is last)
+
+
 def current():
+    class Source(list):
+        def __iter__(self):
+            return iter((9,))
+
+    class Right(Source):
+        def __radd__(self, other):
+            raise AssertionError("direct list descriptors do not use reflected addition")
+
+    left = Source([1])
+    right = Right([2])
+    assert type(list.__add__).__name__ == "wrapper_descriptor"
+    assert Source.__add__ is list.__add__
+    combined = list.__add__(left, right)
+    assert type(combined) is list and combined == [1, 2]
+    add = list.__iadd__.__get__(left, Source)
+    assert add.__self__ is left
+    assert add(right) is left and left == [1, 9]
+    assert left.__iadd__(left) is left and left == [1, 9, 1, 9]
+    items = Source([1, 2])
+    items.extend(items)
+    items.extend(Source())
+    assert items == [1, 2, 1, 2, 9]
+
     class Values(list):
         def append(self, item):
             return "override"
@@ -25,6 +96,42 @@ def current():
     values = Values()
     assert list.append(values, 3) is None
     assert values == [3] and values.append(4) == "override"
+    add = list.append.__get__(values, Values)
+    take = list.pop.__get__(values, Values)
+    assert add(7) is None and take() == 7
+
+    for name in ('clear', 'copy', 'count', 'extend', 'index', 'insert', 'remove', 'reverse', 'sort'):
+        method = getattr(Values, name)
+        assert method is getattr(list, name) and method.__objclass__ is list
+        assert method.__get__(values, Values).__self__ is values
+
+    class ClearOnMatch:
+        def __eq__(self, other):
+            values.clear()
+            return True
+
+    for method in (list.count, list.remove):
+        values.clear()
+        values.extend((ClearOnMatch(), 1))
+        result = method(values, object())
+        assert result == (1 if method is list.count else None) and not values
+
+    class Wrong:
+        push = list.append
+
+    try:
+        Wrong().push
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("list.append bound an unrelated receiver")
+
+    seen = []
+    try:
+        Wrong().push(seen.append(1))
+    except TypeError:
+        pass
+    assert seen == [1]
 
     from copy import copy
 
@@ -35,6 +142,40 @@ def current():
         clone.pop()
     assert len(original) == 2
     retained = {}
+    class Stored(list):
+        def __iter__(self):
+            raise AssertionError("concatenation must read the original list storage")
+
+    stored = Stored([retained])
+    for result in (stored + [], [] + stored, stored + stored):
+        assert type(result) is list and result is not stored and result[0] is retained
+    assert len(stored) == 1
+
+    class Right:
+        def __radd__(self, left):
+            return "reflected"
+
+        def __iter__(self):
+            return iter((3,))
+
+    exact = [1]
+    exact += Right()
+    assert exact == "reflected"
+    alias = stored
+    stored += Right()
+    assert stored is alias and stored[-1] == 3
+
+    class Declines(list):
+        def __add__(self, other):
+            return NotImplemented
+
+    try:
+        Declines([1]) + [2]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("declined addition fell back to list storage")
+
     items = [retained, 2, 3]
     alias = items
     print(items.pop(), list.pop(items, True), items.pop(-1) is retained, alias)
@@ -47,6 +188,10 @@ def current():
                 print(items.pop(*args, **kwargs), items)
             except (TypeError, IndexError, OverflowError) as error:
                 print(str(error), items)
+
+    items = [1, 2]
+    items.insert(Index(items, -1), 3)
+    assert items == [1, 2, 3, 'from __index__']
 
     items = []
     print(items.pop(Index(items, 0)), items)
@@ -68,3 +213,40 @@ def current():
             list.pop(*args)
         except TypeError as error:
             print(str(error))
+
+
+def extend_allocation(kind):
+    old, new = object(), object()
+    items = [old] * 128
+    source = items if kind == 'self' else [new] * 117
+    if kind == 'tuple':
+        source = tuple(source)
+    last = source[-1]
+    extend = items.extend
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        extend(source)
+    except MemoryError as error:
+        print("caught", error.args)
+        assert len(items) == 128 and all(value is old for value in items)
+    expected = len(items) + len(source)
+    extend(source)
+    print(len(items) == expected, items[0] is old, items[-1] is last)
+
+
+def concat_allocation():
+    old, new = object(), object()
+    left, right = [old] * 128, [new] * 117
+
+    def combine():
+        return left + right
+
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        combine()
+    except MemoryError as error:
+        print("caught", error.args)
+    result = combine()
+    print(len(left), len(right), len(result), result[127] is old, result[128] is new)

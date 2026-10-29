@@ -10,6 +10,22 @@ class Boom:
 
 
 def current():
+    from types import ModuleType
+
+    result = object()
+
+    class Hooks:
+        def __eq__(self, other): return result
+        def __radd__(self, other): return other
+
+    class Error(Hooks, ValueError): pass
+    class Module(Hooks, ModuleType): pass
+
+    for cls in (Error, Module):
+        left, right = cls("left"), cls("right")
+        assert (left == right) is result and right in [left]
+        assert 7 + left == 7
+
     x = Candidate()
     print([x] == [17])
     print((x,) == (17,))

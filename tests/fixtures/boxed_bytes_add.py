@@ -65,6 +65,45 @@ def current():
     else:
         raise AssertionError("in-place addition resized an exported bytearray")
 
+    class Buffer(bytearray):
+        pass
+
+    data = Buffer(b"a")
+    append = data.append
+    assert bytearray.clear(data) is None and data[:] == b""
+    assert append(ord("b")) is None and data[:] == b"b"
+    assert data.extend(data) is None and data[:] == b"bb"
+
+    class Index:
+        def __index__(self):
+            data.clear()
+            return 255
+
+    assert bytearray.append(data, Index()) is None and data[:] == b"\xff"
+
+    class BufferFlag:
+        def __init__(self, operation):
+            self.operation = operation
+
+        def __bool__(self):
+            self.operation()
+            return False
+
+    try:
+        b2a_base64(data, newline=BufferFlag(data.clear))
+    except BufferError:
+        assert data[:] == b"\xff"
+    else:
+        raise AssertionError("clear resized an exported bytearray")
+    data.clear()
+    assert b2a_base64(data, newline=BufferFlag(data.clear)) == b""
+
+    data.extend(b"abc")
+    copy = bytearray.copy(data)
+    assert type(copy) is bytearray and copy == b"abc"
+    assert b2a_base64(data, newline=BufferFlag(data.reverse)) == b"Y2Jh"
+    assert data[:] == b"cba" and copy == b"abc"
+
     for rhs, name in (("text", "str"), (1, "int"), (None, "NoneType"), ([], "list"), (Chunk(), "Chunk")):
         try:
             add(first, rhs)
@@ -79,3 +118,17 @@ def current():
         else:
             raise AssertionError("bytearray accepted an invalid right operand")
     print("binary chunks, mutable aliases, empty pieces and invalid operands matched")
+
+
+def copy_allocation():
+    source = bytearray(16381)
+    target = bytearray()
+    extend = target.extend
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        extend(source)
+    except MemoryError as error:
+        print(error.args, len(source), len(target))
+    extend(source)
+    print(len(target))

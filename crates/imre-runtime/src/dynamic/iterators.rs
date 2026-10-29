@@ -16,7 +16,7 @@ impl Context {
         Ok(Some(self.alloc(Value::Tuple(vec![index, item]))))
     }
 
-    pub(super) fn generator(&mut self, function: Id, iter: Id) -> Result<Id> {
+    pub(super) fn generator(&mut self, function: Id, iter: Id, targets: Id) -> Result<Id> {
         let Value::Function {
             code,
             scope,
@@ -29,7 +29,7 @@ impl Context {
                 "expected a compiled generator body",
             ));
         };
-        let scope = self.comprehension_scope(scope);
+        let scope = self.comprehension_scope(scope, targets)?;
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };

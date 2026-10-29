@@ -123,12 +123,22 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         };
         let mut append = |ctx: &mut Context, value: Id| -> Result<()> {
             let value = encoded(ctx, value, safe, encoding, errors, via)?;
+            let key = ctx.str_value(key)?;
+            let value = ctx.str_value(value)?;
+            let separators = 1 + usize::from(!joined.is_empty());
+            joined
+                .try_reserve(
+                    key.len()
+                        .saturating_add(value.len())
+                        .saturating_add(separators),
+                )
+                .map_err(|_| Error::new("MemoryError", ""))?;
             if !joined.is_empty() {
                 joined.push('&')
             }
-            joined.push_str(&key);
+            joined.push_str(key);
             joined.push('=');
-            joined.push_str(&value);
+            joined.push_str(value);
             Ok(())
         };
         if let Some(iter) = expanded {
@@ -157,7 +167,7 @@ fn encoded(
     encoding: Option<Id>,
     errors: Option<Id>,
     via: Option<Id>,
-) -> Result<String> {
+) -> Result<Id> {
     let bytes = matches!(ctx.heap.get(ctx.scalar_value(value)), Value::Bytes(_));
     let id = if bytes || matches!(ctx.heap.get(value), Value::Str(_)) {
         value
@@ -192,5 +202,6 @@ fn encoded(
             if bytes { None } else { errors },
         )?
     };
-    Ok(ctx.str_value(value)?.to_owned())
+    ctx.str_value(value)?;
+    Ok(value)
 }

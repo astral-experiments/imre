@@ -3,7 +3,7 @@ use super::super::{
     Context, builtins,
     value::{Error, Id, MarkQueue, NONE, Result, Value},
 };
-use crate::objects::readiness::{Poll, PollError};
+use crate::objects::readiness::Poll;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 
 const READ: i64 = 1;
@@ -25,7 +25,7 @@ pub(in crate::dynamic) struct Selector {
 }
 
 /// Install both constructor names and the concrete key class in one module scope.
-pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
+pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()> {
     let selector = ctx.alloc(Value::Native("selectors.PollSelector".into()));
     ctx.bind(scope, "PollSelector", selector);
     ctx.bind(scope, "DefaultSelector", selector);
@@ -42,10 +42,9 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     ctx.bind(class_scope, "__annotations__", annotations);
     ctx.bind(class_scope, "_fields", fields);
     let base = ctx.builtin("typing.NamedTuple");
-    let key = ctx
-        .allocate_class("SelectorKey".into(), class_scope, vec![base])
-        .expect("a single named tuple base has a linearization");
+    let key = ctx.allocate_class("SelectorKey".into(), class_scope, vec![base])?;
     ctx.bind(scope, "SelectorKey", key);
+    Ok(())
 }
 
 /// A positive Python descriptor may be wider than the kernel's descriptor type.
@@ -61,7 +60,7 @@ fn fd(ctx: &mut Context, obj: Id) -> Result<Option<i32>> {
             .and_then(|v| ctx.as_int(v));
         number.map_err(|e| {
             if matches!(
-                e.kind.as_str(),
+                e.kind.as_ref(),
                 "AttributeError" | "TypeError" | "ValueError"
             ) {
                 Error::new(
@@ -156,13 +155,7 @@ impl Selector {
 
     /// Each selected pair reuses the key returned by register or modify.
     fn select(&mut self, ctx: &mut Context, seconds: Id) -> Result<Id> {
-        let (count, events) =
-            self.poll
-                .ready(timeout(ctx, seconds)?)
-                .map_err(|error| match error {
-                    PollError::Overflow => Error::new("OverflowError", "too many file descriptors"),
-                    PollError::Io(error) => Error::new("OSError", error.to_string()),
-                })?;
+        let (count, events) = self.poll.ready(timeout(ctx, seconds)?)?;
         let mut results = Vec::new();
         results
             .try_reserve(count)

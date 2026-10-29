@@ -791,6 +791,21 @@ mod tests {
     }
 
     #[test]
+    fn weak_proxy_upgrade_returns_its_referent_class() {
+        let types = Default::default();
+        let check = |input, result| {
+            let arg = Expr {
+                ty: input,
+                kind: ExprKind::Local(0),
+            };
+            Builtin::WeakProxyTarget.verify_specialization(&[arg], result, &types)
+        };
+        assert!(check(Type::WeakProxy(0), Type::Class(0)).is_ok());
+        assert!(check(Type::WeakProxy(0), Type::Class(1)).is_err());
+        assert!(check(Type::Class(0), Type::Class(0)).is_err());
+    }
+
+    #[test]
     fn checks_specialized_shapes_and_bounds_without_reproving_them() {
         let mut module = empty();
         module.entry.locals = vec![Type::ListInt, Type::Int];

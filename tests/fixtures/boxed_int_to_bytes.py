@@ -2,6 +2,13 @@ import sys
 
 
 def current():
+    class Number(int):
+        def bit_length(self):
+            return 42
+
+    assert [x.bit_length() for x in (0, True, -8, 1 << 400)] == [0, 1, 4, 401]
+    assert int.bit_length(Number(-9)) == 4 and Number(-9).bit_length() == 42
+
     assert bytes(divmod(65535, 256)) == b"\xff\xff"
     for value in (1 << 65, -(1 << 65)):
         try:

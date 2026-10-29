@@ -8,12 +8,12 @@ The ranges below are the 25th and 75th percentiles of the same 12 measurements o
 
 | Workload | Rust (ms) | CPython (ms) | Imre (ms) | Output file (bytes) |
 | --- | ---: | ---: | ---: | ---: |
-| Inventory (repeated) | 25.53–26.41 | 79.39–81.23 | 32.71–33.52 | 654,942 |
-| Inventory (distinct) | 47.73–49.45 | 116.08–122.19 | 59.93–63.47 | 1,438,871 |
-| Base45 decode | 9.01–9.45 | 189.00–195.02 | 14.36–15.27 | 16,384 |
-| Luhn checksum | 4.87–5.73 | 150.33–154.63 | 13.22–17.59 | 1 |
-| Telemetry report | 9.43–9.73 | 124.45–125.89 | 13.05–13.37 | 123 |
-| Conformance report | 24.97–25.92 | 255.13–261.01 | 34.39–35.93 | 109,258 |
+| Inventory (repeated) | 26.90–28.81 | 83.54–96.18 | 41.28–42.34 | 654,942 |
+| Inventory (distinct) | 48.12–50.47 | 118.59–131.36 | 71.99–75.84 | 1,438,871 |
+| Base45 decode | 9.50–10.20 | 191.56–230.67 | 16.49–17.67 | 16,384 |
+| Luhn checksum | 5.27–6.02 | 150.90–174.22 | 13.55–14.29 | 1 |
+| Telemetry report | 9.79–10.81 | 125.82–131.91 | 16.03–17.93 | 123 |
+| Conformance report | 28.94–30.07 | 279.97–305.03 | 47.93–59.53 | 109,258 |
 
 ## What each process does
 
@@ -29,7 +29,7 @@ We timed each command from process creation through exit on one logical CPU of a
 
 Each workload gets two warmups and twelve measured runs per implementation. The measured rounds use all six engine orders twice. The filesystem cache is warm. The README's speedup divides the CPython median by the Imre median. The [raw samples](results/runtime-suite.json) include the engine order within each round, versions, binary hashes and output hashes.
 
-The October 24, 2026 run used CPython 3.14.5 with PGO, LTO, the GIL enabled and the JIT disabled. Imre 0.1.2 compiled at optimization level 3 with Clang 18.1.3 and the system allocator. The Rust references and Imre runtime used rustc 1.98.1-dev (Ohm), release optimization level 3, 16 codegen units and LTO disabled.
+The October 28, 2026 run used CPython 3.14.5 with PGO, LTO, the GIL enabled and the JIT disabled. Imre 0.1.3 compiled at optimization level 3 with Clang 18.1.3 and the system allocator. The Rust references and Imre runtime used rustc 1.98.1-dev (Ohm), release optimization level 3, 16 codegen units and LTO disabled. We passed `-Zohm-defaults=no` to Cargo because Ohm’s experimental defaults triggered a compiler error while building the runtime.
 
 ## Reproduce
 

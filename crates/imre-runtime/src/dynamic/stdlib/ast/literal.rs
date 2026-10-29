@@ -230,17 +230,25 @@ fn convert(ctx: &mut Context, node: Id, depth: usize) -> Result<Id> {
             }
             return Ok(set);
         }
-        let mut values = Vec::new();
+        ctx.heap.keep(iter);
+        let result = ctx.alloc(if is(ctx, node, "ast.Tuple") {
+            Value::Tuple(Vec::new())
+        } else {
+            Value::List(Vec::new())
+        });
+        let mark = ctx.heap.temporary_mark();
         while let Some(elt) = ctx.next_item(iter)? {
             let value = convert(ctx, elt, depth + 1)?;
-            ctx.heap.keep(value);
+            let (Value::List(values) | Value::Tuple(values)) = ctx.heap.get_mut(result) else {
+                unreachable!();
+            };
+            values
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
             values.push(value);
+            ctx.heap.release_temporaries_since(mark);
         }
-        return Ok(ctx.alloc(if is(ctx, node, "ast.Tuple") {
-            Value::Tuple(values)
-        } else {
-            Value::List(values)
-        }));
+        return Ok(result);
     }
     if is(ctx, node, "ast.Dict") {
         ctx.heap.keep(node);

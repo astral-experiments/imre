@@ -14,9 +14,12 @@ mod print;
 mod text;
 mod translation;
 pub(super) use collections::{
-    copy_dict, hashable, remove_dict_item, remove_dict_item_hashed, set_add, set_member, update_set,
+    clear_container, copy_dict, hashable, remove_dict_item, remove_dict_item_hashed, set_add,
+    set_member, sort_values, update as update_dict, update_set,
 };
-pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
+pub(super) use text::{
+    bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
+};
 
 macro_rules! exception_kinds {
     ($($kind:ident),* $(,)?) => {
@@ -276,7 +279,26 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "values",
 ];
 
+pub(super) const LIST_METHODS: &[&str] = &[
+    "__add__", "__iadd__", "__init__", "__repr__", "append", "clear", "copy", "count", "extend",
+    "index", "insert", "pop", "remove", "reverse", "sort",
+];
+
+pub(super) const BYTEARRAY_METHODS: &[&str] =
+    &["__repr__", "append", "clear", "copy", "extend", "reverse"];
+
+pub(super) const BYTES_METHODS: &[&str] = &[
+    "__mod__",
+    "__repr__",
+    "decode",
+    "rfind",
+    "rsplit",
+    "rstrip",
+    "translate",
+];
+
 pub(super) const STR_METHODS: &[&str] = &[
+    "__format__",
     "__repr__",
     "capitalize",
     "encode",
@@ -306,31 +328,42 @@ pub(super) const STR_METHODS: &[&str] = &[
     "upper",
 ];
 
+/// Select the builtin formatting implementation inherited by this native value or type.
+pub(super) fn format_owner(class: &str) -> &'static str {
+    match class {
+        "int" | "bool" | "enum.IntEnum" | "enum.IntFlag" => "int",
+        "str" | "enum.StrEnum" => "str",
+        "float" => "float",
+        _ => "object",
+    }
+}
+
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
-        Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
+        Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
-        Value::Range(_) if matches!(attr, "__iter__" | "__reversed__") => "range",
+        Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
             iter.kind
         }
-        Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
+        Value::Slice(_) if super::slice::METHODS.contains(&attr) => "slice",
+        Value::TupleGetterDoc if super::namedtuple::GETTER_METHODS.contains(&attr) => {
+            "member_descriptor"
+        }
+        Value::TupleGetter { .. } if super::namedtuple::GETTER_METHODS.contains(&attr) => {
+            super::namedtuple::GETTER
+        }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Bytes(_)
-            if matches!(
-                attr,
-                "__mod__" | "__repr__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
-            ) =>
+        Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
+        Value::ByteArray(_)
+            if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
         {
-            "bytes"
-        }
-        Value::ByteArray(_) if matches!(attr, "__repr__" | "decode" | "extend" | "translate") => {
             "bytearray"
         }
         Value::NamedTuple {
@@ -383,24 +416,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
-        Value::List(_)
-            if matches!(
-                attr,
-                "append"
-                    | "clear"
-                    | "copy"
-                    | "extend"
-                    | "index"
-                    | "insert"
-                    | "pop"
-                    | "reverse"
-                    | "sort"
-                    | "__init__"
-                    | "__repr__"
-            ) =>
-        {
-            "list"
-        }
+        Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
         Value::Set { frozen: false, .. }
             if matches!(
@@ -426,11 +442,17 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "frozenset"
         }
         Value::DefaultDict { .. }
-            if matches!(attr, "copy" | "__copy__" | "__missing__" | "__reduce__") =>
+            if matches!(
+                attr,
+                "copy" | "__copy__" | "__missing__" | "__repr__" | "__reduce__"
+            ) =>
         {
             "collections.defaultdict"
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
+        Value::Poll(_) if matches!(attr, "register" | "modify" | "unregister" | "poll") => {
+            "select.poll"
+        }
         Value::Selector(_)
             if matches!(
                 attr,
@@ -832,7 +854,18 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "object" | "int" | "float" | "str" if method == "__format__" => {
+                positional(name, kwargs)?;
+                arity(name, args, 2, 2)?;
+                if owner != "object" && !ctx.builtin_slot_accepts(args[0], owner) {
+                    return Err(type_error(format!(
+                        "descriptor '__format__' requires a '{owner}' object"
+                    )));
+                }
+                text::builtin_format(ctx, owner, args[0], Some(args[1]))
+            }
             "module" => ctx.module_method(method, args, kwargs),
+            "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
@@ -845,21 +878,8 @@ pub(super) fn call(
             }
             "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
-            "bytearray" if method == "extend" => {
-                positional(name, kwargs)?;
-                arity(name, args, 2, 2)?;
-                let data = text::bytes_from_iterable(ctx, args[1])?;
-                if !data.is_empty() {
-                    ctx.check_bytearray_resize(args[0])?;
-                }
-                let Value::ByteArray(target) = ctx.heap.get_mut(args[0]) else {
-                    return Err(type_error("expected bytearray"));
-                };
-                target
-                    .try_reserve(data.len())
-                    .map_err(|_| Error::new("MemoryError", "bytearray is too large"))?;
-                target.extend(data);
-                Ok(NONE)
+            "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
+                text::bytearray_method(ctx, name, method, args, kwargs)
             }
             "tuple" if method == "__getitem__" => {
                 let (&receiver, args) = args.split_first().ok_or_else(|| {
@@ -1273,16 +1293,8 @@ pub(super) fn call(
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
                 }
-                Value::Instance { .. } => {
-                    if let Some(size) = ctx.instance_len(args[0])? {
-                        size
-                    } else {
-                        let scalar = ctx.scalar_value(args[0]);
-                        if matches!(ctx.heap.get(scalar), Value::Str(_) | Value::Bytes(_)) {
-                            return call(ctx, "len", &[scalar], &[]);
-                        }
-                        return Err(no_length(ctx));
-                    }
+                Value::Instance { .. } | Value::Raised(_) => {
+                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
                 }
                 _ => return Err(no_length(ctx)),
             };
@@ -1334,14 +1346,7 @@ pub(super) fn call(
         "format" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 2)?;
-            let spec = args
-                .get(1)
-                .map(|&x| ctx.str_value(x))
-                .transpose()?
-                .unwrap_or("")
-                .to_owned();
-            let value = format_value(ctx, args[0], &spec)?;
-            Ok(ctx.text(value))
+            format_value(ctx, args[0], args.get(1).copied())
         }
         "classmethod" => {
             positional(name, kwargs)?;

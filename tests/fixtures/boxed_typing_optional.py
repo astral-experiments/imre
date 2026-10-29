@@ -21,7 +21,53 @@ def current():
         assert right.__args__[0] is second
     assert Final[int] is Final[int]
     assert Container[int] is Container[int]
+
+    marked, regular = Final[int], Container[int]
+    typing.Final = Container
+    try:
+        try:
+            class Invalid(marked):
+                pass
+        except TypeError as error:
+            assert str(error) == "Cannot subclass typing.Final[int]"
+        else:
+            raise AssertionError("Final alias accepted as a base")
+
+        class Valid(regular):
+            pass
+        assert issubclass(Valid, Container)
+    finally:
+        typing.Final = Final
     assert Callable[[int], int] is Callable[[int], int]
+
+    from typing import Final, Literal
+
+    for origin, expected in (
+        (Final, "typing.Final[[typing.Final[[...]]]]"),
+        (Literal, "typing.Literal[[typing.Literal[[...]]]]"),
+    ):
+        items = []
+        alias = origin[items]
+        items.append(alias)
+        assert repr(alias) == expected
+        items.clear()
+        assert typing.get_args(alias)[0] is items
+    items = []
+    alias = list[items]
+    items.append(alias)
+    try:
+        repr(alias)
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("recursive builtin type argument list")
+    items.clear()
+    assert repr(alias) == "list[[]]"
+    union_args = []
+    alias = Literal[union_args]
+    union_args.append(alias | int)
+    assert repr(alias) == "typing.Literal[[typing.Literal[[...]] | int]]"
+    union_args.clear()
 
     from typing import Final, assert_never
 

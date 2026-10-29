@@ -1,4 +1,4 @@
-from difflib import Match, SequenceMatcher, get_close_matches
+from difflib import Match, SequenceMatcher, get_close_matches, ndiff, unified_diff
 
 
 def current():
@@ -12,3 +12,7 @@ def current():
     print(matcher.get_matching_blocks(), matcher.ratio())
     print(SequenceMatcher(None, "", "").ratio())
     print(get_close_matches("healt", ["health", "hello", "visits"]))
+    assert list(ndiff(["old\n"], ["new\n"])) == ["- old\n", "+ new\n"]
+    assert list(unified_diff(["old\n"], ["new\n"])) == [
+        "--- \n", "+++ \n", "@@ -1 +1 @@\n", "-old\n", "+new\n"
+    ]

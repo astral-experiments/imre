@@ -225,3 +225,50 @@ def current():
         str(dead_proxy)
     except ReferenceError as error:
         print(type(error).__name__)
+
+    class Items(list):
+        pass
+
+    class Last:
+        def __index__(self):
+            owners.clear()
+            for i in range(4800):
+                cycle = [i]
+                cycle.append(cycle)
+            assert observer() is not None
+            return -1
+
+    for operation in ("get", "set", "delete"):
+        owners = [Items([1, 2])]
+        observer = ref(owners[0])
+        target = proxy(owners[0])
+        if operation == "get":
+            print(target[Last()])
+        elif operation == "set":
+            target[Last()] = 3
+        else:
+            del target[Last()]
+        print(operation, observer() is None)
+
+    class RepeatText(str):
+        pass
+
+    for operation in range(3):
+        holders = [RepeatText("repeat")]
+        repeated = proxy(holders[0])
+        watched = ref(holders[0])
+
+        class Count:
+            def __index__(self):
+                holders.clear()
+                print(watched() is not None)
+                return 2
+
+        if operation == 0:
+            print(repeated * Count())
+        elif operation == 1:
+            print(Count() * repeated)
+        else:
+            repeated *= Count()
+            print(repeated)
+        print(watched() is None)

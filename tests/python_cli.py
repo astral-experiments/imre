@@ -11,6 +11,53 @@ import tempfile
 from pathlib import Path
 
 
+def check_boxed_literal_roots_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "literal_roots_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "literal_roots_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc",
+    ])
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_literal_roots as fixture; fixture.allocation()"
+    for ordinal in (0, 1):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        expected = (b"caught ()\n" if ordinal else b"value 3\n") + b"retry 3 True\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+
+def check_select_result_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "refuse_select_result.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_select_result.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "boxed_select_result_allocation.py"
+    for optimization in (0, 3):
+        executable = root / f"select-result-O{optimization}"
+        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+                    extra={"IMRE_ENCODED_FLAGS": flags})
+        assert built.returncode == 0, built
+        for shape in range(4):
+            for count in ((1,) if shape == 0 else (1, 511)):
+                arguments = (str(shape), str(count))
+                reference = run(sys.executable, "-B", source, *arguments)
+                assert (reference.returncode, reference.stdout, reference.stderr) == (0, b"ok\nTrue\nTrue\n", b""), reference
+                for refused in (0, 1):
+                    result = run(executable, *arguments, extra={"SELECT_RESULT_REFUSE": str(refused)})
+                    assert (result.returncode, result.stdout, result.stderr) == (
+                        0, b"MemoryError\nTrue\n" if refused else reference.stdout,
+                        b"select_result_allocation_refused\n" if refused else b"",
+                    ), (optimization, shape, count, refused, result)
+
+
 def check_raise_site_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "exceptions" / "refuse_raise_site.c"
     wrapper = root / "refuse_raise_site.o"
@@ -30,15 +77,45 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
-def check_boxed_call_allocation(imre, root, run):
+def call_allocation_flags(root):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "itemgetter_refuse.o"
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
-    flags = "\x1f".join([
+    return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
-    imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_itemgetter as fixture; "
+
+
+def check_boxed_call_allocation(imre, run, flags):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_traceback_allocation as fixture; fixture.allocation()"
+    for size in (0, 160, 224):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        expected = b"MemoryError () ValueError invalid literal for int() with base 10: 'invalid'\n23\n" if size else b"ValueError\n23\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
+        ), result
+
+    source = import_path + "import boxed_memory_error_kind as fixture; fixture.allocation()"
+    for ordinal in (0, 1):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": "8",
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+            "IMRE_TEST_MEMORY_ERROR_KIND": "1",
+        })
+        expected = (b"caught ()\n" if ordinal else b"value 3\n") + b"retry 3 True\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+    imports = import_path + "import boxed_itemgetter as fixture; "
     # The first equal-sized allocation copies the call's positional arguments.
     for ordinal, expected in ((0, b"113\n"), (2, b"caught ()\n113\n")):
         result = run(imre, "-B", "-c", imports + "fixture.constructor_allocation()", extra={
@@ -48,6 +125,54 @@ def check_boxed_call_allocation(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, expected, b"refused\n" if ordinal else b"",
         ), result
+    # Refuse the dictionary snapshot and the equally sized sort buffer separately.
+    for sort, ordinal in ((False, 1), (True, 1), (True, 2)):
+        source = import_path + f"import boxed_json_allocation as fixture; fixture.current({sort})"
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": "16400",
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"caught ()\n1025 True\n", b"refused\n",
+        ), result
+    source = import_path + "import boxed_json_allocation as fixture; fixture.output_growth()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_SIZE": "4096", "IMRE_TEST_GETTER_ALLOCATION": "1",
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"7386 1231 True\n", b"refused\n"), result
+    source = import_path + "import boxed_bytes_add as fixture; fixture.copy_allocation()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_SIZE": "16381", "IMRE_TEST_GETTER_ALLOCATION": "1",
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"() 16381 0\n16381\n", b"refused\n"), result
+    source = import_path + "import boxed_formatter as fixture; fixture.integer_allocation()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_SIZE": "2466", "IMRE_TEST_GETTER_ALLOCATION": "1",
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"caught ()\n8191 2466 True\n", b"refused\n"), result
+    for module in (False, True):
+        source = import_path + f"import boxed_list_pop as fixture; fixture.copy_allocation({module})"
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": "8192",
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"caught ()\n1024 1024 True True True\n", b"refused\n",
+        ), result
+    source = import_path + "import boxed_reversed_range as fixture; fixture.search_allocation()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags,
+        "IMRE_TEST_CALL_SIZE": "4104",
+        "IMRE_TEST_GETTER_ALLOCATION": "1",
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"False\n", b""), result
+    source = import_path + "import boxed_namedtuple_factory as fixture; fixture.layout_read_allocation()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags,
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"9\n", b""), result
     for kind in ("item", "attr"):
         source = imports + f"fixture.result_allocation({kind!r})"
         for ordinal, expected in ((0, b"113 113\n"), (1, b"caught () 0\n113 113\n")):
@@ -59,6 +184,18 @@ def check_boxed_call_allocation(imre, root, run):
                 0, expected, b"refused\n" if ordinal else b"",
             ), result
 
+    for name, bound in (("append", False), ("append", True), ("insert", False), ("insert", True)):
+        source = import_path + f"import boxed_list_pop as fixture; fixture.growth_allocation({name!r}, {bound})"
+        for size, expected in ((0, b"129 True True\nretry 130 True\n"), (2048, b"caught ()\n128 True False\nretry 129 True\n")):
+            result = run(imre, "-B", "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_CALL_SIZE": str(size),
+                "IMRE_TEST_GETTER_ALLOCATION": "1",
+            })
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if size else b"",
+            ), result
+
     source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_source_exec as fixture; fixture.decode_allocation()"
     for ordinal, output in ((0, b"compiled\n7\n"), (1, b"caught ()\n7\n")):
         result = run(imre, "-B", "-c", source, extra={
@@ -68,6 +205,41 @@ def check_boxed_call_allocation(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, output, b"refused\n" if ordinal else b"",
         ), result
+
+    source = import_path + "import boxed_list_pop as fixture; fixture.concat_allocation()"
+    for size in (0, 1960):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, (b"caught ()\n" if size else b"") + b"128 117 245 True True\n", b"refused\n" if size else b"",
+        ), result
+
+    source = import_path + "import boxed_tuple_concatenation as fixture; fixture.allocation()"
+    for size in (0, 16424):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, (b"caught ()\n" if size else b"") + b"1025 1028 2053 True True\n", b"refused\n" if size else b"",
+        ), result
+
+    for kind in ("list", "tuple", "self"):
+        source = import_path + f"import boxed_list_pop as fixture; fixture.extend_allocation({kind!r})"
+        # Refuse the source copy and the destination growth separately.
+        for size in (0, 1024 if kind == "self" else 936, 2048):
+            result = run(imre, "-B", "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_CALL_SIZE": str(size),
+                "IMRE_TEST_GETTER_ALLOCATION": "1",
+            })
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, (b"caught ()\n" if size else b"") + b"True True True\n", b"refused\n" if size else b"",
+            ), result
 
     source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_recursive_repr as fixture; fixture.allocation()"
     # Refuse the initial traversal stack, then its first growth on a nested list.
@@ -93,6 +265,19 @@ def check_boxed_call_allocation(imre, root, run):
             0, expected, b"refused\n" if size else b"",
         ), result
 
+    for kind in ("list", "tuple"):
+        source = import_path + f"import boxed_iterator_collection as fixture; fixture.allocation({kind!r})"
+        for size in (0, 8192):
+            result = run(imre, "-B", "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_CALL_SIZE": str(size),
+                "IMRE_TEST_GETTER_ALLOCATION": "1",
+            })
+            expected = (b"caught ()\n" if size else b"value 513 True\n") + b"retry 513\n"
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if size else b"",
+            ), (kind, size, result)
+
     # Match the existing 113-word allocation probe with a fresh string of the same byte length.
     source = """import sys
 sys.path
@@ -112,14 +297,26 @@ print(sys.intern(value) is value, sys._is_interned(value))
             0, output, b"refused\n" if ordinal else b"",
         ), result
 
-    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_traceback_allocation as fixture; fixture.allocation()"
-    for size in (0, 160, 224):
+    # Check the small result, the base-1e9 scratch, the coefficient text, and the output copy.
+    for wide, size, ordinal in ((False, 0, 1), (False, 8, 2), (True, 0, 1), (True, 568, 1), (True, 1235, 1), (True, 1235, 2)):
+        source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_recursive_repr as fixture; fixture.integer_allocation({wide})"
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        digits = b"1235 -2088 80635\n" if wide else b"2 23 23\n"
+        expected = (b"caught ()\n" if size else b"value " + digits) + b"retry " + digits
+        assert (result.returncode, result.stdout, result.stderr) == (0, expected, b"refused\n" if size else b""), result
+
+    for size in (0, 128, 512, 1024):
+        source = import_path + "import boxed_bytecache as fixture; fixture.long_allocation()"
         result = run(imre, "-B", "-c", source, extra={
             "IMRE_ENCODED_FLAGS": flags,
             "IMRE_TEST_CALL_SIZE": str(size),
             "IMRE_TEST_GETTER_ALLOCATION": "1",
         })
-        expected = b"MemoryError () ValueError invalid literal for int() with base 10: 'invalid'\n23\n" if size else b"ValueError\n23\n"
+        expected = (b"caught ()\n" if size else b"value 0\n") + b"retry 0\n"
         assert (result.returncode, result.stdout, result.stderr) == (
             0, expected, b"refused\n" if size else b"",
         ), result
@@ -173,14 +370,8 @@ def check_slice_stack(imre, imports, root, env):
     assert output(imre, boundary, 8) == exhausted
 
 
-def check_argument_allocation(imre, root, run):
+def check_argument_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "argument_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
-    flags = "\x1f".join([
-        "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
-    ])
     cases = [
         ((), 0, b"113 113 2\n", b""),
         ((), 1, b"caught () 0\n113 113 1\n", b"refused\n"),
@@ -194,6 +385,25 @@ def check_argument_allocation(imre, root, run):
             "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
         })
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
+
+
+
+def check_marshal_allocation(exe):
+    import resource
+    import select
+
+    with subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE) as child:
+        try:
+            assert select.select([child.stdout], [], [], 30)[0]
+            assert child.stdout.readline() == b"ready\n"
+            pages = int(Path(f"/proc/{child.pid}/statm").read_text().split()[0])
+            cap = pages * os.sysconf("SC_PAGESIZE") + 512 * 1024
+            resource.prlimit(child.pid, resource.RLIMIT_AS, (cap, cap))
+            out, err = child.communicate(b"x", timeout=30)
+        finally:
+            child.kill()
+    assert (child.returncode, out, err) == (0, b"refused\nTrue\n", b""), (out, err)
 
 
 def main():
@@ -221,9 +431,12 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
-            check_argument_allocation(imre, root, run)
+            check_select_result_allocation(imre, root, run)
+            flags = call_allocation_flags(root)
+            check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
-            check_boxed_call_allocation(imre, root, run)
+            check_boxed_literal_roots_allocation(imre, root, run)
+            check_boxed_call_allocation(imre, run, flags)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
@@ -322,9 +535,20 @@ def main():
                 expected.stderr,
             )
 
+        compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
+        compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
             "-IB", "-c", "import sys; sys.path; m = __import__(sys.argv[1]); "
             "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
+        )
+
+        compare(
+            "-IB", "-c",
+            "import sysconfig, textwrap\n"
+            "from textwrap import dedent, indent\n"
+            "print(repr(dedent(text='  one\\n    two\\n')))\n"
+            "print(repr(indent('a\\r\\n\\r\\nb', '> ', lambda line: line.endswith('\\n'))))\n"
+            "print(textwrap.wrap('one two three', width=5), textwrap.shorten('one two three', 9))",
         )
 
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
@@ -584,6 +808,12 @@ def report(text):
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
 
+        token_limit = Path(__file__).with_name("fixtures") / "json_integer_token_limit.py"
+        for limit in ("640", "0"):
+            digit_env = {"PYTHONINTMAXSTRDIGITS": limit}
+            compare("-B", token_limit, extra=digit_env)
+            compare("-B", token_limit, extra=digit_env, native_args=("run", token_limit, "--runtime-imports", "--quiet"))
+
         (helpers / "uuid").mkdir()
         uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
@@ -630,11 +860,27 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
+
+        compare(
+            "-IB", "-c",
+            "import re, sysconfig\n"
+            "for cls, pattern in [(re.error, '('), (re.PatternError, b'[')]:\n"
+            "    try: re.compile(pattern)\n"
+            "    except cls as exc: print(type(exc) is re.PatternError, exc.pattern == pattern, exc.pos)\n"
+            "print(re.error is re.PatternError, issubclass(re.error, Exception))",
+        )
+
         resource_package = installed / "pkgutil_resource"
         resource_package.mkdir()
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        if sys.platform == "linux":
+            exe = root / "marshal-allocation"
+            built = run(imre, "build", fixtures / "boxed_marshal_allocation.py",
+                        "--quiet", "--no-cache", "--runtime-imports", "-o", exe)
+            assert built.returncode == 0, built.stderr
+            check_marshal_allocation(exe)
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_literal_eval.py",
@@ -647,6 +893,7 @@ def report(text):
             "boxed_source_exec.py",
             "boxed_sys_intern.py",
             "boxed_bytes_add.py",
+            "boxed_binary_iterators.py",
             "boxed_bytes_io.py",
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
@@ -657,6 +904,7 @@ def report(text):
             "boxed_math_rounding.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
+            "boxed_binary_subclass_lengths.py",
             "boxed_class_union.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
@@ -681,6 +929,9 @@ def report(text):
             "boxed_time.py",
             "boxed_codecs.py",
             "boxed_selector_wide_fds.py",
+            "boxed_pipe_flags.py",
+            "boxed_os_file_descriptors.py",
+            "boxed_select.py",
             "boxed_urlsplit.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
@@ -737,6 +988,9 @@ def report(text):
             "boxed_selector_modify_data.py",
             "boxed_structural_hooks.py",
             "boxed_list_pop.py",
+            "boxed_sequence_repeat.py",
+            "boxed_sequence_order.py",
+            "boxed_json_containers.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
@@ -777,6 +1031,12 @@ def report(text):
         if os.name == "posix":
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_recursive_repr.py":
+                for limit in (640, 4300, 0):
+                    compare(
+                        "-B", "-c", imports + f"arithmetic.integer_digit_limit({limit})",
+                        extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
+                    )
         if sys.platform == "linux":
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
@@ -852,6 +1112,12 @@ except ImportError:
             compare("-IB", "-c", imports + "arithmetic.full_device()")
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_urlsafe_base64.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.check()")
+        digits = fixtures / "json_integer_digit_limit.py"
+        for limit in ("640", "0"):
+            digit_env = {"PYTHONINTMAXSTRDIGITS": limit}
+            compare("-B", digits, extra=digit_env)
+            compare("-B", digits, extra=digit_env, native_args=("run", digits, "--runtime-imports", "--quiet"))
+
         checked = run(
             imre,
             "-IB",
@@ -906,10 +1172,44 @@ try:
 except KeyError as err:
     print(str(err))
 print(json.dumps({"ok": True}, **options))
+from io import StringIO
+stream = StringIO()
+print(json.dump(fp=stream, obj={"a": [1, 2]}), stream.getvalue())
+stream = StringIO()
+try:
+    json.dump([1, object()], stream)
+except TypeError:
+    print(stream.getvalue())
+class StreamItems(list):
+    def __iter__(self):
+        yield 1
+        raise LookupError("iterator stopped")
+stream = StringIO()
+try:
+    json.dump(StreamItems([1]), stream)
+except LookupError as err:
+    print(str(err), stream.getvalue())
 print(json.dumps({"z": Extra(), "a": json.loads("1.25")}, **options))
+print(repr(json.dumps({"items": [1, {}]}, indent=2)))
+print(repr(json.dumps([Extra()], indent="--", **options)))
 print(json.dumps({2: False, json.loads("0.5"): True}, sort_keys=True))
+from enum import IntEnum
+class Code(IntEnum):
+    ok = 4
+class Label(str):
+    pass
+class DecimalKey(float):
+    pass
+print(json.dumps({Label("status"): [Code.ok, DecimalKey(1.25)]}, **options))
+print(json.dumps({Code.ok: Label("ok"), DecimalKey(2.5): Code.ok}, **options))
 nan = json.loads("NaN")
 print(nan == nan, nan <= 1, [nan] == [nan])
+print(json.dumps([1.25], allow_nan=False), json.dumps({nan: nan}, allow_nan=True))
+for obj in ([nan], {float("-inf"): 0}):
+    try:
+        json.dumps(obj, allow_nan=False)
+    except ValueError as err:
+        print(str(err))
 defaults = {"present": None}
 print(defaults.setdefault("missing"), defaults.setdefault("present", 1), len(defaults))
 cache = (Ellipsis, Ellipsis)

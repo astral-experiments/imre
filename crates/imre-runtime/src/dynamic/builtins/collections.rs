@@ -3,6 +3,38 @@ use super::super::value::DictViewKind;
 use super::*;
 use num_traits::Signed;
 
+/// Clear container storage, then finalize any buffered writer whose last owner was removed.
+pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
+    let owns_writer = |&id: &Id| ctx.heap.could_own_writer(id, true);
+    let released = ctx.heap.has_unbound_writer(NONE)
+        && match ctx.heap.get(receiver) {
+            Value::List(items) => items.iter().any(owns_writer),
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => entries
+                .iter()
+                .any(|(key, value)| owns_writer(key) || owns_writer(value)),
+            Value::Deque(ring) => ring.items.iter().any(owns_writer),
+            _ => unreachable!("clearable container"),
+        };
+    match ctx.heap.get_mut(receiver) {
+        Value::List(items) => items.clear(),
+        Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+            for (key, value) in entries.clear() {
+                ctx.heap.weak_edge_removed(key);
+                ctx.heap.weak_edge_removed(value);
+            }
+        }
+        Value::Deque(ring) => {
+            for item in ring.take_items() {
+                ctx.heap.weak_edge_removed(item);
+            }
+        }
+        _ => unreachable!("clearable container"),
+    }
+    if released {
+        ctx.collect_unreachable();
+    }
+}
+
 /// Select the first minimum or maximum, evaluating each key as its candidate arrives.
 pub(super) fn extremum(
     ctx: &mut Context,
@@ -164,7 +196,7 @@ fn sort_list_items(
     Ok(())
 }
 
-fn sort_values<T: Copy>(
+pub(in super::super) fn sort_values<T: Copy>(
     ctx: &mut Context,
     values: &mut [T],
     reverse: bool,
@@ -219,7 +251,13 @@ pub(in super::super) fn copy_dict(ctx: &mut Context, object: Id, storage: Id) ->
     Ok(copy)
 }
 
-fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
+/// Apply the positional entries before keyword entries, as in dict.update.
+pub(in super::super) fn update(
+    ctx: &mut Context,
+    dict: Id,
+    input: Option<Id>,
+    kwargs: &[(String, Id)],
+) -> Result<()> {
     if let Some(input) = input
         && !ctx.for_each_mapping_item(
             input,
@@ -275,7 +313,7 @@ pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
 }
 
 fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
-    match ctx.heap.get(value) {
+    match ctx.tuple_backing(value) {
         Value::Weak(wr) if wr.kind != super::super::weakref::Kind::Reference => Some(value),
         Value::Weak(wr) => wr.target.and_then(|target| unhashable_part(ctx, target)),
         Value::Union(union) => unhashable_part(ctx, union.args),
@@ -355,17 +393,22 @@ pub(in super::super) fn set_member(
     } else {
         value
     };
-    Ok(ctx.find_dictionary_key(set, value, None)?.1.is_some())
+    Ok(ctx
+        .find_dictionary_key(ctx.scalar_value(set), value, None)?
+        .1
+        .is_some())
 }
 
 pub(in super::super) fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result<()> {
-    ctx.set_dictionary_key(set, value, NONE, None, false)?;
+    ctx.set_dictionary_key(ctx.scalar_value(set), value, NONE, None, false)?;
     Ok(())
 }
 
 pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
-    if matches!(ctx.heap.get(source), Value::Set { .. }) {
-        return merge_set(ctx, target, source);
+    let target = ctx.scalar_value(target);
+    let storage = ctx.scalar_value(source);
+    if matches!(ctx.heap.get(storage), Value::Set { .. }) {
+        return merge_set(ctx, target, storage);
     }
     let iterator = ctx.iterator(source)?;
     while let Some(item) = ctx.next_item(iterator)? {
@@ -508,7 +551,9 @@ pub(super) fn method(
 ) -> Result<Id> {
     if matches!(
         name,
-        "list.__init__"
+        "list.__add__"
+            | "list.__iadd__"
+            | "list.__init__"
             | "list.__repr__"
             | "tuple.__repr__"
             | "set.__repr__"
@@ -519,8 +564,8 @@ pub(super) fn method(
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
-    if let Some(method @ ("append" | "clear" | "copy" | "index" | "pop" | "reverse" | "sort")) =
-        name.strip_prefix("list.")
+    if let Some(method) = name.strip_prefix("list.")
+        && LIST_METHODS.contains(&method)
     {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(
@@ -534,21 +579,78 @@ pub(super) fn method(
                 ctx.type_name(receiver)
             )));
         }
+        let one_arg = || {
+            if !kwargs.is_empty() {
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
+            }
+            match args {
+                [value] => Ok(*value),
+                _ => Err(type_error(format!(
+                    "{name}() takes exactly one argument ({} given)",
+                    args.len()
+                ))),
+            }
+        };
         return match method {
             "append" => {
-                if !kwargs.is_empty() {
-                    return Err(type_error(format!("{name}() takes no keyword arguments")));
-                }
-                let [value] = args else {
-                    return Err(type_error(format!(
-                        "{name}() takes exactly one argument ({} given)",
-                        args.len()
-                    )));
-                };
-                list_items_mut(ctx, receiver)?.push(*value);
+                let value = one_arg()?;
+                let items = list_items_mut(ctx, receiver)?;
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                items.push(value);
                 Ok(NONE)
             }
             "index" => list_index(ctx, receiver, args, kwargs),
+            "extend" => {
+                list_extend(ctx, receiver, one_arg()?)?;
+                Ok(NONE)
+            }
+            "count" => {
+                let value = one_arg()?;
+                let mut count = 0;
+                let mut start = 0;
+                while let Some(i) = find_list_item(ctx, receiver, value, start..i64::MAX)? {
+                    count += 1;
+                    start = i + 1;
+                }
+                Ok(ctx.int(count))
+            }
+            "remove" => {
+                let i = find_list_item(ctx, receiver, one_arg()?, 0..i64::MAX)?
+                    .ok_or_else(|| Error::new("ValueError", "list.remove(x): x not in list"))?
+                    as usize;
+                let items = list_items_mut(ctx, receiver)?;
+                if i < items.len() {
+                    let removed = items.remove(i);
+                    ctx.heap.weak_edge_removed(removed);
+                }
+                Ok(NONE)
+            }
+            "insert" => {
+                if !kwargs.is_empty() {
+                    return Err(type_error("list.insert() takes no keyword arguments"));
+                }
+                let [index, value] = args else {
+                    return Err(type_error(format!(
+                        "insert expected 2 arguments, got {}",
+                        args.len()
+                    )));
+                };
+                let index = list_position_arg(ctx, *index)?;
+                let items = list_items_mut(ctx, receiver)?;
+                let len = items.len() as i64;
+                let index = if index < 0 {
+                    (len + index).max(0)
+                } else {
+                    index.min(len)
+                };
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                items.insert(index as usize, *value);
+                Ok(NONE)
+            }
             "pop" => list_pop(ctx, receiver, args, kwargs),
             "sort" => list_sort(ctx, receiver, args, kwargs),
             _ => {
@@ -565,13 +667,13 @@ pub(super) fn method(
                     unreachable!()
                 };
                 if method == "copy" {
-                    let copy = items.clone();
+                    let copy = super::super::copy_ids(items)?;
                     return Ok(ctx.alloc(Value::List(copy)));
                 }
                 if method == "reverse" {
                     items.reverse();
                 } else {
-                    items.clear();
+                    clear_container(ctx, receiver);
                 }
                 Ok(NONE)
             }
@@ -608,8 +710,6 @@ pub(super) fn method(
                 ))
             }
         })?
-    } else if name.starts_with("list.") {
-        ctx.scalar_value(object)
     } else {
         object
     };
@@ -667,15 +767,7 @@ pub(super) fn method(
         }
         "dict.clear" => {
             arity(name, args, 0, 0)?;
-            let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                ctx.heap.get_mut(receiver)
-            else {
-                unreachable!("dictionary payload")
-            };
-            for (key, value) in entries.clear() {
-                ctx.heap.weak_edge_removed(key);
-                ctx.heap.weak_edge_removed(value);
-            }
+            clear_container(ctx, receiver);
             Ok(NONE)
         }
         "dict.keys" | "dict.values" | "dict.items" => {
@@ -746,46 +838,6 @@ pub(super) fn method(
         "dict.update" | "dict.__init__" => {
             arity(name, args, 0, 1)?;
             update(ctx, receiver, args.first().copied(), kwargs)?;
-            Ok(NONE)
-        }
-        "list.extend" => {
-            arity(name, args, 1, 1)?;
-            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(args[0]) {
-                let added = items.clone();
-                list_items_mut(ctx, receiver)?.extend(added);
-            } else {
-                let iterator = ctx.iterator(args[0])?;
-                ctx.heap.keep(iterator);
-                let default = ctx.int(8);
-                let hint = ctx.length_hint(args[0], Some(default))?;
-                let hint = ctx.as_integer(hint)? as usize;
-                let items = list_items_mut(ctx, receiver)?;
-                if hint <= isize::MAX as usize - items.len() {
-                    items
-                        .try_reserve(hint)
-                        .map_err(|_| Error::new("MemoryError", ""))?;
-                }
-                while let Some(item) = ctx.next_item(iterator)? {
-                    let items = list_items_mut(ctx, receiver)?;
-                    items
-                        .try_reserve(1)
-                        .map_err(|_| Error::new("MemoryError", ""))?;
-                    items.push(item);
-                }
-            }
-            Ok(NONE)
-        }
-        "list.insert" => {
-            arity(name, args, 2, 2)?;
-            let index = ctx.as_integer(args[0])?;
-            let items = list_items_mut(ctx, receiver)?;
-            let len = items.len() as i64;
-            let index = if index < 0 {
-                (len + index).max(0)
-            } else {
-                index.min(len)
-            };
-            items.insert(index as usize, args[1]);
             Ok(NONE)
         }
         "frozenset.__contains__" | "set.__contains__" => {
@@ -924,7 +976,19 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             i
         }
     });
-    for i in start..stop {
+    find_list_item(ctx, receiver, needle, start..stop)?
+        .map(|i| ctx.int(i))
+        .ok_or_else(|| Error::new("ValueError", "list.index(x): x not in list"))
+}
+
+/// Locate the next match in a live list. Equality callbacks may resize or clear it.
+fn find_list_item(
+    ctx: &mut Context,
+    receiver: Id,
+    needle: Id,
+    positions: std::ops::Range<i64>,
+) -> Result<Option<i64>> {
+    for i in positions {
         let Value::List(items) = ctx.heap.get(receiver) else {
             unreachable!()
         };
@@ -942,9 +1006,47 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
                 continue;
             }
         }
-        return Ok(ctx.int(i));
+        return Ok(Some(i));
     }
-    Err(Error::new("ValueError", "list.index(x): x not in list"))
+    Ok(None)
+}
+
+/// Extend the list from a concrete sequence or consume the source iterator in order.
+fn list_extend(ctx: &mut Context, receiver: Id, source: Id) -> Result<()> {
+    // Self-extension snapshots the destination, including a list subclass's payload.
+    let source = if ctx.scalar_value(source) == receiver {
+        receiver
+    } else {
+        source
+    };
+    if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(source) {
+        let added = super::super::copy_ids(items)?;
+        let items = list_items_mut(ctx, receiver)?;
+        items
+            .try_reserve(added.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        items.extend(added);
+    } else {
+        let iterator = ctx.iterator(source)?;
+        ctx.heap.keep(iterator);
+        let default = ctx.int(8);
+        let hint = ctx.length_hint(source, Some(default))?;
+        let hint = ctx.as_integer(hint)? as usize;
+        let items = list_items_mut(ctx, receiver)?;
+        if hint <= isize::MAX as usize - items.len() {
+            items
+                .try_reserve(hint)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        while let Some(item) = ctx.next_item(iterator)? {
+            let items = list_items_mut(ctx, receiver)?;
+            items
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            items.push(item);
+        }
+    }
+    Ok(())
 }
 
 /// Call a builtin slot on the receiver’s native payload, bypassing its override.
@@ -967,6 +1069,24 @@ pub(super) fn builtin_slot(
         )));
     }
     let storage = ctx.scalar_value(object);
+    if matches!(method, "__add__" | "__iadd__") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "wrapper {method}() takes no keyword arguments"
+            )));
+        }
+        let [value] = rest else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                rest.len()
+            )));
+        };
+        if method == "__add__" {
+            return ctx.concat_list(storage, *value);
+        }
+        list_extend(ctx, storage, *value)?;
+        return Ok(object);
+    }
     if method == "__repr__" {
         if !kwargs.is_empty() {
             return Err(type_error("wrapper __repr__() takes no keyword arguments"));
@@ -1033,18 +1153,23 @@ pub(super) fn builtin_slot(
     Ok(NONE)
 }
 
+/// Convert a list method's positional index before reading the list's current length.
+fn list_position_arg(ctx: &mut Context, value: Id) -> Result<i64> {
+    ctx.index_integer(value)?.to_i64().ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
 fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error("list.pop() takes no keyword arguments"));
     }
     let index = match args {
         [] => -1,
-        [index] => ctx.index_integer(*index)?.to_i64().ok_or_else(|| {
-            Error::new(
-                "OverflowError",
-                "Python int too large to convert to C ssize_t",
-            )
-        })?,
+        [index] => list_position_arg(ctx, *index)?,
         _ => {
             return Err(type_error(format!(
                 "pop expected at most 1 argument, got {}",

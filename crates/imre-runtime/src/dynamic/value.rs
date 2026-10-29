@@ -80,7 +80,7 @@ pub(super) struct ImportFields {
 
 #[derive(Clone, Debug)]
 pub(super) struct Error {
-    pub kind: String,
+    pub kind: std::borrow::Cow<'static, str>,
     /// The Python exception class, or NONE for a native error.
     pub class: Id,
     pub message: String,
@@ -107,7 +107,11 @@ pub(super) struct DecodeState {
 impl Error {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
         Self {
-            kind: kind.to_owned(),
+            kind: if kind == "MemoryError" {
+                std::borrow::Cow::Borrowed("MemoryError")
+            } else {
+                std::borrow::Cow::Owned(kind.to_owned())
+            },
             class: NONE,
             message: message.into(),
             args: None,
@@ -221,7 +225,8 @@ impl Context {
                 loc.span = Some([start, split, end]);
             }
             let active = self.heap.active_exception();
-            if active != NONE
+            if error.context == NONE
+                && active != NONE
                 && error
                     .trace
                     .as_ref()
@@ -282,6 +287,7 @@ impl Context {
             Value::Str(_) => "str",
             Value::Map { .. } => "map",
             Value::Filter { .. } => "filter",
+            Value::Poll(_) => "select.poll",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
@@ -326,6 +332,8 @@ impl Context {
             Value::MappingProxy(_) => "mappingproxy",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
+            Value::TupleGetter { .. } => "_tuplegetter",
+            Value::TupleGetterDoc => "member_descriptor",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
             Value::Cell(_) => "cell",
@@ -514,10 +522,15 @@ pub(super) struct ClassNamespace {
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
-    pub namedtuple_defaults: Option<Id>,
     pub annotation_thunks: Option<Id>,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ComprehensionKind {
+    ClassBody,
+    Ordinary,
 }
 
 #[derive(Clone)]
@@ -525,7 +538,7 @@ pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
-    pub is_comprehension: bool,
+    pub comprehension: Option<ComprehensionKind>,
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
@@ -567,6 +580,7 @@ pub(super) enum Value {
         value: crate::objects::Calendar,
         tzinfo: Id,
     },
+    Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
     Range(super::range::Range),
@@ -689,6 +703,13 @@ pub(super) enum Value {
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
+    /// A tuple field position and the descriptor’s writable docstring.
+    TupleGetter {
+        index: i64,
+        doc: Option<Id>,
+    },
+    /// The writable document member of the native tuple descriptor type.
+    TupleGetterDoc,
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -825,6 +846,7 @@ impl Value {
         match self {
             Self::Instance { class, .. } => Some(*class),
             Self::Module { constructor, .. } => *constructor,
+            Self::Raised(error) => error.class(),
             _ => None,
         }
     }
@@ -856,6 +878,7 @@ impl Value {
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
+            Self::TupleGetter { doc, .. } => visit.extend(doc),
             Self::ItemGetter(keys) => visit.push(*keys),
             Self::Map {
                 function, inputs, ..
@@ -928,7 +951,6 @@ impl Value {
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
-                    visit.extend(class.namedtuple_defaults);
                     visit.extend(class.annotation_thunks);
                     visit.extend(class.dictionary);
                 }
@@ -1097,9 +1119,11 @@ impl Value {
             | Self::LoggerHandle(_)
             | Self::HandlerLock(_)
             | Self::PrimitiveLock(_)
+            | Self::Poll(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
+            | Self::TupleGetterDoc
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
@@ -1124,7 +1148,7 @@ pub(super) struct DictIterator {
     position: usize,
     reverse: bool,
     remaining: usize,
-    order_state: Option<(usize, usize)>,
+    order_state: Option<(usize, usize, usize)>,
 }
 
 impl DictIterator {
@@ -1133,7 +1157,7 @@ impl DictIterator {
         dict: Id,
         kind: DictViewKind,
         size: usize,
-        order_state: Option<(usize, usize)>,
+        order_state: Option<(usize, usize, usize)>,
         reverse_end: Option<usize>,
     ) -> Self {
         Self {
@@ -1158,8 +1182,62 @@ impl DictIterator {
             .map_or(0, |_| self.remaining as i64)
     }
 
-    /// Check the live size before each pull, including the one that reaches exhaustion.
-    pub(super) fn next(&mut self, ctx: &mut Context) -> Result<Option<Id>> {
+    /// Advance the cursor before a value lookup can call back into the iterator.
+    pub(super) fn next(mut self, ctx: &mut Context, owner: Id) -> Result<Option<Id>> {
+        let entry = self.next_entry(ctx, owner);
+        *ctx.heap.get_mut(owner) = Value::DictIterator(self);
+        let Some((storage, key, mut value)) = entry? else {
+            return Ok(None);
+        };
+        if self.order_state.is_some() && !matches!(self.kind, DictViewKind::Keys) {
+            let index = match Self::ordered_index(ctx, storage, key) {
+                Ok(index) => index,
+                Err(error) => {
+                    self.dict = None;
+                    *ctx.heap.get_mut(owner) = Value::DictIterator(self);
+                    return Err(error);
+                }
+            };
+            value = ctx.stored_entries(storage)[index].1;
+        }
+        Ok(Some(match self.kind {
+            DictViewKind::Keys => key,
+            DictViewKind::Values => value,
+            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
+        }))
+    }
+
+    /// Resolve the retained key through the dictionary, including user hash and equality hooks.
+    fn ordered_index(ctx: &mut Context, storage: Id, key: Id) -> Result<usize> {
+        let (_, index) = ctx.find_dictionary_key(storage, key, None)?;
+        index.ok_or_else(|| ctx.lookup_error("KeyError", key))
+    }
+
+    /// Read a logical order rank or a plain dictionary slot, in the cursor's direction.
+    fn entry_at(
+        &self,
+        entries: &super::dictionary::Entries,
+        position: usize,
+    ) -> Option<(usize, Id, Id)> {
+        if self.order_state.is_some() {
+            let rank = if self.reverse {
+                position.checked_sub(1)
+            } else {
+                Some(position)
+            };
+            rank.filter(|&rank| rank < entries.len()).map(|rank| {
+                let (key, value) = entries[entries.ordered_dense(rank)];
+                (rank, key, value)
+            })
+        } else if self.reverse {
+            entries.before(position)
+        } else {
+            entries.at(position)
+        }
+    }
+
+    /// Check the live table before advancing. Ordered cursors look their resident key up again.
+    fn next_entry(&mut self, ctx: &mut Context, owner: Id) -> Result<Option<(Id, Id, Id)>> {
         let Some(dict) = self.dict else {
             return Ok(None);
         };
@@ -1188,12 +1266,8 @@ impl DictIterator {
                 "dictionary changed size during iteration",
             ));
         }
-        let entry = if self.reverse {
-            entries.before(self.position)
-        } else {
-            entries.at(self.position)
-        };
-        let Some((position, key, value)) = entry else {
+        let entry = self.entry_at(entries, self.position);
+        let Some((position, mut key, value)) = entry else {
             self.dict = None;
             return Ok(None);
         };
@@ -1204,13 +1278,31 @@ impl DictIterator {
                 "dictionary keys changed during iteration",
             ));
         }
+        if self.order_state.is_some() {
+            if let Err(error) = Self::ordered_index(ctx, storage, key) {
+                self.dict = None;
+                return Err(error);
+            }
+            // Hashing can advance this same iterator. It returns the key now at
+            // the cursor, then advances from the entry selected before hashing.
+            let Value::DictIterator(live) = ctx.heap.get(owner) else {
+                unreachable!()
+            };
+            if live.position != self.position || live.dict != self.dict {
+                let entries = ctx.stored_entries(storage);
+                let current = live.entry_at(entries, live.position);
+                let Some((_, current_key, _)) =
+                    current.filter(|_| live.dict.is_some() && live.remaining != 0)
+                else {
+                    self.dict = None;
+                    return Ok(None);
+                };
+                key = current_key;
+            }
+        }
         self.position = if self.reverse { position } else { position + 1 };
         self.remaining = self.remaining.saturating_sub(1);
-        Ok(Some(match self.kind {
-            DictViewKind::Keys => key,
-            DictViewKind::Values => value,
-            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
-        }))
+        Ok(Some((storage, key, value)))
     }
 }
 
@@ -1424,16 +1516,42 @@ impl Heap {
 
     /// A name in a surviving frame keeps this object alive until that binding changes.
     fn bound_in_active_frame(&self, value: Id) -> bool {
+        self.active_binding_matches(|bound| bound == value)
+    }
+
+    /// Inspect names in surviving frames without invoking Python attribute or mapping hooks.
+    fn active_binding_matches(&self, mut predicate: impl FnMut(Id) -> bool) -> bool {
         self.frames.iter().rev().any(|frame| {
             let Value::Scope(scope) = self.get(frame.scope) else {
                 return false;
             };
             if let Some(namespace) = scope.namespace {
                 return matches!(self.get(namespace), Value::Dict(entries)
-                    if entries.iter().any(|&(_, bound)| bound == value));
+                    if entries.iter().any(|&(_, bound)| predicate(bound)));
             }
-            scope.names.values().any(|&bound| bound == value)
+            scope.names.values().copied().any(&mut predicate)
         })
+    }
+
+    /// A short strong path proves the writer survives. A miss falls back to a full heap trace.
+    fn keeps_writer(&self, bound: Id, writer: Id, budget: &mut usize) -> bool {
+        if *budget == 0 {
+            return false;
+        }
+        *budget -= 1;
+        if bound == writer {
+            return true;
+        }
+        match self.get(bound) {
+            Value::List(items) | Value::Tuple(items) => items
+                .iter()
+                .take(*budget)
+                .any(|&item| self.keeps_writer(item, writer, budget)),
+            Value::Dict(items) => items.iter().take(*budget).any(|&(key, value)| {
+                self.keeps_writer(key, writer, budget) || self.keeps_writer(value, writer, budget)
+            }),
+            _ => false,
+        }
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
@@ -1605,10 +1723,7 @@ impl Heap {
                 // A normal function allocates its scope in the caller before entering.
                 // Once it returns, only an escaped closure or frame can keep that scope alive.
                 if scope.parent.is_some() && scope.class_body.is_none() {
-                    let caller = &mut self.frames.last_mut().unwrap().live;
-                    if let Some(index) = caller.iter().position(|&id| id == frame.scope) {
-                        caller[index] = NONE;
-                    }
+                    self.release_scope_temporary(frame.scope);
                 }
                 self.collect_next_statement |= weak_released;
             }
@@ -1616,6 +1731,15 @@ impl Heap {
         self.keep(value);
         writer_released
     }
+
+    /// Drop the caller's temporary reference to a completed function or generator scope.
+    pub(super) fn release_scope_temporary(&mut self, scope: Id) {
+        let caller = &mut self.frames.last_mut().unwrap().live;
+        if let Some(index) = caller.iter().position(|&id| id == scope) {
+            caller[index] = NONE;
+        }
+    }
+
     /// Reserve temporary roots before taking a snapshot that may outlive a Python callback.
     pub(super) fn reserve_temporaries(&mut self, additional: usize) -> Result<()> {
         self.frames
@@ -1673,8 +1797,8 @@ impl Heap {
         }
     }
 
-    /// Discard the evaluated operand while preserving earlier arguments in the same statement.
-    pub(super) fn discard_truth(&mut self, mark: usize) -> bool {
+    /// Release an expression while preserving its result and earlier operands.
+    pub(super) fn discard_operands(&mut self, mark: usize, result: Id) -> bool {
         if self.file_writers.is_empty() {
             return false;
         }
@@ -1685,20 +1809,54 @@ impl Heap {
             .live
             .iter()
             .skip(mark)
-            .any(|&id| self.could_own_writer(id, true));
-        if !could_own_writer || !self.has_unbound_writer(NONE) {
+            .any(|&id| {
+                // A one-argument call roots its operand through a private list.
+                if let Value::List(items) = self.get(id)
+                    && let [item] = items.as_slice()
+                {
+                    return self.could_own_writer(*item, false);
+                }
+                self.could_own_writer(id, false)
+            });
+        if !could_own_writer {
             return false;
         }
         self.release_temporaries_since(mark);
-        true
+        if result != NONE {
+            self.keep(result);
+        }
+        self.file_writers.iter().any(|&writer| {
+            writer != result
+                && !self.active_binding_matches(|bound| {
+                    let mut budget = 8;
+                    self.keeps_writer(bound, writer, &mut budget)
+                })
+        })
     }
 
     pub fn release_temporaries_since(&mut self, mark: usize) {
         self.frames.last_mut().unwrap().live.truncate(mark);
     }
 
+    /// Drop an upgraded proxy's temporary root without discarding results returned by its hooks.
+    pub(super) fn release_weak_target(&mut self, mark: usize, target: Id) {
+        let root = &mut self.frames.last_mut().unwrap().live[mark];
+        debug_assert_eq!(*root, target);
+        *root = NONE;
+        self.weak_edge_removed(target);
+    }
+
     pub fn active_exception(&self) -> Id {
         self.frames.last().unwrap().active
+    }
+
+    /// Use the caller's exception when no lexical handler encloses this operation.
+    pub(super) fn caught_exception(&self, caught: Id) -> Id {
+        if caught == NONE {
+            self.frames.last().unwrap().inherited
+        } else {
+            caught
+        }
     }
 
     pub fn replace_active(&mut self, exception: Id) -> Id {
@@ -1837,12 +1995,9 @@ impl Heap {
         location: Location,
         caught: Id,
     ) -> Option<Vec<(Id, Id)>> {
+        let active = self.caught_exception(caught);
         let frame = self.frames.last_mut().unwrap();
-        frame.active = if caught == NONE {
-            frame.inherited
-        } else {
-            caught
-        };
+        frame.active = active;
         if let Some(id) = frame.object
             && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
         {
@@ -1851,12 +2006,30 @@ impl Heap {
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+        self.collect_if_due(globals)
+    }
+
+    /// Collect when a discarded owner or the heap threshold requests a sweep.
+    pub(super) fn collect_if_due(
+        &mut self,
+        globals: impl Iterator<Item = Id>,
+    ) -> Option<Vec<(Id, Id)>> {
         if !std::mem::take(&mut self.collect_next_statement)
             && (self.slots.len() < self.next_collection || !self.free.is_empty())
         {
             return None;
         }
         self.collect(globals)
+    }
+
+    /// Collect early when a streaming consumer cannot reserve its next heap slot.
+    pub(super) fn reserve_slot_or_request_collection(&mut self) {
+        if self.slots.len() < self.next_collection
+            && self.free.is_empty()
+            && self.slots.try_reserve(1).is_err()
+        {
+            self.next_collection = self.slots.len();
+        }
     }
 
     /// Drop unreachable values and preserve callbacks that must run after the sweep.
@@ -1876,10 +2049,29 @@ impl Heap {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
+        let live = &mut self.frames.last_mut().unwrap().live;
         self.weak.retain(|&target, refs| {
             refs.retain(|&id| self.slots[id as usize].marked());
             if self.slots[target as usize].marked() {
                 return !refs.is_empty();
+            }
+            let count = refs
+                .iter()
+                .filter(|&&id| {
+                    self.slots[id as usize]
+                        .value
+                        .as_ref()
+                        .unwrap()
+                        .weak_reference()
+                        .unwrap()
+                        .callback
+                        != NONE
+                })
+                .count();
+            let dispatch = callbacks.try_reserve(count).is_ok()
+                && live.try_reserve(count.saturating_mul(2)).is_ok();
+            if !dispatch {
+                eprintln!("Exception ignored while clearing object weakrefs: MemoryError");
             }
             for &id in refs.iter() {
                 let wr = self.slots[id as usize]
@@ -1890,8 +2082,9 @@ impl Heap {
                     .unwrap();
                 wr.target = None;
                 let callback = std::mem::replace(&mut wr.callback, NONE);
-                if callback != NONE {
+                if dispatch && callback != NONE {
                     callbacks.push((callback, id));
+                    live.extend([callback, id]);
                 }
             }
             false
@@ -1909,10 +2102,6 @@ impl Heap {
         self.next_collection = (self.slots.len() - self.free.len())
             .saturating_mul(2)
             .max(4096);
-        for &(callback, wr) in &callbacks {
-            self.keep(callback);
-            self.keep(wr);
-        }
         (!callbacks.is_empty()).then_some(callbacks)
     }
 }

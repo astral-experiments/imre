@@ -19,22 +19,38 @@ pub(super) struct Program {
     first_line: u32,
     generator: bool,
     locals: HashSet<String>,
+    method_imports: Rc<std::collections::BTreeSet<String>>,
+    private_names: Option<Rc<imre_ast::Names>>,
     instructions: Vec<(u32, Instruction)>,
 }
 
 enum Instruction {
     Eval(ast::Expr),
     AugAssign(ast::StmtAugAssign),
+    DeleteItem(ast::ExprSubscript),
     Assign(Vec<ast::Expr>, ast::Expr),
+    Import {
+        module: String,
+        alias: Option<String>,
+    },
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
     Return(Option<ast::Expr>),
     Raise(ast::StmtRaise),
+    Assert(ast::StmtAssert),
     Unless(ast::Expr, usize),
     Iter(ast::Expr),
     Next(Option<ast::Expr>, usize),
     Jump(usize),
+    PopIter,
+}
+
+/// Pending exits of the innermost loop body being lowered.
+struct LoopJumps {
+    head: usize,
+    has_iterator: bool,
+    breaks: Vec<usize>,
 }
 
 enum Step {
@@ -169,6 +185,16 @@ impl Program {
                 Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
                     strings.visit_expr(e)
                 }
+                Instruction::DeleteItem(item) => {
+                    strings.visit_expr(&item.value);
+                    strings.visit_expr(&item.slice);
+                }
+                Instruction::Assert(stmt) => {
+                    strings.visit_expr(&stmt.test);
+                    if let Some(message) = &stmt.msg {
+                        strings.visit_expr(message);
+                    }
+                }
                 Instruction::AugAssign(stmt) => {
                     strings.visit_expr(&stmt.target);
                     strings.visit_expr(&stmt.value);
@@ -178,6 +204,14 @@ impl Program {
                         strings.visit_expr(target);
                     }
                     strings.visit_expr(e);
+                }
+                Instruction::Import { module, alias } => {
+                    for part in module.split('.') {
+                        strings.heap.code_name(part);
+                    }
+                    if let Some(alias) = alias {
+                        strings.heap.code_name(alias);
+                    }
                 }
                 Instruction::From(module, bindings) => {
                     strings.heap.code_name(module);
@@ -208,7 +242,7 @@ impl Program {
                         strings.visit_expr(e);
                     }
                 }
-                Instruction::Jump(_) => {}
+                Instruction::Jump(_) | Instruction::PopIter => {}
             }
         }
         self.string_roots = strings.finish()?;
@@ -225,11 +259,19 @@ impl Program {
             first_line: 1,
             generator: false,
             locals: HashSet::new(),
+            method_imports: Rc::default(),
+            private_names: None,
             instructions: Vec::new(),
         }
     }
 
-    fn lower(&mut self, body: &[ast::Stmt], lines: &[usize], function: bool) -> Result<()> {
+    fn lower(
+        &mut self,
+        body: &[ast::Stmt],
+        lines: &[usize],
+        function: bool,
+        mut active: Option<&mut LoopJumps>,
+    ) -> Result<()> {
         use ast::Stmt;
         if function
             && let Some(Stmt::Expr(statement)) = body.first()
@@ -272,6 +314,20 @@ impl Program {
                     let Some(value) = &s.value else { continue };
                     Instruction::Assign(vec![(*s.target).clone()], (**value).clone())
                 }
+                Stmt::Delete(s) => {
+                    for target in &s.targets {
+                        match target {
+                            ast::Expr::Subscript(item)
+                                if !matches!(*item.slice, ast::Expr::Slice(_)) =>
+                            {
+                                self.instructions
+                                    .push((line, Instruction::DeleteItem(item.clone())));
+                            }
+                            _ => return Err(unsupported("deletion target")),
+                        }
+                    }
+                    continue;
+                }
                 Stmt::AugAssign(s) => {
                     self.declare_target(&s.target)?;
                     Instruction::AugAssign(s.clone())
@@ -283,6 +339,20 @@ impl Program {
                     Instruction::Return(s.value.as_deref().cloned())
                 }
                 Stmt::Raise(s) => Instruction::Raise(s.clone()),
+                Stmt::Import(s) if !s.is_lazy => {
+                    for name in &s.names {
+                        let module = name.name.to_string();
+                        let alias = name.asname.as_ref().map(ToString::to_string);
+                        let local = alias
+                            .as_deref()
+                            .unwrap_or_else(|| module.split('.').next().unwrap());
+                        self.locals.insert(local.to_owned());
+                        self.instructions
+                            .push((line, Instruction::Import { module, alias }));
+                    }
+                    continue;
+                }
+                Stmt::Assert(s) => Instruction::Assert(s.clone()),
                 Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
                     let module = s
                         .module
@@ -306,22 +376,67 @@ impl Program {
                         && !function =>
                 {
                     let mut child = Program::new(self.filename.clone(), s.name.as_str());
+                    child.method_imports = self.method_imports.clone();
+                    child.private_names = self.private_names.clone();
                     child.first_line = line;
-                    child.lower(&s.body, lines, true)?;
+                    child.lower(&s.body, lines, true, None)?;
                     self.locals.insert(child.name.clone());
                     Instruction::Define(Rc::new(child), s.parameters.clone())
                 }
-                Stmt::For(s) if !s.is_async => {
-                    self.declare_target(&s.target)?;
-                    self.instructions
-                        .push((line, Instruction::Iter((*s.iter).clone())));
+                Stmt::Break(_) => {
+                    let current = active
+                        .as_deref_mut()
+                        .ok_or_else(|| Error::new("SyntaxError", "'break' outside loop"))?;
+                    if current.has_iterator {
+                        self.instructions.push((line, Instruction::PopIter));
+                    }
+                    current.breaks.push(self.instructions.len());
+                    Instruction::Jump(0)
+                }
+                Stmt::Continue(_) => {
+                    let current = active.as_deref().ok_or_else(|| {
+                        Error::new("SyntaxError", "'continue' not properly in loop")
+                    })?;
+                    Instruction::Jump(current.head)
+                }
+                Stmt::For(_) | Stmt::While(_) => {
+                    let (body, orelse, guard) = match stmt {
+                        Stmt::For(s) if !s.is_async => {
+                            self.declare_target(&s.target)?;
+                            self.instructions
+                                .push((line, Instruction::Iter((*s.iter).clone())));
+                            (
+                                &s.body,
+                                &s.orelse,
+                                Instruction::Next(Some((*s.target).clone()), 0),
+                            )
+                        }
+                        Stmt::While(s) => (
+                            &s.body,
+                            &s.orelse,
+                            Instruction::Unless((*s.test).clone(), 0),
+                        ),
+                        _ => return Err(unsupported("async for")),
+                    };
                     let head = self.instructions.len();
-                    self.instructions.push((line, Instruction::Jump(0)));
-                    self.lower(&s.body, lines, function)?;
+                    let mut current = LoopJumps {
+                        head,
+                        has_iterator: matches!(guard, Instruction::Next(..)),
+                        breaks: Vec::new(),
+                    };
+                    self.instructions.push((line, guard));
+                    self.lower(body, lines, function, Some(&mut current))?;
                     self.instructions.push((line, Instruction::Jump(head)));
-                    self.instructions[head].1 =
-                        Instruction::Next(Some((*s.target).clone()), self.instructions.len());
-                    self.lower(&s.orelse, lines, function)?;
+                    let other = self.instructions.len();
+                    match &mut self.instructions[head].1 {
+                        Instruction::Next(_, end) | Instruction::Unless(_, end) => *end = other,
+                        _ => unreachable!("loop guard"),
+                    }
+                    self.lower(orelse, lines, function, active.as_deref_mut())?;
+                    let end = self.instructions.len();
+                    for jump in current.breaks {
+                        self.instructions[jump].1 = Instruction::Jump(end);
+                    }
                     continue;
                 }
                 Stmt::If(s) => {
@@ -329,16 +444,30 @@ impl Program {
                     let mut arm = Some((&*s.test, s.body.as_slice()));
                     for clause in &s.elif_else_clauses {
                         if let Some((test, body)) = arm.take() {
-                            self.arm(test, body, line, lines, function, &mut ends)?;
+                            ends.push(self.arm(
+                                test,
+                                body,
+                                line,
+                                lines,
+                                function,
+                                active.as_deref_mut(),
+                            )?);
                         }
                         if let Some(test) = &clause.test {
                             arm = Some((test, &clause.body));
                         } else {
-                            self.lower(&clause.body, lines, function)?;
+                            self.lower(&clause.body, lines, function, active.as_deref_mut())?;
                         }
                     }
                     if let Some((test, body)) = arm {
-                        self.arm(test, body, line, lines, function, &mut ends)?;
+                        ends.push(self.arm(
+                            test,
+                            body,
+                            line,
+                            lines,
+                            function,
+                            active.as_deref_mut(),
+                        )?);
                     }
                     let end = self.instructions.len();
                     for i in ends {
@@ -404,15 +533,15 @@ impl Program {
         line: u32,
         lines: &[usize],
         function: bool,
-        ends: &mut Vec<usize>,
-    ) -> Result<()> {
+        active: Option<&mut LoopJumps>,
+    ) -> Result<usize> {
         let index = self.instructions.len();
         self.instructions.push((line, Instruction::Jump(0)));
-        self.lower(body, lines, function)?;
-        ends.push(self.instructions.len());
+        self.lower(body, lines, function, active)?;
+        let end = self.instructions.len();
         self.instructions.push((line, Instruction::Jump(0)));
         self.instructions[index].1 = Instruction::Unless(test.clone(), self.instructions.len());
-        Ok(())
+        Ok(end)
     }
 }
 
@@ -548,7 +677,8 @@ impl Context {
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
             .collect::<Vec<_>>();
         let mut code = Program::new(Rc::from(filename), "<module>");
-        code.lower(&parsed.syntax().body, &lines, false)?;
+        code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
+        code.lower(&parsed.syntax().body, &lines, false, None)?;
         code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         Ok(self.box_source_code(Rc::new(code), None))
     }
@@ -996,12 +1126,14 @@ impl Context {
         struct Signature<'a> {
             #[serde(borrow)]
             private_scope: Option<(&'a str, bool)>,
+            #[serde(default)]
+            method_imports: std::collections::BTreeSet<String>,
         }
         let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|_| Error::new("SystemError", "invalid generator signature"))?;
-        if let Some((owner, postponed)) = signature.private_scope {
-            imre_ast::lower_in(&mut def.body, owner, postponed);
-        }
+        let private_names = signature
+            .private_scope
+            .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
         let lines = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
             .collect::<Vec<_>>();
@@ -1009,9 +1141,11 @@ impl Context {
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
         );
+        program.method_imports = Rc::new(signature.method_imports);
+        program.private_names = private_names;
         program.first_line = code.first_line;
         program.generator = true;
-        program.lower(&def.body, &lines, true)?;
+        program.lower(&def.body, &lines, true, None)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
@@ -1024,6 +1158,7 @@ impl Context {
     }
 
     pub(super) fn resume_source(&mut self, id: Id) -> Result<Option<Id>> {
+        self.heap.reserve_temporaries(1)?;
         self.heap.keep(id);
         let Value::Generator {
             owner,
@@ -1043,11 +1178,11 @@ impl Context {
             return Ok(None);
         };
         *running = true;
-        let (code, scope, owner) = (*code, *scope, *owner);
+        let (code, frame_scope, owner) = (*code, *scope, *owner);
         let mut active = std::mem::take(iterators);
         let result = self
             .prepare_generator(code)
-            .and_then(|()| self.run_source(code, scope, owner, ip, &mut active))
+            .and_then(|()| self.run_source(code, frame_scope, owner, ip, &mut active))
             .map_err(|error| self.generator_error(error));
         let Value::Generator {
             running,
@@ -1061,18 +1196,41 @@ impl Context {
             unreachable!()
         };
         *running = false;
-        if !matches!(result, Ok(Step::Yield(..))) {
-            *scope = NONE;
-            *owner = FrameOwner::Module(NONE);
-        }
-        match result? {
-            Step::Yield(value, ip) => {
+        let completed = match result {
+            Ok(Step::Yield(value, ip)) => {
                 *offset = Some(ip);
                 *iterators = active;
-                Ok(Some(value))
+                return Ok(Some(value));
             }
-            Step::Return(NONE) => Ok(None),
-            Step::Return(value) => Err(self.exception("StopIteration", &[value])),
+            Ok(Step::Return(value)) => Ok(value),
+            Err(error) => Err(error),
+        };
+        *scope = NONE;
+        *owner = FrameOwner::Module(NONE);
+        if self.heap.has_file_writers()
+            && (!active.is_empty()
+                || !self.scope_data(frame_scope).closure.cells.is_empty()
+                || self
+                    .scope_data(frame_scope)
+                    .names
+                    .values()
+                    .any(|&value| self.heap.could_own_writer(value, true)))
+            && self.heap.has_unbound_writer(NONE)
+        {
+            self.heap.release_scope_temporary(frame_scope);
+            match &completed {
+                Ok(value) => self.heap.keep(*value),
+                Err(error) => {
+                    for root in error.roots() {
+                        self.heap.keep(root);
+                    }
+                }
+            }
+            self.collect_unreachable();
+        }
+        match completed? {
+            NONE => Ok(None),
+            value => Err(self.exception("StopIteration", &[value])),
         }
     }
 
@@ -1087,6 +1245,7 @@ impl Context {
         let Body::Source(code) = self.code_object(owner).body.clone() else {
             unreachable!("source frame")
         };
+        self.heap.reserve_temporaries(2)?;
         self.heap.keep(owner);
         self.heap.enter(scope, owner, frame_owner);
         let result = (|| {
@@ -1123,7 +1282,18 @@ impl Context {
         result
     }
 
-    pub(super) fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
+    /// Release the old binding before the next generator target or instruction can observe it.
+    fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
+        if self.store_source_name(scope, name, value)? && self.heap.has_unbound_writer(NONE) {
+            self.collect_unreachable();
+            self.heap.release_unbound_writers();
+        }
+        Ok(())
+    }
+
+    /// Publish a binding and report whether its previous value could own a buffered writer.
+    pub(super) fn store_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<bool> {
+        let replaced = self.replacing_writer(scope, name, value);
         let scope = self.binding_scope(scope, name);
         if let Some(locals) = self.scope_data(scope).exec_locals {
             if matches!(self.heap.get(locals), Value::List(_)) {
@@ -1133,17 +1303,17 @@ impl Context {
                 ));
             }
             let key = self.heap.code_name(name);
-            self.put_item(locals, key, value)
+            self.put_item(locals, key, value)?;
         } else if let Some(globals) = self.scope_data(scope).exec_globals {
             let key = self.heap.code_name(name);
             let storage = self
                 .dict_storage(globals.dict)
                 .expect("exec globals dictionary");
-            self.put_item(storage, key, value)
+            self.put_item(storage, key, value)?;
         } else {
             self.bind(scope, name, value);
-            Ok(())
         }
+        Ok(replaced)
     }
 
     pub(super) fn load_exec_name(&mut self, locals: Id, name: &str) -> Result<Id> {
@@ -1164,6 +1334,85 @@ impl Context {
         Err(Error::new("TypeError", indices))
     }
 
+    /// Call the current scope's import hook with the globals and locals of the source frame.
+    fn import_source_module(
+        &mut self,
+        owner: Id,
+        scope: Id,
+        module: &str,
+        names: Option<&[(String, String)]>,
+    ) -> Result<Id> {
+        let mut root = scope;
+        while let Some(parent) = self.scope_data(root).parent {
+            root = parent;
+        }
+        let globals = self.module_globals(root);
+        let builtins = match self.scope_data(root).exec_globals {
+            Some(supplied) => supplied.builtins,
+            None => self.default_source_builtins()?,
+        };
+        let importer = self
+            .load_exec_name(builtins, "__import__")
+            .map_err(|error| {
+                if self.is_builtin_error(&error, "KeyError") {
+                    Error::new("ImportError", "__import__ not found")
+                } else {
+                    error
+                }
+            })?;
+        let modname = self.text(module);
+        let fromlist = if let Some(names) = names {
+            let names = names.iter().map(|(name, _)| self.text(name)).collect();
+            self.alloc(Value::Tuple(names))
+        } else {
+            NONE
+        };
+        let zero = self.int(0);
+        let locals = if self.code_object(owner).parameters == NONE {
+            self.scope_data(scope).exec_locals.unwrap_or(globals)
+        } else {
+            NONE
+        };
+        self.call(
+            importer,
+            vec![modname, globals, locals, fromlist, zero],
+            Vec::new(),
+        )
+    }
+
+    /// Keep the iterator's backing sequence available when the final pull drops it.
+    fn source_loop_owner(&mut self, iterator: Id) -> Id {
+        if !self.heap.has_file_writers() {
+            return iterator;
+        }
+        match self.heap.get(iterator) {
+            Value::RangeIterator(_) => NONE,
+            Value::Iterator {
+                context: None,
+                sequence,
+                ..
+            } => {
+                let owner = sequence.unwrap_or(NONE);
+                self.heap.keep(owner);
+                owner
+            }
+            _ => iterator,
+        }
+    }
+
+    /// Schedule a flush only when the discarded owner could contain a writer.
+    fn release_source_loop_owner(&mut self, owner: Id) {
+        if self.heap.has_file_writers() && self.heap.could_own_writer(owner, true) {
+            self.heap.release_unbound_writers();
+        }
+    }
+
+    /// Recheck buffered writers when a break discards the loop's hidden iterator.
+    pub(super) fn release_loop_iterator(&mut self, iterator: Id) {
+        let owner = self.source_loop_owner(iterator);
+        self.release_source_loop_owner(owner);
+    }
+
     fn source_step(
         &mut self,
         code: &Program,
@@ -1177,6 +1426,17 @@ impl Context {
         match op {
             Instruction::Eval(e) => {
                 eval(self, e)?;
+            }
+            Instruction::Assert(stmt) => {
+                if !self.source_condition(code, scope, &stmt.test)? {
+                    let class = self.builtin("AssertionError");
+                    let args = match &stmt.msg {
+                        Some(message) => vec![eval(self, message)?],
+                        None => Vec::new(),
+                    };
+                    let error = self.call(class, args, Vec::new())?;
+                    self.op("raise", error, NONE, FALSE)?;
+                }
             }
             Instruction::Raise(s) => {
                 let (op, exception) = match &s.exc {
@@ -1194,6 +1454,11 @@ impl Context {
                 for target in targets {
                     self.bind_target(code, scope, target, value)?;
                 }
+            }
+            Instruction::DeleteItem(item) => {
+                let object = eval(self, &item.value)?;
+                let key = eval(self, &item.slice)?;
+                self.delete_item(object, key)?;
             }
             Instruction::AugAssign(stmt) => {
                 let update = |ctx: &mut Self, left: Id| -> Result<Id> {
@@ -1231,12 +1496,17 @@ impl Context {
                 }
             }
             Instruction::Jump(destination) => *ip = *destination,
+            Instruction::PopIter => {
+                let iterator = iterators.pop().expect("active source loop");
+                self.release_loop_iterator(iterator);
+            }
             Instruction::Iter(e) => {
                 let v = eval(self, e)?;
                 iterators.push(self.iterator(v)?);
             }
             Instruction::Next(target, end) => {
                 let iter = *iterators.last().expect("active source loop");
+                let owner = self.source_loop_owner(iter);
                 match self.next_item(iter)? {
                     Some(v) => {
                         if let Some(target) = target {
@@ -1247,6 +1517,7 @@ impl Context {
                     }
                     None => {
                         iterators.pop();
+                        self.release_source_loop_owner(owner);
                         *ip = *end;
                     }
                 }
@@ -1263,39 +1534,20 @@ impl Context {
                     Step::Return(v)
                 }));
             }
-            Instruction::From(module, names) => {
-                let mut root = scope;
-                while let Some(parent) = self.scope_data(root).parent {
-                    root = parent;
+            Instruction::Import { module, alias } => {
+                let mut imported = self.import_source_module(owner, scope, module, None)?;
+                let mut parts = module.split('.');
+                let first = parts.next().expect("nonempty module name");
+                if alias.is_some() {
+                    for part in parts {
+                        let part = self.text(part);
+                        imported = self.op("from", imported, part, NONE)?;
+                    }
                 }
-                let globals = self.module_globals(root);
-                let builtins = match self.scope_data(root).exec_globals {
-                    Some(supplied) => supplied.builtins,
-                    None => self.default_source_builtins()?,
-                };
-                let importer = self
-                    .load_exec_name(builtins, "__import__")
-                    .map_err(|error| {
-                        if self.is_builtin_error(&error, "KeyError") {
-                            Error::new("ImportError", "__import__ not found")
-                        } else {
-                            error
-                        }
-                    })?;
-                let modname = self.text(module);
-                let fromlist = names.iter().map(|(name, _)| self.text(name)).collect();
-                let fromlist = self.alloc(Value::Tuple(fromlist));
-                let zero = self.int(0);
-                let locals = if self.code_object(owner).parameters == NONE {
-                    self.scope_data(scope).exec_locals.unwrap_or(globals)
-                } else {
-                    NONE
-                };
-                let m = self.call(
-                    importer,
-                    vec![modname, globals, locals, fromlist, zero],
-                    Vec::new(),
-                )?;
+                self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
+            }
+            Instruction::From(module, names) => {
+                let m = self.import_source_module(owner, scope, module, Some(names))?;
                 for (name, local) in names {
                     let name = self.text(name);
                     let v = self.op("from", m, name, NONE)?;
@@ -1376,35 +1628,7 @@ impl Context {
                 let star = elts
                     .iter()
                     .position(|item| matches!(item, ast::Expr::Starred(_)));
-                let required = count - usize::from(star.is_some());
-                let iter = self.iterator(value)?;
-                let mut unpacked = Vec::with_capacity(count);
-                for i in 0..required {
-                    unpacked.push(self.next_item(iter)?.ok_or_else(|| {
-                        let qualifier = if star.is_some() { "at least " } else { "" };
-                        Error::new(
-                            "ValueError",
-                            format!("not enough values to unpack (expected {qualifier}{required}, got {i})"),
-                        )
-                    })?);
-                }
-                if let Some(star) = star {
-                    while let Some(item) = self.next_item(iter)? {
-                        unpacked.push(item);
-                    }
-                    self.group_starred_items(&mut unpacked, star, required - star);
-                } else if self.next_item(iter)?.is_some() {
-                    let size = match self.heap.get(value) {
-                        Value::List(items) | Value::Tuple(items) => Some(items.len()),
-                        Value::Dict(items) => Some(items.len()),
-                        _ => None,
-                    };
-                    let detail = size.map_or_else(String::new, |n| format!(", got {n}"));
-                    return Err(Error::new(
-                        "ValueError",
-                        format!("too many values to unpack (expected {count}{detail})"),
-                    ));
-                }
+                let unpacked = self.unpack_items(value, count, star)?;
                 for (element, item) in elts.iter().zip(unpacked) {
                     self.bind_target(code, scope, element, item)?;
                 }
@@ -1548,6 +1772,21 @@ impl Context {
                     .collect::<Result<_>>()?;
                 Ok(self.alloc(Value::Tuple(items)))
             }
+            Expr::Set(display) => {
+                let items = display
+                    .elts
+                    .iter()
+                    .map(|item| eval(self, item))
+                    .collect::<Result<Vec<_>>>()?;
+                let result = self.alloc(Value::Set {
+                    entries: Default::default(),
+                    frozen: false,
+                });
+                for item in items {
+                    builtins::set_add(self, result, item)?;
+                }
+                Ok(result)
+            }
             Expr::Dict(v) => {
                 let result = self.dict(vec![]);
                 for item in &v.items {
@@ -1603,7 +1842,15 @@ impl Context {
                 eval(self, branch)
             }
             Expr::Call(v) => {
-                let f = eval(self, &v.func)?;
+                let mark = self.heap.temporary_mark();
+                let f = if let Some(field) =
+                    imre_ast::direct_method(v, &code.method_imports, code.private_names.as_deref())
+                {
+                    let receiver = eval(self, &field.value)?;
+                    self.lookup_method(receiver, field.attr.as_str())?
+                } else {
+                    eval(self, &v.func)?
+                };
                 let args = v
                     .arguments
                     .args
@@ -1618,7 +1865,9 @@ impl Context {
                         .ok_or_else(|| unsupported("keyword unpack"))?;
                     kwargs.push((key.to_string(), eval(self, &item.value)?));
                 }
-                self.call(f, args, kwargs)
+                let result = self.call(f, args, kwargs)?;
+                self.finish_call_operands(mark, result);
+                Ok(result)
             }
             _ => Err(unsupported(format!(
                 "{:?}",

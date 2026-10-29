@@ -40,6 +40,12 @@ def ordered_dictionary():
     source["self"] = source
     assert repr(source) == "OrderedDict({'self': ...})"
 
+    moved = OrderedDict(a=1, b=2, c=3)
+    moved.move_to_end("a")
+    assert list(moved) == ["b", "c", "a"]
+    assert list(dict.keys(moved)) == ["a", "b", "c"]
+    assert moved.popitem(last=False) == ("b", 2)
+
 
     class ClearOnRepr:
         def __repr__(self):
@@ -143,6 +149,72 @@ def mapping_patterns():
 
 
 def current():
+    from collections import defaultdict
+    from types import ModuleType
+
+    class Hashed:
+        def __hash__(self):
+            return 7
+
+    class ExceptionKey(ValueError, Hashed):
+        pass
+
+    class Unhashable:
+        __hash__ = None
+
+    class ModuleKey(ModuleType, Unhashable):
+        pass
+
+    key = ExceptionKey()
+    assert key.__hash__() == hash(key) == 7
+    try:
+        {ModuleKey("example"): 1}
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("inserted an unhashable module")
+
+    class Display(defaultdict):
+        pass
+    display = Display(list, a=2)
+    assert repr(display) == display.__repr__() == defaultdict.__repr__(display)
+    assert repr(display) == "Display(<class 'list'>, {'a': 2})"
+    assert dict.__repr__(display) == "{'a': 2}"
+    slot = defaultdict.__repr__
+    assert slot.__objclass__ is defaultdict
+    assert slot.__get__(display, Display)() == repr(display)
+    assert type(slot) is type(dict.__repr__)
+    assert type(display.__repr__) is type({}.__repr__)
+    deep = None
+    for _ in range(160):
+        deep = Display(None, child=deep)
+    assert len(repr(deep)) == len("None") + 160 * len("Display(None, {'child': })")
+
+    entries = defaultdict(list, [("saved", 2)], extra=3, saved=5)
+    assert entries == {"saved": 5, "extra": 3}
+    assert entries["missing"] == []
+    assert defaultdict(default_factory=1) == {"default_factory": 1}
+
+    from collections import OrderedDict
+
+    class Key:
+        def __hash__(self):
+            if self.fail:
+                raise LookupError("iterator hash")
+            return 17
+
+    key = Key()
+    key.fail = False
+    cursor = iter(OrderedDict([(key, 10)]))
+    key.fail = True
+    try:
+        next(cursor)
+    except LookupError as error:
+        assert str(error) == "iterator hash"
+    else:
+        raise AssertionError("missing hash exception")
+    assert next(cursor, None) is None
+
     from collections import Counter, defaultdict
     from collections import _count_elements
     from _collections import _count_elements as native_count
@@ -156,6 +228,16 @@ def current():
     clone["a"] += 1
     assert type(clone) is Counter and clone["missing"] == 0 and counts["a"] == 3
     groups = defaultdict(list)
+    class SlottedFactory(defaultdict):
+        __slots__ = ("default_factory",)
+
+    slotted = SlottedFactory(list)
+    assert not hasattr(slotted, "default_factory")
+    slotted.default_factory = tuple
+    assert slotted.default_factory is tuple and slotted["first"] == []
+    del slotted.default_factory
+    assert not hasattr(slotted, "default_factory") and slotted["second"] == []
+
     child = groups["present"]
     clone = copy(groups)
     assert type(clone) is defaultdict and clone.default_factory is list
@@ -220,6 +302,15 @@ def current():
     print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
 
     groups["visits"].append(1)
+    class WithFactory(defaultdict):
+        pass
+
+    derived = WithFactory(list)
+    assert derived.default_factory is list
+    derived["first"].append(2)
+    assert derived["first"] == [2]
+    assert WithFactory().default_factory is None
+
     plain_copy = dict.copy(groups)
     other = groups.copy()
     other["visits"].append(2)
@@ -605,6 +696,10 @@ def fromkeys_construction():
     made[11].append(7)
     assert type(made) is Custom and list(made) == [12, 11]
     assert not source and made[12] is shared and shared == [7]
+    bound = defaultdict.fromkeys
+    made = bound([2, 1, 2], shared)
+    assert type(made) is defaultdict and made.default_factory is None
+    assert list(made) == [2, 1] and made[1] is made[2] is shared
     fresh = defaultdict(list).fromkeys([1])
     assert fresh[1] is None
     try:

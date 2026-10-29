@@ -371,19 +371,103 @@ fn format_exception(
         Ok(result) => ctx.str_value(result)?.to_owned(),
         Err(_) => "<exception str() failed>".to_owned(),
     };
-    let qualname = match ctx.heap.get(value) {
-        Value::Raised(error) => error
-            .class()
-            .and_then(|class| ctx.own_class_attr(class, "__qualname__")),
+    let (module, dot, name) = exception_label(ctx, value)?;
+    let separator = if text.is_empty() { "" } else { ": " };
+    lines.push(format!("{module}{dot}{name}{separator}{text}\n"));
+    Ok(())
+}
+
+/// Capture the exception class name after its string hook, as traceback does.
+fn exception_label(ctx: &mut Context, value: Id) -> Result<(&str, &str, &str)> {
+    let class = match ctx.heap.get(value) {
+        Value::Raised(error) => error.class(),
         _ => None,
     };
-    let name = qualname
-        .and_then(|name| ctx.str_value(name).ok())
-        .unwrap_or_else(|| ctx.type_name(value));
-    lines.push(if text.is_empty() {
-        format!("{name}\n")
+    let Some(class) = class else {
+        return Ok(("", "", ctx.type_name(value)));
+    };
+    let Some(name) = ctx.own_class_attr(class, "__qualname__") else {
+        return Ok(("", "", ctx.type_name(value)));
+    };
+    let Some(module) = ctx.own_class_attr(class, "__module__") else {
+        return Ok(("", "", ctx.str_value(name)?));
+    };
+    if matches!(ctx.heap.get(module), Value::Str(_)) && matches!(ctx.heap.get(name), Value::Str(_))
+    {
+        let (prefix, dot) = match ctx.str_value(module)? {
+            "__main__" | "builtins" => ("", ""),
+            other => (other, "."),
+        };
+        return Ok((prefix, dot, ctx.str_value(name)?));
+    }
+
+    // A module-name hook can replace both attributes and run a collection.
+    ctx.heap.reserve_temporaries(2)?;
+    ctx.heap.keep(name);
+    ctx.heap.keep(module);
+    for literal in ["__main__", "builtins"] {
+        let reserved = label_literal(ctx, literal)?;
+        if ctx.checked_equal(reserved, module)? {
+            return Ok(("", "", displayed_label(ctx, name)?));
+        }
+    }
+    let module = if ctx.string_storage(module).is_some() {
+        module
     } else {
-        format!("{name}: {text}\n")
-    });
-    Ok(())
+        label_literal(ctx, "<unknown>")?
+    };
+    if !label_slot(ctx, module, "__add__") && !label_slot(ctx, name, "__radd__") {
+        return Ok((ctx.str_value(module)?, ".", ctx.str_value(name)?));
+    }
+    let dot = label_literal(ctx, ".")?;
+    let prefix = label_add(ctx, module, dot)?;
+    ctx.heap.reserve_temporaries(1)?;
+    ctx.heap.keep(prefix);
+    let full = label_add(ctx, prefix, name)?;
+    Ok(("", "", displayed_label(ctx, full)?))
+}
+
+/// Retain constants separately from the class's Python-owned labels.
+fn label_literal(ctx: &mut Context, value: &str) -> Result<Id> {
+    ctx.heap
+        .source_string_constant(value)
+        .ok_or_else(|| Error::new("MemoryError", ""))
+}
+
+/// Built-in string concatenation can use its immutable storage directly.
+fn label_slot(ctx: &Context, value: Id, slot: &str) -> bool {
+    ctx.heap
+        .get(value)
+        .instance_class()
+        .and_then(|class| ctx.class_attr(class, slot))
+        .is_some()
+}
+
+/// Add label parts once through Python slots before using inherited string addition.
+fn label_add(ctx: &mut Context, left: Id, right: Id) -> Result<Id> {
+    if let Some(value) = ctx.binary_special("+", left, right)? {
+        return Ok(value);
+    }
+    if !label_slot(ctx, left, "__add__")
+        && let Some((a, b)) = ctx.string_storage(left).zip(ctx.string_storage(right))
+    {
+        return ctx.binary("+", a, b);
+    }
+    Err(Error::new(
+        "TypeError",
+        format!(
+            "unsupported operand type(s) for +: '{}' and '{}'",
+            ctx.type_name(left),
+            ctx.type_name(right)
+        ),
+    ))
+}
+
+/// The final traceback line applies Python's default format specification.
+fn displayed_label(ctx: &mut Context, label: Id) -> Result<&str> {
+    if matches!(ctx.heap.get(label), Value::Str(_)) {
+        return ctx.str_value(label);
+    }
+    let displayed = super::super::builtins::format_value(ctx, label, None)?;
+    ctx.str_value(displayed)
 }

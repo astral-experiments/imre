@@ -4,7 +4,13 @@ mod keys;
 
 use std::ops::{Deref, DerefMut};
 
-use super::Id;
+use super::{Error, Id, Result};
+
+#[derive(Clone)]
+struct Order {
+    indices: Vec<usize>,
+    revision: usize,
+}
 
 #[derive(Clone)]
 pub(super) struct Entries {
@@ -12,6 +18,7 @@ pub(super) struct Entries {
     // Dense storage keeps one position per live key after a deletion.
     positions: Option<Vec<usize>>,
     index: Option<keys::Index>,
+    order: Option<Order>,
     next: usize,
     usable: usize,
 }
@@ -28,6 +35,7 @@ impl From<Vec<(Id, Id)>> for Entries {
             values,
             positions: None,
             index: None,
+            order: None,
             next,
             usable: usable_slots(next + next.div_ceil(2)),
         }
@@ -78,7 +86,14 @@ impl Entries {
         (self.len() >= self.next.saturating_mul(2) / 3).then(|| self.clone())
     }
 
-    pub(super) fn push(&mut self, value: (Id, Id), hash: i64) {
+    pub(super) fn push(&mut self, value: (Id, Id), hash: i64) -> Result<()> {
+        if let Some(order) = &mut self.order {
+            order
+                .indices
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            order.indices.push(self.values.len());
+        }
         // CPython compacts its entries when the index table runs out of usable slots.
         // Existing iterators keep their numerical cursor in the compacted table.
         if self.next == self.usable {
@@ -98,6 +113,7 @@ impl Entries {
             .push(hash, self.next);
         self.next += 1;
         self.values.push(value);
+        Ok(())
     }
 
     pub(super) fn remove(&mut self, index: usize) -> (Id, Id) {
@@ -108,7 +124,57 @@ impl Entries {
         self.positions
             .get_or_insert_with(|| (0..self.next).collect())
             .remove(index);
+        if let Some(order) = &mut self.order {
+            order.indices.retain_mut(|dense| {
+                if *dense == index {
+                    return false;
+                }
+                if *dense > index {
+                    *dense -= 1;
+                }
+                true
+            });
+        }
         self.values.remove(index)
+    }
+
+    /// Map the ordered view's rank to an entry in the underlying dict.
+    pub(super) fn ordered_dense(&self, rank: usize) -> usize {
+        self.order
+            .as_ref()
+            .map_or(rank, |order| order.indices[rank])
+    }
+
+    /// Move an existing key without changing the underlying dict's insertion order.
+    fn move_to_end(&mut self, dense: usize, last: bool) -> Result<()> {
+        let endpoint = if last { self.len() - 1 } else { 0 };
+        if self.ordered_dense(endpoint) == dense {
+            return Ok(());
+        }
+        if self.order.is_none() {
+            let mut indices = Vec::new();
+            indices
+                .try_reserve_exact(self.len())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            indices.extend(0..self.len());
+            self.order = Some(Order {
+                indices,
+                revision: 0,
+            });
+        }
+        let order = self.order.as_mut().expect("ordered entries");
+        let rank = order
+            .indices
+            .iter()
+            .position(|&i| i == dense)
+            .expect("live ordered key");
+        if last {
+            order.indices[rank..].rotate_left(1);
+        } else {
+            order.indices[..=rank].rotate_right(1);
+        }
+        order.revision = order.revision.wrapping_add(1);
+        Ok(())
     }
 
     pub(super) fn insertion_end(&self) -> usize {
