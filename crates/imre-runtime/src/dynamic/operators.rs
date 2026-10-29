@@ -984,7 +984,7 @@ impl Context {
                 })
                 || self.is_builtin_error(error, "KeyError")
                 || error
-                    .class
+                    .class()
                     .is_some_and(|class| self.class_attr(class, "__str__").is_some())
             {
                 break;
@@ -1064,10 +1064,8 @@ impl Context {
     /// Resolve formatting methods on heap instances and exceptions that retain their Python class.
     fn format_slot(&self, id: Id, name: &str) -> Option<(Id, Id)> {
         let class = match self.heap.get(id) {
-            Value::Instance { class, .. }
-            | Value::Raised(Error {
-                class: Some(class), ..
-            }) => *class,
+            Value::Instance { class, .. } => *class,
+            Value::Raised(error) => error.class()?,
             _ => return None,
         };
         self.class_attr(class, name).map(|slot| (class, slot))
@@ -2830,7 +2828,7 @@ impl Context {
             a
         } else {
             self.alloc(Value::Set {
-                entries: entries.clone(),
+                entries: entries.try_clone()?,
                 frozen: *frozen,
             })
         };
@@ -2910,7 +2908,7 @@ impl Context {
                     let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
                         unreachable!()
                     };
-                    let (removed, _) = entries.remove(index);
+                    let (removed, _) = entries.remove(index)?;
                     ctx.heap.weak_edge_removed(removed);
                 }
                 Ok(())

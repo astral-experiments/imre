@@ -495,7 +495,7 @@ pub(super) fn call(
             let closed = Wrapper::invoke_buffer(ctx, receiver, "close", vec![]);
             return match (flushed, closed) {
                 (Err(flush), Err(mut close)) => {
-                    close.tracing().context = Some(ctx.raised_instance(flush));
+                    close.context = ctx.raised_instance(flush);
                     Err(close)
                 }
                 (Err(flush), _) => Err(flush),

@@ -125,17 +125,35 @@ impl KeyLookup {
 }
 
 impl Index {
-    fn new(hashes: Vec<i64>, positions: Option<&[usize]>, size: usize, generation: usize) -> Self {
+    fn new(hashes: Vec<i64>, positions: Option<&[usize]>, size: usize) -> Result<Self> {
         let mut index = Self {
-            slots: vec![EMPTY; size],
+            slots: Vec::new(),
             hashes,
-            generation,
+            generation: 0,
         };
-        for dense in 0..index.hashes.len() {
+        index.rebuild(positions, size)?;
+        Ok(index)
+    }
+
+    /// Reserve the slots before replacing the probe layout so a refusal preserves lookups.
+    fn rebuild(&mut self, positions: Option<&[usize]>, size: usize) -> Result<()> {
+        self.slots
+            .try_reserve_exact(size.saturating_sub(self.slots.len()))
+            .map_err(|_| crate::Error::memory_error())?;
+        self.slots.clear();
+        self.slots.resize(size, EMPTY);
+        for dense in 0..self.hashes.len() {
             let position = positions.map_or(dense, |p| p[dense]);
-            index.place(index.hashes[dense], position);
+            self.place(self.hashes[dense], position);
         }
-        index
+        Ok(())
+    }
+
+    /// Reserve the next hash before any insertion position becomes visible.
+    pub(super) fn reserve_hash(&mut self) -> Result<()> {
+        self.hashes
+            .try_reserve(1)
+            .map_err(|_| crate::Error::memory_error().into())
     }
 
     fn place(&mut self, hash: i64, position: usize) {
@@ -145,13 +163,10 @@ impl Index {
         self.slots[slot] = position;
     }
 
-    pub(super) fn compact(&mut self, size: usize) {
-        *self = Self::new(
-            std::mem::take(&mut self.hashes),
-            None,
-            size,
-            self.generation + 1,
-        );
+    pub(super) fn compact(&mut self, size: usize) -> Result<()> {
+        self.rebuild(None, size)?;
+        self.generation += 1;
+        Ok(())
     }
 
     pub(super) fn push(&mut self, hash: i64, position: usize) {
@@ -183,9 +198,48 @@ impl Entries {
         let old = std::mem::take(self);
         if let Some(index) = old.index {
             let size = (self.usable + 1).next_power_of_two();
-            self.index = Some(Index::new(Vec::new(), None, size, index.generation + 1));
+            let mut index = index;
+            index.hashes.clear();
+            index.slots.truncate(size);
+            index.slots.fill(EMPTY);
+            index.generation += 1;
+            self.index = Some(index);
         }
         old.values
+    }
+
+    /// Copy the ordered entries and their cached probes without calling Python hash slots.
+    pub(in super::super) fn try_clone(&self) -> Result<Self> {
+        /// Copy one table buffer after ensuring the allocator can hold it.
+        fn copy<T: Copy>(items: &[T]) -> Result<Vec<T>> {
+            let mut out = Vec::new();
+            out.try_reserve_exact(items.len())
+                .map_err(|_| crate::Error::memory_error())?;
+            out.extend_from_slice(items);
+            Ok(out)
+        }
+
+        Ok(Self {
+            values: copy(&self.values)?,
+            positions: self.positions.as_deref().map(copy).transpose()?,
+            index: match &self.index {
+                Some(index) => Some(Index {
+                    slots: copy(&index.slots)?,
+                    hashes: copy(&index.hashes)?,
+                    generation: index.generation,
+                }),
+                None => None,
+            },
+            order: match &self.order {
+                Some(order) => Some(super::Order {
+                    indices: copy(&order.indices)?,
+                    revision: order.revision,
+                }),
+                None => None,
+            },
+            next: self.next,
+            usable: self.usable,
+        })
     }
 
     fn dense(&self, position: usize) -> Option<usize> {
@@ -778,18 +832,21 @@ impl Context {
             return Ok(());
         }
         // Internal constructors can assemble a dictionary directly from builtin names.
-        let keys: Vec<_> = self
-            .stored_entries(dict)
-            .iter()
-            .map(|&(key, _)| key)
-            .collect();
-        let hashes = keys
-            .into_iter()
-            .map(|key| self.dictionary_hash(key))
-            .collect::<Result<Vec<_>>>()?;
+        let entries = self.stored_entries(dict);
+        let mut keys = Vec::new();
+        keys.try_reserve_exact(entries.len())
+            .map_err(|_| crate::Error::memory_error())?;
+        keys.extend(entries.iter().map(|&(key, _)| key));
+        let mut hashes = Vec::new();
+        hashes
+            .try_reserve_exact(keys.len())
+            .map_err(|_| crate::Error::memory_error())?;
+        for key in keys {
+            hashes.push(self.dictionary_hash(key)?);
+        }
         let entries = self.stored_entries_mut(dict);
         let size = (entries.usable + 1).next_power_of_two();
-        entries.index = Some(Index::new(hashes, entries.positions.as_deref(), size, 0));
+        entries.index = Some(Index::new(hashes, entries.positions.as_deref(), size)?);
         Ok(())
     }
 
@@ -799,19 +856,23 @@ impl Context {
         key: Id,
         known_hash: Option<i64>,
     ) -> Result<(i64, Option<usize>)> {
+        let roots = self.heap.temporary_mark();
         self.heap.keep(dict);
         self.heap.keep(key);
-        let mut lookup = KeyLookup::new(self, dict, key, known_hash)?;
-        let mut previous = None;
-        loop {
-            match lookup.next(self, previous) {
-                ControlFlow::Break(found) => return Ok((lookup.hash, found)),
-                ControlFlow::Continue((position, resident)) => {
-                    self.heap.keep(resident);
-                    previous = Some((position, resident, self.dictionary_equal(resident, key)?));
+        let result = KeyLookup::new(self, dict, key, known_hash).and_then(|mut lookup| {
+            let mut previous = None;
+            loop {
+                match lookup.next(self, previous) {
+                    ControlFlow::Break(found) => return Ok((lookup.hash, found)),
+                    ControlFlow::Continue((position, resident)) => {
+                        previous =
+                            Some((position, resident, self.dictionary_equal(resident, key)?));
+                    }
                 }
             }
-        }
+        });
+        self.heap.release_temporaries_since(roots);
+        result
     }
 
     /// Insert a cache entry and identify the actual resident after reentrant comparison.

@@ -146,6 +146,25 @@ def snapshot(directory: Path) -> dict:
     return result
 
 
+def check_fnmatch_allocation(binary: Path) -> None:
+    import resource
+    import select
+
+    with subprocess.Popen([binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE) as child:
+        try:
+            assert select.select([child.stdout], [], [], 30)[0]
+            assert child.stdout.readline() == b"ready\n"
+            pages = int(Path(f"/proc/{child.pid}/statm").read_text().split()[0])
+            cap = pages * os.sysconf("SC_PAGESIZE") + 512 * 1024
+            resource.prlimit(child.pid, resource.RLIMIT_AS, (cap, cap))
+            stdout, stderr = child.communicate(b"x", timeout=30)
+        finally:
+            child.kill()
+    observed = (child.returncode, stdout, stderr)
+    assert observed == (0, b"refused\nTrue\n", b""), observed
+
+
 def main() -> None:
     sources = [(p.stem, p) for p in sorted(FIXTURES.glob("*.py"))]
     sources.extend((p.parent.name, p) for p in sorted(FIXTURES.glob("*/main.py")))
@@ -229,6 +248,15 @@ def main() -> None:
                 files.check_result(actual, None, "invalid filename boundary")
                 assert actual.stdout == (b"invalid directory entry\ninvalid glob entry\n" * 4 + b"True\n"), actual.stdout
                 binary.unlink()
+                checks += 1
+        if sys.platform == "linux" and not args.sanitize and (
+            not args.fixture or "fnmatch_py314" in args.fixture
+        ):
+            for level in args.opt_levels:
+                binary = Path(directory) / f"fnmatch-allocation-O{level}"
+                subprocess.run([compiler, "build", FIXTURES / "fnmatch_allocation/probe.py",
+                                *flags, "--opt-level", level, "-o", binary], check=True)
+                check_fnmatch_allocation(binary)
                 checks += 1
     print(f"Passed {checks} path checks ({len(REJECTED) + 1} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize}; CPython 3.14+ oracle)")
 

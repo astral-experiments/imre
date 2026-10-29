@@ -234,7 +234,7 @@ pub(in super::super) fn copy_dict(ctx: &mut Context, object: Id, storage: Id) ->
     }
     if let Some(storage) = ctx.raw_dict_source(object)
         && let Value::Dict(entries) | Value::DefaultDict { entries, .. } = ctx.heap.get(storage)
-        && let Some(entries) = entries.clone_dense()
+        && let Some(entries) = entries.clone_dense()?
     {
         *ctx.heap.get_mut(copy) = Value::Dict(entries);
     } else {
@@ -367,7 +367,7 @@ pub(in super::super) fn remove_dict_item_hashed(
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
         unreachable!("dictionary payload")
     };
-    let (key, value) = entries.remove(index);
+    let (key, value) = entries.remove(index)?;
     ctx.heap.weak_edge_removed(key);
     ctx.heap.weak_edge_removed(value);
     Ok(Some(value))
@@ -387,7 +387,7 @@ pub(in super::super) fn set_member(
         } = ctx.heap.get(value)
     {
         ctx.alloc(Value::Set {
-            entries: entries.clone(),
+            entries: entries.try_clone()?,
             frozen: true,
         })
     } else {
@@ -425,7 +425,7 @@ fn merge_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
         let Value::Set { entries, .. } = ctx.heap.get(source) else {
             unreachable!()
         };
-        let copy = entries.clone();
+        let copy = entries.try_clone()?;
         let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
             unreachable!()
         };
@@ -535,10 +535,27 @@ fn fromkeys(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         }
     } else {
         let iterator = ctx.iterator(keys)?;
+        let roots = ctx.heap.temporary_mark();
         ctx.heap.keep(iterator);
-        while let Some(key) = ctx.next_item(iterator)? {
-            ctx.put_item(result, key, value)?;
-        }
+        ctx.heap.keep(value);
+        let step = ctx.heap.temporary_mark();
+        let mut limit = ctx.heap.streaming_collection_limit();
+        let populated: Result<()> = (|| {
+            loop {
+                ctx.heap.release_temporaries_since(step);
+                let due = ctx.heap.prepare_streaming_collection(limit);
+                ctx.collect_garbage();
+                if due {
+                    limit = ctx.heap.streaming_collection_limit();
+                }
+                let Some(key) = ctx.next_item(iterator)? else {
+                    return Ok(());
+                };
+                ctx.put_item(result, key, value)?;
+            }
+        })();
+        ctx.heap.release_temporaries_since(roots);
+        populated?;
     }
     Ok(result)
 }
@@ -876,7 +893,7 @@ pub(super) fn method(
             else {
                 return Err(type_error("descriptor 'copy' requires a 'set' object"));
             };
-            let entries = entries.clone();
+            let entries = entries.try_clone()?;
             Ok(ctx.alloc(Value::Set {
                 entries,
                 frozen: false,
@@ -918,7 +935,7 @@ pub(super) fn method(
                 let Value::Set { entries, .. } = ctx.heap.get_mut(receiver) else {
                     unreachable!()
                 };
-                let (key, value) = entries.remove(index);
+                let (key, value) = entries.remove(index)?;
                 ctx.heap.weak_edge_removed(key);
                 ctx.heap.weak_edge_removed(value);
             }

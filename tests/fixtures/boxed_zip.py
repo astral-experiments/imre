@@ -1,4 +1,13 @@
 def current():
+    nested = [7]
+    for _ in range(2048):
+        nested = zip(nested, strict=True)
+    nested = iter(nested)
+    value = next(nested)
+    for _ in range(2048):
+        value = value[0]
+    assert value == 7 and next(nested, None) is None
+
     values = [1, 2, 3]
     rows = []
     for number, label in zip(values, ("a", "b"), strict=True):
