@@ -283,19 +283,20 @@ impl Operation {
 impl Context {
     pub(in crate::dynamic) fn length_hint(&mut self, value: Id, default: Option<Id>) -> Result<Id> {
         // PyObject_LengthHint parses the default before consulting either protocol.
+        let size_overflow = || {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        };
         let default = if let Some(id) = default {
-            self.index_integer(id)?.to_i64().ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    "Python int too large to convert to C ssize_t",
-                )
-            })?
+            self.index_integer(id)?.to_i64().ok_or_else(size_overflow)?
         } else {
             0
         };
         match builtins::call(self, "len", &[value], &[]) {
             Ok(length) => return Ok(length),
-            Err(error) if error.kind == "TypeError" => {}
+            Err(error) if self.is_builtin_error(&error, "TypeError") => {}
             Err(error) => return Err(error),
         }
         if let Value::ReverseSequence { source, remaining } = *self.heap.get(value) {
@@ -308,21 +309,12 @@ impl Context {
             return Ok(self.int(hint as i64));
         }
         if matches!(self.heap.get(value), Value::Iterator { .. }) {
-            let length = i64::try_from(self.iterator_remaining(value)?.len()).map_err(|_| {
-                Error::new(
-                    "OverflowError",
-                    "Python int too large to convert to C ssize_t",
-                )
-            })?;
+            let length = i64::try_from(self.iterator_remaining(value)?.len())
+                .map_err(|_| size_overflow())?;
             return Ok(self.int(length));
         }
         if let Value::RangeIterator(iter) = self.heap.get(value) {
-            let n = iter.remaining.to_i64().ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    "Python int too large to convert to C ssize_t",
-                )
-            })?;
+            let n = iter.remaining.to_i64().ok_or_else(size_overflow)?;
             return Ok(self.int(n));
         }
         if let Value::DictIterator(iter) = self.heap.get(value) {
@@ -334,22 +326,24 @@ impl Context {
         if let Some(hint) = self.bound_slot(value, "__length_hint__")? {
             let hint = match self.call(hint, vec![], vec![]) {
                 Ok(hint) => hint,
-                Err(error) if error.kind == "TypeError" => return Ok(self.int(default)),
+                Err(error) if self.is_builtin_error(&error, "TypeError") => {
+                    return Ok(self.int(default));
+                }
                 Err(error) => return Err(error),
             };
             if hint == super::super::value::NOT_IMPLEMENTED {
                 return Ok(self.int(default));
             }
-            if !matches!(self.heap.get(hint), Value::Int(_) | Value::Bool(_)) {
-                return Err(Error::new(
+            let integer = self.as_int(hint).map_err(|_| {
+                Error::new(
                     "TypeError",
                     format!(
                         "__length_hint__ must be an integer, not {}",
                         self.type_name(hint)
                     ),
-                ));
-            }
-            let n = self.as_integer(hint)?;
+                )
+            })?;
+            let n = integer.to_i64().ok_or_else(size_overflow)?;
             if n < 0 {
                 return Err(Error::new(
                     "ValueError",

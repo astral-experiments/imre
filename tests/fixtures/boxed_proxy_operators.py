@@ -65,6 +65,31 @@ def current():
     print(op.matmul(Refuse(), Right()), op.imatmul(Refuse(), Right()))
     print(op.neg(9), op.pos(-9), op.invert(9), op.index(Number()))
     print(op.length_hint([9]), op.length_hint(Number()), op.length_hint(Unsized(), Number()))
+    class Count(int):
+        def __index__(self):
+            raise AssertionError("use stored value")
+
+    class Unavailable(TypeError):
+        pass
+
+    class Hinted:
+        def __init__(self, value):
+            self.value = value
+
+        def __len__(self):
+            raise Unavailable()
+
+        def __length_hint__(self):
+            if self.value is None:
+                raise Unavailable()
+            return self.value
+
+    print(op.length_hint(Hinted(Count(3))), op.length_hint(Hinted(None), 9))
+    for value in (Count(1 << 80), -(1 << 80)):
+        try:
+            op.length_hint(Hinted(value))
+        except OverflowError as error:
+            print(error.args)
     values = [1, 2]
     alias = values
     print(op.iadd(values, (3, 4)) is alias, op.imul(values, 2) is alias, values)
