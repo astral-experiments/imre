@@ -108,7 +108,8 @@ pub(crate) struct Context {
     slot_depth: usize,
 }
 
-fn copy_ids(values: &[Id]) -> Result<Vec<Id>> {
+/// Copy IDs or dictionary entry pairs while preserving a catchable allocation failure.
+fn copy_ids<T: Copy>(values: &[T]) -> Result<Vec<T>> {
     let mut copied = Vec::new();
     copied
         .try_reserve_exact(values.len())
