@@ -150,6 +150,29 @@ def mapping_patterns():
 
 def current():
     from collections import defaultdict
+    from types import ModuleType
+
+    class Hashed:
+        def __hash__(self):
+            return 7
+
+    class ExceptionKey(ValueError, Hashed):
+        pass
+
+    class Unhashable:
+        __hash__ = None
+
+    class ModuleKey(ModuleType, Unhashable):
+        pass
+
+    key = ExceptionKey()
+    assert key.__hash__() == hash(key) == 7
+    try:
+        {ModuleKey("example"): 1}
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("inserted an unhashable module")
 
     class Display(defaultdict):
         pass

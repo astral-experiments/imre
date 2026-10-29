@@ -23,8 +23,10 @@ impl Context {
             return self
                 .find_in_mro(class, |base| {
                     let slot = self.own_class_attr(base, name);
-                    (slot.is_some() || matches!(self.heap.get(base), Value::Native(_)))
-                        .then_some(slot)
+                    // Modules and exceptions inherit object.__hash__ after any intervening mixins.
+                    let native_hash = matches!(self.heap.get(base), Value::Native(kind)
+                        if kind != "module" && !builtins::is_exception(kind));
+                    (slot.is_some() || native_hash).then_some(slot)
                 })
                 .flatten();
         }
