@@ -2854,9 +2854,11 @@ impl Context {
             Some(iterator)
         };
         let mark = self.heap.temporary_mark();
+        let mut limit = self.heap.streaming_collection_limit();
         let mut position = 0;
         loop {
             let (key, hash) = if let Some(iterator) = iterator {
+                self.collect_streaming_garbage(&mut limit);
                 let Some(key) = self.next_item(iterator)? else {
                     break;
                 };
