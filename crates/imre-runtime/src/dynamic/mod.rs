@@ -967,7 +967,56 @@ impl Context {
         Ok(None)
     }
 
+    /// Keep yielded values in a traced sequence while discarding each step's other temporaries.
+    fn collect_generator(&mut self, generator: Id, tuple: bool) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
+        self.heap.reserve_temporaries(2)?;
+        self.heap.keep(generator);
+        let buffer = self.alloc(if tuple {
+            Value::Tuple(Vec::new())
+        } else {
+            Value::List(Vec::new())
+        });
+        let step = self.heap.temporary_mark();
+        let result: Result<()> = (|| {
+            while let Some(item) = self.next_item(generator)? {
+                let (Value::List(items) | Value::Tuple(items)) = self.heap.get_mut(buffer) else {
+                    unreachable!()
+                };
+                items
+                    .try_reserve(1)
+                    .map_err(|_| crate::Error::memory_error())?;
+                items.push(item);
+                self.heap.release_temporaries_since(step);
+                self.heap.reserve_slot_or_request_collection();
+                self.collect_garbage();
+            }
+            Ok(())
+        })();
+        self.heap.release_temporaries_since(mark);
+        if let Err(error) = result {
+            for root in error.roots() {
+                self.heap.keep(root);
+            }
+            return Err(error);
+        }
+        self.heap.keep(buffer);
+        Ok(buffer)
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
+        if matches!(self.heap.get(id), Value::Generator { .. }) {
+            let buffer = self.collect_generator(id, false)?;
+            let Value::List(items) = self.heap.get_mut(buffer) else {
+                unreachable!()
+            };
+            let items = std::mem::take(items);
+            self.heap.reserve_temporaries(items.len())?;
+            for &item in &items {
+                self.heap.keep(item);
+            }
+            return Ok(items);
+        }
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
@@ -982,7 +1031,6 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Map { .. }
                 | Value::Filter { .. }
-                | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Count { .. }
