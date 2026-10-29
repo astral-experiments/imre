@@ -64,3 +64,11 @@ def check_receivers(native_range):
             method(obj)
         except TypeError:
             print("rejected")
+
+
+def search_allocation():
+    needle = (3 << 32768) + 1
+    contains = range(1, 14, 3).__contains__
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    print(contains(needle))

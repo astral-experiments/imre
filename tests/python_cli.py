@@ -74,6 +74,13 @@ def check_boxed_call_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, b"caught ()\n1024 1024 True True True\n", b"refused\n",
         ), result
+    source = import_path + "import boxed_reversed_range as fixture; fixture.search_allocation()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags,
+        "IMRE_TEST_CALL_SIZE": "4104",
+        "IMRE_TEST_GETTER_ALLOCATION": "1",
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"False\n", b""), result
     source = import_path + "import boxed_namedtuple_factory as fixture; fixture.layout_read_allocation()"
     result = run(imre, "-B", "-c", source, extra={
         "IMRE_ENCODED_FLAGS": flags,
