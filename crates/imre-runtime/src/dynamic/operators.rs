@@ -2291,6 +2291,7 @@ impl Context {
         target: Id,
         operation: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
+        self.heap.reserve_temporaries(1)?;
         let mark = self.heap.temporary_mark();
         self.heap.keep(target);
         let result = operation(self);
