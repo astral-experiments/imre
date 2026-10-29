@@ -301,11 +301,15 @@ def check_weak_proxy_root_allocation(imre, root, run):
         "-C", f"link-arg={wrapper}",
         "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
-    source = fixtures / "boxed_weak_proxy_root_allocation.py"
-    reference = run(sys.executable, "-B", source, "512")
+    source = root / "weak_proxy_subscripts.py"
+    # A single expression keeps the reads' temporary handles in the same frame.
+    reads = ", ".join(["values[index]"] * 512)
+    fixture = (fixtures / "boxed_weak_proxy_root_allocation.py").read_text()
+    source.write_text(f"{fixture}\ncheck(lambda values, index: ({reads}))\n")
+    reference = run(sys.executable, "-B", source)
     assert reference.returncode == 0, reference
     for ordinal in (0, 1):
-        result = run(imre, "-B", source, "512", extra={"IMRE_ENCODED_FLAGS": flags, "PROXY_ROOT_REFUSE_NTH": str(ordinal)})
+        result = run(imre, "-B", source, extra={"IMRE_ENCODED_FLAGS": flags, "PROXY_ROOT_REFUSE_NTH": str(ordinal)})
         expected = reference.stdout if not ordinal else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
         assert result.returncode == 0 and result.stdout == expected, (ordinal, result, reference)
         refused = any(line.startswith(b"weak_proxy_root_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
