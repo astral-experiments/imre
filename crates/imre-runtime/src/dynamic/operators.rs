@@ -245,13 +245,12 @@ impl Context {
 
     pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
         let Some(hook) = self.bound_slot(id, "__len__")? else {
-            return Ok(self
-                .sequence_payload(id)
-                .map(|(_, items)| items.len())
-                .or_else(|| {
-                    self.string_storage(id)
-                        .map(|text| self.str_value(text).unwrap().chars().count())
-                }));
+            return Ok(match self.heap.get(self.scalar_value(id)) {
+                Value::List(items) | Value::Tuple(items) => Some(items.len()),
+                Value::Str(text) => Some(text.chars().count()),
+                Value::Bytes(data) | Value::ByteArray(data) => Some(data.len()),
+                _ => None,
+            });
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
         let length = self.index_integer(value)?;
