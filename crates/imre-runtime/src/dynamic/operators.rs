@@ -398,8 +398,8 @@ impl Context {
                     break 'current true;
                 }
                 if check_special
-                    && (matches!(self.heap.get(a), Value::Instance { .. })
-                        || matches!(self.heap.get(b), Value::Instance { .. }))
+                    && (self.heap.get(a).instance_class().is_some()
+                        || self.heap.get(b).instance_class().is_some())
                 {
                     self.heap.keep(a);
                     self.heap.keep(b);
@@ -3521,11 +3521,10 @@ impl Context {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
-        let class = |id| match self.heap.get(id) {
-            Value::Instance { class, .. } => Some(*class),
-            _ => None,
-        };
-        let (ac, bc) = (class(a), class(b));
+        let (ac, bc) = (
+            self.heap.get(a).instance_class(),
+            self.heap.get(b).instance_class(),
+        );
         if ac.is_none() && bc.is_none() {
             return Ok(None);
         }
