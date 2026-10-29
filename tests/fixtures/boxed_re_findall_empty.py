@@ -19,3 +19,10 @@ def current():
             match = pattern.fullmatch(text)
             print(pattern.groups, match.groups('missing'), match.group('tail'))
             print(pattern.findall(text), pattern.split(text))
+    for source, text in ((r"(?:a?|b)*", "ab"), (r"(?:a?|b){0,3}", "ba"),
+                         (rb"((a?)*)", b"a"), (r"((a)?|b){1,3}", "b"),
+                         (r"(?P<piece>a?|b)*?b", "ab"), (r"((a*)+){1,2}a", "aa")):
+        pattern = re.compile(source)
+        match = pattern.match(text)
+        print(match.group(), match.groups(), pattern.fullmatch(text).groups())
+        print(pattern.findall(text), pattern.split(text))

@@ -9,8 +9,10 @@ use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
 mod casefold;
+mod progress;
 mod split;
 
+use progress::Matcher;
 pub(super) use split::pattern_split;
 use split::split;
 
@@ -74,8 +76,8 @@ pub(in crate::dynamic) struct Pattern {
     pub(in crate::dynamic) flags: i64,
     bytes: bool,
     engine_source: String,
-    regex: Regex,
-    full: OnceCell<std::result::Result<Regex, String>>,
+    regex: Matcher,
+    full: OnceCell<std::result::Result<Matcher, String>>,
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
 
@@ -114,7 +116,7 @@ impl Pattern {
             - 1
     }
 
-    fn matcher(&self, full: bool) -> std::result::Result<&Regex, String> {
+    fn matcher(&self, full: bool) -> std::result::Result<&Matcher, String> {
         if !full {
             return Ok(&self.regex);
         }
@@ -142,12 +144,23 @@ fn syntax(bytes: bool, flags: i64) -> regex_automata::util::syntax::Config {
         .utf8(!bytes)
 }
 
-fn build_regex(source: &str, bytes: bool, flags: i64) -> std::result::Result<Regex, String> {
-    Regex::builder()
-        .syntax(syntax(bytes, flags))
-        .configure(Regex::config().utf8_empty(!bytes))
-        .build(source)
-        .map_err(|err| err.to_string())
+fn build_regex(source: &str, bytes: bool, flags: i64) -> std::result::Result<Matcher, String> {
+    let syntax = syntax(bytes, flags);
+    let mut builder = Regex::builder();
+    builder
+        .syntax(syntax)
+        .configure(Regex::config().utf8_empty(!bytes));
+    let Ok(hir) = regex_automata::util::syntax::parse_with(source, &syntax) else {
+        // Keep the backend's usual diagnostic if parsing fails.
+        return builder
+            .build(source)
+            .map(Matcher::Standard)
+            .map_err(|err| err.to_string());
+    };
+    let regex = builder
+        .build_from_hir(&hir)
+        .map_err(|err| err.to_string())?;
+    Matcher::new(regex, hir, !bytes)
 }
 
 /// Preserve byte literals outside ASCII in the regex parser's text input.
@@ -439,7 +452,7 @@ fn group_value(data: &[u8], bytes: bool) -> Value {
 
 fn capture(
     ctx: &mut Context,
-    regex: &Regex,
+    regex: &Matcher,
     bytes: bool,
     subject: Id,
     input: impl FnOnce(&[u8]) -> Input<'_>,
