@@ -982,6 +982,24 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     Ok(ctx.text(output))
 }
 
+/// Convert a split limit through the index protocol, treating negative limits as unlimited.
+fn split_limit(ctx: &mut Context, max: Option<Id>) -> Result<usize> {
+    let Some(id) = max else {
+        return Ok(usize::MAX);
+    };
+    let count = ctx
+        .index_integer(id)?
+        .to_i64()
+        .and_then(|value| isize::try_from(value).ok())
+        .ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+    Ok(usize::try_from(count).unwrap_or(usize::MAX))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -1182,22 +1200,7 @@ pub(super) fn method(
     if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
         let [sep, max] =
             super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
-        let limit = match max {
-            None => usize::MAX,
-            Some(id) => {
-                let index = ctx.index_integer(id)?;
-                let count = index
-                    .to_i64()
-                    .and_then(|value| isize::try_from(value).ok())
-                    .ok_or_else(|| {
-                        Error::new(
-                            "OverflowError",
-                            "Python int too large to convert to C ssize_t",
-                        )
-                    })?;
-                usize::try_from(count).unwrap_or(usize::MAX)
-            }
-        };
+        let limit = split_limit(ctx, max)?;
         let separator = sep
             .filter(|&id| id != NONE)
             .map(|id| ctx.bytes_like(id))
@@ -1298,20 +1301,16 @@ pub(super) fn method(
         }
         "split" | "rsplit" => {
             let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;
+            let limit = split_limit(ctx, max)?;
             let sep = sep
                 .filter(|&x| x != NONE)
                 .map(|x| ctx.str_value(x).map(str::to_owned))
                 .transpose()?;
-            let max = max.map(|x| ctx.as_integer(x)).transpose()?.unwrap_or(-1);
             let mut values = Vec::new();
             let reverse = name == "rsplit";
-            split_parts(
-                &source,
-                sep.as_deref(),
-                usize::try_from(max).unwrap_or(usize::MAX),
-                reverse,
-                |field| values.push(ctx.text(field)),
-            )
+            split_parts(&source, sep.as_deref(), limit, reverse, |field| {
+                values.push(ctx.text(field))
+            })
             .map_err(|message| Error::new("ValueError", message))?;
             if reverse {
                 values.reverse();
