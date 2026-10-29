@@ -1253,6 +1253,15 @@ impl Context {
         }
     }
 
+    /// Collect unreachable values before a native iterator step grows the heap.
+    pub(super) fn collect_streaming_garbage(&mut self, limit: &mut usize) {
+        let due = self.heap.prepare_streaming_collection(*limit);
+        self.collect_garbage();
+        if due {
+            *limit = self.heap.streaming_collection_limit();
+        }
+    }
+
     /// Run deferred callbacks when a native loop reaches a collection point.
     pub(super) fn collect_garbage(&mut self) {
         let (heap, roots) = self.heap_and_roots();

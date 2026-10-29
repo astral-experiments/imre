@@ -108,10 +108,12 @@ fn select_item(
     };
     ctx.heap.keep(winner);
     let mut winning_key = rank(ctx, winner)?;
+    let mut limit = ctx.heap.streaming_collection_limit();
     loop {
         ctx.heap.release_temporaries_since(mark);
         ctx.heap.keep(winner);
         ctx.heap.keep(winning_key);
+        ctx.collect_streaming_garbage(&mut limit);
         let Some(item) = next(ctx)? else {
             break;
         };
