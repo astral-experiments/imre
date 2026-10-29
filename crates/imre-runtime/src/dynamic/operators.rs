@@ -2503,9 +2503,7 @@ impl Context {
             }
         } else if let Some(setter) = self.bound_slot(obj, "__setitem__")? {
             self.call(setter, vec![key, val], Vec::new())?;
-        } else if let Some((storage, _)) = self.sequence_payload(obj)
-            && matches!(self.heap.get(storage), Value::List(_))
-        {
+        } else if let Some(storage) = self.mutable_sequence_storage(obj) {
             return self.put_item(storage, key, val);
         } else {
             return Err(Error::new(
@@ -3598,9 +3596,7 @@ impl Context {
             self.call(method, vec![key], vec![])?;
             return Ok(());
         }
-        if let Some((storage, _)) = self.sequence_payload(obj)
-            && matches!(self.heap.get(storage), Value::List(_))
-        {
+        if let Some(storage) = self.mutable_sequence_storage(obj) {
             return self.delete_item(storage, key);
         }
         if let Some(dict) = self.dict_storage(obj) {

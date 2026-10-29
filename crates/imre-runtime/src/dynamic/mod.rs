@@ -159,6 +159,14 @@ impl Context {
         }
     }
 
+    /// Return the native mutable sequence for an inherited subscript assignment or deletion.
+    fn mutable_sequence_storage(&self, object: Id) -> Option<Id> {
+        let storage = self.scalar_value(object);
+        (storage != object
+            && matches!(self.heap.get(storage), Value::List(_) | Value::ByteArray(_)))
+        .then_some(storage)
+    }
+
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
@@ -329,6 +337,15 @@ impl Context {
         )
     }
 
+    /// Select the inherited binary iterator for an exact value or a subclass with native storage.
+    fn binary_iterator_kind(&self, id: Id) -> Option<&'static str> {
+        match self.heap.get(self.scalar_value(id)) {
+            Value::Bytes(_) => Some("bytes_iterator"),
+            Value::ByteArray(_) => Some("bytearray_iterator"),
+            _ => None,
+        }
+    }
+
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
@@ -350,8 +367,6 @@ impl Context {
             }
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
-            Value::Bytes(_) => (id, "bytes_iterator"),
-            Value::ByteArray(_) => (id, "bytearray_iterator"),
             Value::Range(ref range) => {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
             }
@@ -394,6 +409,7 @@ impl Context {
                     ),
                 ));
             }
+            _ if let Some(kind) = self.binary_iterator_kind(id) => (id, kind),
             Value::Instance { .. } if let Some((storage, _)) = self.sequence_payload(id) => {
                 return self.iterator(storage);
             }
@@ -473,7 +489,7 @@ impl Context {
         let Some(sequence) = sequence else {
             return Ok(IteratorSlice::Values(&[]));
         };
-        Ok(match self.heap.get(*sequence) {
+        Ok(match self.heap.get(self.scalar_value(*sequence)) {
             Value::List(values) | Value::Tuple(values) if *reverse => {
                 IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
             }
@@ -964,7 +980,7 @@ impl Context {
                 }
                 Ok(values)
             }
-            Value::Instance { .. } if self.slot(id, "__iter__").is_some() => {
+            Value::Instance { .. } if self.binary_iterator_kind(id).is_some() => {
                 let iter = self.iterator(id)?;
                 self.items(iter)
             }
