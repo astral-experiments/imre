@@ -256,7 +256,7 @@ def check_boxed_json_callback_allocation(imre, root, run):
     # Refuse the singleton arguments for default, float repr, writer and sorting.
     # Native allocation traces distinguish these from earlier output-buffer growth.
     for mode in range(5):
-        target = (2, 2, 3, 2, 7)[mode]
+        target = (2, 2, 3, 2, 6)[mode]
         for ordinal in (0, target, 37):
             result = run(executable, str(mode), extra={
                 "IMRE_TEST_JSON_CALLBACK_NTH": str(ordinal),
