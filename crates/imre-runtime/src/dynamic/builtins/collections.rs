@@ -485,6 +485,11 @@ pub(super) fn construct(
     {
         return Ok(*one);
     }
+    if let [source] = args
+        && matches!(ctx.heap.get(*source), Value::Generator { .. })
+    {
+        return ctx.collect_generator(*source, name == "tuple");
+    }
     let items = args
         .first()
         .map(|&it| ctx.items(it))
