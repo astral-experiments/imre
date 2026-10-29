@@ -494,7 +494,12 @@ pub(super) fn call(
             if function.ends_with("count") {
                 Ok(ctx.int(refs.len() as i64))
             } else {
-                Ok(ctx.alloc(Value::List(refs.to_vec())))
+                let mut snapshot = Vec::new();
+                snapshot
+                    .try_reserve_exact(refs.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                snapshot.extend_from_slice(refs);
+                Ok(ctx.alloc(Value::List(snapshot)))
             }
         }
         "_weakref._remove_dead_weakref" => {
