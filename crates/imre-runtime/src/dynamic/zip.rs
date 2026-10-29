@@ -1,6 +1,42 @@
 use super::value::{Error, Id, Result, Value};
 use super::{Context, NONE};
 
+/// One in-progress row of a possibly nested zip or map.
+struct PendingRow {
+    inputs: std::rc::Rc<[Id]>,
+    function: Option<Id>,
+    strict: bool,
+    index: usize,
+    values: Vec<Id>,
+    exhausted: bool,
+}
+
+impl PendingRow {
+    fn from_iterator(value: &Value) -> Result<Option<Self>> {
+        let (inputs, strict, function) = match value {
+            Value::Zip { inputs, strict } => (inputs, *strict, None),
+            Value::Map {
+                inputs,
+                strict,
+                function,
+            } => (inputs, *strict, Some(*function)),
+            _ => return Ok(None),
+        };
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(inputs.len())
+            .map_err(|_| crate::Error::allocation())?;
+        Ok(Some(Self {
+            inputs: inputs.clone(),
+            strict,
+            function,
+            index: 0,
+            values,
+            exhausted: false,
+        }))
+    }
+}
+
 impl Context {
     /// Acquire inputs left to right at construction and defer pulls and calls until iteration.
     pub(super) fn zip_or_map(
@@ -59,44 +95,69 @@ impl Context {
 
     /// Pull one row, preserving source errors and the strict mismatch probe order.
     pub(super) fn next_zip_or_map(&mut self, id: Id) -> Result<Option<Id>> {
-        let (inputs, strict, function, name) = match self.heap.get(id) {
-            Value::Zip { inputs, strict } => (inputs.clone(), *strict, None, "zip"),
-            Value::Map {
-                inputs,
-                strict,
-                function,
-            } => (inputs.clone(), *strict, Some(*function), "map"),
-            _ => unreachable!("zip or map iterator"),
-        };
-        if inputs.is_empty() {
+        let mut row = PendingRow::from_iterator(self.heap.get(id))?.expect("zip or map iterator");
+        if row.inputs.is_empty() {
             return Ok(None);
         }
-        let mut row = Vec::with_capacity(inputs.len());
-        for (index, &input) in inputs.iter().enumerate() {
-            let value = if strict {
-                self.next_item(input)?
-            } else {
-                self.next_result(input)?
-            };
-            let Some(value) = value else {
-                if strict {
-                    if index != 0 {
-                        return Err(length_mismatch(name, index, "shorter"));
-                    }
-                    for (other, &input) in inputs.iter().enumerate().skip(1) {
-                        if self.next_item(input)?.is_some() {
-                            return Err(length_mismatch(name, other, "longer"));
-                        }
-                    }
+        let mut parents = Vec::new();
+        'pull: loop {
+            let input = row.inputs[row.index];
+            let mut result = match PendingRow::from_iterator(self.heap.get(input))? {
+                Some(child) if !child.inputs.is_empty() => {
+                    parents
+                        .try_reserve(1)
+                        .map_err(|_| crate::Error::allocation())?;
+                    parents.push(row);
+                    row = child;
+                    continue;
                 }
-                return Ok(None);
+                Some(_) => Ok(None),
+                None => self.next_result(input),
             };
-            self.heap.keep(value);
-            row.push(value);
-        }
-        match function {
-            Some(function) => self.call(function, row, Vec::new()).map(Some),
-            None => Ok(Some(self.alloc(Value::Tuple(row)))),
+            loop {
+                // Strict cursors handle StopIteration from both a leaf and a child map callback.
+                let value = match result {
+                    Ok(value) => value,
+                    Err(error) if row.strict && self.is_stop_iteration(&error) => None,
+                    Err(error) => {
+                        let Some(parent) = parents.pop() else {
+                            return Err(error);
+                        };
+                        row = parent;
+                        result = Err(error);
+                        continue;
+                    }
+                };
+                let name = if row.function.is_some() { "map" } else { "zip" };
+                if let Some(value) = value {
+                    if row.exhausted {
+                        return Err(length_mismatch(name, row.index, "longer"));
+                    }
+                    self.heap.reserve_temporaries(1)?;
+                    self.heap.keep(value);
+                    row.values.push(value);
+                } else {
+                    if !row.exhausted && row.strict && row.index != 0 {
+                        return Err(length_mismatch(name, row.index, "shorter"));
+                    }
+                    row.exhausted = true;
+                }
+                row.index += 1;
+                if row.index < row.inputs.len() && (!row.exhausted || row.strict) {
+                    continue 'pull;
+                }
+                result = if row.exhausted {
+                    Ok(None)
+                } else if let Some(function) = row.function {
+                    self.call(function, row.values, Vec::new()).map(Some)
+                } else {
+                    Ok(Some(self.alloc(Value::Tuple(row.values))))
+                };
+                let Some(parent) = parents.pop() else {
+                    return result;
+                };
+                row = parent;
+            }
         }
     }
 
