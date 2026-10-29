@@ -136,7 +136,12 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
             ctx.heap.reserve_temporaries(1)?;
             ctx.heap.keep(iter);
             let held = ctx.heap.temporary_mark();
-            while let Some(value) = ctx.next_result(iter)? {
+            let mut limit = ctx.heap.streaming_collection_limit();
+            loop {
+                ctx.collect_streaming_garbage(&mut limit);
+                let Some(value) = ctx.next_result(iter)? else {
+                    break;
+                };
                 ctx.heap.reserve_temporaries(1)?;
                 ctx.heap.keep(value);
                 append(ctx, value)?;
