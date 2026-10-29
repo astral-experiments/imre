@@ -149,6 +149,14 @@ fn list_sort(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id
     let Value::List(live) = ctx.heap.get_mut(receiver) else {
         unreachable!()
     };
+    let count = live.len();
+    ctx.heap.reserve_temporaries(count)?;
+    ctx.sorting_lists
+        .try_reserve(1)
+        .map_err(|_| crate::Error::memory_error())?;
+    let Value::List(live) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
     let mut values = std::mem::take(live);
     for &value in &values {
         ctx.heap.keep(value);
@@ -183,6 +191,7 @@ fn sort_list_items(
             .map_err(|_| Error::new("MemoryError", ""))?;
         for &value in values.iter() {
             let sort_key = ctx.call(key, vec![value], vec![])?;
+            ctx.heap.reserve_temporaries(1)?;
             ctx.heap.keep(sort_key);
             keyed.push((sort_key, value));
         }
