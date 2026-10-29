@@ -284,6 +284,8 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
+pub(super) const BYTEARRAY_METHODS: &[&str] = &["__repr__", "append", "clear", "extend"];
+
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
     "__repr__",
@@ -347,7 +349,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
-        Value::ByteArray(_) if matches!(attr, "__repr__" | "decode" | "extend" | "translate") => {
+        Value::ByteArray(_)
+            if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
+        {
             "bytearray"
         }
         Value::NamedTuple {
@@ -852,21 +856,8 @@ pub(super) fn call(
             }
             "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
-            "bytearray" if method == "extend" => {
-                positional(name, kwargs)?;
-                arity(name, args, 2, 2)?;
-                let data = text::bytes_from_iterable(ctx, args[1])?;
-                if !data.is_empty() {
-                    ctx.check_bytearray_resize(args[0])?;
-                }
-                let Value::ByteArray(target) = ctx.heap.get_mut(args[0]) else {
-                    return Err(type_error("expected bytearray"));
-                };
-                target
-                    .try_reserve(data.len())
-                    .map_err(|_| Error::new("MemoryError", "bytearray is too large"))?;
-                target.extend(data);
-                Ok(NONE)
+            "bytearray" if matches!(method, "append" | "clear" | "extend") => {
+                text::mutate_bytearray(ctx, name, method, args, kwargs)
             }
             "tuple" if method == "__getitem__" => {
                 let (&receiver, args) = args.split_first().ok_or_else(|| {

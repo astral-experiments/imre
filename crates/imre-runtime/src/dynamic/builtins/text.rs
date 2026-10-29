@@ -229,9 +229,68 @@ pub(super) fn construct(
     }
 }
 
+/// Mutate the underlying byte storage, including for inherited bytearray methods.
+pub(super) fn mutate_bytearray(
+    ctx: &mut Context,
+    name: &str,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(type_error(format!(
+            "unbound method {name}() needs an argument"
+        )));
+    };
+    let storage = ctx.scalar_value(receiver);
+    let Value::ByteArray(data) = ctx.heap.get(storage) else {
+        return Err(type_error(format!(
+            "descriptor '{method}' for 'bytearray' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        )));
+    };
+    if method == "clear" {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!("{name}() takes no keyword arguments")));
+        }
+        if !args.is_empty() {
+            return Err(type_error(format!(
+                "{name}() takes no arguments ({} given)",
+                args.len()
+            )));
+        }
+        if !data.is_empty() {
+            ctx.check_bytearray_resize(storage)?;
+            let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            data.clear();
+        }
+        return Ok(NONE);
+    }
+    let argument = one_positional_arg(name, args, kwargs)?;
+    let byte;
+    let extra = if method == "append" {
+        byte = [ctx.byte_value(argument)?];
+        Cow::Borrowed(byte.as_slice())
+    } else {
+        Cow::Owned(bytes_from_iterable(ctx, argument)?)
+    };
+    if !extra.is_empty() {
+        ctx.check_bytearray_resize(storage)?;
+        let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        data.try_reserve(extra.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        data.extend_from_slice(&extra);
+    }
+    Ok(NONE)
+}
+
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
-    if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(obj) {
-        return Ok(data.clone());
+    if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(ctx.scalar_value(obj)) {
+        return super::super::copy_ids(data);
     }
     let iter = ctx.iterator(obj)?;
     ctx.heap.keep(iter);
