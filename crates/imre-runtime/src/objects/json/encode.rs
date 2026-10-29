@@ -316,9 +316,7 @@ impl Encoder<'_> {
 
     #[inline]
     fn append(&mut self, text: &str) -> Result<(), Error> {
-        self.reserve(text.len())?;
-        self.output.push_str(text);
-        Ok(())
+        write_fragment(&mut self.output, text)
     }
 
     fn integer(&mut self, value: &Int) -> Result<(), Error> {
@@ -940,6 +938,14 @@ pub unsafe extern "C" fn imre_json_dump(
         })
     };
     finish(result.map(|_| 1), 0)
+}
+
+/// Append an encoded token or separator after reserving space for its bytes.
+#[inline]
+pub(crate) fn write_fragment(output: &mut String, text: &str) -> Result<(), Error> {
+    reserve_output(output, text.len())?;
+    output.push_str(text);
+    Ok(())
 }
 
 #[inline]
