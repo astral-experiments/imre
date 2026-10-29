@@ -950,6 +950,12 @@ except ImportError:
             compare("-IB", "-c", imports + "arithmetic.full_device()")
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_urlsafe_base64.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.check()")
+        digits = fixtures / "json_integer_digit_limit.py"
+        for limit in ("640", "0"):
+            digit_env = {"PYTHONINTMAXSTRDIGITS": limit}
+            compare("-B", digits, extra=digit_env)
+            compare("-B", digits, extra=digit_env, native_args=("run", digits, "--runtime-imports", "--quiet"))
+
         checked = run(
             imre,
             "-IB",
