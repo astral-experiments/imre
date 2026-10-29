@@ -234,7 +234,7 @@ pub(in super::super) fn copy_dict(ctx: &mut Context, object: Id, storage: Id) ->
     }
     if let Some(storage) = ctx.raw_dict_source(object)
         && let Value::Dict(entries) | Value::DefaultDict { entries, .. } = ctx.heap.get(storage)
-        && let Some(entries) = entries.clone_dense()
+        && let Some(entries) = entries.clone_dense()?
     {
         *ctx.heap.get_mut(copy) = Value::Dict(entries);
     } else {
@@ -387,7 +387,7 @@ pub(in super::super) fn set_member(
         } = ctx.heap.get(value)
     {
         ctx.alloc(Value::Set {
-            entries: entries.clone(),
+            entries: entries.try_clone()?,
             frozen: true,
         })
     } else {
@@ -425,7 +425,7 @@ fn merge_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
         let Value::Set { entries, .. } = ctx.heap.get(source) else {
             unreachable!()
         };
-        let copy = entries.clone();
+        let copy = entries.try_clone()?;
         let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
             unreachable!()
         };
@@ -876,7 +876,7 @@ pub(super) fn method(
             else {
                 return Err(type_error("descriptor 'copy' requires a 'set' object"));
             };
-            let entries = entries.clone();
+            let entries = entries.try_clone()?;
             Ok(ctx.alloc(Value::Set {
                 entries,
                 frozen: false,
