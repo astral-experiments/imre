@@ -44,6 +44,10 @@ impl Parser<'_> {
     }
 
     fn suite(&mut self, body: ast::Suite) -> Result<Id> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.suite_inner(body))
+    }
+
+    fn suite_inner(&mut self, body: ast::Suite) -> Result<Id> {
         let values = body
             .into_iter()
             .map(|s| self.statement(s))
