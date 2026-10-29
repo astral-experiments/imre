@@ -88,7 +88,7 @@ mod source_modules;
 pub(crate) mod stdio;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
-pub(crate) use stdlib::format_fixed_float;
+pub(crate) use stdlib::{format_fixed_float, replace_text};
 mod string_enums;
 mod structs;
 mod tempdirs;

@@ -608,6 +608,8 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     let current = ctx.alloc(Value::Context(Default::default()));
     ctx.contexts.push(current);
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
+    // Resolving the handler after an allocation failure must not grow the builtin cache.
+    ctx.builtin("MemoryError");
     Box::into_raw(Box::new(ctx))
 }
 
@@ -1407,6 +1409,22 @@ mod tests {
         assert!(encoded.starts_with("k=0&k=1&"));
         assert!(encoded.ends_with("k=16383"));
         assert!(probe.upgrade().is_none());
+    }
+
+    #[test]
+    fn memory_error_is_ready_before_python_runs() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the arguments outlive initialization, which returns an owned context.
+        let ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+
+        for name in [
+            "MemoryError",
+            "MemoryError.__new__",
+            "BaseException.__init__",
+        ] {
+            assert!(ctx.builtins.contains_key(name), "{name}");
+        }
     }
 
     #[test]

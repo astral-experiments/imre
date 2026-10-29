@@ -3069,6 +3069,29 @@ impl Context {
     ) -> Result<Id> {
         let target = match self.heap.get(callable) {
             Value::Native(name) => Value::Native(copy_label(name)?),
+            Value::Class {
+                name,
+                scope,
+                ancestors,
+                namedtuple_fields,
+            } => {
+                let mut copied_name = String::new();
+                copied_name
+                    .try_reserve_exact(name.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                copied_name.push_str(name);
+                let mut copied_ancestors = Vec::new();
+                copied_ancestors
+                    .try_reserve_exact(ancestors.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                copied_ancestors.extend_from_slice(ancestors);
+                Value::Class {
+                    name: copied_name,
+                    scope: *scope,
+                    ancestors: copied_ancestors,
+                    namedtuple_fields: namedtuple_fields.clone(),
+                }
+            }
             value => value.clone(),
         };
         match target {
@@ -3494,7 +3517,9 @@ impl Context {
                 self.heap
                     .reserve_temporaries(kwargs.len().saturating_add(4))?;
                 let module = copy_label(&self.scope_data(scope).module)?;
-                let local = self.scope(module, Some(scope));
+                let closure = allocator_api2::boxed::Box::try_new(value::ClosureScope::default())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                let local = self.scope_with_closure(module, Some(scope), closure);
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
                     .map_err(|e| Error::new("SystemError", e.to_string()))?;
                 let names = |key: &str| -> Vec<String> {

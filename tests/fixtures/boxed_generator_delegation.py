@@ -173,7 +173,16 @@ def assigning_cleared_values(source, targets, starred):
     yield targets.values
 
 
+def delegate(child):
+    yield from child
+
+
 def current():
+    chain = iter([7, 8])
+    for _ in range(96):
+        chain = delegate(chain)
+    assert list(chain) == [7, 8]
+
     try:
         first, second = three_then_error()
     except ValueError as error:

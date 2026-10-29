@@ -141,6 +141,32 @@ def check_poll_result_allocation(imre, root, run):
                 ), (optimization, count, nth, result)
 
 
+def check_select_input_root_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "refuse_select_input_roots.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_select_input_roots.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    source = fixtures / "boxed_select_input_root_allocation.py"
+    for optimization in (0, 3):
+        executable = root / f"select-input-roots-O{optimization}"
+        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+                    extra={"IMRE_ENCODED_FLAGS": flags})
+        assert built.returncode == 0, built
+        for shape in (1, 2):
+            arguments = (str(shape), "1023")
+            reference = run(sys.executable, "-B", source, *arguments)
+            assert (reference.returncode, reference.stdout, reference.stderr) == (0, b"ok\nTrue\nTrue\n", b""), reference
+            for size, nth in ((1024, 0), (1024, 2), (8192, 2)):
+                result = run(executable, *arguments, extra={"SELECT_ROOT_REFUSE_BYTES": str(size), "SELECT_ROOT_REFUSE_NTH": str(nth)})
+                assert (result.returncode, result.stdout, result.stderr) == (
+                    0, b"MemoryError\nTrue\n" if nth else reference.stdout,
+                    b"select_input_root_allocation_refused\n" if nth else b"",
+                ), (optimization, shape, size, nth, result)
+
+
 def check_raise_site_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "exceptions" / "refuse_raise_site.c"
     wrapper = root / "refuse_raise_site.o"
@@ -256,6 +282,18 @@ def check_boxed_call_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, expected, b"refused\n" if ordinal else b"",
         ), (ordinal, result)
+
+    source = import_path + "import boxed_call_labels as fixture; fixture.allocation()"
+    for size in (0, 152):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        expected = (b"caught ()\n" if size else b"value 3\n") + b"retry 3\n"
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
+        ), (size, result)
 
     imports = import_path + "import boxed_itemgetter as fixture; "
     # The first equal-sized allocation copies the call's positional arguments.
@@ -552,6 +590,30 @@ def check_argument_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
 
 
+def check_class_metadata_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "class_metadata_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "refuse_class_metadata.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+    ])
+    for shape in range(7):
+        reference = run(sys.executable, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape))
+        assert reference.returncode == 0, reference
+        for target in [0, 1, 2, "all"]:
+            extra = {"IMRE_ENCODED_FLAGS": flags, "CLASS_METADATA_REFUSE_NTH": str(target if target != "all" else 0)}
+            if target == "all":
+                extra["CLASS_METADATA_REFUSE_ALL"] = "1"
+            result = run(imre, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape), extra=extra)
+            assert result.returncode == 0 and b"metadata True True\n" in result.stdout, result
+            expected = reference.stdout if not target else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            assert result.stdout == expected, (result, reference)
+            if target:
+                assert result.stdout.startswith(b"kind MemoryError\n"), result
+                assert b"class_metadata_allocation " in result.stderr and b" 1\n" in result.stderr, result
+
+
 
 def check_marshal_allocation(exe):
     import resource
@@ -598,10 +660,12 @@ def main():
         if sys.platform.startswith("linux"):
             check_ffi_result_roots(imre, root, run)
             check_select_result_allocation(imre, root, run)
+            check_select_input_root_allocation(imre, root, run)
             check_poll_result_allocation(imre, root, run)
             flags = call_allocation_flags(root)
             check_callable_label_allocation(imre, root, run)
             check_argument_allocation(imre, run, flags)
+            check_class_metadata_allocation(imre, root, run)
             check_raise_site_allocation(imre, root, run)
             check_context_protocol_allocation(imre, root, run)
             check_fixed_float_allocation(imre, root, run)
@@ -1052,6 +1116,20 @@ def report(text):
                         "--quiet", "--no-cache", "--runtime-imports", "-o", exe)
             assert built.returncode == 0, built.stderr
             check_marshal_allocation(exe)
+        if sys.platform == "linux":
+            import resource
+
+            source = root / "nested.py"
+            source.write_text("".join(" " * i + "if True:\n" for i in range(96)) + " " * 96 + "result = 7\n")
+            executable = root / "source-branches"
+            built = run(imre, "build", fixtures / "boxed_source_lower_stack.py", "--runtime-imports", "-o", executable)
+            assert built.returncode == 0, built.stderr
+
+            def small_stack():
+                resource.setrlimit(resource.RLIMIT_STACK, (96 * 1024, 96 * 1024))
+
+            result = subprocess.run([executable, source], capture_output=True, preexec_fn=small_stack)
+            assert (result.returncode, result.stdout) == (0, b"7\n"), result.stderr
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_literal_eval.py",
