@@ -113,7 +113,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Root => 1,
                     _ => 2,
                 };
-                let operand = self.instruction(format!(
+                let operand = self.checked_pointer(format!(
                     "call ptr @imre_path_prefix(ptr {}, i32 {part})",
                     args[0].value.operand
                 ));
