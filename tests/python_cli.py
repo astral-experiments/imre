@@ -64,6 +64,11 @@ def check_boxed_call_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, b"caught ()\n1025 True\n", b"refused\n",
         ), result
+    source = import_path + "import boxed_json_allocation as fixture; fixture.output_growth()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_SIZE": "4096", "IMRE_TEST_GETTER_ALLOCATION": "1",
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"7386 1231 True\n", b"refused\n"), result
     source = import_path + "import boxed_bytes_add as fixture; fixture.copy_allocation()"
     result = run(imre, "-B", "-c", source, extra={
         "IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_SIZE": "16381", "IMRE_TEST_GETTER_ALLOCATION": "1",
