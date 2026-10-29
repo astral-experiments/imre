@@ -39,6 +39,54 @@ pub struct Capture {
     pub required: bool,
 }
 
+/// Keep a zero-count group's capture slots when regex-syntax simplifies repetitions.
+pub fn preserve_zero_repeat_groups(source: String) -> Result<String, String> {
+    use regex_syntax::ast::{Ast, RepetitionKind::Range, RepetitionRange, parse::Parser};
+
+    if !source.contains('{') || !source.contains('0') || !source.contains('(') {
+        return Ok(source);
+    }
+    let ast = Parser::new().parse(&source).map_err(|e| e.to_string())?;
+    let mut nodes = vec![&ast];
+    let mut edits = Vec::new();
+    while let Some(node) = nodes.pop() {
+        match node {
+            Ast::Repetition(rep) => {
+                if matches!(*rep.ast, Ast::Group(_))
+                    && matches!(
+                        rep.op.kind,
+                        Range(RepetitionRange::Exactly(0) | RepetitionRange::Bounded(0, 0))
+                    )
+                {
+                    // The empty class makes this optional branch unreachable in both
+                    // text and byte regexes, so its captures never participate.
+                    let group = rep.ast.span();
+                    edits.push((group.start.offset, group.start.offset, r"(?:[^\s\S]"));
+                    edits.push((group.end.offset, rep.span.end.offset, ")?"));
+                }
+                nodes.push(&rep.ast);
+            }
+            Ast::Group(group) => nodes.push(&group.ast),
+            Ast::Concat(concat) => nodes.extend(&concat.asts),
+            Ast::Alternation(alt) => nodes.extend(&alt.asts),
+            _ => {}
+        }
+    }
+    if edits.is_empty() {
+        return Ok(source);
+    }
+    edits.sort_unstable();
+    let mut output = String::with_capacity(source.len());
+    let mut copied = 0;
+    for (start, end, replacement) in edits {
+        output.push_str(&source[copied..start]);
+        output.push_str(replacement);
+        copied = end;
+    }
+    output.push_str(&source[copied..]);
+    Ok(output)
+}
+
 /// Translate the supported Python pattern grammar without changing search semantics.
 pub fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, String> {
     translate_with_ascii(pattern, verbose, false)
@@ -110,7 +158,7 @@ pub fn translate_with_ascii(
                 // or nested choice before the branch can change the first match.
                 // An empty character class is an unreachable branch that keeps
                 // these alternatives separate without adding a capture.
-                output.push_str(if may_backtrack { r"|\P{any}|" } else { "|" });
+                output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
                 if let Some(outer) = outer_prefixes.last_mut() {
                     *outer = true; // The enclosing prefix now contains a choice.
                 }
@@ -176,6 +224,7 @@ pub fn translate_with_ascii(
             }
         }
     }
+    let output = preserve_zero_repeat_groups(output)?;
     let hir = regex_syntax::Parser::new()
         .parse(&output)
         .map_err(|e| e.to_string())?;
