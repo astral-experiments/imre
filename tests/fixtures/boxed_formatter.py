@@ -17,6 +17,31 @@ class Child(Tagged):
 
 def current():
     conversion_order()
+    class Text(str):
+        def __add__(self, other): raise AssertionError("unexpected addition")
+        def __radd__(self, other): raise AssertionError("unexpected reflected addition")
+
+    class Field:
+        def __format__(self, spec):
+            specs.append(spec)
+            return result
+
+    class Number(int):
+        def __str__(self):
+            return "count"
+
+    result = Text("formatted")
+    spec = Text("x")
+    specs = []
+    field = Field()
+    assert format(field, spec) is result and specs[0] is spec
+    assert f"{field}" is result and "{}".format(field) is result
+    assert f"[{field}{field}]" == "[formattedformatted]"
+    assert specs == ["x", "", "", "", ""]
+    assert format(Number(31)) == "count" and format(Number(31), "x") == "1f"
+    label = "abc"
+    assert f"{label=}" == "label='abc'" and f"{label=:}" == "label=abc"
+
     class Word:
         def __str__(self):
             return "label"

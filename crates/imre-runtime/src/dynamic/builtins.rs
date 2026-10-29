@@ -1325,14 +1325,7 @@ pub(super) fn call(
         "format" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 2)?;
-            let spec = args
-                .get(1)
-                .map(|&x| ctx.str_value(x))
-                .transpose()?
-                .unwrap_or("")
-                .to_owned();
-            let value = format_value(ctx, args[0], &spec)?;
-            Ok(ctx.text(value))
+            format_value(ctx, args[0], args.get(1).copied())
         }
         "classmethod" => {
             positional(name, kwargs)?;

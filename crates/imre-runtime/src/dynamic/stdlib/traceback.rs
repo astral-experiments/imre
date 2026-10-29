@@ -468,20 +468,6 @@ fn displayed_label(ctx: &mut Context, label: Id) -> Result<&str> {
     if matches!(ctx.heap.get(label), Value::Str(_)) {
         return ctx.str_value(label);
     }
-    let displayed = if let Some(method) = ctx.bound_slot(label, "__format__")? {
-        let spec = label_literal(ctx, "")?;
-        ctx.call(method, super::super::copy_ids(&[spec])?, Vec::new())?
-    } else {
-        super::super::builtins::call(ctx, "format", &[label], &[])?
-    };
-    if ctx.string_storage(displayed).is_none() {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "__format__ must return a str, not {}",
-                ctx.type_name(displayed)
-            ),
-        ));
-    }
+    let displayed = super::super::builtins::format_value(ctx, label, None)?;
     ctx.str_value(displayed)
 }

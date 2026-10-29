@@ -128,15 +128,20 @@ impl Function<'_, '_> {
                 Body::Expression(&v.body),
             ),
             ast::Expr::FString(v) => {
-                let mut result = self.text("");
+                let mut parts = Vec::new();
                 for part in v.value.iter() {
-                    let part = match part {
-                        ast::FStringPartRef::Literal(lit) => self.text(&lit.value),
-                        ast::FStringPartRef::FString(s) => self.format_parts(&s.elements),
-                    };
-                    result = self.op("+", &[&result, &part]);
+                    match part {
+                        ast::FStringPartRef::Literal(lit) => {
+                            if !lit.value.is_empty() {
+                                parts.push(self.text(&lit.value));
+                            }
+                        }
+                        ast::FStringPartRef::FString(s) => {
+                            self.format_parts(&s.elements, &mut parts)
+                        }
+                    }
                 }
-                result
+                self.join_format_parts(parts)
             }
             ast::Expr::Generator(v) => {
                 if v.generators.iter().any(|generator| generator.is_async) {
@@ -261,31 +266,49 @@ impl Function<'_, '_> {
         kwargs
     }
 
-    fn format_parts(&mut self, elements: &[ast::InterpolatedStringElement]) -> String {
-        let mut out = self.text("");
+    /// Evaluate the fields and their conversions in source order before joining their text.
+    fn format_parts(
+        &mut self,
+        elements: &[ast::InterpolatedStringElement],
+        parts: &mut Vec<String>,
+    ) {
         for element in elements {
             let value = match element {
+                ast::InterpolatedStringElement::Literal(lit) if lit.value.is_empty() => continue,
                 ast::InterpolatedStringElement::Literal(lit) => self.text(&lit.value),
                 ast::InterpolatedStringElement::Interpolation(field) => {
                     if let Some(debug) = &field.debug_text {
-                        let prefix = self.text(debug.as_str());
-                        out = self.op("+", &[&out, &prefix]);
+                        parts.push(self.text(debug.as_str()));
                     }
                     let mut value = self.expr(&field.expression);
-                    if let Some(c) = field.conversion.to_char() {
+                    let conversion = field.conversion.to_char().or_else(|| {
+                        (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r')
+                    });
+                    if let Some(c) = conversion {
                         let conversion = self.text(&c.to_string());
                         value = self.op("format_conversion", &[&value, &conversion]);
                     }
                     let spec = match &field.format_spec {
-                        Some(s) => self.format_parts(&s.elements),
+                        Some(s) => {
+                            let mut spec = Vec::new();
+                            self.format_parts(&s.elements, &mut spec);
+                            self.join_format_parts(spec)
+                        }
                         None => self.text(""),
                     };
                     self.op("format", &[&value, "0", &spec])
                 }
             };
-            out = self.op("+", &[&out, &value]);
+            parts.push(value);
         }
-        out
+    }
+
+    /// Preserve a lone formatted value and bypass string-subclass addition when joining fields.
+    fn join_format_parts(&mut self, parts: Vec<String>) -> String {
+        parts
+            .into_iter()
+            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
+            .unwrap_or_else(|| self.text(""))
     }
 
     /// Resume the innermost active loop, returning to its parent when it runs out of items.
