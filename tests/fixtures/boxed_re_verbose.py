@@ -33,6 +33,7 @@ def current():
     search = re.compile(rb"(\xff)(x)?")
     print(search.search(b"a" + raw + b"x", pos=1, endpos=2).groups())
     print(re.search(r" (é) \# ", "前é#", re.X).groups())
+    print(re.compile(rb"(a+) | (b)", re.X).fullmatch(b"b").groups())
     for pattern, subject in ((octets, "x"), (tokens, b"x")):
         try:
             pattern.match(subject)

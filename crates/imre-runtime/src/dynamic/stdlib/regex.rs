@@ -322,7 +322,12 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         }
         source
     } else {
-        python_escapes(&source, ascii, flags & MULTILINE != 0)
+        imre_regex::preserve_zero_repeat_groups(python_escapes(
+            &source,
+            ascii,
+            flags & MULTILINE != 0,
+        ))
+        .map_err(|message| pattern_error(ctx, id, flags, message))?
     };
     let engine_source = if flags & IGNORECASE != 0 && !bytes {
         casefold::expand(&engine_source, ascii)

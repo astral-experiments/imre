@@ -117,6 +117,9 @@ dictionary_reads("β: F42 message", "absent")
 if found := re.search(r"(?:(?P<a>a)|(?P<b>b))(?P<empty>x*)", "b"):
     print(repr((found.groups(), found.groupdict())))
 
+if found := re.search(r"(x)((?P<missing>y)){0}$", "x"):
+    print(repr((found.groups(), found.groupdict(), found.start("missing"))))
+
 locally_compiled(":")
 locally_compiled("same:same")
 locally_compiled("same:")
