@@ -407,6 +407,36 @@ pub type Str = compact_str::CompactString;
 pub type Bytes = Vec<u8>;
 /// CPython's variable-size bytes header, cached hash and trailing NUL also need to fit.
 pub(crate) const MAX_BYTES_LEN: usize = isize::MAX as usize - (4 * size_of::<usize>() + 1);
+
+/// Release unused byte capacity when possible, preserving data if allocation fails.
+///
+/// Compaction follows a successful read, so its optional allocation must not abort
+/// or turn already-consumed input into an error.
+pub(crate) fn compact_bytes(bytes: &mut Vec<u8>) {
+    let len = bytes.len();
+    let capacity = bytes.capacity();
+    if len == capacity {
+        return;
+    }
+    if len == 0 {
+        *bytes = Vec::new();
+        return;
+    }
+    let layout = std::alloc::Layout::array::<u8>(capacity).expect("valid byte vector layout");
+    let data = bytes.as_mut_ptr();
+    std::mem::forget(std::mem::take(bytes));
+    // SAFETY: the nonempty vector used the global allocator with this layout.
+    // A refusal retains data; success transfers ownership to the resized pointer.
+    let resized = unsafe { std::alloc::realloc(data, layout, len) };
+    let (data, capacity) = if resized.is_null() {
+        (data, capacity)
+    } else {
+        (resized, len)
+    };
+    // SAFETY: both branches recover the allocation's unique owner, initialized
+    // length and exact allocation layout without any intervening allocation.
+    *bytes = unsafe { Vec::from_raw_parts(data, len, capacity) };
+}
 /// All byte handles crossing the native ABI point into this strong owner.
 pub(crate) type BytesOwner = triomphe::Arc<Bytes>;
 

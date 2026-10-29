@@ -513,7 +513,7 @@ pub(super) fn call(
         }
         .map_err(os_error)?;
         if requested.is_some_and(|size| bytes.len() < size) {
-            bytes.shrink_to_fit();
+            crate::compact_bytes(&mut bytes);
         }
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }

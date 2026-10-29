@@ -11,6 +11,57 @@ import tempfile
 from pathlib import Path
 
 
+def check_io_compaction_allocation(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "refuse_io_compaction.c"
+    wrapper = root / "refuse_io_compaction.o"
+    subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=malloc,--wrap=realloc,--wrap=calloc,--wrap=free",
+    ])
+    payload = root / "short-read.bin"
+    payload.write_bytes(b"0123456789abcdefGHIJKLMNOPQRSTUV")
+    for boxed in (False, True):
+        prefix = 'import sys; sys.path.append("unused")\n' if boxed else ""
+        source = prefix + (
+            f"stream = open({str(payload)!r}, 'rb')\n"
+            "print(stream.read(4096) == b'0123456789abcdefGHIJKLMNOPQRSTUV')\n"
+            "print(stream.read() == b'')\nstream.close()\n"
+        )
+        for refuse in (0, 1):
+            result = run(imre, "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_IO_COMPACTION_ALLOCATION": str(refuse),
+            })
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, b"True\nTrue\n", b"refused\n" if refuse else b"",
+            ), (boxed, refuse, result)
+        for receive_flags in (0, 2):
+            source = prefix + f"""import socket
+listener = socket.socket()
+listener.bind(("127.0.0.1", 0))
+listener.listen(1)
+sender = socket.socket()
+sender.connect(listener.getsockname())
+receiver, _ = listener.accept()
+sender.sendall(b"0123456789abcdefGHIJKLMNOPQRSTUV")
+sender.shutdown(socket.SHUT_WR)
+print(receiver.recv(4096, {receive_flags}) == b"0123456789abcdefGHIJKLMNOPQRSTUV")
+print(receiver.recv(1) == {b"0" if receive_flags else b""!r})
+receiver.close()
+sender.close()
+listener.close()
+"""
+            for refuse in (0, 1):
+                result = run(imre, "-c", source, extra={
+                    "IMRE_ENCODED_FLAGS": flags,
+                    "IMRE_TEST_IO_COMPACTION_ALLOCATION": str(refuse),
+                })
+                assert (result.returncode, result.stdout, result.stderr) == (
+                    0, b"True\nTrue\n", b"refused\n" if refuse else b"",
+                ), (boxed, receive_flags, refuse, result)
+
+
 def check_select_result_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "refuse_select_result.o"
@@ -358,6 +409,7 @@ def main():
             flags = call_allocation_flags(root)
             check_argument_allocation(imre, run, flags)
             check_raise_site_allocation(imre, root, run)
+            check_io_compaction_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
 
         entry = root / "serve.py"
