@@ -782,7 +782,7 @@ pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
             bytes.set_len(n);
         }
         if n < size / 2 {
-            bytes.shrink_to_fit();
+            crate::compact_bytes(&mut bytes);
         }
     }
     Ok(bytes)
