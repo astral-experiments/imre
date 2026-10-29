@@ -2,21 +2,23 @@ use std::collections::{HashMap, HashSet};
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::objects::{
-    DecodedJson, JsonNumber, decode_json, decode_json_bytes, write_json_fragment, write_json_string,
+    DecodedJson, JsonNumber, decode_json, decode_json_bytes, owned_bytes_input,
+    write_json_fragment, write_json_string,
 };
 use crate::{Str, StrOwner};
 
 pub(super) fn loads(ctx: &mut Context, input: Id) -> Result<Id> {
     match ctx.heap.get(input) {
         Value::Str(text) => {
-            let text = text.clone();
+            let text = Str::try_new(text).map_err(|_| crate::Error::allocation())?;
             if text.starts_with('\u{feff}') {
-                return Err(crate::objects::json_bom_error(StrOwner::new(Str::from(text))).into());
+                let document = StrOwner::try_new(text).map_err(|_| crate::Error::allocation())?;
+                return Err(crate::objects::json_bom_error(document).into());
             }
             parse(ctx, &text)
         }
         Value::Bytes(bytes) => {
-            let owner = crate::BytesOwner::new(bytes.clone());
+            let owner = owned_bytes_input(bytes)?;
             parse(ctx, &decode_json_bytes(&owner)?)
         }
         _ => Err(Error::new(
