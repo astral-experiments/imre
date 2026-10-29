@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::objects::{DecodedJson, JsonNumber, decode_json, decode_json_bytes, write_json_string};
@@ -138,7 +137,9 @@ impl Encoder {
         match ctx.heap.get(ctx.scalar_value(id)) {
             Value::None => self.output.push_str("null"),
             Value::Bool(value) => self.output.push_str(if *value { "true" } else { "false" }),
-            Value::Int(value) => write!(self.output, "{value}").unwrap(),
+            Value::Int(value) => self
+                .output
+                .push_str(&crate::integer_text::decimal_string(value)?),
             Value::Float(value) => {
                 self.output
                     .push_str(&float_text(ctx, id, *value, self.allow_nan)?)
@@ -322,7 +323,11 @@ impl Encoder {
         self.separator(i, depth)?;
         match ctx.heap.get(ctx.scalar_value(key)) {
             Value::Str(s) => write_json_string(&mut self.output, s, self.ascii)?,
-            Value::Int(n) => write_json_string(&mut self.output, &n.to_string(), self.ascii)?,
+            Value::Int(n) => write_json_string(
+                &mut self.output,
+                &crate::integer_text::decimal_string(n)?,
+                self.ascii,
+            )?,
             Value::Float(n) => {
                 let text = float_text(ctx, key, *n, self.allow_nan)?;
                 write_json_string(&mut self.output, &text, self.ascii)?

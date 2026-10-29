@@ -267,8 +267,8 @@ struct Encoder<'a> {
     separators: Option<Separators<'a, &'a str>>,
     /// A compact list combines the separator with a primitive only after rendering it.
     pending_item_error: Option<InvalidSeparator<'a>>,
-    /// The first-party schema encoder rejects all non-finite numbers.
-    allow_nan: Option<bool>,
+    /// Only the standard library encoder takes an allow_nan option.
+    standard_allow_nan: Option<bool>,
     stream: Option<&'a mut FileState>,
 }
 
@@ -325,7 +325,11 @@ impl Encoder<'_> {
         if let Some(value) = value.as_small() {
             self.append(itoa::Buffer::new().format(value))
         } else {
-            self.append(&value.big().to_string())
+            let value = value.big();
+            if self.standard_allow_nan.is_some() {
+                crate::integer_text::check_decimal(&value)?;
+            }
+            self.append(&value.to_string())
         }
     }
 
@@ -336,7 +340,7 @@ impl Encoder<'_> {
     fn float(&mut self, value: f64) -> Result<(), Error> {
         if value.is_finite() {
             self.append(&crate::floats::render(value))?;
-        } else if self.allow_nan == Some(true) {
+        } else if self.standard_allow_nan == Some(true) {
             self.append(if value.is_nan() {
                 "NaN"
             } else if value.is_sign_negative() {
@@ -344,7 +348,7 @@ impl Encoder<'_> {
             } else {
                 "Infinity"
             })?;
-        } else if self.allow_nan == Some(false) {
+        } else if self.standard_allow_nan == Some(false) {
             return Err(Error::new(
                 Kind::ValueError,
                 format!(
@@ -662,7 +666,7 @@ impl Encoder<'_> {
                         depth,
                     )?;
                 }
-                RECORD | BYTES | SET | PATH if self.allow_nan.is_some() => {
+                RECORD | BYTES | SET | PATH if self.standard_allow_nan.is_some() => {
                     let name = match schema.kind {
                         BYTES => "bytes",
                         SET => "set",
@@ -833,7 +837,7 @@ unsafe fn encode(
         output: String::new(),
         indent,
         ensure_ascii: ensure_ascii != 0,
-        allow_nan: options.as_ref().map(|o| o.allow_nan),
+        standard_allow_nan: options.as_ref().map(|o| o.allow_nan),
         sort_keys: options.as_ref().is_some_and(|o| o.sort_keys),
         separators,
         pending_item_error: None,
