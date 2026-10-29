@@ -1607,6 +1607,12 @@ impl Heap {
             self.slots[index].value = Some(value);
             index
         } else {
+            if self.slots.len() == self.slots.capacity() && self.slots.try_reserve(1).is_err() {
+                // Keep space for the next value when doubling the heap fails.
+                // The next statement can collect with a complete set of live handles.
+                self.slots.reserve_exact(1);
+                self.next_collection = self.slots.len();
+            }
             self.slots.push(Slot::new(value));
             self.slots.len() - 1
         };
@@ -2154,9 +2160,11 @@ impl Heap {
             }
         }
         self.next_collection = if reclaiming {
+            // A refused growth request can lower the usual collection floor.
+            let floor = self.next_collection.min(4096);
             (self.slots.len() - self.free.len())
                 .saturating_mul(2)
-                .max(4096)
+                .max(floor)
         } else {
             self.slots.len()
         };
