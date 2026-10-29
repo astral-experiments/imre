@@ -38,8 +38,8 @@ use std::path::PathBuf;
 
 use crate::objects::exceptions::string_repr;
 use value::{
-    Code, DictIterator, DictViewKind, Error, FALSE, FrameOwner, Heap, Id, NONE, Result, Scope,
-    TRUE, Value,
+    Code, ComprehensionKind, DictIterator, DictViewKind, Error, FALSE, FrameOwner, Heap, Id, NONE,
+    Result, Scope, TRUE, Value,
 };
 
 struct SourceModule {
@@ -995,7 +995,7 @@ impl Context {
             class_body: None,
             enum_namespace: None,
             is_abstract: false,
-            is_comprehension: false,
+            comprehension: None,
             class_cell: None,
             class_namespace: None,
             first_argument: None,
@@ -1011,12 +1011,21 @@ impl Context {
     }
     /// Comprehensions own their loop variables, but assignment expressions bind outside them.
     fn comprehension_scope(&mut self, parent: Id) -> Id {
-        let module = self.scope_data(parent).module.clone();
+        let enclosing = self.scope_data(parent);
+        let module = enclosing.module.clone();
+        let (parent, kind) = if enclosing.class_body.is_some() {
+            (
+                enclosing.parent.expect("class has an enclosing scope"),
+                ComprehensionKind::ClassBody,
+            )
+        } else {
+            (parent, ComprehensionKind::Ordinary)
+        };
         let scope = self.scope(&module, Some(parent));
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.is_comprehension = true;
+        frame.comprehension = Some(kind);
         scope
     }
 
@@ -1259,6 +1268,11 @@ impl Context {
             }
             if let Some(id) = self.scope_name(scope, name) {
                 return Ok(id);
+            }
+            // An eager comprehension in a class cannot capture an outer function's __class__.
+            if name == "__class__" && s.comprehension == Some(ComprehensionKind::ClassBody) {
+                scope = self.root_scope(scope);
+                continue;
             }
             if s.class_body.is_none() && s.closure.declared.contains(name) {
                 return Err(self.missing_binding(origin, scope, name));
