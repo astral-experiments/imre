@@ -329,6 +329,25 @@ def check_argument_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
 
 
+
+def check_marshal_allocation(exe):
+    import resource
+    import select
+
+    with subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE) as child:
+        try:
+            assert select.select([child.stdout], [], [], 30)[0]
+            assert child.stdout.readline() == b"ready\n"
+            pages = int(Path(f"/proc/{child.pid}/statm").read_text().split()[0])
+            cap = pages * os.sysconf("SC_PAGESIZE") + 512 * 1024
+            resource.prlimit(child.pid, resource.RLIMIT_AS, (cap, cap))
+            out, err = child.communicate(b"x", timeout=30)
+        finally:
+            child.kill()
+    assert (child.returncode, out, err) == (0, b"refused\nTrue\n", b""), (out, err)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -796,6 +815,12 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        if sys.platform == "linux":
+            exe = root / "marshal-allocation"
+            built = run(imre, "build", fixtures / "boxed_marshal_allocation.py",
+                        "--quiet", "--no-cache", "--runtime-imports", "-o", exe)
+            assert built.returncode == 0, built.stderr
+            check_marshal_allocation(exe)
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_literal_eval.py",
