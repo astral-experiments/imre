@@ -1362,6 +1362,29 @@ impl Context {
         Ok(previous.is_some())
     }
 
+    /// Bind a parameter in a fresh function scope using checked name and table storage.
+    fn bind_argument(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
+        let name = copy_label(name)?;
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!("function call scope")
+        };
+        debug_assert!(frame.class_body.is_none());
+        debug_assert!(frame.class_namespace.is_none());
+        debug_assert!(frame.namespace.is_none());
+        if !frame.names.contains_key(name.as_str()) {
+            frame
+                .names
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        if let Some(previous) = frame.names.insert(name, value)
+            && previous != value
+        {
+            self.heap.weak_edge_removed(previous);
+        }
+        Ok(())
+    }
+
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
         self.bind_local(scope, name, value);
