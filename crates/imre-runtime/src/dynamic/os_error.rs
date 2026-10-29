@@ -196,7 +196,7 @@ impl Context {
             }
         }
         let mut error = Error::new("", "");
-        append(&mut error.kind, kind)?;
+        append(error.kind.to_mut(), kind)?;
         error.class = class;
         error.args = Some(self.alloc(Value::Tuple(copy_ids(exposed)?)));
         if fields.errno.is_some()

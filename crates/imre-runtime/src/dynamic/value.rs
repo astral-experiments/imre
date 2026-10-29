@@ -81,7 +81,7 @@ pub(super) struct ImportFields {
 
 #[derive(Clone, Debug)]
 pub(super) struct Error {
-    pub kind: String,
+    pub kind: std::borrow::Cow<'static, str>,
     pub class: Option<Id>,
     pub message: String,
     pub args: Option<Id>,
@@ -105,7 +105,11 @@ pub(super) struct DecodeState {
 impl Error {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
         Self {
-            kind: kind.to_owned(),
+            kind: if kind == "MemoryError" {
+                std::borrow::Cow::Borrowed("MemoryError")
+            } else {
+                std::borrow::Cow::Owned(kind.to_owned())
+            },
             class: None,
             message: message.into(),
             args: None,
