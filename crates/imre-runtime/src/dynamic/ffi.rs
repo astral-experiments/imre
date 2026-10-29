@@ -203,7 +203,7 @@ impl Context {
                 }
                 Ok(NONE)
             }
-            "comprehension_scope" => Ok(self.comprehension_scope(a)),
+            "comprehension_scope" => self.comprehension_scope(a, b),
             "import" => {
                 let name = self.str_value(b)?.to_owned();
                 self.module(&name)
@@ -355,7 +355,7 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "generator" => self.generator(a, b),
+            "generator" => self.generator(a, b, c),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
             "break_iter" => {

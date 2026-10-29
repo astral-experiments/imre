@@ -163,7 +163,7 @@ impl<'a> Display<'a> {
     }
 }
 
-pub(super) fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
+pub(crate) fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
     if let ast::Expr::Name(name) = target {
         names.insert(name.id.to_string());
     } else if let ast::Expr::Starred(starred) = target {
