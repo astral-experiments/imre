@@ -169,6 +169,14 @@ def current():
         assert deep.co_filename == "<deep-compile>"
         del deep
     print("deep compile returned")
+    try:
+        deep = compile("result = 1" + "+1" * 16384, "<deep-eval>", "exec")
+    except RecursionError:
+        pass
+    else:
+        deep_values = {}
+        exec(deep, deep_values)
+        assert deep_values["result"] == 16385
     module = compile("from_source = 73\n", "<rebound>", "exec")
     measure.__code__ = module
     print(measure(), measure.__globals__["from_source"], measure.__code__ is module)
