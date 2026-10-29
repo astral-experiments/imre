@@ -111,9 +111,8 @@ impl Context {
             ));
         }
         let wrapper = subclass.map(|class| self.instance(class, None));
-        Ok(self
-            .heap
-            .new_weak_reference(target, callback, kind, wrapper))
+        self.heap
+            .new_weak_reference(target, callback, kind, wrapper)
     }
 
     #[inline]
