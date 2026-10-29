@@ -34,6 +34,11 @@ def current():
     print(search.search(b"a" + raw + b"x", pos=1, endpos=2).groups())
     print(re.search(r" (é) \# ", "前é#", re.X).groups())
     print(re.compile(rb"(a+) | (b)", re.X).fullmatch(b"b").groups())
+    print(re.compile(r"a{,2}").match("aaa").group())
+    print(re.compile(rb"(ab){,2}?x").fullmatch(b"ababx").groups())
+    print(re.compile(r"[a{,2}]{,}").fullmatch("{,2}").group())
+    print([c for c in "0{,2}]" if re.fullmatch(r"[]{,2}]", c)])
+    print([c for c in "\b]x" if re.fullmatch(r"[]\b]", c)])
     for pattern, subject in ((octets, "x"), (tokens, b"x")):
         try:
             pattern.match(subject)
