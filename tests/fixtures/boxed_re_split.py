@@ -22,8 +22,8 @@ def current():
     for source in ("", "x*", "|x+", "x*?", "(a*)|(b)", r"\b"):
         print(re.compile(source).split("xxaβb"), re.compile(source).split("xxaβb", -1))
     print(re.compile("$").split("a\n"), re.compile("$", re.X | re.M).split("a\nb\n"))
-    for pattern, text in [(r"(\n)??$", "\n"), (rb"(\n)??$", b"x\n")]:
-        compiled = re.compile(pattern)
+    for source, text in [(r"(\n)??$", "\n"), (rb"(\n)??$", b"x\n")]:
+        compiled = re.compile(source)
         print(compiled.findall(text), compiled.split(text))
     long_value = "not a delimiter" * 10
     print(pattern.split(long_value)[0] is long_value)
