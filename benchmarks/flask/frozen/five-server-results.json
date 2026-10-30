@@ -1,0 +1,572 @@
+{
+  "benchmark_source": "faf5d6fa27f71ce955017031acaf3746391d20e7",
+  "compiler_source": "1cc948edce211a0d547b6252eba61ec119881142",
+  "compiler_sha256": "afc34b658b81f2b5ce542ccf664ff439affca05d64c98c0b086a7068ac3a10ab",
+  "runtime_sha256": "0831ecfa66682b229e5325a69e77eeaa2ee2740da06f3cddaab87ad086fa08b1",
+  "elf_sha256": "91e27d6845621593cee3e04c1640e89edd9b38b489f3a5df3f34f4083e7e0334",
+  "host": {
+    "kernel": "6.8.0-147-generic",
+    "machine": "x86_64",
+    "cpu": "AMD EPYC-Milan Processor"
+  },
+  "versions": {
+    "cpython": "Python 3.14.5",
+    "node": "v24.22.1",
+    "bun": "1.4.2"
+  },
+  "settings": {
+    "first_round": 1,
+    "rounds": 3,
+    "requests": 1800,
+    "warmup": 180,
+    "concurrency": 8,
+    "server_cpu": 18,
+    "client_cpus": "19,20,21",
+    "mixed_only": true
+  },
+  "wheel_sha256": {
+    "blinker-1.9.0-py3-none-any.whl": "ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc",
+    "click-8.4.2-py3-none-any.whl": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+    "flask-3.1.3-py3-none-any.whl": "f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c",
+    "itsdangerous-2.2.0-py3-none-any.whl": "c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef",
+    "jinja2-3.1.6-py3-none-any.whl": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+    "markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl": "457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97",
+    "werkzeug-3.1.8-py3-none-any.whl": "63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50"
+  },
+  "control_executables": {
+    "cpython": "33aba70968937124a6b516d826cef85876b1e5e899f6efd68c210d6ea52db0b0",
+    "node": "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb",
+    "bun": "a83d263767d839e4d2649ca8e35d07159c7afc99afdc96d731ced29e056dda0c",
+    "rust": "f0b9d086e4799b29000eeaae88773422cc2f801f274f46864a8b2df7a2cbe3ad",
+    "client": "3bee599d603679566053acdd6b7efb62991816639ed5407cdb27ff5452274606",
+    "imre_input": "91e27d6845621593cee3e04c1640e89edd9b38b489f3a5df3f34f4083e7e0334"
+  },
+  "native_responses": 10,
+  "results": {
+    "imre": {
+      "median_rps": 9513.042169413327,
+      "median_trial_p95_ms": 1.4104100000000002,
+      "samples": [
+        {
+          "round": 1,
+          "All": {
+            "Count": 1800,
+            "P50US": 735.575,
+            "P95US": 1410.41,
+            "P99US": 2307.785
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 737.4,
+              "P95US": 1372.115,
+              "P99US": 1836.563
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 727.537,
+              "P95US": 1422.66,
+              "P99US": 2424.802
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 738.272,
+              "P95US": 1444.884,
+              "P99US": 2307.785
+            }
+          },
+          "RPS": 9513.042169413327,
+          "Seconds": 0.18921392,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.13999999999999999
+        },
+        {
+          "round": 2,
+          "All": {
+            "Count": 1800,
+            "P50US": 678.432,
+            "P95US": 1239.048,
+            "P99US": 1726.288
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 677.907,
+              "P95US": 1227.936,
+              "P99US": 1618.822
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 666.561,
+              "P95US": 1178.49,
+              "P99US": 1670.225
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 695.25,
+              "P95US": 1290.784,
+              "P99US": 1806.184
+            }
+          },
+          "RPS": 10340.78511181557,
+          "Seconds": 0.174068021,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.13
+        },
+        {
+          "round": 3,
+          "All": {
+            "Count": 1800,
+            "P50US": 763.575,
+            "P95US": 1473.583,
+            "P99US": 2111.123
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 770.474,
+              "P95US": 1456.656,
+              "P99US": 2010.885
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 756.511,
+              "P95US": 1397.694,
+              "P99US": 2111.123
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 773,
+              "P95US": 1552.124,
+              "P99US": 1989.457
+            }
+          },
+          "RPS": 9261.854531902862,
+          "Seconds": 0.194345527,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.13999999999999999
+        }
+      ]
+    },
+    "cpython": {
+      "median_rps": 941.7902701473749,
+      "median_trial_p95_ms": 9.931521,
+      "samples": [
+        {
+          "round": 1,
+          "All": {
+            "Count": 1800,
+            "P50US": 8207.048,
+            "P95US": 9961.312,
+            "P99US": 10598.828
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 7981.065,
+              "P95US": 9576.607,
+              "P99US": 10394.359
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 8684.987,
+              "P95US": 10245.351,
+              "P99US": 11004.881
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 7949.201,
+              "P95US": 9582.277,
+              "P99US": 10291.396
+            }
+          },
+          "RPS": 947.969298377445,
+          "Seconds": 1.898795671,
+          "Requests": 1800,
+          "server_cpu_seconds": 1.7800000000000002
+        },
+        {
+          "round": 2,
+          "All": {
+            "Count": 1800,
+            "P50US": 8405.584,
+            "P95US": 9816.769,
+            "P99US": 10565.473
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 8325.668,
+              "P95US": 9310.182,
+              "P99US": 10103.28
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 9012.756,
+              "P95US": 9973.221,
+              "P99US": 10822.149
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 7924.45,
+              "P95US": 9330.341,
+              "P99US": 10043.041
+            }
+          },
+          "RPS": 941.7902701473749,
+          "Seconds": 1.9112535529999999,
+          "Requests": 1800,
+          "server_cpu_seconds": 1.8299999999999998
+        },
+        {
+          "round": 3,
+          "All": {
+            "Count": 1800,
+            "P50US": 8637.576,
+            "P95US": 9931.521,
+            "P99US": 10429.011
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 8512.516,
+              "P95US": 9426.953,
+              "P99US": 10116.558
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 9168.687,
+              "P95US": 10110.498,
+              "P99US": 10724.377
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 8263.357,
+              "P95US": 9556.419,
+              "P99US": 10133.612
+            }
+          },
+          "RPS": 929.1010000296543,
+          "Seconds": 1.937356649,
+          "Requests": 1800,
+          "server_cpu_seconds": 1.8199999999999998
+        }
+      ]
+    },
+    "node": {
+      "median_rps": 2493.608320811887,
+      "median_trial_p95_ms": 5.213473,
+      "samples": [
+        {
+          "round": 1,
+          "All": {
+            "Count": 1800,
+            "P50US": 2621.033,
+            "P95US": 4914.571,
+            "P99US": 10318.007
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 2627.605,
+              "P95US": 4925.341,
+              "P99US": 10893.591
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 2565.03,
+              "P95US": 4898.76,
+              "P99US": 10949.908
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 2663.44,
+              "P95US": 4891.937,
+              "P99US": 9352.959
+            }
+          },
+          "RPS": 2605.4954731274865,
+          "Seconds": 0.690847487,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.69
+        },
+        {
+          "round": 2,
+          "All": {
+            "Count": 1800,
+            "P50US": 2648.853,
+            "P95US": 5391.991,
+            "P99US": 12085.842
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 2515.298,
+              "P95US": 5288.519,
+              "P99US": 11603.486
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 2653.167,
+              "P95US": 4845.405,
+              "P99US": 18342.795
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 2761.23,
+              "P95US": 5753.811,
+              "P99US": 11337.429
+            }
+          },
+          "RPS": 2491.00255068282,
+          "Seconds": 0.722600625,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.72
+        },
+        {
+          "round": 3,
+          "All": {
+            "Count": 1800,
+            "P50US": 2573.23,
+            "P95US": 5213.473,
+            "P99US": 12299.002
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 2571.439,
+              "P95US": 5343.464,
+              "P99US": 12346.187
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 2504.823,
+              "P95US": 4935.838,
+              "P99US": 11083.529
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 2611.063,
+              "P95US": 5293.433,
+              "P99US": 15342.843
+            }
+          },
+          "RPS": 2493.608320811887,
+          "Seconds": 0.721845522,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.72
+        }
+      ]
+    },
+    "bun": {
+      "median_rps": 7223.818431924288,
+      "median_trial_p95_ms": 1.696862,
+      "samples": [
+        {
+          "round": 1,
+          "All": {
+            "Count": 1800,
+            "P50US": 864.338,
+            "P95US": 1965.413,
+            "P99US": 3912.932
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 853.601,
+              "P95US": 2024.265,
+              "P99US": 3912.932
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 860.327,
+              "P95US": 1761.478,
+              "P99US": 3284.869
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 872.718,
+              "P95US": 2018.189,
+              "P99US": 3896.908
+            }
+          },
+          "RPS": 6873.370374002649,
+          "Seconds": 0.261880257,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.22999999999999998
+        },
+        {
+          "round": 2,
+          "All": {
+            "Count": 1800,
+            "P50US": 1011.83,
+            "P95US": 1613.165,
+            "P99US": 2254.111
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 1015.809,
+              "P95US": 1626.51,
+              "P99US": 2224.072
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 1001.799,
+              "P95US": 1584.104,
+              "P99US": 2150.48
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 1017.526,
+              "P95US": 1616.591,
+              "P99US": 2275.876
+            }
+          },
+          "RPS": 7544.756248541976,
+          "Seconds": 0.238576296,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.22999999999999998
+        },
+        {
+          "round": 3,
+          "All": {
+            "Count": 1800,
+            "P50US": 1019.464,
+            "P95US": 1696.862,
+            "P99US": 2826.138
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 1005.404,
+              "P95US": 1665.415,
+              "P99US": 3029.465
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 1026.298,
+              "P95US": 1637.961,
+              "P99US": 2526.512
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 1026.78,
+              "P95US": 1801.699,
+              "P99US": 2974.473
+            }
+          },
+          "RPS": 7223.818431924288,
+          "Seconds": 0.249175698,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.25
+        }
+      ]
+    },
+    "rust": {
+      "median_rps": 8830.934366675632,
+      "median_trial_p95_ms": 1.698772,
+      "samples": [
+        {
+          "round": 1,
+          "All": {
+            "Count": 1800,
+            "P50US": 708.806,
+            "P95US": 2003.447,
+            "P99US": 3847.016
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 707.696,
+              "P95US": 1605.874,
+              "P99US": 3693.328
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 709.985,
+              "P95US": 2207.948,
+              "P99US": 3889.607
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 707.125,
+              "P95US": 1822.347,
+              "P99US": 3861.16
+            }
+          },
+          "RPS": 8686.136951483842,
+          "Seconds": 0.207226758,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.18
+        },
+        {
+          "round": 2,
+          "All": {
+            "Count": 1800,
+            "P50US": 714.642,
+            "P95US": 1698.772,
+            "P99US": 3831.156
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 718.914,
+              "P95US": 1695.265,
+              "P99US": 3642.838
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 689.95,
+              "P95US": 1338.773,
+              "P99US": 3815.711
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 742.466,
+              "P95US": 1947.242,
+              "P99US": 3891.998
+            }
+          },
+          "RPS": 9010.042818977103,
+          "Seconds": 0.199777075,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.18
+        },
+        {
+          "round": 3,
+          "All": {
+            "Count": 1800,
+            "P50US": 775.942,
+            "P95US": 1560.427,
+            "P99US": 3718.614
+          },
+          "ByRoute": {
+            "health": {
+              "Count": 600,
+              "P50US": 779.398,
+              "P95US": 1494.816,
+              "P99US": 3635.709
+            },
+            "hello": {
+              "Count": 600,
+              "P50US": 776.233,
+              "P95US": 1556.619,
+              "P99US": 3599.411
+            },
+            "total": {
+              "Count": 600,
+              "P50US": 773.044,
+              "P95US": 1620.119,
+              "P99US": 3856.022
+            }
+          },
+          "RPS": 8830.934366675632,
+          "Seconds": 0.203828941,
+          "Requests": 1800,
+          "server_cpu_seconds": 0.19
+        }
+      ]
+    }
+  }
+}

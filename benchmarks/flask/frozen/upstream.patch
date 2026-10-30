@@ -1,0 +1,194 @@
+diff --git a/flask/app.py b/flask/app.py
+index cc326db..ac766d8 100644
+--- a/flask/app.py
++++ b/flask/app.py
+@@ -280,0 +281,34 @@ class Flask(App):
++    def freeze_routes(self) -> None:
++        """Finish registration and index the Werkzeug rules for concrete method/path lookup."""
++        from .sessions import FrozenCookieSessionInterface
++        from .sessions import SecureCookieSessionInterface
++
++        self.url_map.freeze()
++        if type(self.session_interface) is SecureCookieSessionInterface:
++            self.session_interface = FrozenCookieSessionInterface()
++
++    def bind_frozen_views(self, templates: dict[str, str]) -> None:
++        """Serve registered concrete views through normal Flask contexts and WSGI."""
++        from .frozen.state import AppState
++
++        self.freeze_routes()
++        key = self.secret_key
++        if not key:
++            raise ValueError("a signing key is required")
++        state = AppState(
++            key.encode() if isinstance(key, str) else key, self.session_interface.salt.encode(),
++            int(self.permanent_session_lifetime.total_seconds()), self.config["SESSION_COOKIE_NAME"],
++        )
++        for name, source in templates.items():
++            state.templates[name] = self.jinja_env.compile_text(source)
++
++        def adapt(view):
++            def invoke(**captures):
++                value = next(iter(captures.values()), "")
++                result = view(request_ctx.request.freeze(), value, state)
++                return self.response_class.from_frozen(result)
++            return invoke
++
++        for endpoint, view in self.view_functions.items():
++            self.view_functions[endpoint] = adapt(view)
++
+diff --git a/flask/sessions.py b/flask/sessions.py
+index ad35770..0dc2a55 100644
+--- a/flask/sessions.py
++++ b/flask/sessions.py
+@@ -385,0 +386,11 @@ class SecureCookieSessionInterface(SessionInterface):
++
++
++class FrozenCookieSessionInterface(SecureCookieSessionInterface):
++    """Defer signer construction until a frozen WSGI app receives a cookie."""
++
++    def open_session(self, app: Flask, request: Request) -> SecureCookieSession | None:
++        if not app.secret_key:
++            return None
++        if not request.cookies.get(self.get_cookie_name(app)):
++            return self.session_class()
++        return super().open_session(app, request)
+diff --git a/itsdangerous/timed.py b/itsdangerous/timed.py
+index 7384375..53636e8 100644
+--- a/itsdangerous/timed.py
++++ b/itsdangerous/timed.py
+@@ -47 +47,4 @@ class TimestampSigner(Signer):
+-        value = want_bytes(value)
++        return self.sign_bytes(want_bytes(value))
++
++    def sign_bytes(self, value: bytes) -> bytes:
++        """Sign a concrete byte payload with the configured key and current timestamp."""
+@@ -49,3 +52,2 @@ class TimestampSigner(Signer):
+-        sep = want_bytes(self.sep)
+-        value = value + sep + timestamp
+-        return value + sep + self.get_signature(value)
++        value = value + self.sep + timestamp
++        return value + self.sep + self.get_signature(value)
+diff --git a/jinja2/environment.py b/jinja2/environment.py
+index 0fc6e5b..85352b3 100644
+--- a/jinja2/environment.py
++++ b/jinja2/environment.py
+@@ -1091,0 +1092,23 @@ class Environment:
++    def compile_text(self, source: str):
++        """Compile HTML with literal text and named plain-string slots at registration."""
++        from .textprogram import TextProgram
++
++        if self.finalize is not None or self.extensions or self.is_async:
++            raise ValueError("text programs require a synchronous unextended environment")
++        if not (self.autoescape(None) if callable(self.autoescape) else self.autoescape):
++            raise ValueError("text programs require HTML autoescaping")
++        literals = [""]
++        names = []
++        for node in self.parse(source).body:
++            if type(node) is not nodes.Output:
++                raise ValueError("text programs require output nodes")
++            for child in node.nodes:
++                if type(child) is nodes.TemplateData:
++                    literals[-1] += child.data
++                elif type(child) is nodes.Name:
++                    names.append(child.name)
++                    literals.append("")
++                else:
++                    raise ValueError("text slots require a plain name")
++        return TextProgram(literals, names)
++
+diff --git a/markupsafe/_native.py b/markupsafe/_native.py
+index 088b3bc..316ff28 100644
+--- a/markupsafe/_native.py
++++ b/markupsafe/_native.py
+@@ -8,0 +9,5 @@ def _escape_inner(s: str, /) -> str:
++
++
++def escape_text(text: str) -> str:
++    """Escape an ordinary string for an HTML text node, returning an ordinary string."""
++    return _escape_inner(text)
+diff --git a/werkzeug/routing/map.py b/werkzeug/routing/map.py
+index c86f95a..b42661b 100644
+--- a/werkzeug/routing/map.py
++++ b/werkzeug/routing/map.py
+@@ -105,0 +106 @@ class Map:
++        self._frozen = None
+@@ -175,0 +177 @@ class Map:
++        self._frozen = None
+@@ -182,0 +185,36 @@ class Map:
++    def freeze(self) -> None:
++        """Index strict HTTP rules with literal paths or one final plain string converter."""
++        from .converters import UnicodeConverter
++        from .frozen import FrozenMap
++
++        if self.host_matching:
++            raise ValueError("host matching is not available in frozen maps")
++        index = FrozenMap()
++        rules = []
++        for rule in self.iter_rules():
++            if (rule.build_only or rule.subdomain or rule.websocket or rule.alias
++                    or rule.redirect_to or rule.defaults or not rule.strict_slashes
++                    or not rule.methods or type(rule) is not Rule):
++                raise ValueError(f"cannot freeze rule {rule}")
++            trace = rule._trace[1:]
++            capture = ""
++            if rule._converters:
++                if len(rule._converters) != 1 or not trace[-1][0]:
++                    raise ValueError(f"cannot freeze converters in {rule}")
++                capture = trace[-1][1]
++                conv = rule._converters[capture]
++                if (type(conv) is not UnicodeConverter or conv.regex != "[^/]{1,}"
++                        or len(trace) < 2 or trace[-2] != (False, "/")):
++                    raise ValueError(f"cannot freeze converter in {rule}")
++                trace = trace[:-1]
++            prefix = "".join(value for dynamic, value in trace)
++            if "//" in prefix or (len(prefix) > 1 and not capture and prefix.endswith("/")):
++                raise ValueError(f"cannot freeze slash redirection in {rule}")
++            for method in rule.methods:
++                entries = index.segments if capture else index.literals
++                if method + " " + prefix in entries:
++                    raise ValueError(f"frozen rules have overlapping {method} handlers for {prefix}")
++                index.add(method, prefix, capture, len(rules))
++            rules.append((rule, capture))
++        self._frozen = index, rules
++
+@@ -604,0 +643,8 @@ class MapAdapter:
++            frozen = self.map._frozen
++            if frozen is not None and not domain_part and not websocket:
++                table, rules = frozen
++                idx, value = table.match(method, path_part)
++                if idx >= 0:
++                    rule, capture = rules[idx]
++                    args = {capture: value} if capture else {}
++                    return (rule if return_rule else rule.endpoint, args)
+diff --git a/werkzeug/wrappers/request.py b/werkzeug/wrappers/request.py
+index 9f1eee1..95fc029 100644
+--- a/werkzeug/wrappers/request.py
++++ b/werkzeug/wrappers/request.py
+@@ -630,0 +631,10 @@ class Request(_SansIORequest):
++    def freeze(self):
++        """Snapshot method, origin-form target, media, cookies and body for a concrete view."""
++        from urllib.parse import quote
++        from .frozen import Request as FrozenRequest
++
++        target = quote(self.path, safe="/") + "?" + self.query_string.decode("ascii")
++        return FrozenRequest(
++            self.method, target, self.mimetype, self.headers.get("Cookie", ""), self.get_data()
++        )
++
+diff --git a/werkzeug/wrappers/response.py b/werkzeug/wrappers/response.py
+index 4707292..10e4aae 100644
+--- a/werkzeug/wrappers/response.py
++++ b/werkzeug/wrappers/response.py
+@@ -178,0 +179,11 @@ class Response(_SansIOResponse):
++    @classmethod
++    def from_frozen(cls, result):
++        """Construct a WSGI response from the same concrete result used by the native server."""
++        response = cls(result.body, status=result.status, content_type=result.content_type)
++        if result.allow:
++            response.headers["Allow"] = result.allow
++        if result.cookie:
++            response.headers["Set-Cookie"] = result.cookie
++            response.vary.add("Cookie")
++        return response
++
