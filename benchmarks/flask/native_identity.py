@@ -173,12 +173,12 @@ def inspect_processes(pid, binary, image_cache=None):
     return seen, sockets
 
 
-def attest_socket(pid, binary, port):
+def attest_socket(pid, binary, port, *, route="/health", status=200, body=b'{"ok":true}\n'):
     image_cache = {}
     with socket.create_connection(("127.0.0.1", port), timeout=4) as sock:
         # Leave the headers incomplete until procfs identifies the owner of this
         # accepted connection. A parent that merely publishes a child's port fails.
-        sock.sendall(b"GET /health HTTP/1.1\r\nHost: localhost\r\n")
+        sock.sendall(f"GET {route} HTTP/1.1\r\nHost: localhost\r\n".encode("ascii"))
         peer = sock.getsockname()[1]
         loopback = f'{int.from_bytes(socket.inet_aton("127.0.0.1"), sys.byteorder):08X}'
         limit = time.monotonic() + 4
@@ -202,8 +202,8 @@ def attest_socket(pid, binary, port):
         sock.sendall(b"Connection: close\r\n\r\n")
         response = http.client.HTTPResponse(sock)
         response.begin()
-        if response.status != 200 or response.read() != b'{"ok":true}\n':
-            raise ValueError("the verified socket returned the wrong health response")
+        if response.status != status or response.read() != body:
+            raise ValueError("the verified socket returned the wrong response")
         return {"server_pid": pid, "checked_pids": sorted(seen), "binary_sha256": sha(binary),
                 "sockets": {kind: {"inode": inode, "owner_pids": sorted(set(owners[inode]))}
                             for kind, inode in inodes.items()}}

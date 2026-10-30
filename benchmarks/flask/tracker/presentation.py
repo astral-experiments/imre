@@ -1,0 +1,2 @@
+LIST = """<!doctype html><html lang="en"><title>My issues</title><h1>My issues</h1><ul>{% for issue in issues %}<li><a href="/issues/{{ issue.id }}">{{ issue.title }}</a> <span>{{ issue.status }}</span></li>{% endfor %}</ul></html>"""
+DETAIL = """<!doctype html><html lang="en"><title>{{ title }}</title><h1>{{ title }}</h1><p>Issue #{{ id }} · {{ status }}</p><pre>{{ body }}</pre><a href="/issues">All issues</a></html>"""
