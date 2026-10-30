@@ -364,14 +364,15 @@ impl Function<'_, '_> {
                         &v.body,
                         &v.orelse,
                         Some(&iter),
-                        |f| {
+                        |f, yes, no| {
                             let op = if v.orelse.is_empty() {
                                 "more"
                             } else {
                                 "more_else"
                             };
                             let more = f.op(op, &[&iter]);
-                            f.value(&format!("icmp eq i64 {more}, 2"))
+                            let ready = f.value(&format!("icmp eq i64 {more}, 2"));
+                            f.branch(&ready, yes, no);
                         },
                         |f| {
                             let item = f.op("next", &[&iter]);
@@ -380,7 +381,13 @@ impl Function<'_, '_> {
                     );
                 }
                 ast::Stmt::While(v) => {
-                    self.loop_body(&v.body, &v.orelse, None, |f| f.truth_expr(&v.test), |_| {});
+                    self.loop_body(
+                        &v.body,
+                        &v.orelse,
+                        None,
+                        |f, yes, no| f.branch_expr(&v.test, yes, no),
+                        |_| {},
+                    );
                 }
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
                     if let Some(target) = self.loops.last() {
@@ -459,10 +466,9 @@ impl Function<'_, '_> {
                     self.raise(&exc, cause.as_deref(), v.exc.is_none());
                 }
                 ast::Stmt::Assert(v) => {
-                    let condition = self.truth_expr(&v.test);
                     let pass = self.name("b");
                     let fail = self.name("b");
-                    self.branch(&condition, &pass, &fail);
+                    self.branch_expr(&v.test, &pass, &fail);
                     self.label(&fail);
                     let cls = self.lookup("AssertionError");
                     let error = if let Some(msg) = &v.msg {
@@ -768,8 +774,7 @@ impl Function<'_, '_> {
     fn if_arm(&mut self, test: &ast::Expr, body: &[ast::Stmt], done: &str) {
         let body_label = self.name("b");
         let next = self.name("b");
-        let condition = self.truth_expr(test);
-        self.branch(&condition, &body_label, &next);
+        self.branch_expr(test, &body_label, &next);
         self.label(&body_label);
         self.statements(body);
         self.jump(done);
@@ -781,7 +786,7 @@ impl Function<'_, '_> {
         body: &[ast::Stmt],
         otherwise: &[ast::Stmt],
         iterator: Option<&str>,
-        condition: impl FnOnce(&mut Self) -> String,
+        condition: impl FnOnce(&mut Self, &str, &str),
         bind: impl FnOnce(&mut Self),
     ) {
         let step = self.name("b");
@@ -793,8 +798,7 @@ impl Function<'_, '_> {
         }
         self.jump(&step);
         self.label(&step);
-        let condition = condition(self);
-        self.branch(&condition, &body_label, &exhausted);
+        condition(self, &body_label, &exhausted);
         self.label(&body_label);
         bind(self);
         self.loops.push(LoopTarget {

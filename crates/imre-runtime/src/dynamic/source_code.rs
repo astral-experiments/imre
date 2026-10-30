@@ -1736,10 +1736,12 @@ impl Context {
             .expect("boolean expression has operands");
         let stop = op.op == ast::BoolOp::Or;
         for operand in operands {
+            let mark = self.heap.temporary_mark();
             let (value, known) = self.source_bool_operand(code, scope, operand)?;
             if known.map_or_else(|| self.truth(value), Ok)? == stop {
                 return Ok((value, Some(stop)));
             }
+            self.discard_truth(mark);
         }
         self.source_bool_operand(code, scope, last)
     }
@@ -1787,16 +1789,24 @@ impl Context {
             }
             return Ok(!stop);
         }
-        if let ast::Expr::Compare(comparison) = expr {
-            let (value, stopped) = self.source_comparison(code, scope, comparison)?;
-            return if stopped {
-                Ok(false)
+        if let ast::Expr::If(branch) = expr {
+            let arm = if self.source_condition(code, scope, &branch.test)? {
+                &branch.body
             } else {
-                self.truth(value)
+                &branch.orelse
             };
+            return self.source_condition(code, scope, arm);
         }
-        let value = self.source_expr(code, scope, expr)?;
-        self.truth(value)
+        let mark = self.heap.temporary_mark();
+        let truth = if let ast::Expr::Compare(comparison) = expr {
+            let (value, stopped) = self.source_comparison(code, scope, comparison)?;
+            !stopped && self.truth(value)?
+        } else {
+            let value = self.source_expr(code, scope, expr)?;
+            self.truth(value)?
+        };
+        self.discard_truth(mark);
+        Ok(truth)
     }
 
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {

@@ -1,6 +1,7 @@
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
+use super::boolean::{Context as BooleanContext, Flow, Target};
 use super::{Body, Function};
 
 enum Element<'a> {
@@ -81,15 +82,9 @@ impl Function<'_, '_> {
                 }
                 result
             }
-            ast::Expr::BoolOp(v) => self.boolop(v.op, &v.values),
-            ast::Expr::Compare(v) => {
-                let left = self.expr(&v.operands[0]);
-                self.compare(&left, &v.ops, &v.operands[1..])
-            }
-            ast::Expr::If(v) => {
-                let cond = self.truth_expr(&v.test);
-                self.select(&cond, |f| f.expr(&v.body), |f| f.expr(&v.orelse))
-            }
+            ast::Expr::BoolOp(_) => self.boolean_value(expr),
+            ast::Expr::Compare(v) => self.compare_expr(v, BooleanContext::Value),
+            ast::Expr::If(v) => self.select(&v.test, |f| f.expr(&v.body), |f| f.expr(&v.orelse)),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");
@@ -175,58 +170,146 @@ impl Function<'_, '_> {
         }
     }
 
-    fn boolop(&mut self, op: ast::BoolOp, values: &[ast::Expr]) -> String {
-        self.short_circuit(values.len(), op == ast::BoolOp::Or, true, |f, i| {
-            f.expr(&values[i])
-        })
-    }
-
-    fn compare(&mut self, left: &str, ops: &[ast::CmpOp], operands: &[ast::Expr]) -> String {
-        let mut previous = left.to_owned();
-        self.short_circuit(ops.len(), false, false, |f, i| {
-            let right = f.expr(&operands[i]);
-            let compared = f.op(ops[i].as_str(), &[&previous, &right]);
-            previous = right;
-            compared
-        })
-    }
-
-    /// Merge all exits at one block; a long flat chain need not recurse in the compiler.
-    fn short_circuit(
-        &mut self,
-        count: usize,
-        stop_if_true: bool,
-        discard_operand: bool,
-        mut value: impl FnMut(&mut Self, usize) -> String,
-    ) -> String {
-        if count == 1 {
-            return value(self, 0);
+    /// Jump to the selected suite without materializing or retesting a short-circuit operand.
+    pub(super) fn branch_expr(&mut self, expr: &ast::Expr, yes: &str, no: &str) {
+        let test = |f: &mut Self, expr: &ast::Expr, yes: &str, no: &str| {
+            let condition = f.test_operand(expr);
+            f.branch(&condition, yes, no);
+        };
+        if BooleanContext::Condition.splits(expr) {
+            self.boolean_steps(expr, BooleanContext::Condition, yes, no, test);
+        } else {
+            test(self, expr, yes, no);
         }
+    }
+
+    fn test_operand(&mut self, expr: &ast::Expr) -> String {
+        let mark = self.temporary_mark();
+        let condition = if let ast::Expr::Compare(comparison) = expr {
+            self.compare_expr(comparison, BooleanContext::Condition)
+        } else {
+            let value = self.expr(expr);
+            self.truth(&value)
+        };
+        self.discard_truth(&mark);
+        condition
+    }
+
+    /// Assign a block to each graph step. Multiple predecessors can share a single operand.
+    fn boolean_steps(
+        &mut self,
+        expr: &ast::Expr,
+        context: BooleanContext,
+        yes: &str,
+        no: &str,
+        mut emit: impl FnMut(&mut Self, &ast::Expr, &str, &str),
+    ) {
+        let flow = Flow::new(expr, context);
+        let labels: Vec<_> = flow.steps.iter().map(|_| self.name("b")).collect();
+        let label = |target| match target {
+            Target::Step(i) => labels[i].as_str(),
+            Target::Truth(true) => yes,
+            Target::Truth(false) => no,
+            Target::Operand => {
+                debug_assert_eq!(yes, no);
+                yes
+            }
+        };
+        for (i, step) in flow.steps.iter().enumerate().rev() {
+            if i + 1 != flow.steps.len() {
+                self.label(&labels[i]);
+            }
+            emit(self, step.expr, label(step.yes), label(step.no));
+        }
+    }
+
+    /// Keep the selected object at the join. Discard other operand roots before visiting the next.
+    fn boolean_value(&mut self, expr: &ast::Expr) -> String {
         let done = self.name("b");
-        let mut incoming = Vec::with_capacity(count);
-        for i in 0..count {
-            let mark = (discard_operand && i + 1 < count).then(|| self.temporary_mark());
-            let v = value(self, i);
-            if i + 1 == count {
-                incoming.push(format!("[ {v}, %{} ]", self.block));
+        let mut incoming = Vec::new();
+        self.boolean_steps(
+            expr,
+            BooleanContext::Value,
+            &done,
+            &done,
+            |f, expr, yes, no| {
+                if yes == no {
+                    let value = f.expr(expr);
+                    incoming.push(format!("[ {value}, %{} ]", f.block));
+                    f.jump(&done);
+                    return;
+                }
+                let mark = f.temporary_mark();
+                let value = f.expr(expr);
+                let truth = f.truth(&value);
+                if yes != done && no != done {
+                    f.discard_truth(&mark);
+                    f.branch(&truth, yes, no);
+                    return;
+                }
+                incoming.push(format!("[ {value}, %{} ]", f.block));
+                let discard = f.name("b");
+                let next = if yes == done {
+                    f.branch(&truth, &done, &discard);
+                    no
+                } else {
+                    f.branch(&truth, &discard, &done);
+                    yes
+                };
+                f.label(&discard);
+                f.discard_truth(&mark);
+                f.jump(next);
+            },
+        );
+        self.label(&done);
+        self.value(&format!("phi i64 {}", incoming.join(", ")))
+    }
+
+    /// A failed intermediate comparison returns its object in a value context and false in a branch.
+    fn compare_expr(&mut self, comparison: &ast::ExprCompare, context: BooleanContext) -> String {
+        let mut left = self.expr(&comparison.operands[0]);
+        let done = self.name("b");
+        let mut incoming = Vec::new();
+        for (i, (op, operand)) in comparison
+            .ops
+            .iter()
+            .zip(&comparison.operands[1..])
+            .enumerate()
+        {
+            let right = self.expr(operand);
+            let value = self.op(op.as_str(), &[&left, &right]);
+            left = right;
+            if i + 1 == comparison.ops.len() {
+                let result = if context == BooleanContext::Condition {
+                    self.truth(&value)
+                } else {
+                    value
+                };
+                if incoming.is_empty() {
+                    return result;
+                }
+                incoming.push(format!("[ {result}, %{} ]", self.block));
                 self.jump(&done);
             } else {
-                let condition = self.truth(&v);
-                incoming.push(format!("[ {v}, %{} ]", self.block));
-                let next = self.name("b");
-                if stop_if_true {
-                    self.branch(&condition, &done, &next);
+                let truth = self.truth(&value);
+                let result = if context == BooleanContext::Condition {
+                    "false"
                 } else {
-                    self.branch(&condition, &next, &done);
-                }
+                    &value
+                };
+                incoming.push(format!("[ {result}, %{} ]", self.block));
+                let next = self.name("b");
+                self.branch(&truth, &next, &done);
                 self.label(&next);
-                if let Some(mark) = mark {
-                    self.discard_truth(&mark);
-                }
             }
         }
         self.label(&done);
-        self.value(&format!("phi i64 {}", incoming.join(", ")))
+        let ty = if context == BooleanContext::Condition {
+            "i1"
+        } else {
+            "i64"
+        };
+        self.value(&format!("phi {ty} {}", incoming.join(", ")))
     }
 
     fn display(&mut self, kind: &str, elements: &[ast::Expr]) -> String {
@@ -352,9 +435,8 @@ impl Function<'_, '_> {
             let item = self.op("next", &[&iter]);
             self.assign(&generator.target, &item);
             for filter in &generator.ifs {
-                let yes = self.truth_expr(filter);
                 let keep = self.name("b");
-                self.branch(&yes, &keep, step);
+                self.branch_expr(filter, &keep, step);
                 self.label(&keep);
             }
             if let Some(child) = generators.get(i + 1) {
@@ -433,9 +515,8 @@ impl Function<'_, '_> {
         let item = self.op("next", &[&iter]);
         self.assign(&g.target, &item);
         for test in &g.ifs {
-            let yes = self.truth_expr(test);
             let keep = self.name("b");
-            self.branch(&yes, &keep, &step);
+            self.branch_expr(test, &keep, &step);
             self.label(&keep);
         }
         if let Some(next) = generators.get(1) {
