@@ -20,9 +20,9 @@ impl Function<'_, '_> {
                 self.bind(&name, &value);
             }
             if let Some(test) = &case.guard {
-                let value = self.expr(test);
-                let condition = self.truth(&value);
-                self.pattern_check(&condition, &next);
+                let matched = self.name("b");
+                self.branch_expr(test, &matched, &next);
+                self.label(&matched);
             }
             self.live.pop();
             self.statements(&case.body);
