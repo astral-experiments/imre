@@ -152,8 +152,7 @@ impl Archive {
             let path = self.filename.as_ref().ok_or_else(|| {
                 Error::new(Kind::ValueError, "zipimport requires a path-backed archive")
             })?;
-            return Member::open(Source::open(path)?, entry.zip_info(), || string_repr(name))?
-                .read_import_data();
+            return member::read_import_data(path, &entry.zip_info());
         }
         if self.contains_import(name) {
             return Ok(Bytes::new());

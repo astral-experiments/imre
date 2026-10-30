@@ -1,4 +1,5 @@
 import zipimport
+from pathlib import Path
 
 
 for archive in ['stored.zip', 'deflated.zip']:
@@ -14,6 +15,15 @@ for archive in ['stored.zip', 'deflated.zip']:
         loader.get_data('missing')
     except OSError as error:
         print((error.errno, error.strerror, error.filename))
+
+    print(zipimport.zipimporter(archive + ".short-size").get_data(name))
+    Path(archive).write_bytes(Path(archive + ".replacement").read_bytes())
+    print(loader.get_data(name))
+    Path(archive).write_bytes(b"short")
+    try:
+        loader.get_data(name)
+    except EOFError as error:
+        print(str(error))
 
 try:
     zipimport.zipimporter('input.txt')

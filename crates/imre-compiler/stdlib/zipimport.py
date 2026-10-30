@@ -45,4 +45,8 @@ class _ZipResourceLoader:
         key = pathname
         if pathname.startswith(self.archive + '/'):
             key = pathname[len(self.archive) + 1:]
-        return _read(self._indexed_archive, key)
+        try:
+            return _read(self._indexed_archive, key)
+        except ImportError as error:
+            message = str(error)
+        raise ZipImportError(message, path=self.archive)
