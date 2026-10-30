@@ -77,12 +77,9 @@ pub(super) fn read_import_data(path: &str, info: &Info) -> Result<Bytes> {
             .map_err(|err| deflate_error(err.message().unwrap_or("invalid compressed data")))?;
         let used = (inflater.total_in() - before_in) as usize;
         let written = (inflater.total_out() - before_out) as usize;
-        result.try_reserve(written).map_err(|_| {
-            Error::new(
-                Kind::MemoryError,
-                Str::const_new("Unable to allocate output buffer."),
-            )
-        })?;
+        result
+            .try_reserve(written)
+            .map_err(|_| Error::memory_error_with_message("Unable to allocate output buffer."))?;
         result.extend_from_slice(&chunk[..written]);
         if status == Status::StreamEnd {
             return Ok(result);

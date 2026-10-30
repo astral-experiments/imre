@@ -922,6 +922,16 @@ impl Error {
         sentinel
     }
 
+    /// Fall back to a reserved, argument-free MemoryError if the message owner cannot grow.
+    pub(crate) fn memory_error_with_message(message: &'static str) -> Self {
+        let payload =
+            StrOwner::try_new(Str::const_new(message)).map_or(Payload::Empty, Payload::Message);
+        Self {
+            payload: Some(payload),
+            ..Self::memory_error()
+        }
+    }
+
     /// Use Python's argument-free MemoryError when an operation exhausts memory.
     pub(crate) fn memory_error() -> Self {
         Self {
@@ -1037,7 +1047,15 @@ impl Error {
 
     fn into_object(self) -> crate::ObjectOwner {
         match self.payload {
-            Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
+            Some(payload @ (Payload::Empty | Payload::Message(_)))
+                if self.kind == Kind::MemoryError && self.cause.is_none() =>
+            {
+                if matches!(payload, Payload::Message(_))
+                    && let Ok(error) =
+                        crate::ObjectOwner::try_new(exception_object(self.kind, payload, None))
+                {
+                    return error;
+                }
                 MEMORY_ERRORS.with(|errors| {
                     let slot = errors[..MEMORY_ERROR_RESERVE]
                         .iter()
