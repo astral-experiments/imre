@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
+mod boolean;
 mod expressions;
 mod patterns;
 mod statements;

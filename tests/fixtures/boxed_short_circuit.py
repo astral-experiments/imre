@@ -84,3 +84,13 @@ def current():
     selected = (value < value < tail()) and sentinel
     assert selected is sentinel
     assert log == ["compare", "truth", "truth"]
+
+
+def skipped_literal():
+    # A refused copy of the skipped operand must not affect the first execution of this code.
+    code = compile('if flag or "' + "q" * 8191 + '":\n    answer = 37', "<skipped>", "exec")
+    namespace = {"flag": True}
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    exec(code, namespace)
+    print(namespace["answer"])

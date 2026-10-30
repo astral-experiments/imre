@@ -356,6 +356,14 @@ def check_callable_label_allocation(imre, root, run):
 def check_boxed_call_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
+    source = import_path + "import boxed_short_circuit as fixture; fixture.skipped_literal()"
+    result = run(imre, "-B", "-c", source, extra={
+        "IMRE_ENCODED_FLAGS": flags,
+        "IMRE_TEST_CALL_SIZE": "8191",
+        "IMRE_TEST_GETTER_ALLOCATION": "1",
+    })
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"37\n", b""), result
+
     source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_traceback_allocation as fixture; fixture.allocation()"
     for size in (0, 160, 224):
         result = run(imre, "-B", "-c", source, extra={

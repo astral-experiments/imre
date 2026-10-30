@@ -1,18 +1,14 @@
 //! In-process execution of source received by the boxed Python runtime.
 
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use imre_ast::boolean::{Context as BooleanContext, Flow, Target};
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::value::{Body, ExecGlobals, Location};
 use super::*;
-
-type BooleanFlows = HashMap<(ruff_text_size::TextRange, BooleanContext), Rc<Flow<ast::Expr>>>;
 
 pub(super) struct Program {
     pub filename: Rc<str>,
@@ -26,7 +22,6 @@ pub(super) struct Program {
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
     instructions: Vec<(u32, Instruction)>,
-    boolean_flows: RefCell<BooleanFlows>,
 }
 
 enum Instruction {
@@ -275,7 +270,6 @@ impl Program {
 
     fn new(filename: Rc<str>, name: &str) -> Self {
         Self {
-            boolean_flows: RefCell::default(),
             filename,
             name: name.to_owned(),
             doc: None,
@@ -1726,53 +1720,30 @@ impl Context {
         Ok(value)
     }
 
-    /// Interpret the same branches emitted for boxed native functions. Cache the graph on its code
-    /// object so a loop can revisit it, including through a reentrant truth test.
-    fn source_boolean(
+    /// Preserve the selected operand and any truth test that short-circuited a nested expression.
+    fn source_bool_operand(
         &mut self,
         code: &Program,
         scope: Id,
         expr: &ast::Expr,
-        context: BooleanContext,
-    ) -> Result<Id> {
-        let flow = code
-            .boolean_flows
-            .borrow_mut()
-            .entry((expr.range(), context))
-            .or_insert_with(|| Rc::new(Flow::new(expr, context, Clone::clone)))
-            .clone();
-        let mut next = flow.steps.len() - 1;
-        loop {
-            let step = &flow.steps[next];
+    ) -> Result<(Id, Option<bool>)> {
+        let ast::Expr::BoolOp(op) = expr else {
+            return Ok((self.source_expr(code, scope, expr)?, None));
+        };
+        let (last, operands) = op
+            .values
+            .split_last()
+            .expect("boolean expression has operands");
+        let stop = op.op == ast::BoolOp::Or;
+        for operand in operands {
             let mark = self.heap.temporary_mark();
-            let target = if context == BooleanContext::Condition {
-                if self.source_test_operand(code, scope, &step.expr)? {
-                    step.yes
-                } else {
-                    step.no
-                }
-            } else {
-                let value = self.source_expr(code, scope, &step.expr)?;
-                if step.yes == step.no {
-                    return Ok(value);
-                }
-                let target = if self.truth(value)? {
-                    step.yes
-                } else {
-                    step.no
-                };
-                if target == Target::Operand {
-                    return Ok(value);
-                }
-                target
-            };
-            self.discard_truth(mark);
-            match target {
-                Target::Step(i) => next = i,
-                Target::Truth(truth) => return Ok(if truth { TRUE } else { FALSE }),
-                Target::Operand => unreachable!("a selected operand already returned"),
+            let (value, known) = self.source_bool_operand(code, scope, operand)?;
+            if known.map_or_else(|| self.truth(value), Ok)? == stop {
+                return Ok((value, Some(stop)));
             }
+            self.discard_truth(mark);
         }
+        self.source_bool_operand(code, scope, last)
     }
 
     /// Return the comparison result and whether an earlier comparison already tested false.
@@ -1802,29 +1773,40 @@ impl Context {
         unreachable!("comparison has at least one operator")
     }
 
-    /// Consume the condition's selected truth before the next source instruction.
+    /// Evaluate a branch condition without testing a short-circuited operand twice.
     fn source_condition(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<bool> {
-        if BooleanContext::Condition.splits(expr) {
-            Ok(self.source_boolean(code, scope, expr, BooleanContext::Condition)? == TRUE)
-        } else {
-            let mark = self.heap.temporary_mark();
-            let truth = self.source_test_operand(code, scope, expr)?;
-            self.discard_truth(mark);
-            Ok(truth)
+        if let ast::Expr::UnaryOp(op) = expr
+            && op.op == ast::UnaryOp::Not
+        {
+            return Ok(!self.source_condition(code, scope, &op.operand)?);
         }
-    }
-
-    fn source_test_operand(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<bool> {
-        let value = if let ast::Expr::Compare(comparison) = expr {
-            let (value, stopped) = self.source_comparison(code, scope, comparison)?;
-            if stopped {
-                return Ok(false);
+        if let ast::Expr::BoolOp(op) = expr {
+            let stop = op.op == ast::BoolOp::Or;
+            for operand in &op.values {
+                if self.source_condition(code, scope, operand)? == stop {
+                    return Ok(stop);
+                }
             }
-            value
+            return Ok(!stop);
+        }
+        if let ast::Expr::If(branch) = expr {
+            let arm = if self.source_condition(code, scope, &branch.test)? {
+                &branch.body
+            } else {
+                &branch.orelse
+            };
+            return self.source_condition(code, scope, arm);
+        }
+        let mark = self.heap.temporary_mark();
+        let truth = if let ast::Expr::Compare(comparison) = expr {
+            let (value, stopped) = self.source_comparison(code, scope, comparison)?;
+            !stopped && self.truth(value)?
         } else {
-            self.source_expr(code, scope, expr)?
+            let value = self.source_expr(code, scope, expr)?;
+            self.truth(value)?
         };
-        self.truth(value)
+        self.discard_truth(mark);
+        Ok(truth)
     }
 
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
@@ -1921,7 +1903,7 @@ impl Context {
                 let k = eval(self, &v.slice)?;
                 self.get_item(base, k)
             }
-            Expr::BoolOp(_) => self.source_boolean(code, scope, expr, BooleanContext::Value),
+            Expr::BoolOp(_) => Ok(self.source_bool_operand(code, scope, expr)?.0),
             Expr::BinOp(v) => {
                 let a = eval(self, &v.left)?;
                 let b = eval(self, &v.right)?;

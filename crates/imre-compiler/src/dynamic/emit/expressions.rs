@@ -1,7 +1,7 @@
-use imre_ast::boolean::{Context as BooleanContext, Flow, Target};
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
+use super::boolean::{Context as BooleanContext, Flow, Target};
 use super::{Body, Function};
 
 enum Element<'a> {
@@ -204,7 +204,7 @@ impl Function<'_, '_> {
         no: &str,
         mut emit: impl FnMut(&mut Self, &ast::Expr, &str, &str),
     ) {
-        let flow = Flow::new(expr, context, |expr| expr);
+        let flow = Flow::new(expr, context);
         let labels: Vec<_> = flow.steps.iter().map(|_| self.name("b")).collect();
         let label = |target| match target {
             Target::Step(i) => labels[i].as_str(),
