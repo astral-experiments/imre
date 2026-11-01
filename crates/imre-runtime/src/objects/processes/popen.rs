@@ -287,51 +287,6 @@ impl LaunchConfig {
 }
 
 /// # Safety
-/// Args, optional cwd, and optional environment are rooted through spawn.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_popen(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    streams: u32,
-) -> *const Object {
-    // SAFETY: the legacy ABI uses the normal default buffer and closes inherited fds.
-    unsafe { imre_popen_pipes(args, cwd, env, streams, (-1_isize as usize) << 1 | 1, true) }
-}
-
-/// # Safety
-/// As imre_popen, with a rooted buffer size integer and statically selected stream modes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_popen_pipes(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    streams: u32,
-    bufsize: usize,
-    close_fds: bool,
-) -> *const Object {
-    // SAFETY: the original entry point accepts only list[str].
-    unsafe { imre_popen_command(args.cast(), 5, cwd, env, streams, bufsize, close_fds) }
-}
-
-/// # Safety
-/// The command pointer is rooted with exactly the supplied representation kind.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_popen_command(
-    args: *const (),
-    arg_kind: u32,
-    cwd: *const Str,
-    env: *const Object,
-    streams: u32,
-    bufsize: usize,
-    close_fds: bool,
-) -> *const Object {
-    let config = LaunchConfig::basic(args, arg_kind, cwd, env, streams, bufsize, close_fds);
-    // SAFETY: callers root every borrowed launch argument.
-    unsafe { imre_popen_config(&config) }
-}
-
-/// # Safety
 /// The settings and the owners of every argument must live through spawn.
 /// A borrowed stream requires RedirectConfig; bit 18 requires ChildConfig.
 #[unsafe(no_mangle)]
@@ -532,60 +487,6 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
     })
 }
 
-/// Wait without draining pipes, as call() does. A failed or expired wait
-/// kills the child and context exit closes its pipes and collects the status.
-///
-/// # Safety
-/// Launch arguments and the optional deadline word remain rooted until return.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_subprocess_call(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    streams: u32,
-    bufsize: usize,
-    close_fds: bool,
-    kind: u32,
-    word: usize,
-    check: bool,
-) -> usize {
-    // SAFETY: the original call entry point accepts an exact list[str].
-    unsafe {
-        imre_call_command(
-            args.cast(),
-            5,
-            cwd,
-            env,
-            streams,
-            bufsize,
-            close_fds,
-            kind,
-            word,
-            check,
-        )
-    }
-}
-
-/// # Safety
-/// The command pointer has the given representation; all launch and deadline arguments are rooted.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_call_command(
-    args: *const (),
-    arg_kind: u32,
-    cwd: *const Str,
-    env: *const Object,
-    streams: u32,
-    bufsize: usize,
-    close_fds: bool,
-    kind: u32,
-    word: usize,
-    check: bool,
-) -> usize {
-    let config = LaunchConfig::basic(args, arg_kind, cwd, env, streams, bufsize, close_fds);
-    // SAFETY: the legacy settings and deadline have the supplied representations.
-    unsafe { imre_call_config(&config, kind, word, check) }
-}
-
 /// # Safety
 /// The rooted settings (including any redirect or child trailer) and deadline word
 /// must match the compiler's layouts.
@@ -780,26 +681,6 @@ pub unsafe extern "C" fn imre_popen_status(handle: *const Object, poll: bool) ->
             return callback.invoke();
         }
         imre_child_status(imre_popen_control(handle), poll)
-    }
-}
-
-/// # Safety
-/// Legacy entry point: the handle and timeout word remain rooted on this thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_popen_wait(handle: *const Object, kind: u32, word: usize) -> usize {
-    // SAFETY: the same owner constructs TimeoutExpired if its deadline elapses.
-    unsafe { imre_child_wait(imre_popen_control(handle), kind, word, handle) }
-}
-
-/// # Safety
-/// Legacy entry point: the handle and signal integer stay rooted on this thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_popen_signal(handle: *const Object, signal: usize) {
-    // SAFETY: the handle and signal stay rooted across the optional user callback.
-    unsafe {
-        if !poll::imre_popen_signal_override(handle, signal) {
-            imre_child_signal(imre_popen_control(handle), signal);
-        }
     }
 }
 
