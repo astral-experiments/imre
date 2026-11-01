@@ -6,7 +6,9 @@ from _imre_posixpath import (
     realpath_kind as _realpath_kind, realpath_readlink as _realpath_readlink,
     realpath_notdir as _realpath_notdir,
 )
-from genericpath import ALLOW_MISSING, commonprefix, exists, getsize, isdir, isfile, islink
+from genericpath import (
+    ALLOW_MISSING, commonprefix, exists, getsize, isdir, isfile, islink, samefile, sameopenfile, samestat,
+)
 
 
 def normcase(s):
