@@ -32,9 +32,14 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     }
     Some(match name {
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
+        "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
-        "scandir" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.scandir"),
-        "DirEntry" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.DirEntry"),
+        "scandir" if cfg!(any(target_os = "linux", target_os = "macos")) => {
+            Intrinsic::ObjectRuntimeExport("posix.scandir")
+        }
+        "DirEntry" if cfg!(any(target_os = "linux", target_os = "macos")) => {
+            Intrinsic::ObjectRuntimeExport("posix.DirEntry")
+        }
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
         "close" => Intrinsic::Fd(FdOperation::Close),

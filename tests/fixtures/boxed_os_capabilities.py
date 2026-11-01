@@ -17,6 +17,25 @@ def current():
             assert getattr(posix, function.__name__) is function
             assert (function in functions) == member
 
+    assert os.mkdir is posix.mkdir and os.mkdir in supports_dir_fd
+    directory = os.path.dirname(__file__) or "."
+    fd = os.open(directory, os.O_RDONLY)
+    child = os.fsencode(os.path.basename(__file__) + ".mkdir")
+    try:
+        assert os.mkdir(child, mode=0o700, dir_fd=fd) is None
+        try:
+            assert os.stat(child, dir_fd=fd).st_mode & 0o170000 == 0o040000
+            try:
+                posix.mkdir(child, dir_fd=fd)
+            except FileExistsError as error:
+                assert error.filename == child
+            else:
+                raise AssertionError("mkdir accepted an existing directory")
+        finally:
+            os.rmdir(child, dir_fd=fd)
+    finally:
+        os.close(fd)
+
     original = os.stat
     try:
         os.stat = None
