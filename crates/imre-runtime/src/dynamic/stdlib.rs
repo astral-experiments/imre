@@ -12,6 +12,7 @@ pub(super) mod ast;
 mod binascii;
 pub(super) mod codecs;
 mod contextvars;
+mod csv;
 pub(super) mod datetime;
 mod email;
 mod files;
@@ -77,6 +78,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "posixpath"
             | "_imre_posixpath"
             | "_imre_metadata"
+            | "_imre_csv"
             | "_imre_pkgutil"
             | "fnmatch"
             | "itertools"
@@ -350,9 +352,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
-        ("traceback", "format_exc" | "format_exception" | "print_exc" | "print_exception") => {
-            ctx.builtin(&format!("traceback.{name}"))
-        }
+        (
+            "traceback",
+            "clear_frames" | "format_exc" | "format_exception" | "print_exc" | "print_exception",
+        ) => ctx.builtin(&format!("traceback.{name}")),
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
@@ -578,6 +581,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
+        | ("_imre_csv", "read_row")
         | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
         | ("_imre_posixpath", "exists" | "extension_start" | "isfile" | "islink")
         | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
@@ -742,6 +746,39 @@ pub(super) fn call(
 ) -> Result<Id> {
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);
+    }
+    if name == "BaseException.with_traceback" {
+        let &[exception, tb] = args else {
+            return Err(Error::new(
+                "TypeError",
+                "with_traceback() requires one argument",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "with_traceback() takes no keyword arguments",
+            ));
+        }
+        ctx.set_traceback(exception, tb)?;
+        return Ok(exception);
+    }
+    if name == "frame.clear" {
+        let &[frame] = args else {
+            return Err(Error::new("TypeError", "clear() takes no arguments"));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "clear() takes no keyword arguments",
+            ));
+        }
+        ctx.heap.clear_frame(frame)?;
+        return Ok(NONE);
+    }
+    if name == "traceback.clear_frames" {
+        let tb = single_argument("clear_frames", "tb", args, kwargs)?;
+        return traceback::clear_frames(ctx, tb);
     }
     if name == "collections.defaultdict.__repr__" {
         let Some((&object, args)) = args.split_first() else {
@@ -1019,8 +1056,17 @@ pub(super) fn call(
     if matches!(name, "posix.putenv" | "posix.unsetenv") {
         return os::change_environment(ctx, name, args, kwargs);
     }
+    if name == "array.array" {
+        return super::array::new(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("array.array.") {
+        return super::array::method(ctx, method, args, kwargs);
+    }
     if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
         return pkgutil::call(ctx, operation, args, kwargs);
+    }
+    if name == "_imre_csv.read_row" {
+        return csv::read_row(ctx, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("fnmatch.") {
         return fnmatch::call(ctx, op, args, kwargs);

@@ -54,7 +54,7 @@ impl Lines {
     }
 }
 
-struct Dialect {
+pub(crate) struct Dialect {
     delimiter: char,
     quote: Option<char>,
     escape: Option<char>,
@@ -64,7 +64,7 @@ struct Dialect {
 }
 
 impl Dialect {
-    fn new(delimiter: u32, quote: u32, escape: u32, flags: u32) -> Self {
+    pub(crate) fn new(delimiter: u32, quote: u32, escape: u32, flags: u32) -> Self {
         Self {
             delimiter: char::from_u32(delimiter).unwrap(),
             quote: char::from_u32(quote),
@@ -127,19 +127,53 @@ enum State {
     TrailingNewline,
 }
 
-struct Row {
-    fields: Words,
+/// One logical record. Both native object representations consume the same parser.
+pub(crate) struct Row<F> {
+    save_field: F,
     field: String,
     chars: usize,
+    limit: i64,
+    quoted: bool,
     state: State,
 }
 
-impl Row {
+impl<F: FnMut(String, bool) -> Result<()>> Row<F> {
+    pub(crate) fn new(save_field: F) -> Self {
+        Self {
+            save_field,
+            field: String::new(),
+            chars: 0,
+            limit: 131_072,
+            quoted: false,
+            state: State::Record,
+        }
+    }
+
+    pub(crate) fn line(&mut self, dialect: &Dialect, line: &str, limit: i64) -> Result<bool> {
+        self.limit = limit;
+        for ch in line.chars() {
+            self.token(dialect, Some(ch))?;
+        }
+        self.token(dialect, None)?;
+        Ok(self.state == State::Record)
+    }
+
+    pub(crate) fn eof(&mut self, dialect: &Dialect) -> Result<bool> {
+        if self.chars == 0 && self.state != State::Quoted {
+            return Ok(false);
+        }
+        if dialect.strict {
+            return Err(Error::new(Kind::CsvError, "unexpected end of data"));
+        }
+        self.save()?;
+        Ok(true)
+    }
+
     fn add(&mut self, ch: char) -> Result<()> {
-        if self.chars == 131_072 {
+        if self.chars as i64 >= self.limit {
             return Err(Error::new(
                 Kind::CsvError,
-                "field larger than field limit (131072)",
+                format!("field larger than field limit ({})", self.limit),
             ));
         }
         self.field
@@ -151,14 +185,8 @@ impl Row {
     }
 
     fn save(&mut self) -> Result<()> {
-        self.fields
-            .values
-            .try_reserve(1)
-            .map_err(|_| Error::allocation())?;
-        let value = Str::from(std::mem::take(&mut self.field));
-        self.fields
-            .values
-            .push(StrOwner::into_raw(StrOwner::new(value)) as usize);
+        (self.save_field)(std::mem::take(&mut self.field), self.quoted)?;
+        self.quoted = false;
         self.chars = 0;
         Ok(())
     }
@@ -190,6 +218,7 @@ impl Row {
                     self.save()?;
                     self.state = TrailingNewline;
                 } else if self.state == FieldStart && token == dialect.quote {
+                    self.quoted = true;
                     self.state = Quoted;
                 } else if self.state == AfterQuote && token == dialect.quote {
                     self.add(ch)?;
@@ -260,33 +289,30 @@ impl Row {
 
 impl Reader {
     fn next(&mut self) -> Result<Option<crate::ObjectOwner>> {
-        let mut row = Row {
-            fields: Words::new(3),
-            field: String::new(),
-            chars: 0,
-            state: State::Record,
-        };
+        let mut fields = Words::new(3);
+        let mut row = Row::new(|text, _| {
+            fields
+                .values
+                .try_reserve(1)
+                .map_err(|_| Error::allocation())?;
+            fields
+                .values
+                .push(StrOwner::into_raw(StrOwner::new(Str::from(text))) as usize);
+            Ok(())
+        });
         loop {
             let Some(line) = self.lines.next()? else {
-                if row.chars == 0 && row.state != State::Quoted {
+                if !row.eof(&self.dialect)? {
                     return Ok(None);
                 }
-                if self.dialect.strict {
-                    return Err(Error::new(Kind::CsvError, "unexpected end of data"));
-                }
-                row.save()?;
                 break;
             };
             self.line_num += 1;
-            for ch in line.chars() {
-                row.token(&self.dialect, Some(ch))?;
-            }
-            row.token(&self.dialect, None)?;
-            if row.state == State::Record {
+            if row.line(&self.dialect, &line, 131_072)? {
                 break;
             }
         }
-        Ok(Some(row.fields.into_object()))
+        Ok(Some(fields.into_object()))
     }
 }
 

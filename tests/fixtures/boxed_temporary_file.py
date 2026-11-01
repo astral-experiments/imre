@@ -45,3 +45,16 @@ def current():
         tempfile.mkstemp(suffix="mixed", dir=b".")
     except TypeError as error:
         print(str(error))
+
+    with TemporaryFile("w+", encoding="utf-8", newline="") as text:
+        print(text.mode, text.encoding, text.fileno() >= 0)
+        print(text.write("é\r\nπ\rx\n"), text.seek(0), list(text))
+        text.seek(0)
+        print(text.readline(), text.read())
+        text.seek(0)
+        print(text.buffer.read())
+    print(text.closed)
+    with TemporaryFile("w+t", encoding="utf-8") as translated:
+        translated.write("left\r\nright\r")
+        translated.seek(0)
+        print(list(translated))

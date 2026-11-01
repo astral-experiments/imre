@@ -12,6 +12,8 @@ impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
         let slots = match symbol.split_once('.') {
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
+            Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
+            Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
@@ -84,6 +86,8 @@ impl BuiltinDescriptor {
             super::namespace::CLASS => {
                 ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
             }
+            "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
+            "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),

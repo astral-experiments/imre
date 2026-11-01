@@ -299,6 +299,19 @@ impl Context {
             Err(error) if self.is_builtin_error(&error, "TypeError") => {}
             Err(error) => return Err(error),
         }
+        if let Value::SequenceIterator { source, index } = *self.heap.get(value) {
+            let hint = match source {
+                None => 0,
+                Some(seq) => match builtins::call(self, "len", &[seq], &[]) {
+                    Ok(length) => {
+                        (self.as_int(length)?.to_i64().ok_or_else(size_overflow)? - index).max(0)
+                    }
+                    Err(error) if self.is_builtin_error(&error, "TypeError") => default,
+                    Err(error) => return Err(error),
+                },
+            };
+            return Ok(self.int(hint));
+        }
         if let Value::ReverseSequence { source, remaining } = *self.heap.get(value) {
             let hint = match source {
                 Some(seq) if remaining != 0 && remaining <= self.reverse_sequence_len(seq)? => {

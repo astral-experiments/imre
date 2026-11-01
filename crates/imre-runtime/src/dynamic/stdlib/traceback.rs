@@ -65,6 +65,25 @@ impl FrameLine<'_> {
     }
 }
 
+/// Visit the public traceback protocol, ignoring frames that cannot be cleared yet.
+pub(super) fn clear_frames(ctx: &mut Context, mut tb: Id) -> Result<Id> {
+    let runtime_error = ctx.builtin("RuntimeError");
+    while tb != NONE {
+        let attempt = (|| {
+            let frame = ctx.lookup_attr(tb, "tb_frame")?;
+            let clear = ctx.lookup_attr(frame, "clear")?;
+            ctx.call(clear, Vec::new(), Vec::new())
+        })();
+        if let Err(err) = attempt
+            && !ctx.raised_error_matches(&err, runtime_error)
+        {
+            return Err(err);
+        }
+        tb = ctx.lookup_attr(tb, "tb_next")?;
+    }
+    Ok(NONE)
+}
+
 pub(super) fn print_active(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     call_with_active_exception(
         ctx,

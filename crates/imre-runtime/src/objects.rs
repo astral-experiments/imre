@@ -32,7 +32,7 @@ pub(crate) use codecs::{Codec, CodecInfo, decoding_error, unknown_handler, utf8_
 mod contexts;
 mod contextvars;
 mod copying;
-mod csv;
+pub(crate) mod csv;
 mod deferred_diff;
 mod deque;
 pub(crate) use deque::Ring as DequeRing;

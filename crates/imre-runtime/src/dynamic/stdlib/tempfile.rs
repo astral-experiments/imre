@@ -12,6 +12,10 @@ use crate::objects::{FileState, errno_error};
 pub(in crate::dynamic) const METHODS: &[&str] = &[
     "read",
     "readline",
+    "readable",
+    "writable",
+    "seekable",
+    "isatty",
     "write",
     "seek",
     "tell",
@@ -205,31 +209,69 @@ pub(super) fn path_operation(
     }
 }
 
-/// Opens the binary update modes supported by the native TemporaryFile constructor.
+/// Text update files wrap the same native anonymous binary handle as binary mode.
 pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if args.len() > 1
-        || kwargs
-            .iter()
-            .any(|(key, _)| !matches!(key.as_str(), "mode" | "dir"))
+        || kwargs.iter().any(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "mode" | "dir" | "encoding" | "errors" | "newline"
+            )
+        })
     {
         return Err(Error::new(
             "TypeError",
             "unsupported arguments to TemporaryFile",
         ));
     }
-    if let Some(mode) = option(args, 0, kwargs, "mode")?
-        && !matches!(ctx.str_value(mode)?, "w+b" | "wb+")
+    let mode = option(args, 0, kwargs, "mode")?;
+    let text = match mode
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("w+b")
     {
-        return Err(Error::new(
-            "NotImplementedError",
-            "TemporaryFile supports binary update mode",
-        ));
+        "w+b" | "wb+" => false,
+        "w+" | "w+t" | "wt+" => true,
+        _ => {
+            return Err(Error::new(
+                "NotImplementedError",
+                "TemporaryFile supports update mode",
+            ));
+        }
+    };
+    let mut options = Vec::new();
+    for (key, id) in kwargs {
+        if matches!(key.as_str(), "encoding" | "errors" | "newline") && *id != NONE {
+            if !text {
+                let article = if key == "newline" { "a" } else { "an" };
+                return Err(Error::new(
+                    "ValueError",
+                    format!("binary mode doesn't take {article} {key} argument"),
+                ));
+            }
+            options.push((key.clone(), *id));
+        }
+    }
+    if text {
+        ctx.module("io")?;
     }
     let directory = option(args, 1, kwargs, "dir")?.filter(|&id| id != NONE);
     let file = FileState::temporary(directory.map(|id| ctx.str_value(id)).transpose()?)?;
     let owner =
         crate::Shared::try_new(RefCell::new(file)).map_err(|_| crate::Error::allocation())?;
-    Ok(ctx.alloc(Value::BufferedRandom(owner)))
+    let buffer = ctx.alloc(Value::BufferedRandom(owner.clone()));
+    if !text {
+        return Ok(buffer);
+    }
+    let wrapper = ctx.builtins["_io.TextIOWrapper"];
+    let result = ctx.call(wrapper, vec![buffer], options).and_then(|stream| {
+        ctx.set_attr(stream, "mode", mode.unwrap())?;
+        Ok(stream)
+    });
+    if result.is_err() {
+        let _ = owner.borrow_mut().close();
+    }
+    result
 }
 
 /// Applies a boxed operation to the same buffered stream used by the native file ABI.
@@ -290,6 +332,10 @@ pub(super) fn method(
             };
             let position = owner.borrow_mut().seek_disk(&offset, i64::from(whence))?;
             Ok(ctx.int(position as i64))
+        }
+        "readable" | "writable" | "seekable" | "isatty" => {
+            owner.borrow().fileno()?;
+            Ok(crate::dynamic::builtins::boolean(name != "isatty"))
         }
         "tell" => Ok(ctx.int(owner.borrow_mut().tell()? as i64)),
         "fileno" => Ok(ctx.int(i64::from(owner.borrow().fileno()?))),

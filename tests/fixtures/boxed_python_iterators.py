@@ -239,3 +239,44 @@ def current():
 
     item = Candidate()
     print(17 in [item], 17 in Rows([item]), item in [item], calls)
+
+    class Indexed:
+        def __init__(self):
+            self.values = [1, 2]
+            self.retry = True
+
+        def __len__(self):
+            return len(self.values)
+
+        def __getitem__(self, index):
+            if index == 1 and self.retry:
+                self.retry = False
+                raise OSError("retry")
+            return self.values[index]
+
+    source = Indexed()
+    cursor = iter(source)
+    print(iter(cursor) is cursor, length_hint(cursor), next(cursor), length_hint(cursor))
+    try:
+        next(cursor)
+    except OSError as error:
+        print(str(error))
+    source.values.append(3)
+    print(list(cursor))
+    source.values.append(4)
+    print(length_hint(cursor), list(cursor), list(source))
+
+    class DisabledIteration(Indexed):
+        __iter__ = None
+
+    try:
+        iter(DisabledIteration())
+    except TypeError as error:
+        print(str(error))
+
+    class End:
+        def __getitem__(self, index):
+            raise Finished("done")
+
+    cursor = iter(End())
+    print(length_hint(cursor, 9), next(cursor, "stopped"), length_hint(cursor, 9))
