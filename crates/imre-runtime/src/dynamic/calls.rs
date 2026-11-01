@@ -1826,11 +1826,24 @@ impl Context {
                 }
                 _ => {
                     if let Value::Native(method) = self.heap.get(callable) {
+                        let module_bound = matches!(self.heap.get(receiver), Value::Module { .. });
                         let value = match name {
-                            "__qualname__" if method.starts_with("sys._jit.") => {
-                                method.rsplit('.').next()
+                            "__qualname__" if module_bound => method.rsplit('.').next(),
+                            "__module__" if module_bound => {
+                                method.rsplit_once('.').map(|(module, _)| module)
                             }
-                            "__module__" if method.starts_with("sys._jit.") => Some("sys._jit"),
+                            "__text_signature__" if method == "sys.audit" => {
+                                Some("($module, event, /, *args)")
+                            }
+                            "__text_signature__" if method == "sys.addaudithook" => {
+                                Some("($module, /, hook)")
+                            }
+                            "__doc__" if method == "sys.audit" => {
+                                Some("Passes the event to any audit hooks that are attached.")
+                            }
+                            "__doc__" if method == "sys.addaudithook" => {
+                                Some("Adds a new audit hook callback.")
+                            }
                             "__text_signature__" if method.starts_with("sys._jit.") => {
                                 Some("($module, /)")
                             }

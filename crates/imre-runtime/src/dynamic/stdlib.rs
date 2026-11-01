@@ -9,6 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
+mod audit;
 mod binascii;
 pub(super) mod codecs;
 mod contextvars;
@@ -911,6 +912,12 @@ pub(super) fn call(
         }
         builtins::update_dict(ctx, dict, args.get(1).copied(), kwargs)?;
         return Ok(if receiver.is_some() { NONE } else { dict });
+    }
+    if name == "sys.audit" {
+        return audit::emit(ctx, &args[1..], kwargs);
+    }
+    if name == "sys.addaudithook" {
+        return audit::register(ctx, &args[1..], kwargs);
     }
     if matches!(name, "sys.intern" | "sys._is_interned") {
         if !kwargs.is_empty() {

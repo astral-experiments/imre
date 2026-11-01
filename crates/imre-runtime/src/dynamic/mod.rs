@@ -93,6 +93,7 @@ pub(crate) struct Context {
     argv: Id,
     sys_path: Id,
     default_encoding: Id,
+    audit_hooks: Vec<Id>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
@@ -2034,6 +2035,15 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
+                for name in ["audit", "addaudithook"] {
+                    let callable = self.builtin(&format!("sys.{name}"));
+                    let function = self.alloc(Value::Method {
+                        callable,
+                        receiver: module,
+                        explicit: false,
+                    });
+                    self.bind(scope, name, function);
+                }
                 for (name, original, stderr) in [
                     ("stdout", "__stdout__", false),
                     ("stderr", "__stderr__", true),
