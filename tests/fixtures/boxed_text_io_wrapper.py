@@ -110,6 +110,17 @@ def current():
         else:
             raise AssertionError("read from a detached buffer")
 
+    raw = io.BytesIO()
+    writer = io.BufferedWriter(raw, buffer_size=4)
+    assert type(writer) is _io.BufferedWriter
+    assert isinstance(writer, io.BufferedIOBase) and writer.raw is raw
+    assert writer.write(b"abcd") == 4 and writer.tell() == 4 and raw.getvalue() == b"abcd"
+    assert writer.write(b"e") == 1 and raw.getvalue() == b"abcd"
+    with io.TextIOWrapper(writer, "utf-8", newline="\n") as stream:
+        print("é", file=stream)
+        stream.flush()
+        assert stream.buffer.raw.getvalue() == "abcdeé\n".encode()
+    assert raw.closed and writer.closed
     print("wrapped binary streams")
 
 

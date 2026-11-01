@@ -1061,6 +1061,9 @@ impl Value {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }
+                    Some(super::stdlib::io::MemoryStream::Writer(stream)) => {
+                        visit.extend(stream.raw.get())
+                    }
                     Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
                         stream.children(visit)
                     }

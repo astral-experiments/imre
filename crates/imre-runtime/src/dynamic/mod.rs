@@ -1884,7 +1884,7 @@ impl Context {
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => {
                 self.module("io")?;
-                for name in ["BytesIO", "StringIO", "TextIOWrapper"] {
+                for name in ["BytesIO", "StringIO", "TextIOWrapper", "BufferedWriter"] {
                     let class = self.builtins[&format!("_io.{name}")];
                     self.bind(scope, name, class);
                 }

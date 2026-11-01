@@ -3,6 +3,7 @@
 use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+mod buffered_writer;
 mod bytes_io;
 mod text_wrapper;
 
@@ -11,6 +12,7 @@ pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
+    Writer(std::rc::Rc<buffered_writer::Writer>),
 }
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
@@ -51,6 +53,14 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         &["read", "readall", "readinto"],
     );
     let buffered = class(ctx, module, "BufferedIOBase", io, &[]);
+    let writer = class(
+        ctx,
+        module,
+        "BufferedWriter",
+        buffered,
+        buffered_writer::METHODS,
+    );
+    ctx.builtins.insert("_io.BufferedWriter".into(), writer);
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
     let text = class(ctx, module, "TextIOBase", io, &[]);
@@ -72,7 +82,10 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
         .allocate_class(name.into(), scope, vec![base])
         .expect("a single I/O base has a linearization");
     let module_name = ctx.text(
-        if matches!(name, "StringIO" | "BytesIO" | "TextIOWrapper") {
+        if matches!(
+            name,
+            "StringIO" | "BytesIO" | "TextIOWrapper" | "BufferedWriter"
+        ) {
             "_io"
         } else {
             "io"
@@ -85,11 +98,15 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     let descriptor_owner = match name {
         "TextIOWrapper" => "_io.TextIOWrapper",
         "BytesIO" => "_io.BytesIO",
+        "BufferedWriter" => "_io.BufferedWriter",
         _ => "_io._IOBase",
     };
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
-        let attr = if name == "closed" || wrapper && text_wrapper::property(name) {
+        let attr = if name == "closed"
+            || wrapper && text_wrapper::property(name)
+            || descriptor_owner == "_io.BufferedWriter" && matches!(name, "raw" | "name" | "mode")
+        {
             let set = (wrapper && name == "_CHUNK_SIZE").then(|| {
                 ctx.alloc(Value::IoMethod {
                     owner,
@@ -109,6 +126,35 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     }
     ctx.bind(module, name, owner);
     owner
+}
+
+fn copy_bytes(data: &[u8]) -> Result<Vec<u8>> {
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(data.len())
+        .map_err(|_| crate::Error::allocation())?;
+    result.extend_from_slice(data);
+    Ok(result)
+}
+
+/// Keep the Python stream alive across callbacks that can detach or reinitialize its owner.
+fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(obj);
+    let result = ctx
+        .lookup_attr(obj, name)
+        .and_then(|f| ctx.call(f, args, Vec::new()));
+    ctx.heap.release_temporaries_since(mark);
+    match &result {
+        Ok(value) => ctx.heap.keep(*value),
+        Err(error) => {
+            for value in error.roots() {
+                ctx.heap.keep(value);
+            }
+        }
+    }
+    ctx.heap.weak_edge_removed(obj);
+    result
 }
 
 fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
@@ -269,6 +315,19 @@ pub(in super::super) fn call(
             return super::files::text_method(ctx, name, args, kwargs);
         }
         return text_wrapper::call(ctx, receiver, name, rest, kwargs);
+    }
+    if ctx
+        .builtins
+        .get("_io.BufferedWriter")
+        .is_some_and(|&class| ctx.instance_of(receiver, class))
+    {
+        if matches!(ctx.heap.get(receiver), Value::File(_)) {
+            if name == "closed" {
+                return ctx.lookup_attr(receiver, name);
+            }
+            return super::files::call(ctx, &format!("file.{name}"), args, kwargs);
+        }
+        return buffered_writer::call(ctx, receiver, name, rest, kwargs);
     }
     if bytes_io == Some(owner)
         || matches!(name, "__enter__" | "__exit__")

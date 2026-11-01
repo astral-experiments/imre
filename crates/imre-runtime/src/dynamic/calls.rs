@@ -849,6 +849,10 @@ impl Context {
         match self.heap.get(obj) {
             Value::Class { .. } if let Some(meta) = self.custom_metaclass(obj) => Ok(meta),
             Value::Union(_) => Ok(super::union::class(self)),
+            Value::File(file) if matches!(file.as_ref(), stdlib::BinaryFile::Writer(_)) => {
+                self.module("io")?;
+                Ok(self.builtins["_io.BufferedWriter"])
+            }
             Value::TextFile(_) => {
                 self.module("io")?;
                 Ok(self.builtins["_io.TextIOWrapper"])
@@ -906,7 +910,8 @@ impl Context {
             .builtin_type_name(value)
             .and_then(|name| self.builtins.get(name))
             && (super::mapping_abc::registered_subclass(self, *actual, class)
-                || matches!(self.heap.get(value), Value::TextFile(_))
+                || (matches!(self.heap.get(value), Value::TextFile(_))
+                    || matches!(self.heap.get(value), Value::File(file) if matches!(file.as_ref(), stdlib::BinaryFile::Writer(_))))
                     && self.direct_subclass(*actual, class))
         {
             return true;

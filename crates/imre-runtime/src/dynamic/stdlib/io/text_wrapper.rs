@@ -3,7 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
+use super::{Context, Error, Id, MemoryStream, NONE, Result, Value, invoke};
 use crate::dynamic::builtins::boolean;
 use crate::objects::Codec;
 
@@ -69,25 +69,6 @@ pub(in crate::dynamic) struct Wrapper {
     write_start: Cell<bool>,
     output: RefCell<Vec<u8>>,
     input: RefCell<Reader>,
-}
-
-fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> Result<Id> {
-    let mark = ctx.heap.temporary_mark();
-    ctx.heap.keep(obj);
-    let result = ctx
-        .lookup_attr(obj, name)
-        .and_then(|f| ctx.call(f, args, Vec::new()));
-    ctx.heap.release_temporaries_since(mark);
-    match &result {
-        Ok(value) => ctx.heap.keep(*value),
-        Err(error) => {
-            for value in error.roots() {
-                ctx.heap.keep(value);
-            }
-        }
-    }
-    ctx.heap.weak_edge_removed(obj);
-    result
 }
 
 fn flag(ctx: &mut Context, obj: Id, method: &str) -> Result<bool> {

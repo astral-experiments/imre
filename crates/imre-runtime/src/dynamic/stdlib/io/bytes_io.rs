@@ -4,7 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::io::SeekFrom;
 use std::rc::Rc;
 
-use super::{Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value};
+use super::{Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value, copy_bytes};
 use crate::objects::FileState;
 
 pub(super) const METHODS: &[&str] = &[
@@ -16,15 +16,6 @@ pub(in crate::dynamic) struct BytesIo {
     file: RefCell<FileState>,
     // The heap traces the boxed immutable snapshot until a write replaces its contents.
     pub(in crate::dynamic) snapshot: Cell<Option<Id>>,
-}
-
-fn copy_bytes(data: &[u8]) -> Result<Vec<u8>> {
-    let mut result = Vec::new();
-    result
-        .try_reserve_exact(data.len())
-        .map_err(|_| crate::Error::allocation())?;
-    result.extend_from_slice(data);
-    Ok(result)
 }
 
 impl BytesIo {
