@@ -1619,6 +1619,15 @@ impl Context {
                 return Ok(self.builtin(&format!("property.{name}")));
             }
             Value::Code(ref code) => match name {
+                "co_flags" => {
+                    let flags = code.flags.ok_or_else(|| {
+                        Error::new(
+                            "NotImplementedError",
+                            "co_flags unavailable for this code object",
+                        )
+                    })?;
+                    return Ok(self.int(i64::from(flags)));
+                }
                 "co_name" => return Ok(code.name),
                 "co_filename" => return Ok(code.filename),
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
@@ -3142,7 +3151,12 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
-            Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
+            Value::Code(_)
+                if matches!(
+                    name,
+                    "co_name" | "co_filename" | "co_firstlineno" | "co_flags"
+                ) =>
+            {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
             Value::Partial {

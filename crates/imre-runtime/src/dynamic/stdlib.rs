@@ -379,6 +379,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
+        ("types", "coroutine") => ctx.builtin("types.coroutine"),
+        ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
@@ -1192,6 +1194,40 @@ pub(super) fn call(
         .or_else(|| name.strip_prefix("itertools.repeat."))
     {
         return itertools::method(ctx, method, args, kwargs);
+    }
+    if name == "types.coroutine" {
+        let func = single_argument("coroutine", "func", args, kwargs)?;
+        if !ctx.callable(func) {
+            return Err(Error::new(
+                "TypeError",
+                "types.coroutine() expects a callable",
+            ));
+        }
+        if let Value::Function { code, .. } = *ctx.heap.get(func) {
+            let original = ctx.code_object(code);
+            if let Some(flags) = original.flags {
+                use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
+                if flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
+                    return Ok(func);
+                }
+                if flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
+                {
+                    // Other functions and existing generators retain their original code.
+                    let mut marked = original.clone();
+                    marked.flags = Some(flags | ITERABLE_COROUTINE);
+                    let marked = ctx.alloc(Value::Code(marked));
+                    let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
+                        unreachable!()
+                    };
+                    *code = marked;
+                    return Ok(func);
+                }
+            }
+        }
+        return Err(Error::new(
+            "NotImplementedError",
+            "native types.coroutine supports compiled generator and coroutine functions",
+        ));
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);

@@ -517,6 +517,51 @@ impl Function<'_, '_> {
             }
             _ => None,
         };
+        let flags = match (&body, params) {
+            (Body::Namespace(_) | Body::Annotations(_), _) => None,
+            _ => {
+                use imre_ast::code_flags::*;
+                let mut flags = OPTIMIZED | NEWLOCALS;
+                if params.is_some_and(|p| p.vararg.is_some()) {
+                    flags |= VARARGS;
+                }
+                if params.is_some_and(|p| p.kwarg.is_some()) {
+                    flags |= VARKEYWORDS;
+                }
+                if self.prefix.contains(".<locals>.") {
+                    flags |= NESTED;
+                }
+                if !self.prefix.is_empty() && !self.prefix.ends_with(".<locals>.") {
+                    flags |= METHOD;
+                }
+                if self.source.string_annotations {
+                    flags |= FUTURE_ANNOTATIONS;
+                }
+                if self.source.barry_as_flufl {
+                    flags |= FUTURE_BARRY_AS_BDFL;
+                }
+                if doc.is_some() {
+                    flags |= HAS_DOCSTRING;
+                }
+                let kind = match &body {
+                    Body::GeneratorFunction(_) | Body::Generator(..) => GENERATOR,
+                    Body::Expression(expr) => {
+                        let mut yields = Yields::default();
+                        yields.visit_expr(expr);
+                        if yields.0 { GENERATOR } else { 0 }
+                    }
+                    Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
+                        if is_generator(&f.body) {
+                            ASYNC_GENERATOR
+                        } else {
+                            COROUTINE
+                        }
+                    }
+                    _ => 0,
+                };
+                Some(flags | kind)
+            }
+        };
         let doc = doc.map_or_else(|| "0".into(), |s| self.text(&s));
         let entries = params.map_or_else(Vec::new, |p| {
             crate::frontend::parameter_annotations(p, returns)
@@ -539,6 +584,9 @@ impl Function<'_, '_> {
         let qualname = self.text(&qualname);
         let mut signature =
             json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
+        if let Some(flags) = flags {
+            signature["code_flags"] = json!(flags);
+        }
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
@@ -1063,25 +1111,26 @@ fn relative_import(package: &str, level: u32, name: &str) -> Option<String> {
     })
 }
 
-/// A call to a generator must never run the statements before its first yield.
-fn is_generator(body: &[ast::Stmt]) -> bool {
-    #[derive(Default)]
-    struct Yields(bool);
-    impl<'a> Visitor<'a> for Yields {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if !self.0 && !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
-                visitor::walk_stmt(self, stmt);
-            }
-        }
-        fn visit_expr(&mut self, expr: &'a ast::Expr) {
-            match expr {
-                ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => self.0 = true,
-                ast::Expr::Lambda(_) => {}
-                _ if !self.0 => visitor::walk_expr(self, expr),
-                _ => {}
-            }
+#[derive(Default)]
+struct Yields(bool);
+impl<'a> Visitor<'a> for Yields {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        if !self.0 && !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
+            visitor::walk_stmt(self, stmt);
         }
     }
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        match expr {
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => self.0 = true,
+            ast::Expr::Lambda(_) => {}
+            _ if !self.0 => visitor::walk_expr(self, expr),
+            _ => {}
+        }
+    }
+}
+
+/// A call to a generator must never run the statements before its first yield.
+fn is_generator(body: &[ast::Stmt]) -> bool {
     let mut yields = Yields::default();
     yields.visit_body(body);
     yields.0
