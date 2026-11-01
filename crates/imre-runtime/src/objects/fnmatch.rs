@@ -66,6 +66,65 @@ pub unsafe extern "C" fn imre_fnmatch(
     finish(matched(), 0)
 }
 
+/// The indirect-call ABI passes two borrowed str | bytes | Path words. Normalizing
+/// on POSIX leaves str and bytes untouched and asks a Path for its spelling.
+unsafe fn match_callback(name: usize, pat: usize, normcase: bool) -> bool {
+    const PATH: usize = 6;
+    let tag = |word: usize| word & 7;
+    if !normcase && (tag(pat) == PATH || tag(name) == PATH) {
+        let message = if tag(pat) == PATH {
+            "object of type 'PosixPath' has no len()"
+        } else {
+            "expected string or bytes-like object, got 'PosixPath'"
+        };
+        return Error::new(Kind::TypeError, message).returning(false);
+    }
+    let path_text = |word| {
+        // SAFETY: tag six identifies a live Path. Take an owner through the matcher call.
+        (tag(word) == PATH)
+            .then(|| unsafe { StrOwner::from_raw(super::paths::imre_union_path_text(word)) })
+    };
+    let name_text = path_text(name);
+    let pat_text = path_text(pat);
+    let spelling = |word: usize, text: &Option<StrOwner>| {
+        text.as_ref()
+            .map_or((word & !7) as *const (), |s| StrOwner::as_ptr(s).cast())
+    };
+    // SAFETY: each selected owner stays rooted and the bytes flags describe the spellings.
+    unsafe {
+        imre_fnmatch(
+            spelling(name, &name_text),
+            spelling(pat, &pat_text),
+            u32::from(tag(name) == 1),
+            u32::from(tag(pat) == 1),
+        ) != 0
+    }
+}
+
+/// # Safety
+/// Both arguments are rooted, tagged str | bytes | Path words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_fnmatch_callback(
+    _context: *const (),
+    name: usize,
+    pat: usize,
+) -> bool {
+    // SAFETY: the caller supplies the ordinary matcher callback signature.
+    unsafe { match_callback(name, pat, true) }
+}
+
+/// # Safety
+/// Both arguments are rooted, tagged str | bytes | Path words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_fnmatchcase_callback(
+    _context: *const (),
+    name: usize,
+    pat: usize,
+) -> bool {
+    // SAFETY: the caller supplies the ordinary matcher callback signature.
+    unsafe { match_callback(name, pat, false) }
+}
+
 /// # Safety
 /// The sequence stores rooted str, bytes, or their compiler-described union.
 /// The pattern is an independently rooted immutable owner with the indicated tag.
@@ -136,7 +195,7 @@ fn translate_class(chars: &[char]) -> String {
     text
 }
 
-fn translated_parts(pat: &str, star: &str, question: &str) -> (Vec<String>, Vec<usize>) {
+pub(crate) fn translated_parts(pat: &str, star: &str, question: &str) -> (Vec<String>, Vec<usize>) {
     let chars: Vec<_> = pat.chars().collect();
     let (mut parts, mut stars) = (Vec::new(), Vec::new());
     let mut i = 0;
@@ -165,7 +224,7 @@ fn translated_parts(pat: &str, star: &str, question: &str) -> (Vec<String>, Vec<
     (parts, stars)
 }
 
-fn translate(pat: &str) -> String {
+pub(crate) fn translate(pat: &str) -> String {
     let (parts, stars) = translated_parts(pat, "*", ".");
     let mut regex = String::from("(?s:");
     let mut start = 0;

@@ -252,9 +252,9 @@ impl Checker<'_> {
 const DEFERRED: &str = "inference is waiting for a function return type";
 
 struct Pending {
+    inferred_params: Vec<bool>,
     params: Vec<Option<Type>>,
     none_defaults: Vec<usize>,
-    inferred_params: Vec<bool>,
     returns: Option<Type>,
     infer_return: bool,
 }
@@ -782,24 +782,34 @@ impl Checker<'_> {
                         }
                         return checker.direct_value(supplied, node, ty, parameter.sign_only);
                     }
-                    // Only widen an originally inferred parameter. The final pass checks
-                    // the entire helper against the tagged string or string-list layout.
+                    // Keep annotations fixed. For inferred arguments, select the tagged
+                    // spelling or string-list layout from both sides of the call.
+                    let types = checker.types;
                     if inference.pending.borrow()[signature.id].inferred_params[index]
-                        && (ty == Type::Str || checker.types.element(ty) == Some(Type::Str))
+                        && (matches!(ty, Type::Str | Type::Bytes)
+                            || types.element(ty) == Some(Type::Str))
                     {
-                        let lines = checker.types.list(Type::Str);
-                        let union = checker.types.union(&[Type::Str, lines]).unwrap();
+                        let lines = types.list(Type::Str);
+                        let wider = |other| {
+                            if ty == other {
+                                return None;
+                            }
+                            types.union(&[ty, other]).filter(|&union| {
+                                types.members(union).is_some_and(|members| {
+                                    members == [Type::Str, Type::Bytes]
+                                        || members == [Type::Str, lines]
+                                })
+                            })
+                        };
                         let value = match argument {
                             calls::Supplied::Source(node) => {
                                 checker.expr_expected_if(node, ty, |_, actual| {
-                                    actual == Type::Str || actual == lines || actual == union
+                                    wider(actual).is_some()
                                 })?
                             }
                             calls::Supplied::Field(value, _) => value,
                         };
-                        let expected = if value.ty != ty
-                            && (value.ty == Type::Str || value.ty == lines || value.ty == union)
-                        {
+                        let expected = if let Some(union) = wider(value.ty) {
                             inference.widen_parameter(signature.id, index, union);
                             union
                         } else {

@@ -1,9 +1,9 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_sha256": "e65c158b2ef30907e80273ca17a00fc495850f76588fe76666742f2346dfbaaa",
+  "compiler_sha256": "bfa53900c66598b517716227fb5745f69d7c4181b88f7174ec00dac4fea2ff0c",
   "operation": "check",
   "tests_executed": 0,
-  "source": "git",
+  "source": "vendored",
   "support_files": [],
   "checks": [
     {
@@ -11,28 +11,28 @@
       "entry": "import",
       "reachable_only": false,
       "exit": 1,
-      "diagnostic": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign"
+      "diagnostic": "Lib/test/test_fnmatch.py:260:18: Imre: unknown class method"
     },
     {
       "suite": "test.test_fnmatch",
       "entry": "import",
       "reachable_only": true,
       "exit": 1,
-      "diagnostic": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign"
+      "diagnostic": "Lib/test/test_fnmatch.py:16:5: Imre: cannot infer parameter \"filename\"; add an annotation or a concrete direct call"
     },
     {
       "suite": "test.test_fnmatch",
       "entry": "runner",
       "reachable_only": false,
       "exit": 1,
-      "diagnostic": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign"
+      "diagnostic": "Lib/test/test_fnmatch.py:260:18: Imre: unknown class method"
     },
     {
       "suite": "test.test_fnmatch",
       "entry": "runner",
       "reachable_only": true,
       "exit": 1,
-      "diagnostic": "Lib/test/test_fnmatch.py:16:68: Imre: defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign"
+      "diagnostic": "Lib/imre_suite.py:3:9: Imre: unknown class method"
     }
   ]
 }

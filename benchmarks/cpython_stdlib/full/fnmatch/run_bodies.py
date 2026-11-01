@@ -144,7 +144,12 @@ def main():
                     return name, False, proof
                 check_result([sys.executable, "-I", "-B", path / "case.py"], owner, fn)
                 check_result([binary], owner, fn)
-                if fn == "test_mix_bytes_str":
+                if b"    def check_match(" in entry:
+                    # Invert the helper's expectation only in a separate failure control.
+                    wrong = entry.replace(b"        if should_match:", b"        if not should_match:", 1)
+                    assert wrong != entry
+                    check_result([tool.build(wrong, path)], owner, fn, wrong=True)
+                elif fn == "test_mix_bytes_str":
                     # Make the first call accept its pattern: the original assertRaises must fail.
                     wrong = entry.replace(b", b'*')", b", '*')", 1)
                     assert wrong != entry

@@ -426,6 +426,37 @@ pub unsafe extern "C" fn imre_unittest_compile_pattern(spelling: *const Str) -> 
     }
 }
 
+/// Compile a Python pattern supplied at runtime, then search for a match.
+///
+/// # Safety
+/// The caller roots both Python strings until the match snapshot has been produced.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_regex_search_text(
+    spelling: *const Str,
+    text: *const Str,
+    anchored: bool,
+    verbose: bool,
+) -> *const Object {
+    // SAFETY: the caller retains the string for the full call.
+    let spelling = unsafe { &*spelling };
+    let compiled = match imre_regex::translate(spelling, verbose) {
+        Ok(pattern) => Pattern::with_spelling(&pattern.source, spelling),
+        Err(reason) => {
+            Error::new(
+                Kind::NotImplementedError,
+                format!("unsupported native regex: {reason}"),
+            )
+            .raise();
+            return ptr::null();
+        }
+    };
+    let pattern = crate::ObjectOwner::new(Object(StorageCell::new(Storage::RegexPattern(
+        Box::new(compiled),
+    ))));
+    // SAFETY: the local owner and caller respectively root the pattern and text.
+    unsafe { match_text(crate::ObjectOwner::as_ptr(&pattern), text, anchored) }
+}
+
 /// Substitute all matches; a miss retains the original string.
 ///
 /// # Safety
@@ -572,6 +603,26 @@ pub unsafe extern "C" fn imre_regex_finditer(
 }
 
 impl Match {
+    pub(super) fn write_repr(&self, output: &mut impl std::fmt::Write) -> std::fmt::Result {
+        let (start, end) = self
+            .spans
+            .get(0)
+            .flatten()
+            .expect("a match owns group zero");
+        let mut text = String::new();
+        super::exceptions::write_quoted_repr(&self.text[start..end], &mut text)?;
+        // CPython's %.50R precision applies to the quoted spelling in code points.
+        if let Some((cut, _)) = text.char_indices().nth(50) {
+            text.truncate(cut);
+        }
+        write!(
+            output,
+            "<re.Match object; span=({}, {}), match={text}>",
+            self.spans.char_offset(&self.text, start),
+            self.spans.char_offset(&self.text, end),
+        )
+    }
+
     /// Empty captures own an empty string. Only nonparticipating groups return null.
     fn substring(&self, span: Option<(usize, usize)>) -> *const Str {
         match span {

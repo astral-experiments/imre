@@ -100,7 +100,7 @@ pub(super) fn targets(
         ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, .. } = &value.kind {
                 targets.entry(value.ty).or_default().insert(*function);
-                if let Some(signature) = types.index_callable_signature(value.ty) {
+                if let Some(signature) = types.method_signature(value.ty) {
                     targets.entry(signature).or_default().insert(*function);
                 }
             }
@@ -266,8 +266,17 @@ impl Checker<'_> {
                 "function values require fixed positional parameters",
             ));
         }
+        let method_site = signature.method.filter(|_| {
+            receiver.is_some()
+                && expected.is_none()
+                && !signature.asynchronous
+                && signature.params[skip..].iter().any(|p| p.default.is_some())
+        });
         let mut signature = signature.clone();
-        if let Some(inference) = self.inference {
+        // A later call to the saved method can supply its missing formal types.
+        if let Some(inference) = self.inference
+            && method_site.is_none()
+        {
             let asynchronous = signature.asynchronous;
             inference
                 .callable_signature(
@@ -298,7 +307,10 @@ impl Checker<'_> {
             },
         );
         let unbound = receiver.is_none();
-        let ty = if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
+        let ty = if let Some(method) = method_site {
+            self.types
+                .bound_source_method(ty, method.class, method.index)
+        } else if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
             self.types.declared_cache(ty, signature.id, policy)
         } else {
             ty
@@ -557,6 +569,18 @@ impl Checker<'_> {
         }
         if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
             return Ok(result);
+        }
+        if let Some((class, index)) = self.types.bound_method_site(callable.ty) {
+            let method = &self.classes.declarations.definitions[class].methods[index];
+            let signature = self.classes.methods[class][method.name.as_str()].clone();
+            let (returns, args) = self.bind_source(call, &signature, None, 1, None)?;
+            return Ok(Expr {
+                ty: returns,
+                kind: ExprKind::Invoke {
+                    callable: Box::new(callable),
+                    args,
+                },
+            });
         }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(

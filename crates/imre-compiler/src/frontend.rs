@@ -1406,11 +1406,14 @@ fn signature(
             matches!(value, ast::Expr::Subscript(subscript) if annotations::sequence_annotation(graph.resolve(module, &subscript.value))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
-        let wrapper_default =
+        let fixed_default =
             parameter
                 .default
                 .as_deref()
                 .and_then(|value| match graph.resolve(module, value) {
+                    Some(Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Match {
+                        normcase,
+                    }))) => Some(fnmatch::function(types, normcase)),
                     Some(Binding::Intrinsic(Intrinsic::WrapperAttributes(fields))) => {
                         Some(functools::wrapper_attributes(fields, types))
                     }
@@ -1476,7 +1479,7 @@ fn signature(
                     .map(|value| {
                         if inspect::is_sentinel(graph, module, value) {
                             Ok(Type::PlainObject)
-                        } else if let Some(default) = &wrapper_default {
+                        } else if let Some(default) = &fixed_default {
                             Ok(default.ty)
                         } else {
                             calls::scalar_literal(value, source).map(|value| value.ty)
@@ -1539,13 +1542,9 @@ fn signature(
                     })
                 } else if ty == Type::PlainObject && inspect::is_sentinel(graph, module, value) {
                     Ok(inspect::sentinel())
-                } else if let Some(default) = wrapper_default {
+                } else if let Some(default) = fixed_default {
                     if default.ty != ty {
-                        return Err(error(
-                            source,
-                            value,
-                            "wrapper attribute default requires its exact tuple type",
-                        ));
+                        return Err(error(source, value, "default requires its exact type"));
                     }
                     Ok(default)
                 } else {
@@ -2374,6 +2373,8 @@ struct Checker<'a> {
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
+    /// Outermost plain assignments can give an inferred list a new invariant element type.
+    inferred_lists: HashSet<usize>,
     nullable_assignments: HashMap<String, Type>,
     bound_flags: HashMap<String, usize>,
     omitted_assert_locals: HashMap<String, unbound_locals::Binding>,
@@ -2446,6 +2447,7 @@ impl<'a> Checker<'a> {
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
             returns: Type::None,
+            inferred_lists: HashSet::new(),
             nullable_assignments: HashMap::new(),
             bound_flags: HashMap::new(),
             omitted_assert_locals: HashMap::new(),
@@ -2910,6 +2912,18 @@ impl<'a> Checker<'a> {
                 ExprKind::Present(Box::new(self.coerce(value, payload, node)?))
             };
             return Ok(Expr { ty: expected, kind });
+        }
+        // Tagged spelling unions share the same representation for each member.
+        if let (Some(actual), Some(target)) =
+            (self.types.members(value.ty), self.types.members(expected))
+            && actual
+                .iter()
+                .all(|ty| matches!(ty, Type::Str | Type::Bytes | Type::Path) && target.contains(ty))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
         }
         if self
             .types
@@ -3604,7 +3618,7 @@ impl<'a> Checker<'a> {
                     .types
                     .partial_function(args[0].ty)
                     .is_some_and(|p| p.callable == self.locals[slot])
-                || self.types.index_callable_signature(args[0].ty) == Some(self.locals[slot]))
+                || self.types.method_signature(args[0].ty) == Some(self.locals[slot]))
         {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
@@ -4540,7 +4554,7 @@ impl<'a> Checker<'a> {
     }
 
     fn lower_statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
-        if self.graph.local_metadata_import(self.module, statement) {
+        if self.graph.local_static_import(self.module, statement) {
             return Ok((Vec::new(), true));
         }
         if let ast::Stmt::ImportFrom(import) = statement
@@ -4581,6 +4595,9 @@ impl<'a> Checker<'a> {
                     self.types,
                     self.class,
                 )?;
+                if let Some(slot) = self.names.get(name.id.as_str()) {
+                    self.inferred_lists.remove(slot);
+                }
                 // A new outermost annotation dominates every subsequent read.
                 // Evaluate its RHS with the old binding; closures and nested
                 // suites keep their fixed slots across calls and control flow.
@@ -4592,15 +4609,7 @@ impl<'a> Checker<'a> {
                     && let Some(rhs) = &assign.value
                 {
                     let value = self.expr_expected(rhs, ty)?;
-                    let slot = self.hidden(ty);
-                    self.names.insert(name.id.to_string(), slot);
-                    self.assigned_value(slot, &value);
-                    self.assigned.remove(&old);
-                    self.narrowed.remove_mut(&old);
-                    return Ok((
-                        vec![Statement::Assign(slot, value), Statement::Clear(old)],
-                        true,
-                    ));
+                    return Ok((self.replace_local(name.id.as_str(), old, ty, value), true));
                 }
                 let slot = self.declare(name.id.as_str(), ty, statement)?;
                 if let Some(value) = &assign.value {
@@ -5097,6 +5106,41 @@ impl<'a> Checker<'a> {
         let Some((item, remaining)) = items.split_first() else {
             return self.block(body);
         };
+        if let ast::Expr::Call(call) = &item.context_expr
+            && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::CatchWarnings))
+        {
+            self.arguments(call, &[], None)?;
+            let mut protected = Vec::new();
+            if let Some(target) = &item.optional_vars {
+                protected.push(self.assign_value(
+                    target,
+                    Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    },
+                )?);
+            }
+            let (nested, falls) = self.with_items(remaining, body)?;
+            protected.extend(nested);
+            let action = |op| {
+                Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(op, vec![]),
+                })
+            };
+            return Ok((
+                vec![
+                    action(Builtin::WarningScopeEnter),
+                    Statement::Try {
+                        body: protected,
+                        handlers: vec![],
+                        orelse: vec![],
+                        finalbody: vec![action(Builtin::WarningScopeExit)],
+                    },
+                ],
+                falls,
+            ));
+        }
         let temporary = if let ast::Expr::Call(call) = &item.context_expr
             && matches!(
                 self.resolve(&call.func),
@@ -5736,6 +5780,19 @@ impl<'a> Checker<'a> {
         Ok((no, falls))
     }
 
+    /// A straight-line rebind publishes the new slot before releasing the old owner.
+    fn replace_local(&mut self, name: &str, old: usize, ty: Type, value: Expr) -> Vec<Statement> {
+        let slot = self.hidden(ty);
+        if self.inferred_lists.remove(&old) {
+            self.inferred_lists.insert(slot);
+        }
+        self.names.insert(name.to_owned(), slot);
+        self.assigned_value(slot, &value);
+        self.assigned.remove(&old);
+        self.narrowed.remove_mut(&old);
+        vec![Statement::Assign(slot, value), Statement::Clear(old)]
+    }
+
     fn assign(&mut self, target: &ast::Expr, value: Expr) -> Result<Statement, String> {
         let ast::Expr::Name(name) = target else {
             return Err(error(
@@ -5753,7 +5810,7 @@ impl<'a> Checker<'a> {
             && self.types.payload(nullable) == Some(value.ty)
         {
             self.coerce(value, nullable, target)?
-        } else if let Some(signature) = self.types.index_callable_signature(value.ty) {
+        } else if let Some(signature) = self.types.method_signature(value.ty) {
             self.coerce(value, signature, target)?
         } else {
             Self::inferred_stream(value)
@@ -6270,6 +6327,9 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::RegisteredImport(name) => {
                     return Err(self.object_runtime_export(name, expression));
+                }
+                Intrinsic::Fnmatch(ir::FnmatchOperation::Match { normcase }) => {
+                    return Ok(fnmatch::function(self.types, normcase));
                 }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
@@ -9133,7 +9193,12 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::PatchSet)) => return self.parse_patch(call),
-            Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => {
+                return self.search_regex(call, false);
+            }
+            Some(Binding::Intrinsic(Intrinsic::RegexMatchStart)) => {
+                return self.search_regex(call, true);
+            }
             Some(Binding::Intrinsic(Intrinsic::Fnmatch(operation))) => {
                 return self.fnmatch_call(operation, call);
             }

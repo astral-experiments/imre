@@ -43,3 +43,17 @@ def current():
         filter(Broken(), "*")
     except ValueError as error:
         print(error.args)
+
+    from fnmatch import _translate, filterfalse, fnmatch, fnmatchcase, translate
+
+    def check(name, pat, fn=fnmatch):
+        return fn(name, pat)
+
+    print(check(Pattern(), "*.cache"), check("AbC", "abc", fnmatchcase))
+    try:
+        check(Pattern(), "*.cache", fnmatchcase)
+    except TypeError as error:
+        print(error.args)
+    print(check(b"\xff", b"?"), check(b"\xc3\xa9", b"?"))
+    print(filterfalse(names, "*.cache"))
+    print(translate("**a*a*b"), _translate("a*b?c**[?]", "star", "question"))

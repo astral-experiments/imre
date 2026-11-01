@@ -24,7 +24,13 @@ impl Checker<'_> {
     pub(super) fn boxable_value(&self, ty: Type) -> bool {
         matches!(
             ty,
-            Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
+            Type::None
+                | Type::Bool
+                | Type::Int
+                | Type::Str
+                | Type::StrLiteral(_)
+                | Type::Bytes
+                | Type::RegexMatch
         ) || self
             .types
             .payload(ty)

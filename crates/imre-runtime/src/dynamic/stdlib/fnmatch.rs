@@ -1,84 +1,171 @@
 use super::{Context, Error, Id, Result, Value};
-use crate::objects::fnmatch::{byte_spelling, compile, mixed_message};
+use crate::dynamic::builtins::boolean;
+use crate::objects::fnmatch::{byte_spelling, compile, mixed_message, translate, translated_parts};
 
-fn arguments(args: &[Id], kwargs: &[(String, Id)]) -> Result<(Id, Id)> {
-    let mut names = args.first().copied();
-    let mut pat = args.get(1).copied();
+/// Bind the required positional-or-keyword parameters of a Python fnmatch function.
+fn arguments<const N: usize>(
+    function: &str,
+    params: [&str; N],
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<[Id; N]> {
+    let mut values = std::array::from_fn(|i| args.get(i).copied());
     for (key, value) in kwargs {
-        let slot = match key.as_str() {
-            "names" => &mut names,
-            "pat" => &mut pat,
-            _ => {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("filter() got an unexpected keyword argument '{key}'"),
-                ));
+        let Some(index) = params.iter().position(|&p| p == key) else {
+            let mut message = format!("{function}() got an unexpected keyword argument '{key}'");
+            if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &params) {
+                message.push_str(&format!(". Did you mean '{hint}'?"));
             }
+            return Err(Error::new("TypeError", message));
         };
-        if slot.replace(*value).is_some() {
+        if values[index].replace(*value).is_some() {
             return Err(Error::new(
                 "TypeError",
-                format!("filter() got multiple values for argument '{key}'"),
+                format!("{function}() got multiple values for argument '{key}'"),
             ));
         }
     }
-    if args.len() > 2 {
+    if args.len() > N {
         return Err(Error::new(
             "TypeError",
             format!(
-                "filter() takes 2 positional arguments but {} were given",
+                "{function}() takes {N} positional arguments but {} were given",
                 args.len()
             ),
         ));
     }
-    let missing = match (names, pat) {
-        (Some(names), Some(pat)) => return Ok((names, pat)),
-        (None, None) => "2 required positional arguments: 'names' and 'pat'",
-        (None, Some(_)) => "1 required positional argument: 'names'",
-        (Some(_), None) => "1 required positional argument: 'pat'",
-    };
-    Err(Error::new(
-        "TypeError",
-        format!("filter() missing {missing}"),
-    ))
+    if values.iter().any(Option::is_none) {
+        let missing: Vec<_> = params
+            .iter()
+            .zip(values)
+            .filter(|(_, value)| value.is_none())
+            .map(|(p, _)| format!("'{p}'"))
+            .collect();
+        let (last, others) = missing.split_last().unwrap();
+        let names = match others {
+            [] => last.clone(),
+            [first] => format!("{first} and {last}"),
+            _ => format!("{}, and {last}", others.join(", ")),
+        };
+        let plural = if others.is_empty() { "" } else { "s" };
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{function}() missing {} required positional argument{plural}: {names}",
+                missing.len()
+            ),
+        ));
+    }
+    Ok(values.map(Option::unwrap))
 }
 
-pub(super) fn filter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (names, pat) = arguments(args, kwargs)?;
-    let pat = super::posixpath::fspath(ctx, pat)?;
-    let (matches, bytes) = match ctx.heap.get(ctx.scalar_value(pat)) {
-        Value::Bytes(value) => (compile(&byte_spelling(value)?), true),
-        _ => (compile(ctx.str_value(ctx.scalar_value(pat))?), false),
-    };
-    let iter = ctx.iterator(names)?;
-    let result = ctx.alloc(Value::List(Vec::new()));
-    while let Some(name) = ctx.next_item(iter)? {
-        let selected = match ctx.heap.get(ctx.scalar_value(name)) {
-            Value::Str(_) | Value::SurrogateStr(_) if !bytes => {
-                matches(ctx.str_value(ctx.scalar_value(name))?)
-            }
-            Value::Bytes(value) | Value::ByteArray(value) if bytes => {
-                matches(&byte_spelling(value)?)
-            }
-            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::ByteArray(_) => {
-                return Err(Error::new("TypeError", mixed_message(bytes)));
-            }
-            _ => {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "expected string or bytes-like object, got '{}'",
-                        ctx.type_name(name)
-                    ),
-                ));
-            }
-        };
-        if selected {
-            let Value::List(items) = ctx.heap.get_mut(result) else {
-                unreachable!()
-            };
-            items.push(name);
-        }
+fn pattern(ctx: &Context, pat: Id) -> Result<(impl Fn(&str) -> bool + use<>, bool)> {
+    match ctx.heap.get(ctx.scalar_value(pat)) {
+        Value::Str(_) | Value::SurrogateStr(_) => Ok((compile(ctx.str_value(pat)?), false)),
+        Value::Bytes(value) => Ok((compile(&byte_spelling(value)?), true)),
+        Value::ByteArray(_)
+        | Value::List(_)
+        | Value::Dict(_)
+        | Value::Set { frozen: false, .. } => Err(Error::new(
+            "TypeError",
+            format!("unhashable type: '{}'", ctx.type_name(pat)),
+        )),
+        _ => Err(Error::new(
+            "TypeError",
+            format!("object of type '{}' has no len()", ctx.type_name(pat)),
+        )),
     }
-    Ok(result)
+}
+
+fn matches(ctx: &Context, name: Id, bytes: bool, matcher: &impl Fn(&str) -> bool) -> Result<bool> {
+    match ctx.heap.get(ctx.scalar_value(name)) {
+        Value::Str(_) | Value::SurrogateStr(_) if !bytes => Ok(matcher(ctx.str_value(name)?)),
+        Value::Bytes(value) | Value::ByteArray(value) if bytes => {
+            Ok(matcher(&byte_spelling(value)?))
+        }
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::ByteArray(_) => {
+            Err(Error::new("TypeError", mixed_message(bytes)))
+        }
+        _ => Err(Error::new(
+            "TypeError",
+            format!(
+                "expected string or bytes-like object, got '{}'",
+                ctx.type_name(name)
+            ),
+        )),
+    }
+}
+
+pub(super) fn call(
+    ctx: &mut Context,
+    op: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    match op {
+        "fnmatch" | "fnmatchcase" => {
+            let [mut name, mut pat] = arguments(op, ["name", "pat"], args, kwargs)?;
+            if op == "fnmatch" {
+                // POSIX normcase resolves PathLike values in name-then-pattern order.
+                name = super::posixpath::fspath(ctx, name)?;
+                pat = super::posixpath::fspath(ctx, pat)?;
+            }
+            let (matcher, bytes) = pattern(ctx, pat)?;
+            Ok(boolean(matches(ctx, name, bytes, &matcher)?))
+        }
+        "filter" | "filterfalse" => {
+            let [names, pat] = arguments(op, ["names", "pat"], args, kwargs)?;
+            let pat = super::posixpath::fspath(ctx, pat)?;
+            let (matcher, bytes) = pattern(ctx, pat)?;
+            let iter = ctx.iterator(names)?;
+            let result = ctx.alloc(Value::List(Vec::new()));
+            while let Some(name) = ctx.next_item(iter)? {
+                if matches(ctx, name, bytes, &matcher)? == (op == "filter") {
+                    let Value::List(items) = ctx.heap.get_mut(result) else {
+                        unreachable!()
+                    };
+                    items.push(name);
+                }
+            }
+            Ok(result)
+        }
+        "translate" => {
+            let pat = super::single_argument(op, "pat", args, kwargs)?;
+            let regex = match ctx.heap.get(ctx.scalar_value(pat)) {
+                Value::Str(_) | Value::SurrogateStr(_) => translate(ctx.str_value(pat)?),
+                Value::Bytes(bytes) if bytes.is_empty() => translate(""),
+                Value::Bytes(_) => {
+                    return Err(Error::new(
+                        "TypeError",
+                        "decoding to str: need a bytes-like object, int found",
+                    ));
+                }
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("object of type '{}' has no len()", ctx.type_name(pat)),
+                    ));
+                }
+            };
+            Ok(ctx.text(regex))
+        }
+        "_translate" => {
+            let [pat, star, question] =
+                arguments(op, ["pat", "star", "question_mark"], args, kwargs)?;
+            let (parts, stars) = translated_parts(ctx.str_value(pat)?, "*", "?");
+            let parts = parts
+                .into_iter()
+                .map(|part| match part.as_str() {
+                    "*" => star,
+                    "?" => question,
+                    _ => ctx.text(part),
+                })
+                .collect();
+            let parts = ctx.alloc(Value::List(parts));
+            let indices = stars.into_iter().map(|i| ctx.int(i as i64)).collect();
+            let indices = ctx.alloc(Value::List(indices));
+            Ok(ctx.alloc(Value::Tuple(vec![parts, indices])))
+        }
+        _ => unreachable!("registered fnmatch function"),
+    }
 }

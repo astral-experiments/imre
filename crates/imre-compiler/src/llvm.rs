@@ -4558,6 +4558,17 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::RegexSearchText { anchored, verbose } => {
+                let pointer = self.checked_instruction(format!(
+                    "call ptr @imre_regex_search_text(ptr {}, ptr {}, i1 {anchored}, i1 {verbose})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
+                    small_integer: false,
+                }
+            }
             Builtin::RegexSearch | Builtin::RegexMatchStart => {
                 let operation = if matches!(builtin, Builtin::RegexMatchStart) {
                     "match"
@@ -4711,6 +4722,14 @@ impl Emitter<'_, '_> {
                     args[0].value.operand, args[1].value.operand, args[2].value.operand,
                     args[3].value.operand, args[4].value.operand, args[5].value.operand
                 ));
+                none()
+            }
+            Builtin::WarningScopeEnter | Builtin::WarningScopeExit => {
+                self.line(if matches!(builtin, Builtin::WarningScopeEnter) {
+                    "call void @imre_warning_scope_enter()"
+                } else {
+                    "call void @imre_warning_scope_exit()"
+                });
                 none()
             }
             Builtin::WarningReset => {
@@ -5249,6 +5268,19 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::FnmatchFunction { normcase } => {
+                let name = if *normcase { "fnmatch" } else { "fnmatchcase" };
+                let root = self.output.global_ref(format!("static_function_{name}"));
+                self.static_functions.insert(root.clone());
+                self.rooted_record(returns, &root, |emitter| {
+                    let value = emitter.record_with_layout(returns, "callable");
+                    emitter.line(format!(
+                        "store ptr @imre_{name}_callback, ptr {}",
+                        value.operand
+                    ));
+                    value
+                })
+            }
             Builtin::BuiltinsLen => {
                 let layout = self.output.global_ref("layout_callable".to_owned());
                 let value = Value {
@@ -9056,6 +9088,8 @@ declare i64 @imre_time_extra(ptr, i1)
 declare double @imre_wall_time()
 declare void @imre_warning_filter(ptr, ptr, ptr, ptr, ptr, i64, i32, i32, i32)
 declare void @imre_warning_reset()
+declare void @imre_warning_scope_enter()
+declare void @imre_warning_scope_exit()
 declare ptr @imre_warning_format(ptr, ptr, ptr, ptr, i64, ptr, ptr, ptr, i32, ptr)
 declare void @imre_warning_write(ptr, ptr, i32)
 declare void @imre_time_sleep(double)
@@ -9226,6 +9260,8 @@ declare ptr @imre_path_info_repr(ptr)
 declare i32 @imre_path_query(ptr, i32, i32)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
 declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
+declare i1 @imre_fnmatch_callback(ptr, i64, i64)
+declare i1 @imre_fnmatchcase_callback(ptr, i64, i64)
 declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
 declare ptr @imre_fnmatch_translate(ptr)
 declare ptr @imre_fnmatch_translate_bytes(ptr)
@@ -9910,6 +9946,7 @@ declare ptr @imre_patch_path(ptr)
 declare i64 @imre_patch_source_start(ptr)
 declare ptr @imre_patch_hunk_text(ptr)
 declare ptr @imre_regex_search(ptr, ptr)
+declare ptr @imre_regex_search_text(ptr, ptr, i1, i1)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)

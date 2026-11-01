@@ -2,6 +2,15 @@
 use super::*;
 use crate::ir::FnmatchOperation;
 
+/// The POSIX matcher accepts both raw spellings and native Path objects.
+pub(super) fn function(types: &Types, normcase: bool) -> Expr {
+    let spelling = types.union(&[Type::Str, Type::Bytes, Type::Path]).unwrap();
+    Expr {
+        ty: types.callable(vec![spelling, spelling], Type::Bool),
+        kind: ExprKind::Builtin(Builtin::FnmatchFunction { normcase }, vec![]),
+    }
+}
+
 impl Checker<'_> {
     pub(super) fn fnmatch_call(
         &mut self,

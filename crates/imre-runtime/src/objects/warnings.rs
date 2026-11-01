@@ -32,6 +32,7 @@ impl Action {
     }
 }
 
+#[derive(Clone)]
 struct Pattern {
     original: String,
     regex: Regex,
@@ -58,6 +59,7 @@ impl Pattern {
     }
 }
 
+#[derive(Clone)]
 struct Rule {
     name: String,
     action: Action,
@@ -200,6 +202,27 @@ pub unsafe extern "C" fn imre_warning_filter(
         })(),
         (),
     );
+}
+
+thread_local! {
+    static SAVED_RULES: std::cell::RefCell<Vec<Vec<Rule>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Enter a non-recording catch_warnings block with a copy of the current filters.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_warning_scope_enter() {
+    let mut filters = FILTERS.lock().unwrap_or_else(|poison| poison.into_inner());
+    SAVED_RULES.with_borrow_mut(|stack| stack.push(filters.rules.clone()));
+    filters.displayed.clear();
+}
+
+/// The compiler emits this in a finally block for every successful entry.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_warning_scope_exit() {
+    let mut filters = FILTERS.lock().unwrap_or_else(|poison| poison.into_inner());
+    filters.rules =
+        SAVED_RULES.with_borrow_mut(|stack| stack.pop().expect("entered warning scope"));
+    filters.displayed.clear();
 }
 
 /// Clear filters, including the initial ResourceWarning ignore rule.

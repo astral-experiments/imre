@@ -900,6 +900,9 @@ pub(crate) enum Builtin {
     SysDisplayHook,
     BuiltinsLast,
     BuiltinsLen,
+    FnmatchFunction {
+        normcase: bool,
+    },
     BuiltinsSetLen,
     BuiltinsHasLast,
     BuiltinsSetLast,
@@ -1027,6 +1030,8 @@ pub(crate) enum Builtin {
         invalid: u32,
     },
     WarningReset,
+    WarningScopeEnter,
+    WarningScopeExit,
     WarningFormat {
         entry: Type,
         environment: bool,
@@ -1379,6 +1384,10 @@ pub(crate) enum Builtin {
     RegexSpelling,
     UnittestCompilePattern,
     RegexSearch,
+    RegexSearchText {
+        anchored: bool,
+        verbose: bool,
+    },
     RegexSub(Vec<u8>),
     RegexGroupDict,
     RegexFindIter,

@@ -587,6 +587,13 @@ pub(crate) fn brace_integer_field(spec: &str, value: Int, type_name: &str) -> Re
 }
 
 fn unpack_object(value: OwnedWord) -> OwnedWord {
+    if value.kind.raw() == 9 {
+        // SAFETY: the tagged owner roots its member until the formatter takes its own reference.
+        return unsafe {
+            let (kind, word) = boxed_values::concrete(value.kind, value.word);
+            kind.acquire(word)
+        };
+    }
     if value.kind.raw() == 5 && value.word != 0 {
         // SAFETY: a kind-five owner roots this object; clone a boxed field inside the borrow.
         if let Some(field) = unsafe {

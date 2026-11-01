@@ -401,6 +401,31 @@ impl Session {
         Ok(copy)
     }
 
+    /// Fold a local import only while that statement is the sole binding reaching this read.
+    pub(crate) fn has_import_binding(
+        &self,
+        module: usize,
+        expression: &Expr,
+        alias: TextRange,
+        parsed: &ParsedModuleRef,
+    ) -> bool {
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        let Some(scope) = index.try_expression_scope_id(expression) else {
+            return false;
+        };
+        let Some(use_id) = index.try_expression_use_id(expression.into()) else {
+            return false;
+        };
+        let mut bindings = index.use_def_map(scope).bindings_at_use(use_id);
+        bindings
+            .next()
+            .and_then(|b| b.binding.definition())
+            .is_some_and(|def| def.kind(&self.db).target_range(parsed) == alias)
+            && bindings.next().is_none()
+    }
+
     /// A function-local module alias can be shadowed independently of the package binding.
     pub(crate) fn is_stdlib_module(&self, module: usize, expression: &Expr, name: &str) -> bool {
         use ty_python_semantic::types::Type as Ty;

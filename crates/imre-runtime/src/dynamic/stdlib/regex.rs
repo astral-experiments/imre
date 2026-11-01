@@ -345,9 +345,10 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     };
     let ascii = bytes || flags & ASCII != 0;
     let engine_source = if flags & VERBOSE != 0 {
-        let mut source = imre_regex::translate_with_ascii(&source, true, ascii)
-            .map_err(|message| pattern_error(ctx, id, flags, message))?
-            .source;
+        let mut source =
+            imre_regex::translate_with_flags(&source, true, ascii, flags & DOTALL != 0)
+                .map_err(|message| pattern_error(ctx, id, flags, message))?
+                .source;
         if flags & MULTILINE != 0 && source.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
             source.truncate(source.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
             source.push('$');
@@ -367,8 +368,20 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     } else {
         engine_source
     };
-    let regex = build_regex(&engine_source, bytes, flags)
-        .map_err(|message| pattern_error(ctx, id, flags, message))?;
+    // The regular-expression backend does not parse atomic groups directly.
+    // The shared Python translator can lower the subset with a fixed delimiter.
+    let (engine_source, regex) = match build_regex(&engine_source, bytes, flags) {
+        Ok(regex) => (engine_source, regex),
+        Err(original) if !bytes && flags & !UNICODE == 0 && source.contains("(?>") => {
+            let translated = imre_regex::translate(&source, false)
+                .map_err(|_| pattern_error(ctx, id, flags, original))?
+                .source;
+            let regex = build_regex(&translated, bytes, flags)
+                .map_err(|message| pattern_error(ctx, id, flags, message))?;
+            (translated, regex)
+        }
+        Err(message) => return Err(pattern_error(ctx, id, flags, message)),
+    };
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },

@@ -90,6 +90,8 @@ impl Checker<'_> {
             if next.ty != value.ty {
                 let ty = if let Some(ty) = union_result {
                     ty
+                } else if let Some(abi) = self.types.common_method_signature(next.ty, value.ty) {
+                    abi
                 } else if matches!((next.ty, value.ty), (Type::Class(a), Type::Class(b)) if
                     (a == base || self.classes.declarations.definitions[a].bases.contains(&base)) &&
                     (b == base || self.classes.declarations.definitions[b].bases.contains(&base)))
