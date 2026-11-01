@@ -657,7 +657,18 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
             None => {
-                eprintln!("{}", e.message);
+                use std::io::Write;
+
+                let mut message = if let Some(&[arg]) = ctx.exception_arguments(&e)
+                    && let Some(text) = ctx.string_storage(arg)
+                {
+                    ctx.encode_utf8_codepoints(text, false, "backslashreplace")
+                        .unwrap_or_default()
+                } else {
+                    e.message.into_bytes()
+                };
+                message.push(b'\n');
+                let _ = crate::sys::stderr_writer().write_all(&message);
                 1
             }
         },
