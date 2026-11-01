@@ -1535,6 +1535,8 @@ def report(text):
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
         if os.name == "posix":
+            plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_recursive_repr.py":

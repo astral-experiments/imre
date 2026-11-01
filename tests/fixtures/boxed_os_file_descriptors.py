@@ -40,3 +40,27 @@ def current():
             print(error.errno, type(error.filename).__name__)
         else:
             raise AssertionError("opened a missing file")
+
+    directory = os.open(".", os.O_RDONLY)
+    path = "imre-boxed-unlink"
+    try:
+        for remove, data in ((os.remove, b"hello"), (posix.unlink, b"Hello World!")):
+            with open(path, "xb") as file:
+                assert file.write(data) == len(data)
+            assert remove(path=path, dir_fd=directory) is None
+            try:
+                remove(os.fsencode(path), dir_fd=directory)
+            except FileNotFoundError as error:
+                assert error.errno == 2 and error.filename == os.fsencode(path)
+            else:
+                raise AssertionError("file still exists after unlink")
+    finally:
+        os.close(directory)
+
+    assert os.rmdir is posix.rmdir
+    try:
+        os.rmdir(__file__)
+    except NotADirectoryError as error:
+        assert error.filename == __file__
+    else:
+        raise AssertionError("rmdir removed a regular file")

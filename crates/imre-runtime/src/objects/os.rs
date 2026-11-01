@@ -188,6 +188,16 @@ pub(crate) fn open_at(path: &CStr, flags: i32, mode: i32, dir_fd: i32) -> io::Re
     }
 }
 
+/// Remove the named entry relative to dir_fd without following a final symlink.
+pub(crate) fn unlink_at(path: &CStr, dir_fd: i32, directory: bool) -> io::Result<()> {
+    let flags = if directory { libc::AT_REMOVEDIR } else { 0 };
+    // SAFETY: path remains NUL-terminated for the duration of the syscall.
+    if unsafe { libc::unlinkat(dir_fd, path.as_ptr(), flags) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Remove the entry itself, using the raw spelling even for trailing slashes.
 /// Validate the path before converting the optional directory descriptor.
 ///
@@ -201,15 +211,8 @@ pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, r
         let (path, name) = unsafe { syscall_path(value, tag, function, "path") }?;
         // SAFETY: fd is a rooted optional integer.
         let dir_fd = unsafe { directory_fd(fd) }?;
-        // SAFETY: the zero-terminated path is owned until unlinkat returns.
-        if unsafe { libc::unlinkat(dir_fd, path.as_ptr(), 0) } == -1 {
-            return Err(errno_with_filenames(
-                io::Error::last_os_error(),
-                Some(name),
-                None,
-            ));
-        }
-        Ok(())
+        unlink_at(&path, dir_fd, false)
+            .map_err(|error| errno_with_filenames(error, Some(name), None))
     })();
     finish(result, ());
 }
