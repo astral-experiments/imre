@@ -49,7 +49,7 @@ shape = int(sys.argv[1])
 target = classes[shape]
 name = target.__name__
 inherits = issubclass(target, Parent)
-marker = "arm class metadata refusal"
+marker = "arm call allocation refusal"
 kind = "ok"
 try:
     target()
