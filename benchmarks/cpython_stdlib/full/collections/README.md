@@ -8,7 +8,7 @@ free-threading test. The loader includes inherited test methods and both
 upstream test inputs.
 
 The [versioned native evidence](evidence-linux.json) covers all eight suites
-at both optimization levels. See [the collections runner](routines.md) for per-test reproduction.
+at both optimization levels.
 The [recorded compiler and runtime](source-linux.json) ran eight complete cases natively at both optimization levels. Fourteen more exercised a native operation from CPython, and eight ran the test body in Imre with CPython fixtures.
 
 To reproduce the report, run the suite with a fresh output directory and test-enabled CPython 3.14.5.
@@ -18,6 +18,8 @@ python3.14 -B benchmarks/cpython_stdlib/full/collections/measure.py \
     --imre "$IMRE" --runtime "$RUNTIME" --clang "$CLANG" \
     --compiler-revision "$IMRE_REVISION" --output collections-results
 ```
+
+The output directory contains `routines-O0.json` and `routines-O3.json` from the [per-method runner](routines.py).
 
 | Suite | IDs |
 | --- | ---: |
