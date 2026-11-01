@@ -1370,6 +1370,7 @@ def report(text):
             "boxed_dataclasses.py",
             "boxed_email_dates.py",
             "boxed_time.py",
+            "boxed_time_strftime.py",
             "boxed_codecs.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
