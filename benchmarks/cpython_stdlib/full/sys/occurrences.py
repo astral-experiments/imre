@@ -9,7 +9,7 @@ from ioencoding_case import observe as ioencoding_observation
 from locale_stream_cases import observe as locale_stream_observations
 from suite_evidence import roles
 from suite_inventory import load_suite
-from suite_native import NativeCompileError, method_bytes, native_method, run_in_fixtures, testcase_fixture
+from suite_native import NativeCompileError, method_bytes, native_method, run_in_fixtures, testcase_fixture, testcase_import_blocker
 
 MODULE = "test.test_sys"
 UNOBSERVED = roles(body="unobserved", assertions="unobserved", operation="unobserved",
@@ -42,20 +42,6 @@ def reference_skips(reference, level):
             "reason": reference["reference"][test_id]["skipped"], "source": f"Lib/test/test_sys.py:{line}",
         }
     return result
-
-
-def testcase_import_blocker(child, entry, fixture):
-    """Recognize only the child traceback for the generated top-level TestCase import."""
-    if child.returncode != 1 or child.stdout:
-        return None
-    for line, statement in enumerate(fixture.splitlines(), 1):
-        if statement == "import unittest" and child.stderr.splitlines() == [
-            "Traceback (most recent call last):",
-            f'  File "{entry}", line {line}',
-            "ModuleNotFoundError: No module named 'unittest'",
-        ]:
-            return line
-    return None
 
 
 def blocked_methods(toolchain, root, source, reference, selected, module):

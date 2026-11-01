@@ -2,8 +2,7 @@
 from pathlib import Path
 import unittest
 
-from occurrences import testcase_import_blocker
-from suite_native import native_method, run_in_fixtures, testcase_fixture
+from suite_native import native_method, run_in_fixtures, testcase_fixture, testcase_import_blocker
 
 
 class FailingBody(unittest.TestCase):

@@ -29,6 +29,20 @@ def compile_blocker(exc):
             "evidence": {"stage": "compile"}}
 
 
+def testcase_import_blocker(child, entry, fixture):
+    """Recognize only the child traceback for the generated top-level TestCase import."""
+    if child.returncode != 1 or child.stdout:
+        return None
+    for line, statement in enumerate(fixture.splitlines(), 1):
+        if statement == "import unittest" and child.stderr.splitlines() == [
+            "Traceback (most recent call last):",
+            f'  File "{entry}", line {line}',
+            "ModuleNotFoundError: No module named 'unittest'",
+        ]:
+            return line
+    return None
+
+
 @dataclasses.dataclass(frozen=True)
 class Toolchain:
     imre: Path
