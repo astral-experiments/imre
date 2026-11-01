@@ -6058,6 +6058,18 @@ impl<'a> Checker<'a> {
         self.object_export_error(name, node)
     }
 
+    fn object_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
+        let error = self.object_runtime_export(name, node);
+        self.graph
+            .object_builtin_errors
+            .borrow_mut()
+            .insert(format!(
+                "{}:{error}",
+                self.graph.modules[self.module].path.display()
+            ));
+        error
+    }
+
     fn object_export_error(&self, name: &str, node: &impl Ranged) -> String {
         self.classified_error(
             FailureKind::ObjectOperation,
@@ -8264,6 +8276,13 @@ impl<'a> Checker<'a> {
             && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
         {
             return Ok(raised);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "fromhex"
+            && (self.unshadowed_builtin(&method.value, "bytes")
+                || self.unshadowed_builtin(&method.value, "bytearray"))
+        {
+            return Err(self.object_builtin_error("fromhex", call));
         }
         if receiver.is_none()
             && let Some(result) = self.fromkeys_call(call, None)?
@@ -10816,15 +10835,7 @@ impl<'a> Checker<'a> {
             && matches!(&size.value, ast::Number::Int(n) if n.as_i64() == Some(0))
             && self.expr(path)?.ty == Type::Str
         {
-            let error = self.object_runtime_export("unbuffered binary open", call);
-            self.graph
-                .object_builtin_errors
-                .borrow_mut()
-                .insert(format!(
-                    "{}:{error}",
-                    self.graph.modules[self.module].path.display()
-                ));
-            return Err(error);
+            return Err(self.object_builtin_error("unbuffered binary open", call));
         }
         let (path, mode) = match call.arguments.args.as_ref() {
             [path] if !gzip => (path, "r"),

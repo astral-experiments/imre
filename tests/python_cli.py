@@ -1028,6 +1028,19 @@ def main():
                 "os", "posix",
             )
 
+        array_import = root / "array_import.py"
+        for statement in (
+            "from array import array as cls",
+            "import array\ncls = array.array",
+            'from importlib import import_module\ncls = import_module("array").array',
+            'from importlib import import_module\ncls = import_module("".join(("ar", "ray"))).array',
+            'cls = __import__("".join(("ar", "ray"))).array',
+        ):
+            array_import.write_text(
+                statement + '\nvalues = cls("i", [7])\nprint(type(values) is cls, list(values))\n'
+            )
+            compare("-B", array_import, native_args=("run", array_import, "--runtime-imports", "--quiet"))
+
         hash_args = ["", b"", "latin1é", b"latin1\xe9", "Āfoo", "😀abc", bytes(range(32))]
         hash_calls = "\n".join(f"print(hash({value!r}))" for value in hash_args)
         for seed in ("0", "1", "4294967295"):
@@ -1581,6 +1594,7 @@ def report(text):
             "boxed_standard_base64.py",
             "boxed_csv.py",
             "boxed_bytes_separators.py",
+            "boxed_bytes_fromhex.py",
             "boxed_struct.py",
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
