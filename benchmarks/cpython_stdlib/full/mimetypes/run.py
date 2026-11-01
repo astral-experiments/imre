@@ -6,6 +6,7 @@ from dataclasses import replace
 from hashlib import sha256
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -83,12 +84,35 @@ def diagnostic(exc, work):
     return str(exc).strip().replace(str(work) + "/", "").replace(str(work), ".")
 
 
+def support_import_blocker(child, entry, source):
+    """Recognize an unavailable module attribute while loading test.support or one of its requested submodules."""
+    if child.returncode != 1 or child.stdout:
+        return False
+    support = entry.parent / "test/support"
+    trace = re.fullmatch(
+        r"Traceback \(most recent call last\):\n"
+        rf'  File "{re.escape(str(entry))}", line (\d+)\n'
+        r'  File "<imre stdlib>/importlib/_bootstrap_external\.py", line \d+\n'
+        rf'  File "{re.escape(str(support))}/(\w+)\.py", line \d+\n'
+        r"AttributeError: module '[^'\n]+' has no attribute '[^'\n]+'\n",
+        child.stderr,
+    )
+    if trace:
+        for stmt in ast.parse(source).body:
+            if (isinstance(stmt, ast.ImportFrom) and stmt.level == 0 and stmt.module == "test.support"
+                    and stmt.lineno == int(trace[1])):
+                return trace[2] == "__init__" or any(alias.name == trace[2] for alias in stmt.names)
+    return False
+
+
 def run_method(tool, case, work, typed=False):
     src, digest = source_for(case, typed)
     exe = tool.build(src, work)
     process = subprocess.run([exe, *([] if typed else ["-v"])], capture_output=True, text=True, timeout=30)
     if process.returncode:
-        if testcase_import_blocker(process, exe.with_name("case.py"), src.decode()) is not None:
+        entry = exe.with_name("case.py")
+        if (testcase_import_blocker(process, entry, src.decode()) is not None
+                or support_import_blocker(process, entry, src)):
             return dict(outcome="blocked", roles=UNOBSERVED, reason=diagnostic(process.stderr, work),
                         evidence=dict(stage="native startup"))
         raise AssertionError((case.id(), process.stdout, process.stderr))
