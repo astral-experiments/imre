@@ -366,3 +366,49 @@ pub unsafe extern "C" fn imre_popen_communicate(
         finish(result, std::ptr::null_mut())
     }
 }
+
+#[test]
+fn deadline_capture_drains_both_full_pipes_before_expiry() {
+    use crate::objects::processes::tests::args;
+    use std::io::Read;
+    use std::os::fd::BorrowedFd;
+
+    let argv = args(&[
+        "python3",
+        "-c",
+        "import os,time\nos.write(1,b'!')\nfor _ in range(4):\n os.write(1,b'O'*65536)\n os.write(2,b'E'*65536)\ntime.sleep(10)",
+    ]);
+    let config = LaunchConfig::basic(
+        crate::ObjectOwner::as_ptr(&argv).cast(),
+        5,
+        std::ptr::null(),
+        std::ptr::null(),
+        0x11,
+        Int::small(-1).unwrap().0,
+        true,
+    );
+    // SAFETY: argv remains rooted and both configured output pipes belong to the child.
+    let mut child = unsafe { spawn(&config, LaunchExtras::default()) }
+        .ok()
+        .expect("child failed to start");
+    let stdout = file(child.pipes[1].as_ref().unwrap(), |f| f.fileno())
+        .ok()
+        .expect("stdout pipe is closed");
+    // SAFETY: the child owns this open descriptor until its pipes are closed.
+    let stdout = unsafe { BorrowedFd::borrow_raw(stdout) }
+        .try_clone_to_owned()
+        .unwrap();
+    let mut ready = [0];
+    std::fs::File::from(stdout).read_exact(&mut ready).unwrap();
+    assert_eq!(ready, [b'!']);
+    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false);
+    assert!(child.signal(|| Ok(libc::SIGKILL)).is_ok());
+    assert!(child.close_wait().is_ok());
+    let Ok(Exchange::Timeout([Some(stdout), Some(stderr)], None)) = result else {
+        panic!("expected a timeout with both output streams");
+    };
+    assert_eq!(stdout.len(), 262_144);
+    assert_eq!(stderr.len(), 262_144);
+    assert!(stdout.iter().all(|byte| *byte == b'O'));
+    assert!(stderr.iter().all(|byte| *byte == b'E'));
+}
