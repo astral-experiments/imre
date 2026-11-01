@@ -17,6 +17,7 @@ if sys.flags.optimize:
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 REFERENCE = HERE / "reference/memory_report"
+reference_sources = runpy.run_path(str(REFERENCE.parent / "build_reference.py"))["reference_sources"]
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 targets = SimpleNamespace(**runpy.run_path(str(HERE / "telemetry_benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "memory_validate.py")))
@@ -159,16 +160,15 @@ def source_paths(args):
                   for path in validator.STDLIB.rglob("*.py")})
     paths.update({"fixture:" + path.name: path for path in (validator.PACKAGE / "sample").iterdir() if path.is_file()})
     paths.update({"upstream:" + path.name: path for path in (validator.PACKAGE / "upstream").iterdir() if path.is_file()})
-    reference_paths = [REFERENCE / name for name in ("Cargo.toml", "Cargo.lock", "build.py")]
-    reference_paths.extend(sorted((REFERENCE / "src").glob("*.rs")))
-    paths.update({"rust_source:" + str(path.relative_to(REFERENCE)): path for path in reference_paths})
+    rust_sources = reference_sources(REFERENCE)
+    paths.update({"rust_source:" + name: path for name, path in rust_sources.items()})
     rust_record = json.loads(paths["rust_build_record"].read_text())
     paths["producer"] = (paths["rust"].parent / rust_record["binaries"]["producer"]["name"]).resolve(strict=True)
     assert rust_record["binaries"]["producer"]["sha256"] == shared.sha256(paths["producer"])
     paths.update({"helper:" + path.name: path for path in HERE.glob("memory_*.py")})
     assert rust_record["input_guards_passed"]
     assert rust_record["binary_sha256"] == shared.sha256(paths["rust"])
-    assert rust_record["sources"] == {str(path.relative_to(REFERENCE)): shared.sha256(path) for path in reference_paths}
+    assert rust_record["sources"] == {name: shared.sha256(path) for name, path in rust_sources.items()}
     assert rust_record["thinlto"] == bool(args.lto_linker)
     assert rust_record["environment"]["CARGO_PROFILE_RELEASE_OPT_LEVEL"] == "3"
     assert rust_record["environment"]["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"] == "16"

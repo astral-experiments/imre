@@ -15,6 +15,7 @@ from types import SimpleNamespace
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 REFERENCE = HERE / "reference/telemetry_comparison"
+reference_sources = runpy.run_path(str(REFERENCE.parent / "build_reference.py"))["reference_sources"]
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "telemetry_validate.py")))
 SCENARIOS = (
@@ -188,15 +189,7 @@ def source_paths(args) -> tuple[dict[str, Path], dict, dict | None]:
             if path.is_file() and "__pycache__" not in path.parts
         }
     )
-    rust_sources = {
-        str(path.relative_to(REFERENCE)): path
-        for path in (
-            REFERENCE / "Cargo.toml",
-            REFERENCE / "Cargo.lock",
-            REFERENCE / "build.py",
-            *sorted((REFERENCE / "src").glob("*.rs")),
-        )
-    }
+    rust_sources = reference_sources(REFERENCE)
     paths.update({"rust_source:" + name: path for name, path in rust_sources.items()})
     assert rust_record["sources"] == {
         name: shared.sha256(path) for name, path in rust_sources.items()
