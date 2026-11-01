@@ -604,6 +604,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("operator.{name}"))
         }
         ("subprocess", "PIPE") => ctx.int(-1),
+        ("subprocess", "STDOUT") => ctx.int(-2),
+        ("subprocess", "DEVNULL") => ctx.int(-3),
         ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
         (
             "sys",
