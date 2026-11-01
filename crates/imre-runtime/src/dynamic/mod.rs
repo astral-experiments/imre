@@ -9,6 +9,7 @@ mod deque;
 mod dictionary;
 mod enums;
 mod ffi;
+mod finalizers;
 mod function_fields;
 mod importlib;
 mod iterators;
@@ -145,7 +146,13 @@ impl Context {
     }
 
     fn alloc(&mut self, value: Value) -> Id {
-        self.heap.alloc(value)
+        let finalizer = matches!(&value, Value::Instance { class, .. }
+            if self.class_attr(*class, "__del__").is_some());
+        let id = self.heap.alloc(value);
+        if finalizer {
+            self.heap.register_finalizer(id);
+        }
+        id
     }
     fn text(&mut self, value: impl Into<String>) -> Id {
         self.alloc(Value::Str(value.into()))
@@ -972,15 +979,11 @@ impl Context {
         let mark = self.heap.temporary_mark();
         self.heap.reserve_temporaries(2)?;
         self.heap.keep(generator);
-        let buffer = self.alloc(if tuple {
-            Value::Tuple(Vec::new())
-        } else {
-            Value::List(Vec::new())
-        });
+        let buffer = self.alloc(Value::List(Vec::new()));
         let step = self.heap.temporary_mark();
         let result: Result<()> = (|| {
             while let Some(item) = self.next_item(generator)? {
-                let (Value::List(items) | Value::Tuple(items)) = self.heap.get_mut(buffer) else {
+                let Value::List(items) = self.heap.get_mut(buffer) else {
                     unreachable!()
                 };
                 items
@@ -999,6 +1002,13 @@ impl Context {
                 self.heap.keep(root);
             }
             return Err(error);
+        }
+        if tuple {
+            let Value::List(items) = self.heap.get_mut(buffer) else {
+                unreachable!()
+            };
+            let items = std::mem::take(items);
+            return Ok(self.alloc(Value::Tuple(items)));
         }
         self.heap.keep(buffer);
         Ok(buffer)

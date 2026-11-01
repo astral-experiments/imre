@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 95 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 191 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 96 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 191 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -40,6 +40,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `errno` | Yes | Named errno constants, aliases and the `errorcode` registry. [Evidence](../benchmarks/cpython_stdlib/full/errno/README.md) | [3 / 3](../benchmarks/cpython_stdlib/full/errno/) | 0 | 0 |
 | `fnmatch` | Yes | `fnmatch`, `fnmatchcase`, `filter`, `filterfalse` and `translate`. [Evidence](../benchmarks/cpython_stdlib/full/fnmatch/README.md) | [24 / 24](../benchmarks/cpython_stdlib/full/fnmatch/) | 0 | 0 |
 | `functools` | Yes | Selected `partial`, caching decorators and dispatch operations. [Evidence](../benchmarks/cpython_stdlib/full/functools/EVIDENCE.md) | [0 / 329](../benchmarks/cpython_stdlib/full/functools/) | 18 | 17 |
+| `gc` | Yes | `collect()` and `collect(2)` reclaim unreachable native cycles and dispatch weak-reference callbacks. [Evidence](../tests/fixtures/boxed_gc_collect.py) | — | — | — |
 | `genericpath` | Yes | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
 | `gettext` | Yes | Translate singular, plural and contextual messages from GNU MO catalogs selected by domain and language, with source-text fallback. [Evidence](../tests/fixtures/text/gettext_catalog.py) | [18 / 73](../benchmarks/cpython_stdlib/full/gettext/) | 6 | 0 |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
@@ -137,7 +138,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `fileinput` |
 | `fractions` |
 | `ftplib` |
-| `gc` |
 | `getopt` |
 | `getpass` |
 | `glob` |
