@@ -21,3 +21,95 @@ def assertEqual(self, first, second, msg=None):
 
 TestCase._baseAssertEqual = _baseAssertEqual
 TestCase.assertEqual = assertEqual
+
+
+# Multiset comparison and diagnostics follow CPython 3.14.5 unittest.util and unittest.case.
+def _count_diff_all_purpose(actual, expected):
+    'Returns list of (cnt_act, cnt_exp, elem) triples where the counts differ'
+    # elements need not be hashable
+    s, t = list(actual), list(expected)
+    m, n = len(s), len(t)
+    NULL = object()
+    result = []
+    for i, elem in enumerate(s):
+        if elem is NULL:
+            continue
+        cnt_s = cnt_t = 0
+        for j in range(i, m):
+            if s[j] == elem:
+                cnt_s += 1
+                s[j] = NULL
+        for j, other_elem in enumerate(t):
+            if other_elem == elem:
+                cnt_t += 1
+                t[j] = NULL
+        if cnt_s != cnt_t:
+            diff = (cnt_s, cnt_t, elem)
+            result.append(diff)
+
+    for i, elem in enumerate(t):
+        if elem is NULL:
+            continue
+        cnt_t = 0
+        for j in range(i, n):
+            if t[j] == elem:
+                cnt_t += 1
+                t[j] = NULL
+        diff = (0, cnt_t, elem)
+        result.append(diff)
+    return result
+
+
+def _count_diff_hashable(actual, expected):
+    'Returns list of (cnt_act, cnt_exp, elem) triples where the counts differ'
+    # elements must be hashable
+    from collections import Counter
+    s, t = Counter(actual), Counter(expected)
+    result = []
+    for elem, cnt_s in s.items():
+        cnt_t = t.get(elem, 0)
+        if cnt_s != cnt_t:
+            diff = (cnt_s, cnt_t, elem)
+            result.append(diff)
+    for elem, cnt_t in t.items():
+        if elem not in s:
+            diff = (0, cnt_t, elem)
+            result.append(diff)
+    return result
+
+
+def assertCountEqual(self, first, second, msg=None):
+    """Asserts that two iterables have the same elements, the same number of
+    times, without regard to order.
+
+        self.assertEqual(Counter(list(first)),
+                         Counter(list(second)))
+
+     Example:
+        - [0, 1, 1] and [1, 0, 1] compare equal.
+        - [0, 0, 1] and [0, 1] compare unequal.
+
+    """
+    from collections import Counter
+    first_seq, second_seq = list(first), list(second)
+    try:
+        first = Counter(first_seq)
+        second = Counter(second_seq)
+    except TypeError:
+        # Handle case with unhashable elements
+        differences = _count_diff_all_purpose(first_seq, second_seq)
+    else:
+        if first == second:
+            return
+        differences = _count_diff_hashable(first_seq, second_seq)
+
+    if differences:
+        standardMsg = 'Element counts were not equal:\n'
+        lines = ['First has %d, Second has %d:  %r' % diff for diff in differences]
+        diffMsg = '\n'.join(lines)
+        standardMsg = self._truncateMessage(standardMsg, diffMsg)
+        msg = self._formatMessage(msg, standardMsg)
+        self.fail(msg)
+
+
+TestCase.assertCountEqual = assertCountEqual
