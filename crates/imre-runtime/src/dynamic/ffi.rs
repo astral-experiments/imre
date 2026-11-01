@@ -571,6 +571,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
             .filter(|prefix| !prefix.is_empty())
             .into();
     }
+    crate::python_hash::initialize(config["isolated"].as_bool().unwrap_or(false));
     crate::integer_text::imre_integer_digits_init(u32::from(
         config["isolated"].as_bool().unwrap_or(false),
     ));

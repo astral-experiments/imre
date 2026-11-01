@@ -10347,6 +10347,7 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 Type::Str | Type::StrLiteral(_) => Builtin::HashStr,
+                Type::Bytes => Builtin::HashBytes,
                 Type::Class(id)
                     if self.classes.declarations.definitions[id].toml_hash
                         || self.classes.declarations.definitions[id]
@@ -10359,7 +10360,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "hash requires a string or a known frozen hash projection",
+                        "hash requires a string, bytes, or a known frozen hash projection",
                     ));
                 }
             };

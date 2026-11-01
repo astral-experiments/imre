@@ -1141,6 +1141,7 @@ impl IntrinsicModule {
             (Self::Subprocess, "getstatusoutput") => Intrinsic::ShellOutput { status: true },
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
+            (Self::Sys, "hash_info") => Intrinsic::ObjectRuntimeExport("sys.hash_info"),
             (Self::Sys, "stdout") => Intrinsic::Stdout,
             (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
