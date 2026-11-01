@@ -78,7 +78,7 @@ impl Checker<'_> {
         operation(
             PathOperation::Stat { lstat: false },
             self.types.stat_result(),
-            vec![path, boolean(true)],
+            vec![path, Expr::boolean(true)],
         )
     }
 
@@ -122,13 +122,13 @@ impl Checker<'_> {
                 let selected = self.hidden(Type::Bool);
                 let custom = self.hidden(call.ty);
                 clear.extend([selected, custom]);
-                handler.push(Statement::Assign(selected, boolean(false)));
+                handler.push(Statement::Assign(selected, Expr::boolean(false)));
                 let a = self.samefile_stats(left.clone(), self.local(custom), at)?;
                 let b = self.samefile_stats(left, self.local(fs_result), at)?;
                 (
                     vec![
                         Statement::Assign(custom, call),
-                        Statement::Assign(selected, boolean(true)),
+                        Statement::Assign(selected, Expr::boolean(true)),
                     ],
                     Expr {
                         ty: Type::Bool,
@@ -237,7 +237,11 @@ impl Checker<'_> {
         let dev = equal_field(2)?;
         Ok(Expr {
             ty: Type::Bool,
-            kind: ExprKind::Conditional(Box::new(ino), Box::new(dev), Box::new(boolean(false))),
+            kind: ExprKind::Conditional(
+                Box::new(ino),
+                Box::new(dev),
+                Box::new(Expr::boolean(false)),
+            ),
         })
     }
 
@@ -279,7 +283,7 @@ impl Checker<'_> {
                     ty: Type::Bool,
                     kind: ExprKind::Scope {
                         body: vec![Statement::Expr(integer), Statement::Expr(field)],
-                        value: Box::new(boolean(false)),
+                        value: Box::new(Expr::boolean(false)),
                         clear: vec![],
                     },
                 });

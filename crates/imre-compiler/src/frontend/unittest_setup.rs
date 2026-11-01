@@ -334,14 +334,7 @@ impl Checker<'_> {
                 Statement::Assign(rhs, value),
                 Statement::Assign(object, receiver),
                 Statement::SetField(self.local(object), field.value, self.local(rhs)),
-                Statement::SetField(
-                    self.local(object),
-                    field.ready,
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(true),
-                    },
-                ),
+                Statement::SetField(self.local(object), field.ready, Expr::boolean(true)),
             ],
             clear: vec![rhs, object],
         })

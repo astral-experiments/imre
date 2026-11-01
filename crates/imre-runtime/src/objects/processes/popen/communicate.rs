@@ -30,37 +30,6 @@ unsafe fn input_bytes<'a>(input: *const (), text: bool) -> &'a [u8] {
     }
 }
 
-/// Capture stdout, keep checked failures' streams, and reap the direct child
-/// before exposing a timeout. Descendants may still hold the far pipe ends.
-///
-/// # Safety
-/// The launch configuration, deadline word and optional input have the layouts
-/// selected by the compiler and stay rooted until the call returns.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_check_output_config(
-    config: *const LaunchConfig,
-    deadline_kind: u32,
-    deadline: usize,
-    input: usize,
-    validation: u32,
-    errors: u32,
-) -> *const () {
-    // SAFETY: the legacy API supplies the same rooted parameters; a null
-    // descriptor asks for the stdout object instead of a CompletedProcess.
-    unsafe {
-        imre_run_config(
-            config,
-            deadline_kind,
-            deadline,
-            input,
-            validation,
-            errors,
-            true,
-            std::ptr::null(),
-        )
-    }
-}
-
 /// Run a native command and return either an exact CompletedProcess or checked stdout.
 ///
 /// # Safety

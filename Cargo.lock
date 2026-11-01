@@ -663,7 +663,6 @@ dependencies = [
  "notify",
  "num-bigint",
  "regex",
- "regex-syntax",
  "rpds",
  "ruff_db",
  "ruff_python_ast",

@@ -76,14 +76,7 @@ impl Checker<'_> {
                         vec![
                             Statement::Assign(result, compute),
                             Statement::SetField(self.local(owner), value, self.local(result)),
-                            Statement::SetField(
-                                self.local(owner),
-                                ready,
-                                Expr {
-                                    ty: Type::Bool,
-                                    kind: ExprKind::Bool(true),
-                                },
-                            ),
+                            Statement::SetField(self.local(owner), ready, Expr::boolean(true)),
                         ],
                     ),
                 ],

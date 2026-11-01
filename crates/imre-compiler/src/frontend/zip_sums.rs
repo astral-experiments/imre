@@ -198,14 +198,7 @@ fn group(
     }
     let mut next = first.next.clone();
     next.extend(terms);
-    body.push(Statement::While(
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(true),
-        },
-        next,
-        Vec::new(),
-    ));
+    body.push(Statement::While(Expr::boolean(true), next, Vec::new()));
     // Every term is pure and total. A strict-length error therefore belongs to the first
     // sum, before any user-visible assignment. Commit the private totals only on exhaustion.
     let count = outputs.len();

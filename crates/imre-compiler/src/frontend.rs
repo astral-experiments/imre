@@ -1317,13 +1317,7 @@ fn lower_body(
         }));
     }
     if falls_through && types.payload(signature.returns).is_some() {
-        body.push(Statement::Return(Expr {
-            ty: signature.returns,
-            kind: ExprKind::Absent(Box::new(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            })),
-        }));
+        body.push(Statement::Return(Expr::absent(signature.returns)));
     } else if falls_through && signature.returns != Type::None {
         return Err(error(
             &module.source,
@@ -3557,13 +3551,7 @@ impl<'a> Checker<'a> {
             args.push(if let Some(bound) = bound {
                 self.expr_expected(bound, index_type)?
             } else {
-                Expr {
-                    ty: index_type,
-                    kind: ExprKind::Absent(Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    })),
-                }
+                Expr::absent(index_type)
             });
         }
         Ok(Expr {
@@ -4227,13 +4215,7 @@ impl<'a> Checker<'a> {
             } else {
                 self.local(key)
             };
-            (
-                item,
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                },
-            )
+            (item, Expr::boolean(true))
         };
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
@@ -4498,13 +4480,7 @@ impl<'a> Checker<'a> {
             if let Some(flag) =
                 unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
             {
-                lowered.push(Statement::Assign(
-                    *flag,
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(true),
-                    },
-                ));
+                lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
             body.extend(lowered);
             falls_through &= continues;
@@ -4762,10 +4738,7 @@ impl<'a> Checker<'a> {
                         vec![Statement::If(
                             resume,
                             Vec::new(),
-                            vec![Statement::Return(Expr {
-                                ty: Type::None,
-                                kind: ExprKind::None,
-                            })],
+                            vec![Statement::Return(Expr::none())],
                         )],
                         true,
                     ));
@@ -4962,10 +4935,7 @@ impl<'a> Checker<'a> {
                         )?
                     }
                 } else {
-                    Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    }
+                    Expr::none()
                 };
                 let value = if let Some(types) = &mut self.inferred_returns {
                     types.push(value.ty);
@@ -5124,13 +5094,7 @@ impl<'a> Checker<'a> {
             self.arguments(call, &[], None)?;
             let mut protected = Vec::new();
             if let Some(target) = &item.optional_vars {
-                protected.push(self.assign_value(
-                    target,
-                    Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    },
-                )?);
+                protected.push(self.assign_value(target, Expr::none())?);
             }
             let (nested, falls) = self.with_items(remaining, body)?;
             protected.extend(nested);
@@ -6293,10 +6257,7 @@ impl<'a> Checker<'a> {
             && attr.attr.as_str() == "avoids_symlink_attacks"
             && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::RmTree))
         {
-            return Ok(Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(true),
-            });
+            return Ok(Expr::boolean(true));
         }
         if let Some(Binding::Intrinsic(Intrinsic::AccessMode(mode))) = self.resolve(expression) {
             return Ok(Expr {
@@ -6330,10 +6291,7 @@ impl<'a> Checker<'a> {
                 match symbol {
                     Intrinsic::SysExecutable => return Ok(unpacking::string(executable.clone())),
                     Intrinsic::SysDontWriteBytecode => {
-                        return Ok(Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Bool(flags.dont_write_bytecode),
-                        });
+                        return Ok(Expr::boolean(flags.dont_write_bytecode));
                     }
                     _ => {}
                 }
@@ -6406,10 +6364,7 @@ impl<'a> Checker<'a> {
                 Intrinsic::OsSeparator { alternate, posix } => {
                     if posix {
                         return Ok(if alternate {
-                            Expr {
-                                ty: Type::None,
-                                kind: ExprKind::None,
-                            }
+                            Expr::none()
                         } else {
                             unpacking::string("/")
                         });
@@ -6754,10 +6709,7 @@ impl<'a> Checker<'a> {
                     && let (Some(left), Some(right)) =
                         (self.class_reference(left), self.class_reference(right))
                 {
-                    return Ok(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool((left == right) == (*op == ast::CmpOp::Is)),
-                    });
+                    return Ok(Expr::boolean((left == right) == (*op == ast::CmpOp::Is)));
                 }
                 if compare.ops.len() == 1
                     && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
@@ -7018,10 +6970,7 @@ impl<'a> Checker<'a> {
                         ty: Type::Bool,
                         kind: ExprKind::Scope {
                             body: values.into_iter().map(Statement::Expr).collect(),
-                            value: Box::new(Expr {
-                                ty: Type::Bool,
-                                kind: ExprKind::Bool(*op == ast::CmpOp::NotEq),
-                            }),
+                            value: Box::new(Expr::boolean(*op == ast::CmpOp::NotEq)),
                             clear: Vec::new(),
                         },
                     });
@@ -8461,14 +8410,7 @@ impl<'a> Checker<'a> {
         let key = self.expr_expected(key, key_type)?;
         let value = match rest {
             [default] => self.expr_expected(default, value_type)?,
-            [] => self.coerce(
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
-                value_type,
-                call,
-            )?,
+            [] => self.coerce(Expr::none(), value_type, call)?,
             _ => {
                 return Err(error(
                     self.source,
@@ -9412,10 +9354,7 @@ impl<'a> Checker<'a> {
                     .classes
                     .declarations
                     .subclass(self.graph, child, parent);
-                return Ok(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(result),
-                });
+                return Ok(Expr::boolean(result));
             }
             if let [child, parent] = call.arguments.args.as_ref()
                 && call.arguments.keywords.is_empty()
@@ -9430,10 +9369,7 @@ impl<'a> Checker<'a> {
                 let protocol = ["__enter__", "__exit__"]
                     .iter()
                     .all(|name| local.attributes.get(*name) == Some(&Some(true)));
-                return Ok(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(nominal || protocol),
-                });
+                return Ok(Expr::boolean(nominal || protocol));
             }
             if let Some(answer) = self.mapping_issubclass(call)? {
                 return Ok(answer);
@@ -10219,10 +10155,7 @@ impl<'a> Checker<'a> {
         self.reject_builtin_keywords(call)?;
         if name.id == "bool" {
             return match call.arguments.args.as_ref() {
-                [] => Ok(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(false),
-                }),
+                [] => Ok(Expr::boolean(false)),
                 [value] => self.condition(value),
                 _ => Err(error(
                     self.source,
@@ -10320,10 +10253,7 @@ impl<'a> Checker<'a> {
                     Some(partials::singleton(ir::PlaceholderKind::Class))
                 }
                 "type" => annotations::builtin_type("type"),
-                "callable" => Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(kind == ir::PlaceholderKind::Class),
-                }),
+                "callable" => Some(Expr::boolean(kind == ir::PlaceholderKind::Class)),
                 _ => None,
             };
             if let Some(result) = result {

@@ -95,10 +95,7 @@ impl Checker<'_> {
             return Ok(None);
         };
         if attr.attr.as_str() == "safe_path" {
-            return Ok(Some(Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(flags.safe_path),
-            }));
+            return Ok(Some(Expr::boolean(flags.safe_path)));
         }
         let setting = match attr.attr.as_str() {
             "isolated" | "ignore_environment" => flags.isolated,
@@ -331,10 +328,7 @@ impl Checker<'_> {
                     ty: Type::Bool,
                     kind: ExprKind::Scope {
                         body: vec![Statement::Expr(value)],
-                        value: Box::new(Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Bool(false),
-                        }),
+                        value: Box::new(Expr::boolean(false)),
                         clear: vec![],
                     },
                 });
@@ -428,10 +422,7 @@ impl Checker<'_> {
                 ))
             )
         {
-            return Ok(Some(Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(true),
-            }));
+            return Ok(Some(Expr::boolean(true)));
         }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::SysDisplayHook)) => {
@@ -524,10 +515,7 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::SysJitPredicate(name))) => {
                 // Imre emits machine code before the program starts. No running
                 // frame has a JIT compiler, regardless of the child's PYTHON_JIT.
-                let result = Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(false),
-                };
+                let result = Expr::boolean(false);
                 return self
                     .sys_no_args(call, &format!("sys.{name}"), result)
                     .map(Some);

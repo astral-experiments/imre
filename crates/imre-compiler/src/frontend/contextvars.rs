@@ -8,13 +8,6 @@ pub(super) fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
         kind: ExprKind::Builtin(Builtin::ContextVar(operation), args),
     }
 }
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-
 impl Checker<'_> {
     /// A binding can strongly retain its payload for the life of a task. A
     /// token, context, or opaque callable can point back into that same state.
@@ -404,7 +397,7 @@ impl Checker<'_> {
                 let fallback = if let [d] = rest {
                     Self::string_value(self.expr(d)?)
                 } else {
-                    none()
+                    Expr::none()
                 };
                 let checked = self.context_get(Some(receiver), key, Some(fallback), call)?;
                 if invalid_key {

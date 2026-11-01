@@ -49,13 +49,7 @@ impl Checker<'_> {
                 Op::LockAcquire,
                 Type::Bool,
                 vec![
-                    param(
-                        "blocking",
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Bool(true),
-                        },
-                    ),
+                    param("blocking", Expr::boolean(true)),
                     param(
                         "timeout",
                         Expr {

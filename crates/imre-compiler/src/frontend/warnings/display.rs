@@ -13,17 +13,13 @@ impl Checker<'_> {
         } else {
             &["message", "category", "filename", "lineno", "line"]
         };
-        let none = || Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
         let params = fields
             .iter()
             .map(|&name| Parameter {
                 name: name.into(),
                 ty: Type::None,
                 kind: ParameterKind::PositionalOrKeyword,
-                default: matches!(name, "file" | "line").then(none),
+                default: matches!(name, "file" | "line").then(Expr::none),
                 sign_only: false,
             })
             .collect::<Vec<_>>();
@@ -35,7 +31,7 @@ impl Checker<'_> {
                     c.resolve(node)
             {
                 stdout = matches!(stream, Intrinsic::Stdout);
-                return Ok(none());
+                return Ok(Expr::none());
             }
             let value = Self::string_value(c.expr(node)?);
             let underlying = c.types.payload(value.ty).unwrap_or(value.ty);

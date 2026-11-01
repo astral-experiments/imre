@@ -213,13 +213,13 @@ impl Checker<'_> {
             ty: Type::Str,
             kind: ExprKind::Scope {
                 body: vec![
-                    Statement::Assign(failed, boolean(false)),
+                    Statement::Assign(failed, Expr::boolean(false)),
                     Statement::Try {
                         body: vec![Statement::Assign(result, protocol)],
                         handlers: vec![ir::ExceptHandler {
                             kinds: vec![exception_kind("TypeError").unwrap()],
                             name: None,
-                            body: vec![Statement::Assign(failed, boolean(true))],
+                            body: vec![Statement::Assign(failed, Expr::boolean(true))],
                         }],
                         orelse: vec![],
                         finalbody: vec![],

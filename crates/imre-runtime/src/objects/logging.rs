@@ -19,7 +19,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::exceptions::Result;
 use super::mappings::IntKey;
@@ -144,8 +143,6 @@ impl Entry {
 struct Registry {
     disable: Int,
     entries: HashMap<String, Entry>,
-    format: Option<Vec<Field>>,
-    datefmt: Option<String>,
 }
 
 impl Registry {
@@ -153,8 +150,6 @@ impl Registry {
         Self {
             disable: Int::small(0).unwrap(),
             entries: HashMap::from([("root".into(), Entry::new("root", 30, 0))]),
-            format: None,
-            datefmt: None,
         }
     }
 
@@ -233,75 +228,7 @@ impl Registry {
 
 thread_local! { static LOGGERS: RefCell<Registry> = RefCell::new(Registry::new()); }
 
-enum Field {
-    Literal(String),
-    Name,
-    LevelName,
-    LevelNo,
-    Message,
-    Time,
-}
-
-fn parse_field(tail: &str) -> Option<(Field, &str)> {
-    [
-        ("(name)s", Field::Name),
-        ("(levelname)s", Field::LevelName),
-        ("(levelno)d", Field::LevelNo),
-        ("(message)s", Field::Message),
-        ("(asctime)s", Field::Time),
-    ]
-    .into_iter()
-    .find_map(|(prefix, field)| tail.strip_prefix(prefix).map(|rest| (field, rest)))
-}
-
-fn fields(mut fmt: &str) -> Result<Vec<Field>> {
-    let original = fmt;
-    let mut parts = Vec::new();
-    let mut has_field = false;
-    while let Some((literal, tail)) = fmt.split_once('%') {
-        if !literal.is_empty() {
-            parts.push(Field::Literal(literal.into()));
-        }
-        if let Some(rest) = tail.strip_prefix('%') {
-            // PercentStyle validates against the original format, even when
-            // the matching field starts at the second percent of a literal %%.
-            has_field |= parse_field(rest).is_some();
-            parts.push(Field::Literal("%".into()));
-            fmt = rest;
-            continue;
-        }
-        let (field, rest) = parse_field(tail).ok_or_else(|| {
-            Error::new(
-                Kind::ValueError,
-                format!("Invalid format '{original}' for '%' style"),
-            )
-        })?;
-        parts.push(field);
-        has_field = true;
-        fmt = rest;
-    }
-    if !has_field {
-        return Err(Error::new(
-            Kind::ValueError,
-            format!("Invalid format '{original}' for '%' style"),
-        ));
-    }
-    if !fmt.is_empty() {
-        parts.push(Field::Literal(fmt.into()));
-    }
-    Ok(parts)
-}
-
-fn timestamp(format: Option<&str>) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    timed::civil(now.as_secs() as libc::time_t, false)
-        .map(|local| format_timestamp(format, &local, now))
-        .unwrap_or_default()
-}
-
-/// Renders either an emitted timestamp or the time captured earlier by a LogRecord.
+/// Format the time captured by a LogRecord.
 fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Duration) -> String {
     let custom = format.filter(|value| !value.is_empty());
     let mut text = String::new();
@@ -381,39 +308,6 @@ pub unsafe extern "C" fn imre_log_get(word: usize) -> *const Object {
 }
 
 /// # Safety
-/// All nonzero optional words are rooted values of their declared kinds.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_config(level: usize, fmt: usize, datefmt: usize, force: bool) {
-    let result = LOGGERS.with_borrow_mut(|logs| {
-        if logs.format.is_some() && !force {
-            return Ok(());
-        }
-        if force {
-            logs.format = None;
-        }
-        // SAFETY: both nullable strings remain rooted until configuration returns.
-        let (fmt, datefmt) = unsafe {
-            (
-                (fmt as *const Str).as_ref(),
-                (datefmt as *const Str).as_ref(),
-            )
-        };
-        let fmt = fmt.map_or("", Str::as_str);
-        let format = fields(if fmt.is_empty() { "%(message)s" } else { fmt })?;
-        let datefmt = datefmt.map(ToString::to_string);
-        if level != 0 {
-            // SAFETY: obtain an independent owner of the supplied integer.
-            let level = unsafe { Int::borrow(level) };
-            logs.set_level(&logs.entries["root"].logger, &level);
-        }
-        logs.format = Some(format);
-        logs.datefmt = datefmt;
-        Ok(())
-    });
-    finish(result, ());
-}
-
-/// # Safety
 /// The logger is rooted; the result owns its name.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_name(logger: *const Object) -> *const Str {
@@ -464,83 +358,4 @@ pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize)
     // SAFETY: both arguments are rooted by the caller.
     let (logger, value) = unsafe { (state(logger), Int::borrow(level)) };
     LOGGERS.with_borrow(|logs| logs.set_level(&logger, &value));
-}
-
-/// # Safety
-/// The rooted arguments are a native logger and integer level.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -> bool {
-    // SAFETY: both arguments are rooted by the caller.
-    let (logger, value) = unsafe { (state(logger), Int::borrow(level)) };
-    let result = logger.enabled_at(&value);
-    finish(result, false)
-}
-
-/// # Safety
-/// The compiler has checked the level and roots all three arguments.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_emit(logger: *const Object, level: usize, message: *const Str) {
-    // SAFETY: each exact input is rooted through the synchronous stderr write.
-    let (name, level, message) = unsafe { (name(logger), Int::borrow(level), &*message) };
-    LOGGERS.with_borrow(|logs| {
-        let mut line = String::new();
-        if let Some(fields) = &logs.format {
-            let mut asctime = None;
-            for field in fields {
-                match field {
-                    Field::Literal(text) => line.push_str(text),
-                    Field::Time => line.push_str(
-                        asctime.get_or_insert_with(|| timestamp(logs.datefmt.as_deref())),
-                    ),
-                    Field::Message => line.push_str(message),
-                    Field::LevelNo => line.push_str(&level.big().to_string()),
-                    Field::LevelName => line.push_str(&levels::level_name(&level)),
-                    Field::Name => line.push_str(&name),
-                }
-            }
-        } else {
-            if level.big().as_ref() < &num_bigint::BigInt::from(30) {
-                return;
-            }
-            line.push_str(message);
-        }
-        // A handler writes and flushes the same text stream as sys.stderr.write.
-        let _ = crate::sys::write_stderr(&line, true);
-    });
-}
-
-/// Look up a logger for callers compiled with the original named-logger ABI.
-///
-/// # Safety
-/// The caller roots the string for the duration of the lookup.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_logger_get(name: *const Str) -> *const Object {
-    // SAFETY: a rooted string pointer is a present optional string word.
-    unsafe { imre_log_get(name as usize) }
-}
-
-/// Install the original level-only configuration in the shared registry.
-///
-/// # Safety
-/// The caller roots the exact tagged integer level.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_logger_configure(level: usize) {
-    let format = Str::from("%(levelname)s:%(name)s:%(message)s");
-    // SAFETY: both inputs stay live while the registry copies the configuration.
-    unsafe { imre_log_config(level, std::ptr::from_ref(&format) as usize, 0, false) }
-}
-
-/// Emit a preformatted message from the original named-logger ABI.
-///
-/// # Safety
-/// The caller roots the logger and message for the whole call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_logger_write(logger: *const Object, level: u32, message: *const Str) {
-    let level = Int::small(i64::from(level)).unwrap().into_raw();
-    // SAFETY: the caller roots both objects and every u32 level fits in an immediate.
-    unsafe {
-        if config::imre_log_is_enabled(logger, level) {
-            imre_log_emit(logger, level, message);
-        }
-    }
 }

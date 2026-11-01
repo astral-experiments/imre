@@ -10,13 +10,6 @@ const UNINITIALIZED: usize = 5;
 const LOCATION: usize = 6;
 const CACHED: usize = 7;
 
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-
 fn is_none(value: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
@@ -63,7 +56,7 @@ impl Checker<'_> {
                 } else {
                     ParameterKind::KeywordOnly
                 },
-                default: (!required).then(none),
+                default: (!required).then(Expr::none),
                 sign_only: false,
             }
         });
@@ -95,7 +88,7 @@ impl Checker<'_> {
             kind: ExprKind::Conditional(
                 Box::new(package),
                 Box::new(self.coerce(empty(), optional_list, call)?),
-                Box::new(self.coerce(none(), optional_list, call)?),
+                Box::new(self.coerce(Expr::none(), optional_list, call)?),
             ),
         };
         let fields = vec![
@@ -105,11 +98,8 @@ impl Checker<'_> {
             get(STATE),
             locations,
             empty(),
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(false),
-            },
-            self.coerce(none(), optional_str, call)?,
+            Expr::boolean(false),
+            self.coerce(Expr::none(), optional_str, call)?,
         ];
         Ok(roots.finish(Expr {
             ty: self

@@ -109,15 +109,7 @@ impl Checker<'_> {
         // Both methods first evaluate the arguments in source order. Check the
         // bound method before creating the target or consuming the iterable.
         let guard = check_ordered.then(|| {
-            self.ordered_fromkeys_or_error(
-                call,
-                shape,
-                receiver.as_ref().unwrap(),
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
-            )
+            self.ordered_fromkeys_or_error(call, shape, receiver.as_ref().unwrap(), Expr::none())
         });
         let named = |name| call.arguments.find_keyword(name).map(|kw| &kw.value);
         let source = args
@@ -145,10 +137,7 @@ impl Checker<'_> {
         let value = match (value_arg, shape) {
             (Some(value), Some((_, ty))) => self.expr_expected(value, ty)?,
             (Some(value), None) => self.expr(value)?,
-            (None, _) => Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            },
+            (None, _) => Expr::none(),
         };
         // When value= is supplied first, evaluate it before creating the iterable.
         let value = if value_arg.is_some_and(|arg| arg.start() < source.start()) {

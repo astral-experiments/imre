@@ -140,13 +140,7 @@ impl Checker<'_> {
             if let Some(expr) = expr {
                 self.expr_expected(expr, optional)
             } else {
-                Ok(Expr {
-                    ty: optional,
-                    kind: ExprKind::Absent(Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    })),
-                })
+                Ok(Expr::absent(optional))
             }
         };
         let alt = optional(alternate)?;

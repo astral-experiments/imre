@@ -13,14 +13,7 @@ impl Checker<'_> {
         value: Type,
     ) -> Result<Expr, String> {
         let optional = self.types.optional(value);
-        let none = self.coerce(
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            },
-            optional,
-            call,
-        )?;
+        let none = self.coerce(Expr::none(), optional, call)?;
         let parameter = |name: &str, ty, default| Parameter {
             name: name.to_owned(),
             ty,

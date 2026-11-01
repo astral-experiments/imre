@@ -169,14 +169,7 @@ impl Checker<'_> {
                 ),
             ]);
         }
-        params.push((
-            "dir_fd",
-            dir_fd,
-            Some(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }),
-        ));
+        params.push(("dir_fd", dir_fd, Some(Expr::none())));
         let params: Vec<_> = params
             .into_iter()
             .map(|(name, ty, default)| Parameter {

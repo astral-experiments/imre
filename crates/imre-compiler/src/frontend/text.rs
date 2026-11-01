@@ -14,17 +14,6 @@ fn parameter(name: &str, ty: Type, kind: ParameterKind, default: Option<Expr>) -
     }
 }
 
-/// Supplies an absent optional value without changing its concrete type.
-fn absent(ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Absent(Box::new(Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        })),
-    }
-}
-
 impl Checker<'_> {
     pub(super) fn unicode_normalize(
         &mut self,
@@ -117,10 +106,7 @@ impl Checker<'_> {
                 name,
                 Type::Bool,
                 ParameterKind::PositionalOrKeyword,
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(value),
-                }),
+                Some(Expr::boolean(value)),
             )
         };
         let parameters = [
@@ -618,7 +604,7 @@ impl Checker<'_> {
                         "sep",
                         optional_string,
                         PositionalOrKeyword,
-                        Some(absent(optional_string)),
+                        Some(Expr::absent(optional_string)),
                     ),
                     parameter(
                         "maxsplit",
@@ -642,7 +628,7 @@ impl Checker<'_> {
                     "chars",
                     optional_string,
                     PositionalOnly,
-                    Some(absent(optional_string)),
+                    Some(Expr::absent(optional_string)),
                 )],
             ),
             "startswith" | "endswith" => (
@@ -674,7 +660,7 @@ impl Checker<'_> {
                             "start",
                             optional_index,
                             PositionalOnly,
-                            Some(absent(optional_index)),
+                            Some(Expr::absent(optional_index)),
                         ),
                     ],
                 )

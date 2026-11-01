@@ -216,13 +216,7 @@ impl Checker<'_> {
                 },
             }
         };
-        let absent = Expr {
-            ty: self.types.optional(Type::Str),
-            kind: ExprKind::Absent(Box::new(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            })),
-        };
+        let absent = Expr::absent(self.types.optional(Type::Str));
         Ok([absent, name])
     }
 }

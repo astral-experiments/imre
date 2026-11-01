@@ -1633,10 +1633,7 @@ impl Checker<'_> {
             ty: Type::None,
             kind: ExprKind::Scope {
                 body: vec![Statement::SetField(self.local(0), field, value)],
-                value: Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
+                value: Box::new(Expr::none()),
                 clear: Vec::new(),
             },
         }
@@ -1735,10 +1732,7 @@ impl Checker<'_> {
                 .contains_key("super")
             && call.arguments.is_empty()
         {
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            });
+            return Ok(Expr::none());
         }
         let base = self
             .super_initializer

@@ -30,7 +30,7 @@ prints a confirmation followed by the report to stderr. Set
 `CONFORMANCE_SUITE_COMMIT` to use a specific revision in report links.
 
 Running ty 0.0.60 and 0.0.90 on 146 files, the original program took 583–588 ms
-in Imre and 569–572 ms in Rust. [Full CLI comparison](../../benchmarks/results/2026-10-23-original-conformance.md)
+in Imre and 569–572 ms in Rust. [Full CLI comparison](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-original-conformance.md)
 
 ## Run the typed port
 
@@ -189,54 +189,54 @@ tool and stream hashes. Retain the typing checkout's root `LICENSE` alongside
 the captured inputs when sharing them.
 
 The live benchmark runs ty 0.0.90 on both sides for its unchanged case and
-0.0.60 → 0.0.90 for changed reports. The [checkout comparison](../../benchmarks/results/2026-10-21-live-conformance.md)
+0.0.60 → 0.0.90 for changed reports. The [checkout comparison](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-21-live-conformance.md)
 includes complete workflow timings, separate report-computation timings,
 and reproducible evidence for CPython, Imre, Codon, and Rust.
-The [fixed-regex comparison](../../benchmarks/results/2026-10-22-fixed-regex.md)
+The [fixed-regex comparison](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-22-fixed-regex.md)
 times Ruff’s original pattern against the previous scanner on the same checkout
 and verifies the text and offsets of each captured annotation.
-The [string-enum comparison](../../benchmarks/results/2026-10-22-string-enums.md)
+The [string-enum comparison](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-22-string-enums.md)
 measures Ruff’s original `compute_stats` over 1,269 preloaded test groups. It
 also times complete and repeated reports and includes Rust controls that
 specialize the common one- and two-diagnostic cases.
-The [in-place sort comparison](../../benchmarks/results/2026-10-22-entry-sort.md)
+The [in-place sort comparison](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-22-entry-sort.md)
 measures Ruff’s unchanged diagnostic entry collector and full reports against
 the previous Imre port, CPython, native Codon, and Rust.
 In 972 pairs, each side has a single diagnostic. Imre compares the six
 fingerprint fields directly in these pairs, avoiding two temporary tuples and
-two sorted lists per pair. The [collector profiles and timings](../../benchmarks/results/2026-10-22-collector-ownership.md)
+two sorted lists per pair. The [collector profiles and timings](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-22-collector-ownership.md)
 measure the effect across all 1,269 groups.
 Ruff’s original `render_file_stats_table` renders the per-file breakdown.
 The enclosing function supplies the report URL for the selected typing revision.
-[Full-report benchmarks](../../benchmarks/results/2026-10-23-file-stats-table.md)
+[Full-report benchmarks](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-file-stats-table.md)
 
 Ruff’s original `render_test_cases` groups consecutive entries by title with
 `itertools.groupby` and renders each section in GitHub or diff format. The
 GitHub rows link to the same revision as the per-file breakdown.
-[Test-case renderer benchmarks](../../benchmarks/results/2026-10-23-render-test-cases.md)
+[Test-case renderer benchmarks](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-render-test-cases.md)
 
 Both diagnostic row renderers also come directly from Ruff. `render_diff_row`
 formats each `TyDiagnostic` using its original `__str__` and severity labels.
 `render_html_diff_row` links to a single line or to the range between the
 lowest and highest line numbers in the group.
-[Diagnostic row benchmarks](../../benchmarks/results/2026-10-23-diagnostic-rows.md)
+[Diagnostic row benchmarks](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-diagnostic-rows.md)
 
 Ruff’s `render_summary` and `diff_format` produce the compact no-change summary
 and the full metrics table. The enclosing function supplies the selected typing
 revision’s URL. Each signed percentage and change marker comes from Ruff’s
 original formatting code.
-[Summary benchmarks](../../benchmarks/results/2026-10-23-conformance-summary.md)
+[Summary benchmarks](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-conformance-summary.md)
 
-The [expected diagnostics comparison](../../benchmarks/results/2026-10-23-expected-diagnostics.md)
+The [expected diagnostics comparison](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-expected-diagnostics.md)
 measures the live reporter with real ty and replayed analyzer output. It also
 counts source reads across repeated frozen reports.
 
 The diagnostic grouping study compares ordered groups, fingerprint equivalence,
 per-file statistics, and complete reports on 146 and 1,460 source files.
-[Timings, memory, and checkout-path sensitivity](../../benchmarks/results/2026-10-23-diagnostic-grouping.md)
+[Timings, memory, and checkout-path sensitivity](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-diagnostic-grouping.md)
 
 On Linux, `imre build script.py --allocator jemalloc` selects a separate archive.
-The [allocator comparison](../../benchmarks/results/2026-10-23-diagnostic-allocator.md)
+The [allocator comparison](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-diagnostic-allocator.md)
 measures grouping and complete reports against Rust using both allocator choices.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects

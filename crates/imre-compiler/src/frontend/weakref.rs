@@ -79,13 +79,7 @@ impl Checker<'_> {
                 ty: Type::WeakProxy(class),
                 kind: ExprKind::Builtin(
                     Builtin::WeakProxyNew,
-                    vec![
-                        target,
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Bool(callable),
-                        },
-                    ],
+                    vec![target, Expr::boolean(callable)],
                 ),
             })
         };
@@ -306,14 +300,8 @@ impl Checker<'_> {
     pub(super) fn weak_proxy_instance(&mut self, value: Expr, callable: bool) -> Expr {
         let mut scope = calls::ArgumentScope::default();
         let value = scope.hold(self, value);
-        let yes = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(true),
-        };
-        let no = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(false),
-        };
+        let yes = Expr::boolean(true);
+        let no = Expr::boolean(false);
         if !matches!(value.ty, Type::WeakProxy(_)) {
             return scope.finish(no);
         }

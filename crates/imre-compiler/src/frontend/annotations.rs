@@ -538,10 +538,7 @@ impl Checker<'_> {
                     {
                         ty
                     }
-                    ast::Expr::NoneLiteral(_) => Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    },
+                    ast::Expr::NoneLiteral(_) => Expr::none(),
                     ast::Expr::Name(n)
                         if !module.bindings.contains_key(n.id.as_str())
                             && potential_forward_name(n.id.as_str())
@@ -584,11 +581,11 @@ impl Checker<'_> {
                                         unpacking::string(n.id.as_str()),
                                         Expr {
                                             ty: module_type,
-                                            kind: ExprKind::Absent(Box::new(none_value())),
+                                            kind: ExprKind::Absent(Box::new(Expr::none())),
                                         },
                                         owner,
-                                        bool_value(false),
-                                        bool_value(false),
+                                        Expr::boolean(false),
+                                        Expr::boolean(false),
                                     ],
                                 ),
                             }
@@ -689,20 +686,6 @@ impl Checker<'_> {
     }
 }
 
-fn none_value() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-
-fn bool_value(value: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(value),
-    }
-}
-
 impl Checker<'_> {
     /// Bind the real constructor signature before building the immutable owned record.
     pub(super) fn forward_ref(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -714,26 +697,26 @@ impl Checker<'_> {
                 module,
                 Some(Expr {
                     ty: module,
-                    kind: ExprKind::Absent(Box::new(none_value())),
+                    kind: ExprKind::Absent(Box::new(Expr::none())),
                 }),
                 ParameterKind::KeywordOnly,
             ),
             (
                 "owner",
                 Type::None,
-                Some(none_value()),
+                Some(Expr::none()),
                 ParameterKind::KeywordOnly,
             ),
             (
                 "is_argument",
                 Type::Bool,
-                Some(bool_value(true)),
+                Some(Expr::boolean(true)),
                 ParameterKind::KeywordOnly,
             ),
             (
                 "is_class",
                 Type::Bool,
-                Some(bool_value(false)),
+                Some(Expr::boolean(false)),
                 ParameterKind::KeywordOnly,
             ),
         ]

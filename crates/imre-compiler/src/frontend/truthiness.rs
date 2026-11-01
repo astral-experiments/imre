@@ -64,10 +64,7 @@ impl Checker<'_> {
                         ty: Type::Bool,
                         kind: ExprKind::Conditional(
                             Box::new(absent),
-                            Box::new(Expr {
-                                ty: Type::Bool,
-                                kind: ExprKind::Bool(false),
-                            }),
+                            Box::new(Expr::boolean(false)),
                             Box::new(truth),
                         ),
                     }),
@@ -127,10 +124,7 @@ impl Checker<'_> {
                     ty: Type::Bool,
                     kind: ExprKind::Conditional(
                         Box::new(absent),
-                        Box::new(Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Bool(false),
-                        }),
+                        Box::new(Expr::boolean(false)),
                         Box::new(actual),
                     ),
                 }),

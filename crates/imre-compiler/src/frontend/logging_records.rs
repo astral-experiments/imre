@@ -9,13 +9,6 @@ pub(super) fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
     }
 }
 
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-
 fn text(value: &str) -> Expr {
     Expr {
         ty: Type::Str,
@@ -54,15 +47,15 @@ impl Checker<'_> {
             Op::New,
             Type::LogRecord,
             vec![
-                none(),
-                none(),
+                Expr::none(),
+                Expr::none(),
                 text(""),
                 logging::number(0),
                 text(""),
                 args,
-                none(),
-                none(),
-                none(),
+                Expr::none(),
+                Expr::none(),
+                Expr::none(),
             ],
         )
     }
@@ -77,7 +70,7 @@ impl Checker<'_> {
             name: name.into(),
             ty: Type::None,
             kind: ParameterKind::PositionalOrKeyword,
-            default: (index >= 7).then(none),
+            default: (index >= 7).then(Expr::none),
             sign_only: false,
         })
         .collect();
@@ -217,7 +210,7 @@ impl Checker<'_> {
             name: name.into(),
             ty: Type::None,
             kind: ParameterKind::PositionalOrKeyword,
-            default: (i >= 7).then(none),
+            default: (i >= 7).then(Expr::none),
             sign_only: false,
         })
         .collect();

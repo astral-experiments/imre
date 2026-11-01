@@ -10,30 +10,16 @@ struct FormEncoder {
     quoting: TextOperation,
 }
 
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-
-fn boolean(value: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(value),
-    }
-}
-
 impl Checker<'_> {
     /// Evaluate call arguments before iterating the query, including keyword arguments in source order.
     pub(in super::super) fn url_encode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let params = [
             slot("query", None),
-            slot("doseq", Some(boolean(false))),
+            slot("doseq", Some(Expr::boolean(false))),
             slot("safe", Some(unpacking::string(""))),
-            slot("encoding", Some(none())),
-            slot("errors", Some(none())),
-            slot("quote_via", Some(boolean(true))),
+            slot("encoding", Some(Expr::none())),
+            slot("errors", Some(Expr::none())),
+            slot("quote_via", Some(Expr::boolean(true))),
         ];
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             let value = match index {
@@ -49,8 +35,8 @@ impl Checker<'_> {
                     checker.optional_scalar_value(value, Type::Str, arg)?
                 }
                 5 => match checker.resolve(arg) {
-                    Some(Binding::Intrinsic(Intrinsic::QuotePlus)) => boolean(true),
-                    Some(Binding::Intrinsic(Intrinsic::Quote)) => boolean(false),
+                    Some(Binding::Intrinsic(Intrinsic::QuotePlus)) => Expr::boolean(true),
+                    Some(Binding::Intrinsic(Intrinsic::Quote)) => Expr::boolean(false),
                     _ => {
                         return Err(error(
                             checker.source,
@@ -187,11 +173,15 @@ impl FormEncoder {
                     value,
                     self.safe.clone(),
                     if binary {
-                        none()
+                        Expr::none()
                     } else {
                         self.encoding.clone()
                     },
-                    if binary { none() } else { self.errors.clone() },
+                    if binary {
+                        Expr::none()
+                    } else {
+                        self.errors.clone()
+                    },
                 ],
             ),
         })

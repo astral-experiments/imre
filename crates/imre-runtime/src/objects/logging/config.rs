@@ -8,26 +8,15 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Write};
 use std::rc::Rc;
 
-/// The root can handle its own records even if root.propagate is false.
-/// Re-evaluate parents on each walk: creating a logger can reparent its children.
-fn reaches_root(logs: &super::Registry, mut current: &str) -> bool {
-    while let Some(parent) = logs.parent_name(current) {
-        if !logs.entries[current].logger.propagate.get() {
-            return false;
-        }
-        current = parent;
-    }
-    true
-}
-
 /// A disabled logger bypasses the level decision, including its cache.
 ///
 /// # Safety
 /// The logger and exact integer remain rooted for the duration of the check.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_is_enabled(logger: *const Object, level: usize) -> bool {
-    // SAFETY: both borrowed arguments remain live for the synchronous calls.
-    unsafe { !imre_log_disabled(logger) && super::imre_log_enabled(logger, level) }
+    // SAFETY: the caller roots the logger and level for this check.
+    let (logger, level) = unsafe { (state(logger), Int::borrow(level)) };
+    !logger.disabled.get() && finish(logger.enabled_at(&level), false)
 }
 
 /// # Safety
@@ -87,7 +76,7 @@ pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
                 return true;
             }
             let Some(parent) = logs.parent(current) else {
-                return !current.standalone && logs.format.is_some();
+                return false;
             };
             if !current.propagate.get() {
                 return false;
@@ -97,84 +86,28 @@ pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
     })
 }
 
-enum Output {
-    Root,
-    LastResort,
-}
-
-/// Resolve the configured sink or last-resort handler before rendering.
-unsafe fn fallback(logger: *const Object, level: usize, found: bool) -> Option<Output> {
-    // SAFETY: the caller roots the logger and exact integer through dispatch.
-    let (receiver, level) = unsafe { (state(logger), Int::borrow(level)) };
-    let (root, configured) = LOGGERS.with_borrow(|logs| {
-        (
-            !receiver.standalone && reaches_root(logs, &receiver.name),
-            logs.format.is_some(),
-        )
-    });
-    if root && configured {
-        Some(Output::Root)
-    } else if !found && *level.big() >= 30.into() {
-        Some(Output::LastResort)
-    } else {
-        None
-    }
-}
-
-impl Output {
-    /// The caller roots the logger and level until the synchronous write finishes.
-    unsafe fn write(self, logger: *const Object, level: usize, message: &Str) {
-        match self {
-            // SAFETY: each exact argument stays live through the synchronous write.
-            Self::Root => unsafe { super::imre_log_emit(logger, level, message) },
-            Self::LastResort => {
-                let _ = crate::sys::write_stderr(message, true);
-            }
-        }
-    }
-}
-
-/// Emit a preformatted message for callers compiled with the original routing ABI.
+/// Write an unhandled record at WARNING or above to the last-resort handler.
 ///
 /// # Safety
-/// The logger, level and message remain rooted through the output operation.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_routed_emit(
-    logger: *const Object,
-    level: usize,
-    message: *const Str,
-    found: bool,
-) {
-    // SAFETY: all three original owners remain live.
-    unsafe {
-        if let Some(output) = fallback(logger, level, found) {
-            output.write(logger, level, &*message);
-        }
-    }
-}
-
-/// Render a record only when a configured sink or the last-resort handler will emit it.
-///
-/// # Safety
-/// The logger, level and record remain rooted through the output operation.
+/// The caller roots the exact tagged level and record through the write.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_routed_record(
-    logger: *const Object,
+    _logger: *const Object,
     level: usize,
     record: *const Object,
     found: bool,
 ) {
-    // SAFETY: both native operands remain rooted through the registry lookup.
-    let Some(output) = (unsafe { fallback(logger, level, found) }) else {
+    // SAFETY: the caller roots the level for this comparison.
+    let level = unsafe { Int::borrow(level) };
+    if found || *level.big() < 30.into() {
         return;
-    };
+    }
     // SAFETY: the live record owns its original message and arguments.
     let message = unsafe { super::record::with_record(record, super::record::Record::message) };
     finish(
         message.map(|s| {
-            // SAFETY: Record::message returns a rooted native string; its owner and the
-            // logger and level remain live until the synchronous write finishes.
-            unsafe { output.write(logger, level, &*(s.word as *const Str)) };
+            // SAFETY: Record::message returns an owned string that remains live through the write.
+            let _ = crate::sys::write_stderr(unsafe { &*(s.word as *const Str) }, true);
         }),
         (),
     );
@@ -300,12 +233,6 @@ fn configure_logger(name: &str, spec: &Value, incremental: bool, root: bool) -> 
             if get(&cfg, key).is_some_and(|v| v.truth()) {
                 return Err(unsupported(key));
             }
-        }
-        if root {
-            LOGGERS.with_borrow_mut(|logs| {
-                logs.format = None;
-                logs.datefmt = None;
-            });
         }
     }
     if !root {
@@ -672,10 +599,6 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
     if !option("logger_root", "handlers")?.is_empty() {
         return Err(unsupported("root handlers"));
     }
-    LOGGERS.with_borrow_mut(|r| {
-        r.format = None;
-        r.datefmt = None;
-    });
     let old = LOGGERS.with_borrow(|r| {
         r.entries
             .keys()

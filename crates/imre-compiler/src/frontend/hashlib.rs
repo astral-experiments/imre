@@ -64,10 +64,7 @@ impl Checker<'_> {
                 name: "usedforsecurity".into(),
                 ty: Type::Bool,
                 kind: ParameterKind::KeywordOnly,
-                default: Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                }),
+                default: Some(Expr::boolean(true)),
                 sign_only: false,
             },
         ];

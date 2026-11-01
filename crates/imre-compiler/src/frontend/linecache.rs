@@ -22,10 +22,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn linecache_call(&mut self, op: Op, call: &ast::ExprCall) -> Result<Expr, String> {
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         let names: &[(&str, bool)] = match op {
             Op::Getline => &[
                 ("filename", false),

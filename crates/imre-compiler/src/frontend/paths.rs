@@ -24,13 +24,6 @@ fn parameter(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
     }
 }
 
-fn boolean(value: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(value),
-    }
-}
-
 /// A raw binary mode contains one access letter, one b and an optional +.
 pub(super) fn is_raw_binary_mode(mode: &str) -> bool {
     let mode = mode.as_bytes();
@@ -112,10 +105,7 @@ impl Checker<'_> {
         } else {
             self.reject_builtin_keywords(call)?;
             match call.arguments.args.as_ref() {
-                [] => Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
+                [] => Expr::none(),
                 [arg] => self.expr(arg)?,
                 _ => {
                     return Err(error(
@@ -315,7 +305,7 @@ impl Checker<'_> {
                 ) {
                     let param = Parameter {
                         kind: ParameterKind::KeywordOnly,
-                        ..parameter("follow_symlinks", Type::Bool, Some(boolean(true)))
+                        ..parameter("follow_symlinks", Type::Bool, Some(Expr::boolean(true)))
                     };
                     let args = self.arguments_with(
                         call,
@@ -337,7 +327,11 @@ impl Checker<'_> {
                 }
                 self.reject_builtin_keywords(call)?;
                 let follow = !matches!(query, PathQuery::Symlink);
-                return Ok(operation(kind, Type::Bool, vec![receiver, boolean(follow)]));
+                return Ok(operation(
+                    kind,
+                    Type::Bool,
+                    vec![receiver, Expr::boolean(follow)],
+                ));
             }
             if info {
                 return Err(error(self.source, call, "unsupported Path.info method"));
@@ -372,7 +366,7 @@ impl Checker<'_> {
             if name == "relative_to" {
                 params.push(Parameter {
                     kind: ParameterKind::KeywordOnly,
-                    ..parameter("walk_up", Type::Bool, Some(boolean(false)))
+                    ..parameter("walk_up", Type::Bool, Some(Expr::boolean(false)))
                 });
             }
             let arguments =
@@ -412,14 +406,7 @@ impl Checker<'_> {
         if matches!(name, "match" | "full_match") {
             let full = name == "full_match";
             let optional_bool = self.types.optional(Type::Bool);
-            let default = self.coerce(
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
-                optional_bool,
-                call,
-            )?;
+            let default = self.coerce(Expr::none(), optional_bool, call)?;
             let params = [
                 parameter(
                     if full { "pattern" } else { "path_pattern" },
@@ -536,13 +523,7 @@ impl Checker<'_> {
         }
         if !binary {
             let optional = self.types.optional(Type::Str);
-            let absent = Expr {
-                ty: optional,
-                kind: ExprKind::Absent(Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                })),
-            };
+            let absent = Expr::absent(optional);
             for key in ["encoding", "errors", "newline"] {
                 params.push(parameter(key, optional, Some(absent.clone())));
             }
@@ -634,14 +615,18 @@ impl Checker<'_> {
                             kind: ExprKind::Int("511".to_owned()),
                         }),
                     ),
-                    parameter("parents", Type::Bool, Some(boolean(false))),
-                    parameter("exist_ok", Type::Bool, Some(boolean(false))),
+                    parameter("parents", Type::Bool, Some(Expr::boolean(false))),
+                    parameter("exist_ok", Type::Bool, Some(Expr::boolean(false))),
                 ],
             ),
             "unlink" => (
                 PathOperation::Unlink,
                 Type::None,
-                vec![parameter("missing_ok", Type::Bool, Some(boolean(false)))],
+                vec![parameter(
+                    "missing_ok",
+                    Type::Bool,
+                    Some(Expr::boolean(false)),
+                )],
             ),
             "replace" => (
                 PathOperation::Replace,
@@ -653,7 +638,11 @@ impl Checker<'_> {
                 Type::None,
                 vec![
                     parameter("target", Type::Str, None),
-                    parameter("target_is_directory", Type::Bool, Some(boolean(false))),
+                    parameter(
+                        "target_is_directory",
+                        Type::Bool,
+                        Some(Expr::boolean(false)),
+                    ),
                 ],
             ),
             "hardlink_to" => (
@@ -664,7 +653,7 @@ impl Checker<'_> {
             "resolve" => (
                 PathOperation::Resolve,
                 Type::Path,
-                vec![parameter("strict", Type::Bool, Some(boolean(false)))],
+                vec![parameter("strict", Type::Bool, Some(Expr::boolean(false)))],
             ),
             "with_name" => (
                 PathOperation::WithName,
@@ -785,13 +774,7 @@ impl Checker<'_> {
         .ok_or_else(|| error(self.source, call, "unsupported native Path.open mode"))?;
         if matches!(builtin, Builtin::TextOpen(1..=3)) {
             let optional = self.types.optional(Type::Str);
-            let absent = Expr {
-                ty: optional,
-                kind: ExprKind::Absent(Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                })),
-            };
+            let absent = Expr::absent(optional);
             let mut params = vec![parameter("mode", Type::Str, Some(unpacking::string("r")))];
             for name in ["encoding", "errors", "newline"] {
                 params.push(parameter(name, optional, Some(absent.clone())));
@@ -840,17 +823,7 @@ impl Checker<'_> {
         let directory = self.types.optional(Type::Str);
         let mut params = [
             parameter("mode", Type::Str, Some(unpacking::string("w+b"))),
-            parameter(
-                "dir",
-                directory,
-                Some(Expr {
-                    ty: directory,
-                    kind: ExprKind::Absent(Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    })),
-                }),
-            ),
+            parameter("dir", directory, Some(Expr::absent(directory))),
         ];
         params[1].kind = ParameterKind::KeywordOnly;
         let args = self.arguments_with(call, &params, None, |checker, index, value| {
@@ -871,17 +844,7 @@ impl Checker<'_> {
         calls::reject_unpacking(call, self.source)?;
         let directory = self.types.optional(Type::Str);
         let mut params = vec![
-            parameter(
-                "dir",
-                directory,
-                Some(Expr {
-                    ty: directory,
-                    kind: ExprKind::Absent(Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    })),
-                }),
-            ),
+            parameter("dir", directory, Some(Expr::absent(directory))),
             parameter(
                 "prefix",
                 Type::Str,
@@ -930,7 +893,7 @@ impl Checker<'_> {
             },
         })));
         let unreachable = if ty == Type::Bool {
-            boolean(false)
+            Expr::boolean(false)
         } else {
             self.local(clear[0])
         };
@@ -993,14 +956,11 @@ impl Checker<'_> {
             ));
         }
         if name == "walk" {
-            let none = Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            };
+            let none = Expr::none();
             let params = [
-                parameter("top_down", Type::Bool, Some(boolean(true))),
+                parameter("top_down", Type::Bool, Some(Expr::boolean(true))),
                 parameter("on_error", Type::None, Some(none)),
-                parameter("follow_symlinks", Type::Bool, Some(boolean(false))),
+                parameter("follow_symlinks", Type::Bool, Some(Expr::boolean(false))),
             ];
             let args = self.arguments(call, &params, Some(receiver))?;
             let names = self.types.list(Type::Str);
@@ -1012,14 +972,7 @@ impl Checker<'_> {
             ));
         }
         let optional = self.types.optional(Type::Bool);
-        let default = self.coerce(
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            },
-            optional,
-            call,
-        )?;
+        let default = self.coerce(Expr::none(), optional, call)?;
         let params = [
             parameter("pattern", Type::Str, None),
             Parameter {
@@ -1028,7 +981,7 @@ impl Checker<'_> {
             },
             Parameter {
                 kind: ParameterKind::KeywordOnly,
-                ..parameter("recurse_symlinks", Type::Bool, Some(boolean(false)))
+                ..parameter("recurse_symlinks", Type::Bool, Some(Expr::boolean(false)))
             },
         ];
         let args = self.arguments_with(call, &params, Some(receiver), |checker, i, value| {
