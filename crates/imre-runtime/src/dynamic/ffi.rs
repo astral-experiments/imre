@@ -197,8 +197,13 @@ impl Context {
             }
             "delname" | "clearname" => {
                 let name = copy_label(self.str_value(b)?)?;
+                let released = self.replacing_writer(a, &name, NONE);
                 let scope = self.binding_scope(a, &name);
-                if !self.remove_binding(scope, &name, b)? && op == "delname" {
+                if self.remove_binding(scope, &name, b)? {
+                    if released {
+                        self.heap.release_unbound_writers();
+                    }
+                } else if op == "delname" {
                     return Err(self.missing_binding(a, scope, &name));
                 }
                 Ok(NONE)

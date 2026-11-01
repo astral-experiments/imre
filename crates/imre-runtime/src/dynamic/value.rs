@@ -308,6 +308,7 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
+            Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(_) => "_io.BufferedRandom",
             Value::ReverseSequence { .. } => "reversed",
             Value::Deque(_) => super::deque::CLASS,
@@ -811,6 +812,7 @@ pub(super) enum Value {
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
+    NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
     BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
     RegexMatch {
         groups: Vec<Option<Id>>,
@@ -1123,6 +1125,7 @@ impl Value {
             | Self::TokenMissing
             | Self::File(_)
             | Self::TextFile(_)
+            | Self::NamedFileCloser(_)
             | Self::BufferedRandom(_) => {}
         }
     }
@@ -2087,6 +2090,7 @@ impl Heap {
             let slot = &self.slots[id as usize];
             slot.marked()
                 && match &slot.value {
+                    Some(Value::NamedFileCloser(closer)) => closer.borrow().needs_cleanup(),
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
                     _ => false,

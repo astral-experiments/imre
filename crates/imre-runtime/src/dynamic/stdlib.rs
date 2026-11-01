@@ -313,9 +313,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin("enum.Enum.__deepcopy__");
             ctx.builtin(&format!("enum.{name}"))
         }
-        ("_imre_tempfile", "abspath" | "mkdir" | "random_name" | "default_directory") => {
-            ctx.builtin(&format!("{module}.{name}"))
-        }
+        (
+            "_imre_tempfile",
+            "abspath" | "mkdir" | "random_name" | "default_directory" | "open_named"
+            | "finish_named" | "keep_named",
+        ) => ctx.builtin(&format!("{module}.{name}")),
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         (
