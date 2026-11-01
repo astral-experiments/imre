@@ -590,6 +590,7 @@ impl Reachable {
                 let id = DefinitionId { module, statement };
                 if module != graph.entry
                     && !found.value_reads.contains(&id)
+                    && !source.rebound_values.contains(&statement)
                     && super::value_name(node)
                         .is_some_and(|name| source.bindings.get(name) == Some(&Binding::Value(id)))
                     && super::module_value(node).is_some_and(inert_literal)

@@ -4588,6 +4588,12 @@ impl<'a> Checker<'a> {
         if self.classes.parsers.declaration(self.module, statement) {
             return Ok((Vec::new(), true));
         }
+        if self.module_scope
+            && let Some(first) =
+                self.graph.modules[self.module].rebound_target(self.module, statement)
+        {
+            return Ok((vec![self.replace_global(first, statement)?], true));
+        }
         let result = match statement {
             ast::Stmt::ClassDef(class) if !self.module_scope => {
                 self.define_local_class(class)?;
@@ -6222,10 +6228,17 @@ impl<'a> Checker<'a> {
                     "module value is not initialized on this path",
                 )
             })?;
-            return Ok(Expr {
-                ty,
-                kind: ExprKind::Builtin(Builtin::GlobalGet(slot), Vec::new()),
-            });
+            let storage = self.globals.slot_value(slot);
+            if self.graph.modules[definition.module]
+                .rebound_values
+                .contains(&definition.statement)
+            {
+                return Ok(Expr {
+                    ty: self.types.element(ty).unwrap(),
+                    kind: ExprKind::Builtin(Builtin::ListGet, vec![storage, pipelines::integer(0)]),
+                });
+            }
+            return Ok(storage);
         }
         if let ast::Expr::Attribute(attr) = expression
             && attr.attr.as_str() == "avoids_symlink_attacks"

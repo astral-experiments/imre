@@ -1,4 +1,4 @@
-//! Fixed module bindings with ordinary mutable values and ordered initialization.
+//! Module values with ordered initialization and typed storage.
 
 use std::cell::RefCell;
 use std::ops::Range;
@@ -265,15 +265,36 @@ impl Checker<'_> {
         self.inherit_class_data(class_id, body)
     }
 
-    fn initialize_global(
+    pub(super) fn replace_global(
         &mut self,
+        first: DefinitionId,
         statement: &ast::Stmt,
-        definition: DefinitionId,
     ) -> Result<Statement, String> {
+        let (slot, storage) = self.globals.get(first).ok_or_else(|| {
+            error(
+                self.source,
+                statement,
+                "module value is not initialized on this path",
+            )
+        })?;
+        let ty = self.types.element(storage).expect("module cell");
         let value = match statement {
-            ast::Stmt::ImportFrom(_) => self
-                .import_sys_value(self.graph.modules[self.module].snapshots[&definition.statement]),
-            ast::Stmt::Assign(assignment) => self.expr(&assignment.value)?,
+            ast::Stmt::Assign(assign) => self.expr_expected(&assign.value, ty)?,
+            _ => {
+                let value = self.module_assignment(statement)?;
+                self.coerce(value, ty, statement)?
+            }
+        };
+        Ok(Statement::SetItem(
+            self.globals.slot_value(slot),
+            pipelines::integer(0),
+            value,
+        ))
+    }
+
+    fn module_assignment(&mut self, statement: &ast::Stmt) -> Result<Expr, String> {
+        match statement {
+            ast::Stmt::Assign(assignment) => self.expr(&assignment.value),
             ast::Stmt::AnnAssign(assignment) => {
                 let value = assignment.value.as_deref().ok_or_else(|| {
                     error(
@@ -285,7 +306,7 @@ impl Checker<'_> {
                 if self.resolve(&assignment.annotation)
                     == Some(Binding::Intrinsic(Intrinsic::Final))
                 {
-                    self.expr(value)?
+                    self.expr(value)
                 } else {
                     let ty = annotation(
                         &assignment.annotation,
@@ -294,10 +315,28 @@ impl Checker<'_> {
                         &self.classes.declarations,
                         self.types,
                     )?;
-                    self.expr_expected(value, ty)?
+                    self.expr_expected(value, ty)
                 }
             }
             _ => unreachable!(),
+        }
+    }
+
+    fn initialize_global(
+        &mut self,
+        statement: &ast::Stmt,
+        definition: DefinitionId,
+    ) -> Result<Statement, String> {
+        let rebound = self.graph.modules[self.module].rebound_target(self.module, statement);
+        if let Some(first) = rebound
+            && first != definition
+        {
+            return self.replace_global(first, statement);
+        }
+        let value = match statement {
+            ast::Stmt::ImportFrom(_) => self
+                .import_sys_value(self.graph.modules[self.module].snapshots[&definition.statement]),
+            _ => self.module_assignment(statement)?,
         };
         // A native frozenset predicate captures only its already-initialized immutable set.
         let frozen_predicate = matches!(&value.kind, ExprKind::Callable { receiver: Some(set), .. }
@@ -309,6 +348,21 @@ impl Checker<'_> {
                 "imported module values cannot contain callable values",
             ));
         }
+        let value = if rebound.is_some() {
+            if !class_data_type(value.ty, self.types) {
+                return Err(error(
+                    self.source,
+                    statement,
+                    "a rebindable module value requires plain scalar or container storage",
+                ));
+            }
+            Expr {
+                ty: self.types.list(value.ty),
+                kind: ExprKind::List(vec![value]),
+            }
+        } else {
+            value
+        };
         let slot = self.globals.insert(definition, value.ty);
         if let Some(groups) = self.globals.regex_groups(&value) {
             self.globals.regex_globals.borrow_mut().insert(slot, groups);
