@@ -55,6 +55,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/unittest/boxed_raises.py"),
                 "\n",
                 include_str!("../../stdlib/unittest/boxed_cleanup.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_suite.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_loader.py"),
             ),
         )),
         "textwrap" => {

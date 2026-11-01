@@ -5,7 +5,7 @@ def addCleanup(self, function, /, *args, **kwargs):
     self._cleanups.append((function, args, kwargs))
 
 
-def enterContext(self, cm):
+def _enterCleanupContext(cm, register):
     cls = type(cm)
     try:
         enter = cls.__enter__
@@ -18,8 +18,12 @@ def enterContext(self, cm):
                         "Did you mean to use enterAsyncContext()?")
         raise TypeError(message) from None
     result = enter(cm)
-    self.addCleanup(exit, cm, None, None, None)
+    register(exit, cm, None, None, None)
     return result
+
+
+def enterContext(self, cm):
+    return _enterCleanupContext(cm, self.addCleanup)
 
 
 def _callCleanup(self, function, /, *args, **kwargs):

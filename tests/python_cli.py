@@ -1415,6 +1415,7 @@ def report(text):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
+            "boxed_unittest_class_cleanup.py",
             "boxed_posixpath.py",
             "boxed_stat.py",
             "boxed_itertools_count.py",

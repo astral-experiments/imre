@@ -1,0 +1,322 @@
+# The boxed runtime can validate and call bound methods on the actual instance.
+def _validateCaseMethod(case, methodName):
+    try:
+        method = getattr(case, methodName)
+    except AttributeError:
+        if methodName != "runTest":
+            raise ValueError("no such test method in " + str(type(case)) + ": " + methodName)
+        case._testMethodDoc = "No test"
+    else:
+        case._testMethodDoc = getattr(method, "__doc__", None)
+
+
+def _boxedCheckFixtures(cls):
+    # Inspect the defining module, including for cases re-exported under an alias.
+    module = __import__(cls.__module__, fromlist=("*",))
+    for name in ("setUpModule", "tearDownModule"):
+        if getattr(module, name, None) is not None:
+            raise NotImplementedError("native unittest does not yet support module hooks: " + name)
+    if not issubclass(cls, TestCase):
+        for name in ("addClassCleanup", "enterClassContext", "doClassCleanups"):
+            if getattr(cls, name, None) is not None:
+                raise NotImplementedError("native unittest does not yet support class cleanup hooks: " + name)
+        return
+    for name in ("run", "__call__", "defaultTestResult"):
+        for owner in cls.__mro__:
+            if owner is object:
+                break
+            if name in owner.__dict__:
+                if owner is not TestCase:
+                    raise NotImplementedError("native unittest does not yet support custom result hooks: "
+                                              + owner.__qualname__ + "." + name)
+                break
+
+
+def _boxedCheckResult(result):
+    if (getattr(type(result), "addFailure", None) is not getattr(TestResult, "addFailure", None)
+            or getattr(type(result), "addError", None) is not getattr(TestResult, "addError", None)):
+        raise NotImplementedError("native unittest does not yet support custom result hooks: addFailure/addError")
+
+
+def _runRegistered(self, case, name):
+    cls = type(case)
+    method_name = case._testMethodName
+    method = getattr(case, method_name)
+    _boxedCheckResult(self)
+    if not name and isinstance(self, TextTestResult):
+        name = str(case)
+        if self.descriptions:
+            description = case.shortDescription()
+            if description:
+                name += "\n" + description
+    if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
+        reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
+        self._skipCase(case, name, reason)
+    else:
+        if getattr(cls, "__unittest_expecting_failure__", False) or getattr(method, "__unittest_expecting_failure__", False):
+            raise NotImplementedError("native unittest does not yet support expectedFailure")
+        self._runCase(case, name, case.setUp, method, case.tearDown)
+
+
+TestResult._runRegistered = _runRegistered
+
+
+def _caseEqual(self, other):
+    if type(self) is not type(other):
+        return NotImplemented
+    return self._testMethodName == other._testMethodName
+
+
+def _caseHash(self):
+    return hash((type(self), self._testMethodName))
+
+
+def _caseShortDescription(self):
+    doc = self._testMethodDoc
+    return doc.strip().split("\n")[0].strip() if doc else None
+
+
+def _caseStr(self):
+    method = self._testMethodName
+    cls = type(self)
+    return method + " (" + cls.__module__ + "." + cls.__qualname__ + "." + method + ")"
+
+
+def _caseRun(self, result=None):
+    if result is None:
+        result = TestResult()
+        result.startTestRun()
+        try:
+            result._runRegistered(self, "")
+        finally:
+            result.stopTestRun()
+    else:
+        result._runRegistered(self, "")
+    return result
+
+
+def _callTest(self, *args, **kwargs):
+    return self.run(*args, **kwargs)
+
+
+def _suiteInit(self, tests=()):
+    self._tests = []
+    self._removed_tests = 0
+    self.addTests(tests)
+
+
+def _suiteIter(self):
+    return iter(self._tests)
+
+
+def _suiteEqual(self, other):
+    if not isinstance(other, type(self)):
+        return NotImplemented
+    return list(self) == list(other)
+
+
+def _suiteCount(self):
+    count = self._removed_tests
+    for test in self:
+        if test:
+            count += test.countTestCases()
+    return count
+
+
+def _suiteAddTest(self, test):
+    if not callable(test):
+        raise TypeError(repr(test) + " is not callable")
+    if isinstance(test, type) and issubclass(test, (TestCase, TestSuite)):
+        raise TypeError("TestCases and TestSuites must be instantiated before passing them to addTest()")
+    self._tests.append(test)
+
+
+def _suiteAddTests(self, tests):
+    if isinstance(tests, str):
+        raise TypeError("tests must be an iterable of tests, not a string")
+    for test in tests:
+        self.addTest(test)
+
+
+def _suiteRemoveTest(self, index):
+    try:
+        test = self._tests[index]
+    except TypeError:
+        return
+    if hasattr(test, "countTestCases"):
+        self._removed_tests += test.countTestCases()
+    self._tests[index] = None
+
+
+def _initCaseSubclass(cls, *args, **kwargs):
+    cls._classSetupFailed = False
+    cls._class_cleanups = []
+    super(TestCase, cls).__init_subclass__(*args, **kwargs)
+
+
+def _classCleanups(cls):
+    # The bundled classes defined before these boxed methods also need their own stack.
+    if "_class_cleanups" not in cls.__dict__:
+        cls._class_cleanups = []
+    return cls._class_cleanups
+
+
+def _addClassCleanup(cls, function, /, *args, **kwargs):
+    _classCleanups(cls).append((function, args, kwargs))
+
+
+def _enterClassContext(cls, cm):
+    return _enterCleanupContext(cm, cls.addClassCleanup)
+
+
+def _doClassCleanups(cls):
+    cls.tearDown_exceptions = []
+    cleanups = _classCleanups(cls)
+    while cleanups:
+        function, args, kwargs = cleanups.pop()
+        try:
+            function(*args, **kwargs)
+        except Exception:
+            cls.tearDown_exceptions.append(sys.exc_info())
+
+
+class _ErrorHolder:
+    failureException = None
+
+    def __init__(self, description):
+        self.description = description
+
+    def id(self):
+        return self.description
+
+    def __str__(self):
+        return self.description
+
+    def __repr__(self):
+        return "<ErrorHolder description=" + repr(self.description) + ">"
+
+    def shortDescription(self):
+        return None
+
+    def countTestCases(self):
+        return 0
+
+    def run(self, result):
+        pass
+
+    __call__ = run
+
+
+def _boxedClassPhase(cls, method, result):
+    hook = getattr(cls, method, None)
+    if hook is None:
+        return True
+    try:
+        hook()
+    except Exception as exc:
+        _boxedClassProblem(cls, method, result, exc, exc.__traceback__)
+        return False
+    return True
+
+
+def _boxedClassProblem(cls, method, result, exc, tb):
+    label = method + " (" + cls.__module__ + "." + cls.__qualname__ + ")"
+    holder = _ErrorHolder(label)
+    result._startCase(label)
+    if isinstance(exc, SkipTest):
+        result.addSkip(holder, str(exc))
+        result._mark("s", "skipped " + repr(str(exc)))
+    else:
+        import traceback
+        # Both the hook invocation and the cleanup invocation start in unittest.
+        if tb is not None:
+            tb = tb.tb_next
+        detail = "".join(traceback.format_exception(type(exc), exc, tb))
+        result.errors.append((holder, detail))
+        result._mark("E", "ERROR")
+        if result.failfast:
+            result.stop()
+
+
+def _boxedClassCleanups(cls, method, result):
+    hook = getattr(cls, "doClassCleanups", None)
+    if hook is not None:
+        hook()
+        for _, exc, tb in cls.tearDown_exceptions:
+            _boxedClassProblem(cls, method, result, exc, tb)
+
+
+def _boxedTearDownClass(cls, result):
+    if (cls is not None and not getattr(cls, "_classSetupFailed", False)
+            and not getattr(cls, "__unittest_skip__", False)):
+        _boxedClassPhase(cls, "tearDownClass", result)
+        _boxedClassCleanups(cls, "tearDownClass", result)
+
+
+def _boxedIsLeaf(test):
+    try:
+        iter(test)
+    except TypeError:
+        return True
+    return False
+
+
+def _suiteRun(self, result):
+    outer = not getattr(result, "_testRunEntered", False)
+    if outer:
+        result._testRunEntered = True
+    try:
+        for index, test in enumerate(self):
+            if result.shouldStop:
+                break
+            if _boxedIsLeaf(test):
+                cls = type(test)
+                _boxedCheckFixtures(cls)
+                _boxedCheckResult(result)
+                previous = getattr(result, "_previousTestClass", None)
+                if cls is not previous:
+                    _boxedTearDownClass(previous, result)
+                    if not getattr(cls, "__unittest_skip__", False):
+                        try:
+                            cls._classSetupFailed = False
+                        except TypeError:
+                            pass  # Builtin callables can be suite members.
+                        if not _boxedClassPhase(cls, "setUpClass", result):
+                            cls._classSetupFailed = True
+                            _boxedClassCleanups(cls, "setUpClass", result)
+                    result._previousTestClass = cls
+                if getattr(cls, "_classSetupFailed", False):
+                    continue
+            test(result)
+            if self._cleanup:
+                self._removeTestAtIndex(index)
+        if outer:
+            _boxedTearDownClass(getattr(result, "_previousTestClass", None), result)
+    finally:
+        if outer:
+            result._testRunEntered = False
+    return result
+
+
+TestCase.__init_subclass__ = classmethod(_initCaseSubclass)
+TestCase.addClassCleanup = classmethod(_addClassCleanup)
+TestCase.doClassCleanups = classmethod(_doClassCleanups)
+TestCase.enterClassContext = classmethod(_enterClassContext)
+
+TestCase.__eq__ = _caseEqual
+TestCase.__hash__ = _caseHash
+TestCase.shortDescription = _caseShortDescription
+TestCase.__str__ = _caseStr
+TestCase.run = _caseRun
+TestCase.__call__ = _callTest
+TestSuite._cleanup = True
+TestSuite.__init__ = _suiteInit
+TestSuite.__iter__ = _suiteIter
+TestSuite.__eq__ = _suiteEqual
+TestSuite.__hash__ = None
+TestSuite.countTestCases = _suiteCount
+TestSuite.addTest = _suiteAddTest
+TestSuite.addTests = _suiteAddTests
+TestSuite._removeTestAtIndex = _suiteRemoveTest
+TestSuite.run = _suiteRun
+TestSuite.__call__ = _callTest

@@ -1428,6 +1428,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
+        self.check_unittest_class_fixtures(call, class)?;
         if self.decimal_class(class) {
             return self.decimal_constructor(call, class);
         }

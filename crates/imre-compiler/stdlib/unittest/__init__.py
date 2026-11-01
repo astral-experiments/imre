@@ -704,6 +704,10 @@ class TestResult:
              body: Callable[[], None], teardown: Callable[[], None]) -> None:
         if self.shouldStop:
             return
+        self._runCase(case, name, setup, body, teardown)
+
+    def _runCase(self, case: TestCase, name: str, setup: Callable[[], None],
+             body: Callable[[], None], teardown: Callable[[], None]) -> None:
         self.startTest(case)
         self._startCase(name)
         before = len(self.failures) + len(self.errors) + len(self.skipped)
@@ -724,6 +728,9 @@ class TestResult:
     def _skip(self, case: TestCase, name: str, reason: str) -> None:
         if self.shouldStop:
             return
+        self._skipCase(case, name, reason)
+
+    def _skipCase(self, case: TestCase, name: str, reason: str) -> None:
         self.startTest(case)
         self._startCase(name)
         try:
@@ -988,12 +995,13 @@ class TextTestResult(TestResult):
             parts.append("errors=" + str(len(self.errors)))
         if self.skipped:
             parts.append("skipped=" + str(len(self.skipped)))
-        message = "FAILED" if self.failures or self.errors else "OK"
+        if self.unexpectedSuccesses:
+            parts.append("unexpected successes=" + str(len(self.unexpectedSuccesses)))
+        message = "FAILED"
+        if self.wasSuccessful():
+            message = "NO TESTS RAN" if not self.testsRun and not self.skipped else "OK"
         if parts:
             message += " (" + ", ".join(parts) + ")"
-        if not self.testsRun:
-            self.stream.writeln("NO TESTS RAN")
-            return
         self.stream.writeln(message)
 
 
@@ -1047,10 +1055,10 @@ class _MainRunner(TextTestResult):
 
     def _finish(self) -> None:
         self._report()
-        if not self.testsRun:
-            sys.exit(5)
         if not self.wasSuccessful():
             sys.exit(1)
+        if not self.testsRun and not self.skipped:
+            sys.exit(5)
         sys.exit(0)
 
 
