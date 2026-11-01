@@ -53,6 +53,13 @@ pub(super) fn options(
         expression => (expression, None),
     };
     let binding = graph.resolve(module_id, target);
+    if let Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) = binding {
+        graph.needs_object_runtime.set(true);
+        return Err(module.error(
+            decorator,
+            &format!("{name} requires native Python object operations"),
+        ));
+    }
     let value_struct = binding == Some(Binding::Intrinsic(Intrinsic::Struct));
     if value_struct && arguments.is_some() {
         return Err(module.error(decorator, "use bare @imre.struct without options"));

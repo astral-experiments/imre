@@ -1047,6 +1047,9 @@ impl IntrinsicModule {
                 Intrinsic::WrapperAttributes(WrapperAttributes::Updated)
             }
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
+            (Self::Functools, "total_ordering") => {
+                Intrinsic::ObjectRuntimeExport("functools.total_ordering")
+            }
             (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
             (Self::Functools, "update_wrapper") => Intrinsic::UpdateWrapper,
             (Self::Functools, "wraps") => Intrinsic::Wraps,

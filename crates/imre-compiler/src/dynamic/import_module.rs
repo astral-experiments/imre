@@ -4,6 +4,7 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Python sources used only by the boxed importer.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "functools" => Some(("functools.py", include_str!("../../stdlib/functools.py"))),
         "textwrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("textwrap.py", SOURCE.get_or_init(|| {

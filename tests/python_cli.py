@@ -1342,6 +1342,7 @@ def report(text):
             "boxed_secrets.py",
             "boxed_pkgutil.py",
             "boxed_lru_cache_equality.py",
+            "boxed_total_ordering.py",
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
             "boxed_typing_optional.py",
