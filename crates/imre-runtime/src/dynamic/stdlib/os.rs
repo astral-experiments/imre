@@ -17,7 +17,7 @@ pub(in crate::dynamic) fn install_capabilities(
     for (capability, functions) in [
         (
             "supports_dir_fd",
-            &["lstat", "open", "rmdir", "stat", "unlink"][..],
+            &["lstat", "mkdir", "open", "rmdir", "stat", "unlink"][..],
         ),
         ("supports_fd", &["listdir", "scandir", "stat"][..]),
         ("supports_follow_symlinks", &["stat"][..]),
@@ -317,6 +317,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "remove"
             | "unlink"
             | "rmdir"
+            | "mkdir"
             | "dup"
             | "dup2"
             | "isatty"
@@ -336,6 +337,53 @@ fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+/// Convert an optional dir_fd after the path and preceding arguments.
+fn directory_fd(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+    let Some(value) = value.filter(|&fd| fd != NONE) else {
+        return Ok(libc::AT_FDCWD);
+    };
+    stat::warn_bool_fd(ctx, value)?;
+    let fd = ctx.index_value(value)?.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "argument should be integer or None, not {}",
+                ctx.type_name(value)
+            ),
+        )
+    })?;
+    Ok(native::directory_fd_number(&fd)?)
+}
+
+/// Create a directory relative to dir_fd using the caller's mode and process umask.
+fn mkdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["path", "mode", "dir_fd"];
+    let [Some(path), mode, dir_fd] = (if args.len() > 2 {
+        builtins::bind_method_arguments("mkdir", args, kwargs, names, 2)?
+    } else {
+        builtins::bind_builtin_arguments("mkdir", args, kwargs, names, 1)?
+    }) else {
+        unreachable!("mkdir requires path")
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        "mkdir: path should be string, bytes or os.PathLike",
+    )?;
+    let pathname = c_path(ctx, path, "mkdir: embedded null character in path")?;
+    let mode = mode
+        .map(|value| c_int(ctx, value))
+        .transpose()?
+        .unwrap_or(0o777);
+    let dir_fd = directory_fd(ctx, dir_fd)?;
+    // SAFETY: pathname is NUL-terminated and stays live through the synchronous call.
+    if unsafe { libc::mkdirat(dir_fd, pathname.as_ptr(), mode as libc::mode_t) } != 0 {
+        let error = crate::objects::errno_error(std::io::Error::last_os_error());
+        return Err(ctx.with_errno_filename(error.into(), path)?);
+    }
+    Ok(NONE)
 }
 
 /// Bind and convert open arguments in Python order before opening the named entry.
@@ -393,6 +441,9 @@ pub(super) fn descriptor(
     }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
+    }
+    if name == "mkdir" {
+        return mkdir(ctx, args, kwargs);
     }
     if name == "open" {
         return open(ctx, args, kwargs);

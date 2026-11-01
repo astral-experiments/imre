@@ -1,29 +1,4 @@
-use super::{Context, Error, Id, NONE, Result, Value, builtins, c_path, native, posixpath};
-
-/// Convert an optional dir_fd after the path and preceding arguments.
-fn directory_fd(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
-    let Some(value) = value.filter(|&fd| fd != NONE) else {
-        return Ok(libc::AT_FDCWD);
-    };
-    if matches!(ctx.heap.get(value), Value::Bool(_)) {
-        let location = ctx.heap.current_location();
-        let (file, line) = location.as_ref().map_or(("<string>", 1), |loc| {
-            (loc.file.as_ref(), loc.line as isize)
-        });
-        let module = &ctx.scope_data(ctx.heap.current_scope()).module;
-        crate::objects::runtime_warning(module, file, line, "bool is used as a file descriptor")?;
-    }
-    let fd = ctx.index_value(value)?.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!(
-                "argument should be integer or None, not {}",
-                ctx.type_name(value)
-            ),
-        )
-    })?;
-    Ok(native::directory_fd_number(&fd)?)
-}
+use super::{Context, Error, Id, NONE, Result, builtins, c_path, directory_fd, native, posixpath};
 
 /// Remove an entry or an empty directory using the same path and dir_fd converters.
 pub(super) fn call(
