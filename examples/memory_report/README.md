@@ -23,9 +23,9 @@ dependencies. Subsequent runs reuse those projects and collect eight fresh ty
 reports. Keep the Ruff checkout available to a built executable that uses
 `run`. The `compare` command can run independently.
 
-The [comparison benchmarks](../../benchmarks/results/2026-10-23-original-memory-report.md)
+The [comparison benchmarks](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-original-memory-report.md)
 cover 1× and 10× input against CPython, Codon, and Rust. The
-[live runs](../../benchmarks/results/2026-10-23-original-memory-live.md) time the
+[live runs](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-original-memory-live.md) time the
 original command on all four projects with both ty executables.
 
 ## Run the typed port
@@ -186,14 +186,14 @@ existing CLI; the prepared-project adapter adds the collection and capture
 workflow. Workloads include real captures, actual ty child runs, and clearly
 labeled larger copies.
 
-The [native-path results](../../benchmarks/results/2026-10-21-native-paths.md)
+The [native-path results](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-21-native-paths.md)
 take 0.91–1.28× Rust's time for complete directory comparisons and
 1.38–1.63× for repeated parsing, comparison, and rendering. Both layouts contain
 65,024 items per side and meet the ≤2× target in ordinary and ThinLTO builds.
 Complete directory runs are 2.13–2.89× faster than the unchanged upstream
 CPython script. The report includes validation and replayable benchmark evidence.
 
-The [workspace and atomic-output results](../../benchmarks/results/2026-10-21-native-workspaces.md)
+The [workspace and atomic-output results](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-21-native-workspaces.md)
 cover actual old/new ty launches and synthetic workloads with 16,256 items per
 side, with and without retained transcripts. Complete process runs take
 1.00–1.57× Rust's time, file-only reports take 1.13–1.26×, and repeated report

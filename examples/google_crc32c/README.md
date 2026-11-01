@@ -93,5 +93,5 @@ cases that can run without a C extension. [Unmodified upstream tests](https://gi
 The benchmark keeps each process alive, creates the payload before timing,
 checks every result, and rotates the engine order between batches. On Linux
 pass `--cpu N` to pin the parent and child processes to one available core.
-The [published Linux timings](../../benchmarks/results/2026-10-23-google-crc32c.md)
+The [published Linux timings](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-23-google-crc32c.md)
 used the [original build commands](https://github.com/astral-sh/imre/blob/d8e268d6885ce77d31bd3dd1c1c8fb223fd2a010/examples/google_crc32c/README.md).

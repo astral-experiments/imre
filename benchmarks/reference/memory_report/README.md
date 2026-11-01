@@ -33,13 +33,13 @@ helper uses POSIX `mkdtemp`, checked file close, and explicit cleanup, including
 permission recovery and rejection of a workspace root replaced by a symlink.
 The reference uses `std::process::Command`; it does not invoke Python or Imre.
 
-The [native-path results](../../results/2026-10-21-native-paths.md) compare both
+The [native-path results](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-21-native-paths.md) compare both
 directory layouts in ordinary and ThinLTO builds. Imre takes 0.91–1.28× Rust's
 time for the complete application and 1.38–1.63× for repeated
 parse/compare/render work. The report retains raw samples and a portable replay
 of the output, statistics, and source checks.
 
-The [workspace and atomic-output results](../../results/2026-10-21-native-workspaces.md)
+The [workspace and atomic-output results](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-21-native-workspaces.md)
 cover actual ty runs, synthetic captures with 16,256 items per side, retained
 transcripts, file-only reports, and repeated computation. Complete process runs
 take 1.00–1.57× Rust's time, file-only reports take 1.13–1.26×, and repeated
