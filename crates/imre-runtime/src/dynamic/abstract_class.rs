@@ -22,21 +22,85 @@ impl Context {
         ) {
             self.lookup_attr(class, "__mro__")?;
         }
+        let hierarchy = self.lineage(class);
         for &method in methods {
             let name = self.str_value(method)?;
-            let declared = self.find_in_mro(class, |base| {
+            let declared = hierarchy.iter().find_map(|&base| {
                 if let Some(slot) = self.own_class_attr(base, name) {
                     return Some(slot != NONE);
                 }
                 let Value::Native(kind) = self.heap.get(base) else {
                     return None;
                 };
+                if name == "__hash__" {
+                    // Builtin classes may supply a hash slot directly or inherit it
+                    // later in the MRO. Looking up the slot must never hash a value.
+                    return match kind.as_str() {
+                        "bytearray"
+                        | "dict"
+                        | "list"
+                        | "set"
+                        | "cell"
+                        | "dict_keys"
+                        | "dict_items"
+                        | "odict_keys"
+                        | "odict_items"
+                        | "array.array"
+                        | "collections.defaultdict"
+                        | "collections.deque"
+                        | "contextvars.Context"
+                        | "contextvars.Token"
+                        | "types.SimpleNamespace"
+                        | "weakref.ProxyType"
+                        | "weakref.CallableProxyType" => Some(false),
+                        "object"
+                        | "int"
+                        | "float"
+                        | "complex"
+                        | "str"
+                        | "bytes"
+                        | "tuple"
+                        | "frozenset"
+                        | "memoryview"
+                        | "range"
+                        | "slice"
+                        | "NoneType"
+                        | "mappingproxy"
+                        | "types.GenericAlias"
+                        | "weakref.ReferenceType" => Some(true),
+                        _ => None,
+                    };
+                }
+                if name == "__buffer__" {
+                    return matches!(
+                        kind.as_str(),
+                        "bytes" | "bytearray" | "memoryview" | "array.array"
+                    )
+                    .then_some(true);
+                }
                 let present = match kind.as_str() {
-                    "str" | "bytes" | "bytearray" | "list" | "tuple" | "range" | "dict" | "set"
-                    | "frozenset" | "dict_keys" | "dict_items" | "mappingproxy" => {
+                    "list"
+                    | "range"
+                    | "dict"
+                    | "collections.defaultdict"
+                    | "collections.deque"
+                    | "dict_keys"
+                    | "dict_items"
+                    | "odict_keys"
+                    | "odict_items"
+                    | "mappingproxy" => {
+                        matches!(
+                            name,
+                            "__iter__" | "__len__" | "__contains__" | "__reversed__"
+                        )
+                    }
+                    "str" | "bytes" | "bytearray" | "tuple" | "set" | "frozenset" => {
                         matches!(name, "__iter__" | "__len__" | "__contains__")
                     }
-                    "memoryview" | "dict_values" => matches!(name, "__iter__" | "__len__"),
+                    "dict_values" | "odict_values" => {
+                        matches!(name, "__iter__" | "__len__" | "__reversed__")
+                    }
+                    "memoryview" => matches!(name, "__iter__" | "__len__"),
                     _ => {
                         super::builtins::is_iterator_type(kind)
                             && matches!(name, "__iter__" | "__next__")

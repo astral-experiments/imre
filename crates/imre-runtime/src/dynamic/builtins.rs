@@ -83,7 +83,9 @@ exception_kinds!(
     BufferError,
     ReferenceError,
     SystemExit,
+    GeneratorExit,
     StopIteration,
+    StopAsyncIteration,
     Warning,
     RuntimeWarning,
 );
@@ -178,13 +180,14 @@ pub(super) fn exception_initializer(kind: &str) -> &'static str {
 pub(super) fn exception_new_owner(name: &str) -> &str {
     match name {
         "KeyError" => "LookupError",
-        "SystemExit" => "BaseException",
+        "SystemExit" | "GeneratorExit" => "BaseException",
         "NameError"
         | "UnboundLocalError"
         | "AttributeError"
         | "ImportError"
         | "ModuleNotFoundError"
         | "StopIteration"
+        | "StopAsyncIteration"
         | "binascii.Incomplete" => "Exception",
         "binascii.Error" => "ValueError",
         name if exception_subclass(name, "OSError") == Some(true) => "OSError",
@@ -1268,10 +1271,6 @@ pub(super) fn call(
                     ..
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
-                Value::MappingView { mapping, .. } => {
-                    let mapping = *mapping;
-                    return call(ctx, "len", &[mapping], &[]);
-                }
                 Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
                     collections::entries(ctx, *dict)?.len()
                 }

@@ -411,7 +411,6 @@ impl Context {
                 | Value::Range(_)
                 | Value::Iterator { .. }
                 | Value::DictIterator(_)
-                | Value::MappingViewIterator { .. }
         ) {
             return Ok(false);
         }
@@ -721,6 +720,9 @@ impl Context {
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
                     | ("collections.defaultdict", "dict")
+                    | ("odict_keys", "dict_keys")
+                    | ("odict_items", "dict_items")
+                    | ("odict_values", "dict_values")
                     | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
@@ -774,7 +776,7 @@ impl Context {
             | Value::Iterator { .. }
             | Value::Tuple(_)
             | Value::DictIterator(_)
-            | Value::MappingViewIterator { .. }
+            | Value::DictView { .. }
             | Value::CallableIterator(_)
             | Value::FormatIterator { .. }
             | Value::File(_)
@@ -853,6 +855,12 @@ impl Context {
                             | "method_descriptor"
                             | "getset_descriptor"
                             | "member_descriptor"
+                            | "dict_keys"
+                            | "dict_items"
+                            | "dict_values"
+                            | "odict_keys"
+                            | "odict_items"
+                            | "odict_values"
                             | "mappingproxy"
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
@@ -3950,6 +3958,15 @@ impl Context {
                 let name = self.text(name);
                 self.call(set_name, vec![value, class, name], Vec::new())?;
             }
+        }
+        if module == "_collections_abc"
+            && matches!(
+                name.as_str(),
+                "Hashable" | "Awaitable" | "AsyncIterable" | "Buffer"
+            )
+        {
+            self.classes
+                .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, &name, scope)?;
         self.classes.insert(name, class);

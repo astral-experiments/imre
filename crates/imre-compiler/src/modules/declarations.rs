@@ -36,7 +36,6 @@ pub(super) fn symbol(owner: IntrinsicModule, name: &str) -> Option<Binding> {
         (M::Declaration("email.policy"), "compat32") => "email.policy.compat32",
         (M::Declaration("importlib.resources"), "files") => "importlib.resources.files",
         (M::Warnings, "warn") => "warnings.warn",
-        (M::CollectionsAbc, "Collection") => "collections.abc.Collection",
         _ => return None,
     };
     Some(Binding::Intrinsic(Intrinsic::Declaration(symbol)))

@@ -872,6 +872,54 @@ impl IntrinsicModule {
             (Self::Struct, "calcsize") => Intrinsic::ObjectRuntimeExport("struct.calcsize"),
             (Self::Struct, "unpack") => Intrinsic::ObjectRuntimeExport("struct.unpack"),
             (Self::Struct, "error") => Intrinsic::ObjectRuntimeExport("struct.error"),
+            (Self::CollectionsAbc, "Collection") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.Collection")
+            }
+            (Self::CollectionsAbc, "Hashable") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.Hashable")
+            }
+            (Self::CollectionsAbc, "Generator") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.Generator")
+            }
+            (Self::CollectionsAbc, "AsyncIterable") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.AsyncIterable")
+            }
+            (Self::CollectionsAbc, "AsyncIterator") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.AsyncIterator")
+            }
+            (Self::CollectionsAbc, "AsyncGenerator") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.AsyncGenerator")
+            }
+            (Self::CollectionsAbc, "Buffer") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.Buffer")
+            }
+            (Self::CollectionsAbc, "Coroutine") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.Coroutine")
+            }
+            (Self::CollectionsAbc, "MappingView") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.MappingView")
+            }
+            (Self::CollectionsAbc, "KeysView") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.KeysView")
+            }
+            (Self::CollectionsAbc, "ItemsView") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.ItemsView")
+            }
+            (Self::CollectionsAbc, "ValuesView") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.ValuesView")
+            }
+            (Self::CollectionsAbc, "Sized") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.Sized")
+            }
+            (Self::CollectionsAbc, "Container") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.Container")
+            }
+            (Self::CollectionsAbc, "MutableSet") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.MutableSet")
+            }
+            (Self::CollectionsAbc, "Reversible") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.Reversible")
+            }
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }
@@ -3129,7 +3177,9 @@ impl<'a> Loader<'a> {
                                 | IntrinsicModule::Struct
                         ) && matches!(
                             binding,
-                            Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_))
+                            Binding::Intrinsic(
+                                Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable
+                            )
                         );
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)

@@ -335,10 +335,6 @@ impl Context {
             Value::Set { entries: v, .. }
             | Value::Dict(v)
             | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
-            Value::MappingView { mapping, .. } => {
-                let mapping = *mapping;
-                return self.truth(mapping);
-            }
             Value::DictView { dict, .. } => !self
                 .dict_entries(*dict)
                 .expect("dict view backing")
@@ -3131,6 +3127,10 @@ impl Context {
         }
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
+        }
+        if inplace && op == "+" && matches!(self.heap.get(a), Value::Deque(_)) {
+            deque::extend(self, a, b, false)?;
+            return Ok(a);
         }
         if op == "|"
             && let Some(result) = super::union::binary(self, a, b)

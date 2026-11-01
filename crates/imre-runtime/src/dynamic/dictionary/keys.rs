@@ -8,7 +8,7 @@ use num_traits::ToPrimitive;
 use smallvec::SmallVec;
 
 use super::Entries;
-use crate::dynamic::value::{DictViewKind, NONE};
+use crate::dynamic::value::NONE;
 use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 
 const EMPTY: usize = usize::MAX;
@@ -369,28 +369,10 @@ impl Context {
         }
     }
 
-    fn key_type_name(&self, key: Id) -> &str {
-        match self.heap.get(key) {
-            Value::DictView {
-                kind: DictViewKind::Keys,
-                ..
-            } => "dict_keys",
-            Value::DictView {
-                kind: DictViewKind::Items,
-                ..
-            } => "dict_items",
-            Value::DictView {
-                kind: DictViewKind::Values,
-                ..
-            } => "dict_values",
-            _ => self.type_name(key),
-        }
-    }
-
     fn unhashable(&self, key: Id) -> Error {
         Error::new(
             "TypeError",
-            format!("unhashable type: '{}'", self.key_type_name(key)),
+            format!("unhashable type: '{}'", self.type_name(key)),
         )
     }
 
@@ -417,14 +399,14 @@ impl Context {
             let name = self
                 .own_class_attr(class, "__qualname__")
                 .and_then(|id| self.str_value(id).ok())
-                .unwrap_or_else(|| self.key_type_name(key));
+                .unwrap_or_else(|| self.type_name(key));
             if matches!(module.as_str(), "builtins" | "__main__") {
                 name.to_owned()
             } else {
                 format!("{module}.{name}")
             }
         } else {
-            self.key_type_name(key).to_owned()
+            self.type_name(key).to_owned()
         };
         Error::new(
             "TypeError",

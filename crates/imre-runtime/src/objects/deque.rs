@@ -41,6 +41,22 @@ impl<T, K> Ring<T, K> {
         Ok(copy)
     }
 
+    /// Normalize the half-open search range, including arbitrary-size Python integers.
+    pub(crate) fn search_range(
+        &self,
+        start: Option<&Int>,
+        stop: Option<&Int>,
+    ) -> std::ops::Range<usize> {
+        let length = self.items.len();
+        let offset = |value: &Int| match crate::signed_index(value) {
+            Some(i) if i < 0 => length.saturating_add_signed(i),
+            Some(i) => length.min(i as usize),
+            None if value.cmp(&Int::from(0)).is_lt() => 0,
+            None => length,
+        };
+        start.map_or(0, offset)..stop.map_or(length, offset)
+    }
+
     /// Reserve before acquiring the item and return an evicted owner to the caller.
     pub(crate) fn push(
         &mut self,
@@ -368,6 +384,35 @@ pub unsafe extern "C" fn imre_deque_contains(value: *const Object, word: usize) 
                 .any(|item| values::equal(item.word, word, deque.kind))
         })
     })
+}
+
+/// Find the first equal scalar within the specified Python slice bounds.
+///
+/// # Safety
+/// The caller roots the deque, its matching scalar needle, and both optional integers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_index(
+    value: *const Object,
+    word: usize,
+    start: usize,
+    stop: usize,
+) -> usize {
+    // SAFETY: the checker admits only non-reentrant scalar equality. Zero denotes
+    // an omitted bound, and every other bound is a canonical integer.
+    let found = unsafe {
+        let start = (start != 0).then(|| Int::borrow(start));
+        let stop = (stop != 0).then(|| Int::borrow(stop));
+        object(value).0.with(|storage| {
+            let deque = storage.deque();
+            deque
+                .search_range(start.as_deref(), stop.as_deref())
+                .find(|&i| values::equal(deque.items[i].word, word, deque.kind))
+        })
+    };
+    match found {
+        Some(i) => Int::from_usize(i).into_raw(),
+        None => Error::new(Kind::ValueError, "deque.index(x): x not in deque").returning(0),
+    }
 }
 
 /// # Safety

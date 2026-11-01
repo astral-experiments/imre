@@ -324,7 +324,6 @@ impl Context {
             Value::RangeIterator(iter) => iter.kind,
             Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
-            Value::MappingViewIterator { .. } => "generator",
             Value::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
                 (Some(_), _, _) => "odict_iterator",
                 (_, false, DictViewKind::Keys) => "dict_keyiterator",
@@ -350,10 +349,13 @@ impl Context {
             Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Union(_) => "Union",
             Value::Class { .. } => "type",
-            Value::MappingView { kind, .. } => match kind {
-                DictViewKind::Keys => "KeysView",
-                DictViewKind::Values => "ValuesView",
-                DictViewKind::Items => "ItemsView",
+            Value::DictView { kind, ordered, .. } => match (kind, ordered) {
+                (DictViewKind::Keys, false) => "dict_keys",
+                (DictViewKind::Items, false) => "dict_items",
+                (DictViewKind::Values, false) => "dict_values",
+                (DictViewKind::Keys, true) => "odict_keys",
+                (DictViewKind::Items, true) => "odict_items",
+                (DictViewKind::Values, true) => "odict_values",
             },
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
@@ -635,16 +637,6 @@ pub(super) enum Value {
     },
     Dict(super::dictionary::Entries),
     MappingProxy(Id),
-    MappingView {
-        mapping: Id,
-        kind: DictViewKind,
-    },
-    MappingViewIterator {
-        mapping: Option<Id>,
-        source: Option<Id>,
-        kind: DictViewKind,
-        running: bool,
-    },
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -910,14 +902,6 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
-            Self::MappingView { mapping, .. } => visit.push(*mapping),
-            Self::MappingViewIterator {
-                mapping, source, ..
-            } => {
-                visit.extend(*mapping);
-                visit.extend(*source);
-            }
-
             Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])

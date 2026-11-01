@@ -26,7 +26,7 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
         "Mapping" => (
             &["Collection"],
             &["__getitem__"],
-            &["__contains__", "get", "items", "keys", "values"],
+            &["__contains__", "__eq__", "get", "items", "keys", "values"],
         ),
         "MutableMapping" => (
             &["Mapping"],
@@ -44,6 +44,9 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     ctx.bind(scope, "__module__", module);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
+    if name == "Mapping" {
+        ctx.bind(scope, "__reversed__", NONE);
+    }
     if structural_methods(name).is_some() {
         let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
         let hook = ctx.alloc(Value::ClassMethod(function));
@@ -198,6 +201,35 @@ pub(super) fn call(
             _ => Err(Error::new("KeyError", "")),
         };
     }
+    if name == "mapping.__eq__" {
+        let [Some(left), Some(right)] = super::builtins::bind_builtin_arguments(
+            "Mapping.__eq__",
+            args,
+            kwargs,
+            ["self", "other"],
+            2,
+        )?
+        else {
+            unreachable!("required mapping operands were checked")
+        };
+        let mapping = class(ctx, "Mapping")?;
+        if !ctx.python_instance_check(right, mapping)? {
+            return Ok(super::value::NOT_IMPLEMENTED);
+        }
+        // Mapping compares the results of each operand's public items() method.
+        let snapshot = |ctx: &mut Context, obj| {
+            let items = ctx.lookup_attr(obj, "items")?;
+            let pairs = ctx.call(items, Vec::new(), Vec::new())?;
+            super::builtins::call(ctx, "dict", &[pairs], &[])
+        };
+        let left = snapshot(ctx, left)?;
+        let right = snapshot(ctx, right)?;
+        return Ok(if ctx.checked_equal(left, right)? {
+            TRUE
+        } else {
+            FALSE
+        });
+    }
     let Some((&object, values)) = args.split_first() else {
         return Err(Error::new("TypeError", "missing mapping receiver"));
     };
@@ -212,15 +244,14 @@ pub(super) fn call(
     }
     match (method, values) {
         ("keys" | "items" | "values", []) => {
-            let kind = match method {
-                "keys" => super::value::DictViewKind::Keys,
-                "items" => super::value::DictViewKind::Items,
-                _ => super::value::DictViewKind::Values,
+            let name = match method {
+                "keys" => "KeysView",
+                "items" => "ItemsView",
+                _ => "ValuesView",
             };
-            Ok(ctx.alloc(Value::MappingView {
-                mapping: object,
-                kind,
-            }))
+            let abc = ctx.module("_collections_abc")?;
+            let class = ctx.lookup_attr(abc, name)?;
+            ctx.call(class, vec![object], Vec::new())
         }
         ("get" | "__contains__" | "setdefault" | "pop", [key] | [key, _]) => {
             match ctx.get_item(object, *key) {
@@ -298,30 +329,4 @@ pub(super) fn call(
             format!("invalid arguments to {method}()"),
         )),
     }
-}
-
-pub(super) fn view_items(
-    ctx: &mut Context,
-    mapping: Id,
-    kind: super::value::DictViewKind,
-) -> Result<Vec<Id>> {
-    use super::value::DictViewKind;
-    let iter = ctx
-        .bound_slot(mapping, "__iter__")?
-        .expect("mapping __iter__");
-    let source = ctx.call(iter, Vec::new(), Vec::new())?;
-    let keys = ctx.items(source)?;
-    if matches!(kind, DictViewKind::Keys) {
-        return Ok(keys);
-    }
-    keys.into_iter()
-        .map(|key| {
-            let value = ctx.get_item(mapping, key)?;
-            Ok(match kind {
-                DictViewKind::Values => value,
-                DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
-                DictViewKind::Keys => unreachable!(),
-            })
-        })
-        .collect()
 }

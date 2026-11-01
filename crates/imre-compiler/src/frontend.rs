@@ -498,6 +498,8 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "RecursionError" => return Some(43),
         "ReferenceError" => return Some(53),
         "BufferError" => return Some(54),
+        "GeneratorExit" => return Some(59),
+        "StopAsyncIteration" => return Some(60),
         "SyntaxError" => return Some(55),
         "IndentationError" => return Some(56),
         "BlockingIOError" => return Some(44),
@@ -4738,6 +4740,12 @@ impl<'a> Checker<'a> {
                     Some(Statement::AugmentField(receiver, field, op, value))
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
+                    if assign.op == ast::Operator::Add
+                        && let Some(element) = self.types.deque_element(left.ty)
+                    {
+                        let value = self.deque_extend(left, element, &assign.value, "__iadd__")?;
+                        return Ok((vec![self.assign(&assign.target, value)?], true));
+                    }
                     let right = self.expr(&assign.value)?;
                     let value = if self.types.is_counter(left.ty) {
                         self.counter_math(assign.op, left, right, true, statement)?
@@ -10287,6 +10295,13 @@ impl<'a> Checker<'a> {
                 return Ok(self.cmp_key_hash(value.clone()));
             }
             let builtin = match value.ty {
+                Type::Deque(_) => {
+                    return Ok(calls::type_error(
+                        Type::Int,
+                        args,
+                        "unhashable type: 'collections.deque'".into(),
+                    ));
+                }
                 Type::Str | Type::StrLiteral(_) => Builtin::HashStr,
                 Type::Class(id)
                     if self.classes.declarations.definitions[id].toml_hash

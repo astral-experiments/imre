@@ -1,7 +1,8 @@
-# Set, iterator, and sequence ABC implementations from CPython 3.14.5, Lib/_collections_abc.py.
+# Set, mapping view, iterator, and sequence ABC implementations from CPython 3.14.5, Lib/_collections_abc.py.
 # abstractmethod is from Lib/abc.py at the same revision. See stdlib/docstrings/LICENSE.
 import sys
-from _collections_abc import Collection, Iterable, MutableMapping, _check_methods
+from _collections_abc import Collection, Iterable, MutableMapping, Sized, _check_methods
+from types import GenericAlias
 
 
 def abstractmethod(funcobj):
@@ -23,6 +24,179 @@ def abstractmethod(funcobj):
     """
     funcobj.__isabstractmethod__ = True
     return funcobj
+
+
+# The native class builder installs ABC semantics on this root class.
+class Hashable:
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __hash__(self):
+        return 0
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Hashable:
+            return _check_methods(C, "__hash__")
+        return NotImplemented
+
+
+class Awaitable:
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __await__(self):
+        yield
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Awaitable:
+            return _check_methods(C, "__await__")
+        return NotImplemented
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+
+class Coroutine(Awaitable):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def send(self, value):
+        """Send a value into the coroutine.
+        Return next yielded value or raise StopIteration.
+        """
+        raise StopIteration
+
+    @abstractmethod
+    def throw(self, typ, val=None, tb=None):
+        """Raise an exception in the coroutine.
+        Return next yielded value or raise StopIteration.
+        """
+        if val is None:
+            if tb is None:
+                raise typ
+            val = typ()
+        if tb is not None:
+            val = val.with_traceback(tb)
+        raise val
+
+    def close(self):
+        """Raise GeneratorExit inside coroutine.
+        """
+        try:
+            self.throw(GeneratorExit)
+        except (GeneratorExit, StopIteration):
+            pass
+        else:
+            raise RuntimeError("coroutine ignored GeneratorExit")
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Coroutine:
+            return _check_methods(C, '__await__', 'send', 'throw', 'close')
+        return NotImplemented
+
+
+class AsyncIterable:
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __aiter__(self):
+        return AsyncIterator()
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is AsyncIterable:
+            return _check_methods(C, "__aiter__")
+        return NotImplemented
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+
+class AsyncIterator(AsyncIterable):
+
+    __slots__ = ()
+
+    @abstractmethod
+    async def __anext__(self):
+        """Return the next item or raise StopAsyncIteration when exhausted."""
+        raise StopAsyncIteration
+
+    def __aiter__(self):
+        return self
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is AsyncIterator:
+            return _check_methods(C, "__anext__", "__aiter__")
+        return NotImplemented
+
+
+class AsyncGenerator(AsyncIterator):
+
+    __slots__ = ()
+
+    async def __anext__(self):
+        """Return the next item from the asynchronous generator.
+        When exhausted, raise StopAsyncIteration.
+        """
+        return await self.asend(None)
+
+    @abstractmethod
+    async def asend(self, value):
+        """Send a value into the asynchronous generator.
+        Return next yielded value or raise StopAsyncIteration.
+        """
+        raise StopAsyncIteration
+
+    @abstractmethod
+    async def athrow(self, typ, val=None, tb=None):
+        """Raise an exception in the asynchronous generator.
+        Return next yielded value or raise StopAsyncIteration.
+        """
+        if val is None:
+            if tb is None:
+                raise typ
+            val = typ()
+        if tb is not None:
+            val = val.with_traceback(tb)
+        raise val
+
+    async def aclose(self):
+        """Raise GeneratorExit inside coroutine.
+        """
+        try:
+            await self.athrow(GeneratorExit)
+        except (GeneratorExit, StopAsyncIteration):
+            pass
+        else:
+            raise RuntimeError("asynchronous generator ignored GeneratorExit")
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is AsyncGenerator:
+            return _check_methods(C, '__aiter__', '__anext__',
+                                  'asend', 'athrow', 'aclose')
+        return NotImplemented
+
+
+class Buffer:
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __buffer__(self, flags: int, /) -> memoryview:
+        raise NotImplementedError
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Buffer:
+            return _check_methods(C, "__buffer__")
+        return NotImplemented
 
 
 class Set(Collection):
@@ -248,6 +422,84 @@ class MutableSet(Set):
 
 MutableSet.register(set)
 
+class MappingView(Sized):
+
+    __slots__ = '_mapping',
+
+    def __init__(self, mapping):
+        self._mapping = mapping
+
+    def __len__(self):
+        return len(self._mapping)
+
+    def __repr__(self):
+        return '{0.__class__.__name__}({0._mapping!r})'.format(self)
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+
+class KeysView(MappingView, Set):
+
+    __slots__ = ()
+
+    @classmethod
+    def _from_iterable(cls, it):
+        return set(it)
+
+    def __contains__(self, key):
+        return key in self._mapping
+
+    def __iter__(self):
+        yield from self._mapping
+
+
+KeysView.register(type({}.keys()))
+
+
+class ItemsView(MappingView, Set):
+
+    __slots__ = ()
+
+    @classmethod
+    def _from_iterable(cls, it):
+        return set(it)
+
+    def __contains__(self, item):
+        key, value = item
+        try:
+            v = self._mapping[key]
+        except KeyError:
+            return False
+        else:
+            return v is value or v == value
+
+    def __iter__(self):
+        for key in self._mapping:
+            yield (key, self._mapping[key])
+
+
+ItemsView.register(type({}.items()))
+
+
+class ValuesView(MappingView, Collection):
+
+    __slots__ = ()
+
+    def __contains__(self, value):
+        for key in self._mapping:
+            v = self._mapping[key]
+            if v is value or v == value:
+                return True
+        return False
+
+    def __iter__(self):
+        for key in self._mapping:
+            yield self._mapping[key]
+
+
+ValuesView.register(type({}.values()))
+
+
 MutableMapping.register(dict)
 
 
@@ -268,6 +520,62 @@ class Iterator(Iterable):
         if cls is Iterator:
             return _check_methods(C, '__iter__', '__next__')
         return NotImplemented
+
+
+class Generator(Iterator):
+
+    __slots__ = ()
+
+    def __next__(self):
+        """Return the next item from the generator.
+        When exhausted, raise StopIteration.
+        """
+        return self.send(None)
+
+    @abstractmethod
+    def send(self, value):
+        """Send a value into the generator.
+        Return next yielded value or raise StopIteration.
+        """
+        raise StopIteration
+
+    @abstractmethod
+    def throw(self, typ, val=None, tb=None):
+        """Raise an exception in the generator.
+        Return next yielded value or raise StopIteration.
+        """
+        if val is None:
+            if tb is None:
+                raise typ
+            val = typ()
+        if tb is not None:
+            val = val.with_traceback(tb)
+        raise val
+
+    def close(self):
+        """Raise GeneratorExit inside generator.
+        """
+        try:
+            self.throw(GeneratorExit)
+        except (GeneratorExit, StopIteration):
+            pass
+        else:
+            raise RuntimeError("generator ignored GeneratorExit")
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Generator:
+            return _check_methods(C, '__iter__', '__next__',
+                                  'send', 'throw', 'close')
+        return NotImplemented
+
+
+def _generator_type_sample():
+    yield
+
+
+Generator.register(type(_generator_type_sample()))
+del _generator_type_sample
 
 
 class Reversible(Iterable):

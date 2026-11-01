@@ -308,6 +308,54 @@ impl Checker<'_> {
         })
     }
 
+    /// Extend once from the original receiver, snapshotting an aliased deque source.
+    pub(super) fn deque_extend(
+        &mut self,
+        receiver: Expr,
+        element: Type,
+        source: &ast::Expr,
+        name: &str,
+    ) -> Result<Expr, String> {
+        let target = self.hidden(receiver.ty);
+        let mut input = self.expansion_input(source, Some(element))?;
+        if let Iteration::Container {
+            iterable,
+            items: false,
+            start: None,
+        } = &mut input
+        {
+            if iterable.ty == receiver.ty {
+                *iterable = Expr {
+                    ty: receiver.ty,
+                    kind: ExprKind::Builtin(
+                        Builtin::DequeExtendSource,
+                        vec![self.local(target), iterable.clone()],
+                    ),
+                };
+            } else if matches!(iterable.ty, Type::StrLiteral(_)) {
+                *iterable = Self::string_value(iterable.clone());
+            }
+        }
+        let mut body = vec![Statement::Assign(target, receiver)];
+        body.extend(self.deque_fill(target, element, input, name == "extendleft", source)?);
+        let value = if name == "__iadd__" {
+            self.local(target)
+        } else {
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            }
+        };
+        Ok(Expr {
+            ty: value.ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(value),
+                clear: vec![target],
+            },
+        })
+    }
+
     pub(super) fn deque_method(
         &mut self,
         call: &ast::ExprCall,
@@ -341,6 +389,15 @@ impl Checker<'_> {
                 },
                 element,
             ),
+            ("index", [value, bounds @ ..])
+                if bounds.len() <= 2 && matches!(element, Type::Int | Type::Str | Type::Bool) =>
+            {
+                args.push(self.expr_expected(value, element)?);
+                for bound in bounds {
+                    args.push(self.integer_index(bound)?);
+                }
+                (Builtin::DequeIndex, Type::Int)
+            }
             ("clear", []) => (Builtin::DequeClear, Type::None),
             ("__getitem__" | "__delitem__", [index]) => {
                 args.push(self.integer_index(index)?);
@@ -356,41 +413,8 @@ impl Checker<'_> {
                 (Builtin::DequeSet, Type::None)
             }
             ("copy" | "__copy__", []) => (Builtin::DequeCopy, args[0].ty),
-            ("extend" | "extendleft", [source]) => {
-                let receiver = args.pop().unwrap();
-                let target = self.hidden(receiver.ty);
-                let mut input = self.expansion_input(source, Some(element))?;
-                if let Iteration::Container {
-                    iterable,
-                    items: false,
-                    start: None,
-                } = &mut input
-                {
-                    if iterable.ty == receiver.ty {
-                        *iterable = Expr {
-                            ty: receiver.ty,
-                            kind: ExprKind::Builtin(
-                                Builtin::DequeExtendSource,
-                                vec![self.local(target), iterable.clone()],
-                            ),
-                        };
-                    } else if matches!(iterable.ty, Type::StrLiteral(_)) {
-                        *iterable = Self::string_value(iterable.clone());
-                    }
-                }
-                let mut body = vec![Statement::Assign(target, receiver)];
-                body.extend(self.deque_fill(target, element, input, name == "extendleft", call)?);
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Scope {
-                        body,
-                        value: Box::new(Expr {
-                            ty: Type::None,
-                            kind: ExprKind::None,
-                        }),
-                        clear: vec![target],
-                    },
-                });
+            ("extend" | "extendleft" | "__iadd__", [source]) => {
+                return self.deque_extend(args.pop().unwrap(), element, source, name);
             }
             _ => {
                 return Err(error(

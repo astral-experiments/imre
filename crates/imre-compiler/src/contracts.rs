@@ -642,6 +642,7 @@ impl Builtin {
             | Self::ArgparseChoiceDigits(_)
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
+            | Self::DequeIndex
             | Self::DequeGet { .. }
             | Self::DequeSet
             | Self::DequeDelete { .. }
