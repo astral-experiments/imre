@@ -16,7 +16,7 @@ const MAX_SMALL: i128 = (1_i128 << 62) - 1;
 // The 64-bit runtime asserts that list slots and mapping entries occupy at least
 // eight bytes. Rust allocations cannot exceed isize::MAX bytes, including their
 // Vec buffers.
-const MAX_LIST_LEN: i128 = (1_i128 << 60) - 1;
+pub(crate) const MAX_LIST_LEN: i128 = (1_i128 << 60) - 1;
 const WIDENING_POINTS: [i128; 7] = [MIN_SMALL, -MAX_LIST_LEN, -1, 0, 1, MAX_LIST_LEN, MAX_SMALL];
 
 /// A value guaranteed to use the runtime's canonical tagged-small representation.

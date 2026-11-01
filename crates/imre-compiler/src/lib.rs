@@ -13,6 +13,7 @@ mod ir;
 mod list_bounds;
 mod list_specialization;
 mod llvm;
+mod loop_fusion;
 mod modules;
 mod narrowing;
 mod range_specialization;
@@ -484,6 +485,8 @@ fn checked_lower_with(
 
 fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "lowering")?;
+    loop_fusion::specialize(module);
+    verify_after(module, "producer-consumer loop fusion")?;
     sorted_rows::specialize(module);
     verify_after(module, "sorted record rows")?;
     let reader_origins = record_copies::scalarize(module);
