@@ -1337,6 +1337,7 @@ def report(text):
             "boxed_source_exec.py",
             "boxed_sys_intern.py",
             "boxed_sys_hash_info.py",
+            "boxed_sys_jit.py",
             "boxed_bytes_add.py",
             "boxed_binary_iterators.py",
             "boxed_array.py",
