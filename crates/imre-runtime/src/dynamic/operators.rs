@@ -2316,6 +2316,15 @@ impl Context {
                 self.weakref_descriptor_owner(*owner)
             ),
             Value::Class { name, scope, .. } => self.class_repr(name, *scope),
+            Value::Method {
+                callable,
+                explicit: false,
+                ..
+            } if let Value::Native(symbol) = self.heap.get(*callable)
+                && let Some(leaf) = symbol.strip_prefix("sys._jit.") =>
+            {
+                format!("<built-in function {leaf}>")
+            }
             Value::Native(name) => super::wrapper_descriptor::BuiltinDescriptor::lookup(name)
                 .map(|slot| slot.repr())
                 .unwrap_or_else(|| format!("<class '{name}'>")),

@@ -1710,6 +1710,25 @@ impl Context {
                 _ => {
                     if let Value::Native(method) = self.heap.get(callable) {
                         let value = match name {
+                            "__qualname__" if method.starts_with("sys._jit.") => {
+                                method.rsplit('.').next()
+                            }
+                            "__module__" if method.starts_with("sys._jit.") => Some("sys._jit"),
+                            "__text_signature__" if method.starts_with("sys._jit.") => {
+                                Some("($module, /)")
+                            }
+                            "__doc__" if method.starts_with("sys._jit.") => match method.as_str() {
+                                "sys._jit.is_available" => Some(
+                                    "Return True if the current Python executable supports JIT compilation, and False otherwise.",
+                                ),
+                                "sys._jit.is_enabled" => Some(
+                                    "Return True if JIT compilation is enabled for the current Python process (implies sys._jit.is_available()), and False otherwise.",
+                                ),
+                                "sys._jit.is_active" => Some(
+                                    "Return True if the topmost Python frame is currently executing JIT code (implies sys._jit.is_enabled()), and False otherwise.",
+                                ),
+                                _ => None,
+                            },
                             "__name__" => method.rsplit('.').next(),
                             "__qualname__" => Some(method.as_str()),
                             "__module__" => return Ok(NONE),
