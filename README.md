@@ -102,6 +102,45 @@ At the same time, Imre is capable of running scripts like
 [ty’s conformance report](examples/conformance_report/README.md) unchanged,
 with Rust-competitive performance.
 
+## Standard library test results
+
+The table covers 25 standard library modules as of November 1, 2026.
+A **paired pass** means the same original CPython 3.14.5 test passed at both
+`-O0` and `-O3`. Counts include selected tests and results from development
+branches. Skipped tests count toward the suite size only.
+
+| Module | Paired passes | Upstream tests | How the tests ran |
+| --- | ---: | ---: | --- |
+| `argparse` | 1,103 | 1,893 | Selected cases |
+| `collections` | 144 | 659 | Selected cases and registered doctests |
+| `csv` | 122 | 128 | Complete suite on `main`, six skips |
+| `dataclasses` | 219 | 276 | Selected cases |
+| `datetime` | 1 | 1,098 | Selected cases |
+| `fnmatch` | 24 | 24 | Complete suite on `main` |
+| `functools` | 18 | 329 | Selected cases |
+| `hashlib` | 63 | 82 | Selected cases |
+| `importlib` | 8 | 1,346 | Selected cases |
+| `io` | 102 | 1,038 | Selected cases |
+| `itertools` | 105 | 138 | Selected cases |
+| `json` | 72 | 216 | Selected cases |
+| `logging` | 21 | 272 | Selected cases |
+| `os` | 6 | 579 | Selected cases on `main` |
+| `pathlib` | 18 | 1,369 | Selected cases |
+| `re` | 118 | 165 | All 165 cases ran on a development branch |
+| `shutil` | 5 | 223 | Selected cases |
+| `socket` | 31 | 746 | Selected cases |
+| `subprocess` | 16 | 353 | Selected cases |
+| `tempfile` | 3 | 118 | Selected cases |
+| `textwrap` | 68 | 68 | Complete suite on `main` |
+| `threading` | 65 | 228 | All 228 cases ran on a development branch |
+| `typing` | 93 | 712 | Selected cases |
+| `unittest` | 154 | 1,090 | Package runner on a development branch |
+| `urllib` | 84 | 178 | Selected cases |
+| **Total** | **2,663** | **13,328** | **3 complete suites on `main`** |
+
+See the [standard library coverage report](docs/stdlib.md) for the Linux test
+results and import coverage recorded in this repository.
+
 ## Design
 
 Types are part of Imre's compilation contract: variables, containers, and class
