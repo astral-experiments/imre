@@ -1038,6 +1038,19 @@ def main():
             set_method.write_text("items = {1, 2}\nalias = items\n" + statement + "\nprint(sorted(alias))\n")
             compare("-B", set_method, native_args=("run", set_method, "--quiet"))
 
+        instance_check = root / "unittest_instance.py"
+        for statement in (
+            "case.assertIsInstance(1, int)",
+            "Case.assertNotIsInstance(case, 1, str)",
+            "check = case.assertIsInstance\ncheck(1, int)",
+            "check = Case.assertNotIsInstance\ncheck(case, 1, str)",
+        ):
+            instance_check.write_text(
+                "from unittest import TestCase\nclass Case(TestCase): pass\ncase = Case()\n"
+                + statement + "\nprint('checked')\n"
+            )
+            compare("-B", instance_check, native_args=("run", instance_check, "--quiet"))
+
         temporary_read = root / "temporary_readinto.py"
         temporary_read.write_text(
             "from tempfile import TemporaryFile\n"
@@ -1534,6 +1547,7 @@ def report(text):
             "boxed_dir.py",
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
+            "boxed_unittest_instance.py",
             "boxed_unittest_not_equal.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_identity.py",
