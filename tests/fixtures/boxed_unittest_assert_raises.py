@@ -35,6 +35,34 @@ def current():
     else:
         raise RuntimeError("missing exception passed")
 
+    # Holding a traceback must not retain inactive frames' locals after __exit__.
+    from weakref import ref
+
+    class Local:
+        pass
+
+    locals_seen = []
+    tracebacks = []
+
+    def leave_traceback():
+        local = Local()
+        locals_seen.append(ref(local))
+        try:
+            raise ParseError()
+        except ParseError as caught:
+            tracebacks.append(caught.__traceback__)
+            raise
+
+    with raises(ParseError):
+        leave_traceback()
+    try:
+        with raises(ValueError):
+            leave_traceback()
+    except ParseError:
+        pass
+    assert len(tracebacks) == 2 and all(tracebacks)
+    assert all(item() is None for item in locals_seen)
+
     case.longMessage = False
     message = ["input"]
     try:
