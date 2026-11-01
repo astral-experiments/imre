@@ -148,6 +148,8 @@ pub(super) fn call(
     }
     let function = match name {
         "time" => "time.time",
+        "monotonic" => "time.monotonic",
+        "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
         _ => name,
     };
@@ -159,9 +161,14 @@ pub(super) fn call(
     }
     match name {
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),
-        "time" => Err(Error::new(
+        "monotonic" | "perf_counter" if args.is_empty() => {
+            let stamp =
+                crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
+            Ok(ctx.alloc(Value::Float(stamp.as_secs_f64())))
+        }
+        "time" | "monotonic" | "perf_counter" => Err(Error::new(
             "TypeError",
-            format!("time.time() takes no arguments ({} given)", args.len()),
+            format!("{function}() takes no arguments ({} given)", args.len()),
         )),
         "mktime" => match args {
             [value] => {
