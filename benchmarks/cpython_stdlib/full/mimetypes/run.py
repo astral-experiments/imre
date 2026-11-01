@@ -17,7 +17,7 @@ from bridge import worker
 from stage_tests import stage
 from suite_evidence import build_report, occurrence_keys, roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import NativeCompileError, Toolchain, run_in_fixtures
+from suite_native import NativeCompileError, Toolchain, run_in_fixtures, testcase_import_blocker
 
 SOURCE = HERE / "upstream/Lib/test/test_mimetypes.py"
 LINES = SOURCE.read_bytes().splitlines(keepends=True)
@@ -88,6 +88,9 @@ def run_method(tool, case, work, typed=False):
     exe = tool.build(src, work)
     process = subprocess.run([exe, *([] if typed else ["-v"])], capture_output=True, text=True, timeout=30)
     if process.returncode:
+        if testcase_import_blocker(process, exe.with_name("case.py"), src.decode()) is not None:
+            return dict(outcome="blocked", roles=UNOBSERVED, reason=diagnostic(process.stderr, work),
+                        evidence=dict(stage="native startup"))
         raise AssertionError((case.id(), process.stdout, process.stderr))
     if typed:
         negative = subprocess.run([exe, "force-failure"], capture_output=True, text=True, timeout=10)
@@ -211,13 +214,14 @@ def main():
                         try:
                             result = run_method(replace(tool, module_root=staged / "Lib"), case, staged / "Lib", typed)
                         except NativeCompileError as exc:
-                            failures.append(diagnostic(exc, staged / "Lib"))
-                        else:
+                            result = dict(outcome="blocked", roles=UNOBSERVED, reason=diagnostic(exc, staged / "Lib"),
+                                          evidence=dict(stage="original method"))
+                        if result["outcome"] == "pass":
                             break
+                        failures.append(result["reason"])
                     else:
                         if name not in HOSTED:
-                            return dict(outcome="blocked", roles=UNOBSERVED,
-                                        reason=failures[-1], evidence=dict(stage="original method"))
+                            return result
                         result = hosted(case, original, exe, work)
                     if failures:
                         result["evidence"]["original_staging"] = failures
