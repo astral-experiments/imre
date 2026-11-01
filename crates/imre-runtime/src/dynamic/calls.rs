@@ -3,6 +3,8 @@ use crate::objects::HashState;
 use super::wrapper_descriptor::BuiltinDescriptor;
 use super::*;
 
+const KEY_WRAPPER: &str = "functools.KeyWrapper";
+
 pub(super) enum MappingOperation {
     Copy,
     Update,
@@ -30,6 +32,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
+        "functools" if function == "cmp_to_key" => Some(("_functools", function)),
         "zlib" if function == "adler32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -112,7 +115,10 @@ impl Context {
             }
             Value::Native(kind)
                 if name == "__hash__"
-                    && matches!(kind.as_str(), "list" | "dict" | "set" | "bytearray") =>
+                    && matches!(
+                        kind.as_str(),
+                        "list" | "dict" | "set" | "bytearray" | KEY_WRAPPER
+                    ) =>
             {
                 Some(NONE)
             }
@@ -509,6 +515,7 @@ impl Context {
                 | Value::StaticMethod { .. }
                 | Value::CacheParameters { .. }
                 | Value::CacheDecorator { .. }
+                | Value::KeyWrapper { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
@@ -893,6 +900,7 @@ impl Context {
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
             Value::Cached { .. } => "functools._lru_cache_wrapper",
+            Value::KeyWrapper { .. } => KEY_WRAPPER,
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
             Value::SequenceIterator { .. } => "iterator",
@@ -959,6 +967,7 @@ impl Context {
                             | "odict_items"
                             | "odict_values"
                             | "mappingproxy"
+                            | KEY_WRAPPER
                             | "functools._PlaceholderType"
                             | "functools._lru_cache_wrapper"
                             | HashState::CLASS
@@ -1586,6 +1595,20 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::KeyWrapper { object, .. } => match name {
+                "obj" => return Ok(object.unwrap_or(NONE)),
+                "__hash__" | "__doc__" => return Ok(NONE),
+                "__module__" => return Ok(self.text("functools")),
+                "__text_signature__" => return Ok(self.text("(obj)")),
+                "__new__" => return Ok(self.builtin("object.__new__")),
+                _ => {
+                    let symbol = format!("{KEY_WRAPPER}.{name}");
+                    if let Some(slot) = BuiltinDescriptor::lookup(&symbol) {
+                        let method = self.builtin(&symbol);
+                        return slot.bind(self, method, obj);
+                    }
+                }
+            },
             Value::Cached { dictionary, .. } => {
                 if name == "__dict__" {
                     return Ok(dictionary);
@@ -1701,6 +1724,12 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "posix.urandom" => {
                         return Ok(self.text("($module, size, /)"));
+                    }
+                    "__doc__" if symbol == "functools.cmp_to_key" => {
+                        return Ok(self.text("Convert a cmp= function into a key= function.\n\n  mycmp\n    Function that compares two objects."));
+                    }
+                    "__text_signature__" if symbol == "functools.cmp_to_key" => {
+                        return Ok(self.text("($module, /, mycmp)"));
                     }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
@@ -1914,6 +1943,7 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | KEY_WRAPPER
                         | "functools._lru_cache_wrapper"
                         | HashState::CLASS
                         | HashState::XOF_CLASS
@@ -1938,6 +1968,15 @@ impl Context {
                         return Ok(self.text(short.to_owned()));
                     }
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
+                        return Ok(NONE);
+                    }
+                    "__new__" if class == KEY_WRAPPER => return Ok(self.builtin("object.__new__")),
+                    _ if class == KEY_WRAPPER
+                        && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
+                    {
+                        return Ok(self.builtin(&format!("{class}.{name}")));
+                    }
                     _ if class == super::namedtuple::GETTER
                         && super::namedtuple::GETTER_METHODS.contains(&name) =>
                     {
@@ -2564,6 +2603,26 @@ impl Context {
         }
         Err(self.missing_attribute(obj, name))
     }
+    /// A missing T_OBJECT member reads as None, even after repeated deletions.
+    fn update_key_wrapper_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<bool> {
+        let Value::KeyWrapper { object, .. } = self.heap.get_mut(obj) else {
+            return Ok(false);
+        };
+        match name {
+            "obj" => {
+                if let Some(old) = std::mem::replace(object, value) {
+                    self.heap.weak_edge_removed(old);
+                }
+                Ok(true)
+            }
+            "__text_signature__" => Err(Error::new(
+                "AttributeError",
+                format!("attribute '{name}' of '{KEY_WRAPPER}' objects is not writable"),
+            )),
+            _ => Ok(false),
+        }
+    }
+
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         self.delete_named_attr(obj, name, None)
     }
@@ -2678,7 +2737,9 @@ impl Context {
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, None);
         }
-        if self.update_os_field(obj, name, None)? {
+        if self.update_key_wrapper_field(obj, name, None)?
+            || self.update_os_field(obj, name, None)?
+        {
             return Ok(());
         }
         if name == "__dict__"
@@ -3107,7 +3168,10 @@ impl Context {
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         super::namespace::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
-            && matches!(class.as_str(), HashState::CLASS | HashState::XOF_CLASS)
+            && matches!(
+                class.as_str(),
+                HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
+            )
         {
             return Err(Error::new(
                 "TypeError",
@@ -3245,7 +3309,9 @@ impl Context {
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, Some(value));
         }
-        if self.update_os_field(obj, name, Some(value))? {
+        if self.update_key_wrapper_field(obj, name, Some(value))?
+            || self.update_os_field(obj, name, Some(value))?
+        {
             return Ok(());
         }
         if name == "__dict__"
@@ -3486,6 +3552,12 @@ impl Context {
             ));
         }
         let object = self.builtin("object");
+        if matches!(self.heap.get(class), Value::Native(name) if name == KEY_WRAPPER) {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot create '{KEY_WRAPPER}' instances"),
+            ));
+        }
         let base = self.allocation_base(class).unwrap_or(class);
         let new = self.class_attr(class, "__new__");
         if base != object {
@@ -3757,7 +3829,10 @@ impl Context {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name)
-                if matches!(name.as_str(), HashState::CLASS | HashState::XOF_CLASS) =>
+                if matches!(
+                    name.as_str(),
+                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
+                ) =>
             {
                 Err(Error::new(
                     "TypeError",
@@ -3766,6 +3841,13 @@ impl Context {
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
             Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
+            Value::KeyWrapper { comparator, .. } => {
+                let object = stdlib::functools::key_argument("K", "obj", &args, &kwargs)?;
+                Ok(self.alloc(Value::KeyWrapper {
+                    comparator,
+                    object: Some(object),
+                }))
+            }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {

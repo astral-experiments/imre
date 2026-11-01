@@ -3716,6 +3716,9 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 
 impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+        if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
+            return stdlib::functools::key_comparison(self, name, comparator, object, other);
+        }
         // Without a Python addition hook, list concatenation waits for the reflected operand.
         if name == "__add__"
             && self.list_storage(obj).is_some()
@@ -3844,7 +3847,13 @@ impl Context {
             self.heap.get(a).instance_class(),
             self.heap.get(b).instance_class(),
         );
-        if ac.is_none() && bc.is_none() {
+        if ac.is_none()
+            && bc.is_none()
+            && !(inplace.is_empty()
+                && [a, b]
+                    .iter()
+                    .any(|id| matches!(self.heap.get(*id), Value::KeyWrapper { .. })))
+        {
             return Ok(None);
         }
         let set_order = matches!(op, "<" | "<=" | ">" | ">=")

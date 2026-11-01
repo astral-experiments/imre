@@ -658,7 +658,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
-        | ("functools", "cache" | "lru_cache" | "_cache_wrapper" | "partial" | "update_wrapper")
+        | (
+            "functools",
+            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "partial" | "update_wrapper",
+        )
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
@@ -798,6 +801,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
+        return functools::key_method(ctx, slot, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);
     }
@@ -1645,6 +1651,13 @@ pub(super) fn call(
         "separators",
     ];
     let (max_args, keywords): (usize, &[&str]) = match name {
+        "functools.cmp_to_key" => {
+            let comparator = functools::key_argument("cmp_to_key", "mycmp", args, kwargs)?;
+            return Ok(ctx.alloc(Value::KeyWrapper {
+                comparator,
+                object: None,
+            }));
+        }
         "functools.cache" => return functools::cache(ctx, args, kwargs),
         "functools.lru_cache" => return functools::lru_cache(ctx, args, kwargs),
         "functools._cache_wrapper" => (3, &[]),
