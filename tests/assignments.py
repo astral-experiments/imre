@@ -5,11 +5,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comprehensions import BOOTSTRAP, require_result, run, snapshot, write_files
+from comprehensions import BOOTSTRAP, cases, require_result, run, snapshot, write_files
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "assignments"
 
@@ -62,20 +63,6 @@ ERRORS = {
 }
 
 
-def cases(
-    project: Path, errors: dict[str, tuple[str, str]] = ERRORS
-) -> list[tuple[str, Path, str | None]]:
-    result = [(path.stem, path, None) for path in sorted(project.glob("*.py"))]
-    imported = project / "imported/main.py"
-    if imported.is_file():
-        result.append(("imported", imported, None))
-    for name, (source, error) in errors.items():
-        path = project / "errors" / name / "main.py"
-        write_files(path.parent, {"main.py": source})
-        result.append((name, path, error))
-    return result
-
-
 def reference(
     python: str, source: Path, cwd: Path, error: str | None
 ) -> subprocess.CompletedProcess[str]:
@@ -107,6 +94,8 @@ def main(
     label: str = "assignment expression",
     description: str | None = __doc__,
     thinlto_build_timeout: int = 60,
+    require_imported: bool = False,
+    check_rejection: Callable[[str, str], None] | None = None,
 ) -> None:
     """Run a fixture suite using the shared output, filesystem, and failure oracle."""
     parser = argparse.ArgumentParser(description=description)
@@ -139,7 +128,7 @@ def main(
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(fixtures, project, ignore=shutil.ignore_patterns("__pycache__"))
-        for name, source, error in cases(project, errors):
+        for name, source, error in cases(project, errors, require_imported=require_imported):
             reference_dir = temporary / name / "reference"
             reference_dir.mkdir(parents=True)
             expected = reference(python, source, reference_dir, error)
@@ -210,6 +199,8 @@ def main(
                     name,
                     result.stderr,
                 )
+            if check_rejection is not None:
+                check_rejection(name, result.stderr)
             checks += 1
     print(
         f"Passed {checks} {label} checks ({len(rejected)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"

@@ -166,10 +166,14 @@ def write_files(directory: Path, files: dict[str, str]) -> None:
         path.write_text(dedent(source), encoding="utf-8")
 
 
-def cases(project: Path) -> list[tuple[str, Path, str | None]]:
+def cases(
+    project: Path, errors: dict[str, tuple[str, str]], *, require_imported: bool = True
+) -> list[tuple[str, Path, str | None]]:
     result = [(path.stem, path, None) for path in sorted(project.glob("*.py"))]
-    result.append(("imported", project / "imported/main.py", None))
-    for name, (source, error) in ERRORS.items():
+    imported = project / "imported/main.py"
+    if require_imported or imported.is_file():
+        result.append(("imported", imported, None))
+    for name, (source, error) in errors.items():
         path = project / "errors" / name / "main.py"
         write_files(path.parent, {"main.py": source})
         result.append((name, path, error))
@@ -218,7 +222,7 @@ def main() -> None:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
-        for name, source, error in cases(project):
+        for name, source, error in cases(project, ERRORS):
             reference_dir = temporary / name / "reference"
             reference_dir.mkdir(parents=True)
             expected = reference(python, source, reference_dir, error)
