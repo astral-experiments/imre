@@ -589,7 +589,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("enum", "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
-        | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
+        | (
+            "inspect",
+            "iscoroutinefunction"
+            | "markcoroutinefunction"
+            | "_signature_identifier"
+            | "_signature_mapping"
+            | "_signature_layout",
+        )
         | ("contextlib", "contextmanager")
         | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
@@ -1658,11 +1665,8 @@ pub(super) fn call(
         "functools.lru_cache" => {
             if args.is_empty() && kwargs.is_empty() {
                 ctx.alloc(Value::Native("functools._cached".into()))
-            } else if args.len() == 1
-                && matches!(ctx.heap.get(args[0]), Value::Function { .. })
-                && kwargs.is_empty()
-            {
-                ctx.cached_function(args[0])
+            } else if args.len() == 1 && ctx.callable(args[0]) && kwargs.is_empty() {
+                functools::default_cache(ctx, args[0])?
             } else {
                 return Err(Error::new(
                     "NotImplementedError",
@@ -1670,7 +1674,13 @@ pub(super) fn call(
                 ));
             }
         }
-        "functools._cached" => ctx.cached_function(argument(args, 0)?),
+        "functools._cached" => functools::default_cache(ctx, argument(args, 0)?)?,
+        "functools._cache_parameters" => {
+            let maxsize = ctx.text("maxsize");
+            let size = ctx.int(super::value::CACHE_CAPACITY as i64);
+            let typed = ctx.text("typed");
+            ctx.dict(vec![(maxsize, size), (typed, FALSE)])
+        }
         "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;
             if let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) {

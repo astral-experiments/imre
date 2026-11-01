@@ -754,8 +754,10 @@ pub(super) enum Value {
         coroutine_marker: Option<Id>,
     },
     PartialPlaceholder,
+    CacheParameters,
     Cached {
         function: Id,
+        dictionary: Id,
         entries: Vec<CachedCall>,
         table: Id,
         marker: Id,
@@ -838,6 +840,8 @@ pub(super) enum FormatKind {
     Markup,
     Field,
 }
+
+pub(super) const CACHE_CAPACITY: usize = 128;
 
 #[derive(Clone)]
 pub(super) struct CachedCall {
@@ -1085,11 +1089,12 @@ impl Value {
             }
             Self::Cached {
                 function,
+                dictionary,
                 entries,
                 table,
                 marker,
             } => {
-                visit.extend([*function, *table, *marker]);
+                visit.extend([*function, *dictionary, *table, *marker]);
                 visit.extend(entries.iter().map(|call| call.key));
             }
             Self::Raised(error) => visit.extend(error.roots()),
@@ -1121,6 +1126,7 @@ impl Value {
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TupleGetterDoc
+            | Self::CacheParameters
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
