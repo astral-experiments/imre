@@ -177,6 +177,7 @@ impl Checker<'_> {
             let display = format!("{name} ({origin}.{}.{name})", class.name);
             let mut args = vec![
                 self.local(runner),
+                self.coerce(self.local(case), Type::Class(case_base), call)?,
                 str_lit(if description.is_empty() {
                     display
                 } else {

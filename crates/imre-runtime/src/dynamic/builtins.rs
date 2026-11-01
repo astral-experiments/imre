@@ -83,6 +83,7 @@ exception_kinds!(
     BufferError,
     ReferenceError,
     SystemExit,
+    KeyboardInterrupt,
     StopIteration,
     Warning,
     RuntimeWarning,
@@ -180,7 +181,7 @@ pub(super) fn exception_initializer(kind: &str) -> &'static str {
 pub(super) fn exception_new_owner(name: &str) -> &str {
     match name {
         "KeyError" => "LookupError",
-        "SystemExit" => "BaseException",
+        "SystemExit" | "KeyboardInterrupt" => "BaseException",
         "NameError"
         | "UnboundLocalError"
         | "AttributeError"

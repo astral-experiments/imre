@@ -77,6 +77,16 @@ impl Checker<'_> {
         &mut self,
         value: &ast::Expr,
     ) -> Result<Option<Expr>, String> {
+        self.unittest_failure_class(value, |_, qualified| {
+            unpacking::string(format!("<class '{qualified}'>"))
+        })
+    }
+
+    pub(super) fn unittest_failure_class(
+        &mut self,
+        value: &ast::Expr,
+        use_class: impl Fn(u32, String) -> Expr,
+    ) -> Result<Option<Expr>, String> {
         let Some(attr) = value.as_attribute_expr() else {
             return Ok(None);
         };
@@ -97,7 +107,7 @@ impl Checker<'_> {
         }
         let receiver = self.expr(&attr.value)?;
         self.dispatch_record(class, receiver, value, |checker, concrete, _| {
-            let (_, _, qualified) = checker
+            let (kind, _, qualified) = checker
                 .unittest_category(value, Some((name.id.as_str(), concrete)))
                 .ok_or_else(|| {
                     error(
@@ -106,7 +116,7 @@ impl Checker<'_> {
                         "cannot identify the case's failureException",
                     )
                 })?;
-            Ok(unpacking::string(format!("<class '{qualified}'>")))
+            Ok(use_class(kind, qualified))
         })
         .map(Some)
     }
@@ -913,6 +923,85 @@ impl Checker<'_> {
                 }),
             },
         })
+    }
+
+    /// A runner may suppress a subtest exception, so execution after the with
+    /// cannot depend on assignments made by the rest of the protected suite.
+    pub(super) fn subtest_scope(
+        &mut self,
+        item: &ast::WithItem,
+        remaining: &[ast::WithItem],
+        suite: &[ast::Stmt],
+        class: usize,
+        manager: Expr,
+    ) -> Result<(Vec<Statement>, bool), String> {
+        let saved = self.hidden(manager.ty);
+        let exc = self.hidden(Type::Exception);
+        let methods = &self.classes.methods[class];
+        let enter = methods["__enter__"].id;
+        let leave = methods["_leave"].id;
+        let handle = methods["_handle"].id;
+        self.calls.extend([enter, leave, handle]);
+        let call = |id, ty, args| Expr {
+            ty,
+            kind: ExprKind::Call(id, ir::CallArgs::positional(args)),
+        };
+        let mut protected = Vec::new();
+        if let Some(target) = &item.optional_vars {
+            protected.push(self.assign(
+                target,
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+            )?);
+        }
+        let incoming = self.local_state();
+        let (nested, _) = self.with_items(remaining, suite)?;
+        protected.extend(nested);
+        self.restore_state(incoming);
+        if !remaining.is_empty() {
+            self.narrowed = assignments::Narrowed::new();
+        }
+        for name in narrowing::assigned_names(suite) {
+            if let Some(slot) = self.names.get(&name) {
+                self.narrowed.remove_mut(slot);
+            }
+        }
+        for name in narrowing::deleted_names(suite) {
+            if let Some(slot) = self.names.get(&name) {
+                self.assigned.remove(slot);
+            }
+        }
+        let handled = call(handle, Type::Bool, vec![self.local(saved), self.local(exc)]);
+        Ok((
+            vec![Statement::Scope {
+                body: vec![
+                    Statement::Assign(saved, manager),
+                    Statement::Expr(call(enter, Type::None, vec![self.local(saved)])),
+                    Statement::Try {
+                        body: protected,
+                        handlers: vec![ir::ExceptHandler {
+                            kinds: vec![],
+                            name: Some(exc),
+                            body: vec![Statement::If(
+                                handled,
+                                vec![],
+                                vec![Statement::Raise(None)],
+                            )],
+                        }],
+                        orelse: vec![],
+                        finalbody: vec![Statement::Expr(call(
+                            leave,
+                            Type::None,
+                            vec![self.local(saved)],
+                        ))],
+                    },
+                ],
+                clear: vec![saved],
+            }],
+            true,
+        ))
     }
 
     /// A normal exit (including return, break and continue) must raise an

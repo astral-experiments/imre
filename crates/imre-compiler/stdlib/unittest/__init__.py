@@ -139,7 +139,13 @@ def _mapping_text(mapping: dict[str, str], pretty: bool) -> str:
     return "{" + ",\n ".join(expanded) + "}"
 
 
+class _SubTestStop(Exception):
+    pass
+
+
 class TestCase:
+    _runner: _MainRunner | None
+    _subtest_params: dict[str, object]
     failureException: ClassVar[type[Exception]] = AssertionError
     _testMethodName: str
     longMessage: bool
@@ -147,6 +153,8 @@ class TestCase:
     _diffThreshold: int
 
     def __init__(self) -> None:
+        self._runner = None
+        self._subtest_params = {}
         self._testMethodName = "runTest"
         self.longMessage = True
         self.maxDiff = 640
@@ -172,6 +180,21 @@ class TestCase:
 
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
+
+    def subTest(self, *messages: object, **params: object) -> _SubTestContext:
+        has_message = "msg" in params
+        if len(messages) and has_message:
+            raise TypeError("TestCase.subTest() got multiple values for argument 'msg'")
+        if len(messages) > 1:
+            raise TypeError("TestCase.subTest() takes from 1 to 2 positional arguments but "
+                            + str(len(messages) + 1) + " were given")
+        message: object = None
+        if has_message:
+            message = params.pop("msg")
+        for item in messages:
+            message = item
+            has_message = True
+        return _SubTestContext(self, has_message, message, params)
 
     def assertIsNone(self, obj: object, msg: str | None = None) -> None:
         if obj is not None:
@@ -463,6 +486,65 @@ class _AssertRaisesContext:
         return caught
 
 
+class _SubTestContext:
+    case: TestCase
+    has_message: bool
+    message: object
+    params: dict[str, object]
+    previous: dict[str, object]
+    entered: bool
+
+    def __init__(self, case: TestCase, has_message: bool, message: object,
+                 params: dict[str, object]) -> None:
+        self.case = case
+        self.has_message = has_message
+        self.message = message
+        self.params = params
+        self.previous = {}
+        self.entered = False
+
+    def __enter__(self) -> None:
+        # contextlib's generator context manager can be entered only once.
+        if self.entered:
+            raise AttributeError("'_GeneratorContextManager' object has no attribute 'args'")
+        self.entered = True
+        self.previous = self.case._subtest_params
+        for key in self.previous:
+            if key not in self.params:
+                self.params[key] = self.previous[key]
+        self.case._subtest_params = self.params
+
+    def _leave(self) -> None:
+        self.case._subtest_params = self.previous
+
+    def __exit__(self, exc_type: object, exc: BaseException | None, traceback: object) -> bool:
+        try:
+            if exc is not None:
+                return self._handle(exc)
+            return False
+        finally:
+            self._leave()
+
+    def _handle(self, exc: BaseException) -> bool:
+        runner = self.case._runner
+        if runner is None or isinstance(exc, (_SubTestStop, KeyboardInterrupt)):
+            return False
+        parts: list[str] = []
+        if self.has_message:
+            parts.append("[" + str(self.message) + "]")
+        if self.params:
+            items: list[str] = []
+            for key in self.params:
+                items.append(key + "=" + repr(self.params[key]))
+            parts.append("(" + ", ".join(items) + ")")
+        description = " ".join(parts) or "(<subtest>)"
+        case = self.case
+        runner._subtest_result(description, exc, isinstance(exc, case.failureException))
+        if runner.failfast:
+            raise _SubTestStop()
+        return True
+
+
 class TestResult:
     testsRun: int
     shouldStop: bool
@@ -591,9 +673,34 @@ class _MainRunner:
             print(long, file=sys.stderr)
             self.name_pending = False
 
+    def _subtest_result(self, description: str, exc: BaseException, failure: bool) -> None:
+        parent = self.current_name.split("\n", 1)
+        name = parent[0] + " " + description
+        if len(parent) == 2:
+            name += "\n" + parent[1]
+        if isinstance(exc, SkipTest):
+            self.skips += 1
+            short, status = "s", "skipped " + repr(str(exc))
+        elif failure:
+            detail = "AssertionError: " + str(exc) if isinstance(exc, AssertionError) else str(exc)
+            self.failures.append("FAIL: " + name + "\n" + detail)
+            short, status = "F", "FAIL"
+        else:
+            self.errors.append("ERROR: " + name + "\n" + str(exc))
+            short, status = "E", "ERROR"
+        if self.verbose == 1:
+            sys.stderr.write(short)
+        elif self.verbose == 2:
+            if self.name_pending:
+                print("", file=sys.stderr)
+            print("  " + name + " ... " + status, file=sys.stderr)
+            self.name_pending = False
+
     def _phase(self, action: Callable[[], None], name: str) -> bool:
         try:
             action()
+        except _SubTestStop:
+            return False
         except SkipTest as exc:
             self.skips += 1
             self._mark("s", "skipped " + repr(str(exc)))
@@ -612,20 +719,25 @@ class _MainRunner:
             return False
         return True
 
-    def _run(self, name: str, setup: Callable[[], None],
+    def _run(self, case: TestCase, name: str, setup: Callable[[], None],
              body: Callable[[], None], teardown: Callable[[], None]) -> None:
         if self.failfast and (self.errors or self.failures):
             return
         self.total += 1
+        self.current_name = name
         if self.verbose == 2:
-            self.current_name = name
             self.name_pending = True
             sys.stderr.write(name + " ... ")
-        if self._phase(setup, name):
-            passed = self._phase(body, name)
-            cleaned = self._phase(teardown, name)
-            if passed and cleaned:
-                self._mark(".", "ok")
+        before = len(self.failures) + len(self.errors) + self.skips
+        case._runner = self
+        try:
+            if self._phase(setup, name) and before == len(self.failures) + len(self.errors) + self.skips:
+                passed = self._phase(body, name)
+                cleaned = self._phase(teardown, name)
+                if passed and cleaned and before == len(self.failures) + len(self.errors) + self.skips:
+                    self._mark(".", "ok")
+        finally:
+            case._runner = None
 
     def _finish(self) -> None:
         if self.verbose:

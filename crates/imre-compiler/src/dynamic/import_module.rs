@@ -4,6 +4,18 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Python sources used only by the boxed importer.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "unittest" => Some((
+            "unittest/__init__.py",
+            concat!(
+                include_str!("../../stdlib/unittest/__init__.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_equal.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_raises.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_cleanup.py"),
+            ),
+        )),
         "textwrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("textwrap.py", SOURCE.get_or_init(|| {

@@ -210,6 +210,13 @@ impl Error {
         self.trace.as_deref_mut()
     }
 
+    pub(super) fn clear_traceback(&mut self) {
+        if let Some(trace) = self.trace.as_mut() {
+            trace.frames.clear();
+            trace.cached = None;
+        }
+    }
+
     pub(super) fn tracing(&mut self) -> &mut Trace {
         self.trace.get_or_insert_with(Default::default)
     }

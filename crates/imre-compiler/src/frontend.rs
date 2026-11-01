@@ -508,6 +508,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "ConnectionResetError" => return Some(49),
         "InterruptedError" => return Some(50),
         "TimeoutError" => return Some(51),
+        "KeyboardInterrupt" => return Some(59),
         "Warning" => return Some(80),
         "RuntimeWarning" => return Some(81),
         "DeprecationWarning" => return Some(82),
@@ -5137,6 +5138,14 @@ impl<'a> Checker<'a> {
             && self.unittest_context(class)
         {
             return self.assert_raises_scope(item, remaining, body, class, manager);
+        }
+        if let Type::Class(class) = manager.ty {
+            let record = &self.classes.declarations.definitions[class];
+            if record.name == "_SubTestContext"
+                && self.graph.modules[record.definition.module].is_bundled("unittest")
+            {
+                return self.subtest_scope(item, remaining, body, class, manager);
+            }
         }
         if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {
             return self.handler_lock_scope(item, remaining, body, manager);
