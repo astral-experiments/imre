@@ -2404,6 +2404,18 @@ impl Heap {
     }
 
     pub(super) fn acyclic_finalizer(&self, roots: impl Iterator<Item = Id>) -> Result<Option<Id>> {
+        // A suspended caller keeps earlier operands live across a nested call.
+        // Scan the callers once when only one finalizer needs a reachability check.
+        if let [owner] = self.ordinary_finalizers.as_slice()
+            && self
+                .frames
+                .iter()
+                .rev()
+                .skip(1)
+                .any(|frame| frame.live.contains(owner))
+        {
+            return Ok(None);
+        }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark(roots);
         let next = self.identify_cycles(&mut cycles);

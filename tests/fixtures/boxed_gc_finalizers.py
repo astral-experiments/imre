@@ -57,7 +57,28 @@ def exercise(cyclic, unrelated):
     events.clear()
 
 
+class WeakTarget:
+    pass
+
+
+def clear_weak_target():
+    targets = [WeakTarget()]
+    witness = ref(targets[0], weak_callback)
+    assert (targets.clear(), events.copy()) == (None, ["weak"])
+    return witness
+
+
+def check_arguments(owner, witness):
+    assert isinstance(owner, Owner) and witness() is None
+    assert events == ["weak"]
+
+
 def current():
     exercise(True, False)
     exercise(True, True)
     exercise(False, False)
+    # The first argument stays live while the second releases an unrelated target.
+    check_arguments(Owner(), clear_weak_target())
+    assert events == ["weak", "finalize"]
+    saved.clear()
+    events.clear()
