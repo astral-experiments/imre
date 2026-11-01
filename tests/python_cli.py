@@ -1571,21 +1571,21 @@ def report(text):
                 check_slice_stack(imre, imports, root, env)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
-        if os.name == "posix":
-            check_unittest_file_discovery(imre, root, run)
-            plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())
-            compare("-IB", "-c", imports + "arithmetic.current()")
-            plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
-            compare("-IB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_recursive_repr.py":
                 for limit in (640, 4300, 0):
                     compare(
                         "-B", "-c", imports + f"arithmetic.integer_digit_limit({limit})",
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
-        if sys.platform == "linux":
+        if os.name == "posix":
+            check_unittest_file_discovery(imre, root, run)
+            plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        if sys.platform == "linux":
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
             probe = root / "entropy.py"
