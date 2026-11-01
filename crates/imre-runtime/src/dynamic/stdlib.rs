@@ -68,6 +68,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "locale"
             | "_locale"
             | "traceback"
+            | "_opcode"
             | "sysconfig"
             | "ast"
             | "os"
