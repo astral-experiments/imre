@@ -3,6 +3,14 @@
   "opt_level": 0,
   "denominator": 97,
   "tests": {
+    "test.test_sys.ActiveExceptionTests.test_exc_info_no_exception": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "8581d47c313aa7933ee2e34ddb5abe605dd575bc2397e7d956ff9c4079d5dd4e"
+    },
     "test.test_sys.ActiveExceptionTests.test_sys_exception_no_exception": {
       "status": "pass",
       "execution": "native-body",
