@@ -5,6 +5,7 @@ pub(super) enum MappingOperation {
     Copy,
     Update,
     Unpack,
+    Keywords(Id),
 }
 
 #[derive(Default)]
@@ -313,6 +314,30 @@ impl Context {
         })
     }
 
+    /// CPython reports the qualified callable in errors while unpacking its keywords.
+    pub(super) fn keyword_callable(&mut self, callable: Id) -> Result<String> {
+        let name = match self.lookup_attr(callable, "__qualname__") {
+            Ok(id) => {
+                let name = builtins::call(self, "str", &[id], &[])?;
+                self.str_value(name)?.to_owned()
+            }
+            Err(e) if self.is_attribute_error(&e) => {
+                let repr = builtins::call(self, "repr", &[callable], &[])?;
+                return Ok(self.str_value(repr)?.to_owned());
+            }
+            Err(e) => return Err(e),
+        };
+        match self.lookup_attr(callable, "__module__") {
+            Ok(id) if id != NONE && self.str_value(id).ok() != Some("builtins") => {
+                let module = builtins::call(self, "str", &[id], &[])?;
+                Ok(format!("{}.{name}()", self.str_value(module)?))
+            }
+            Ok(_) => Ok(format!("{name}()")),
+            Err(e) if self.is_attribute_error(&e) => Ok(format!("{name}()")),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Dict copying uses raw entries for a dict with its original iterator.
     /// An overridden iterator opts into the mapping protocol, including key lookup.
     pub(super) fn for_each_mapping_item(
@@ -322,6 +347,22 @@ impl Context {
         operation: MappingOperation,
         mut visit: impl FnMut(&mut Self, Id, Id, Option<i64>) -> Result<()>,
     ) -> Result<bool> {
+        let check_duplicate = |ctx: &mut Self, key, hash| -> Result<()> {
+            if let MappingOperation::Keywords(callable) = operation
+                && ctx.find_dictionary_key(target, key, hash)?.1.is_some()
+            {
+                let name = ctx.keyword_callable(callable)?;
+                let key = builtins::call(ctx, "str", &[key], &[])?;
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{name} got multiple values for keyword argument '{}'",
+                        ctx.str_value(key)?
+                    ),
+                ));
+            }
+            Ok(())
+        };
         // dict.update probes for keys before choosing a merge or a sequence of pairs.
         // A later mapping lookup may return a different method or raise.
         if matches!(operation, MappingOperation::Update)
@@ -346,6 +387,7 @@ impl Context {
             while let Some((current, key, value, hash)) = self.dictionary_pair(storage, position) {
                 self.heap.keep(key);
                 self.heap.keep(value);
+                check_duplicate(self, key, hash)?;
                 visit(self, key, value, hash)?;
                 if self
                     .dict_entries(storage)
@@ -377,7 +419,10 @@ impl Context {
             Ok(keys) => keys,
             Err(error)
                 if error.kind == "AttributeError"
-                    && matches!(operation, MappingOperation::Unpack) =>
+                    && matches!(
+                        operation,
+                        MappingOperation::Unpack | MappingOperation::Keywords(_)
+                    ) =>
             {
                 return Ok(false);
             }
@@ -394,6 +439,7 @@ impl Context {
         let iterator = self.iterator(keys)?;
         while let Some(key) = self.next_item(iterator)? {
             self.heap.keep(key);
+            check_duplicate(self, key, None)?;
             let value = self.get_item(input, key)?;
             visit(self, key, value, None)?;
         }
@@ -555,7 +601,13 @@ impl Context {
         field: Option<Id>,
         name: &str,
     ) -> Result<Id> {
-        let member = self.class_attr(class, name);
+        // The class namespace holds type.__qualname__ for native class lookup.
+        // An instance can supply its own value, but cannot inherit that metadata.
+        let member = if name == "__qualname__" {
+            None
+        } else {
+            self.class_attr(class, name)
+        };
         if member.is_none()
             && matches!(name, "fget" | "fset" | "fdel" | "__name__")
             && let Some(property) = self.heap.get(object).property().copied()
@@ -1456,6 +1508,16 @@ impl Context {
                 if let Some(attribute) = property.attribute(self, name)? {
                     return Ok(attribute);
                 }
+            }
+            Value::Native(ref symbol)
+                if builtins::is_builtin(symbol)
+                    && !builtins::is_builtin_type(symbol)
+                    && matches!(name, "__name__" | "__qualname__" | "__module__") =>
+            {
+                if name == "__module__" {
+                    return Ok(self.text(if symbol == "open" { "_io" } else { "builtins" }));
+                }
+                return Ok(self.text(symbol.clone()));
             }
             Value::Native(ref symbol)
                 if symbol.starts_with("posix.") || symbol == "zlib.adler32" =>
@@ -3619,7 +3681,7 @@ impl Context {
                         if self.scope_data(local).names.contains_key(&n) {
                             return Err(Error::new(
                                 "TypeError",
-                                format!("multiple values for {n:?}"),
+                                format!("{name}() got multiple values for argument '{n}'"),
                             ));
                         }
                         self.bind_argument(local, &n, v)?;
@@ -3627,10 +3689,19 @@ impl Context {
                         let k = self.text(n);
                         extra.push((k, v));
                     } else {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!("unexpected keyword {n:?} in {name}"),
-                        ));
+                        let candidates: Vec<_> = pos[posonly.len()..]
+                            .iter()
+                            .chain(&kwonly)
+                            .map(String::as_str)
+                            .collect();
+                        let mut message =
+                            format!("{name}() got an unexpected keyword argument '{n}'");
+                        if let Some(hint) =
+                            crate::objects::exceptions::keyword_suggestion(&n, &candidates)
+                        {
+                            message.push_str(&format!(". Did you mean '{hint}'?"));
+                        }
+                        return Err(Error::new("TypeError", message));
                     }
                 }
                 if let Some(n) = sig["kwargs"].as_str() {

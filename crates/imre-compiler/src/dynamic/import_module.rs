@@ -7,13 +7,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "textwrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("textwrap.py", SOURCE.get_or_init(|| {
-                // The indentation functions are independent of TextWrapper's regular expressions.
+                // The boxed ABI can forward the original **kwargs, preserving omitted
+                // options and dispatching construction through the module's TextWrapper.
+                const WRAPPER: &str = include_str!("../../stdlib/textwrap/wrapper.py");
                 const UPSTREAM: &str = include_str!(
                     "../../../../benchmarks/cpython_stdlib/full/textwrap/upstream/Lib/textwrap.py"
                 );
-                let first = UPSTREAM.find("\ndef dedent(").unwrap();
+                let (implementation, _) = WRAPPER.split_once("\ndef wrap(").unwrap();
+                let first = UPSTREAM.find("\ndef wrap(").unwrap();
                 let (functions, _) = UPSTREAM[first..].split_once("\nif __name__").unwrap();
-                format!("{}{functions}", include_str!("../../stdlib/textwrap/wrapper.py"))
+                format!("{implementation}{functions}")
             })))
         }
         "importlib.util" => Some((

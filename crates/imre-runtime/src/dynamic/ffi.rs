@@ -273,23 +273,27 @@ impl Context {
                 Ok(a)
             }
             "update" | "keywords" => {
-                let mapping = self.for_each_mapping_item(
-                    b,
-                    a,
-                    super::calls::MappingOperation::Unpack,
-                    |ctx, key, val, hash| {
-                        if op == "keywords" {
-                            ctx.str_value(key)
-                                .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
-                            ctx.op("keyword", a, key, val)?;
-                        } else {
-                            ctx.set_dictionary_key(a, key, val, hash, true)?;
-                        }
-                        Ok(())
-                    },
-                )?;
+                use super::calls::MappingOperation;
+                let operation = if op == "keywords" {
+                    MappingOperation::Keywords(c)
+                } else {
+                    MappingOperation::Unpack
+                };
+                let mapping =
+                    self.for_each_mapping_item(b, a, operation, |ctx, key, val, hash| {
+                        ctx.set_dictionary_key(a, key, val, hash, true).map(|_| ())
+                    })?;
                 if !mapping {
-                    return Err(Error::new("TypeError", "expected a mapping"));
+                    let message = if op == "keywords" {
+                        format!(
+                            "{} argument after ** must be a mapping, not {}",
+                            self.keyword_callable(c)?,
+                            self.type_name(b)
+                        )
+                    } else {
+                        "expected a mapping".into()
+                    };
+                    return Err(Error::new("TypeError", message));
                 }
                 Ok(a)
             }

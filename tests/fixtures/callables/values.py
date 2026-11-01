@@ -109,7 +109,7 @@ def main() -> None:
         print(optional_fn(13))
     optional_fn = None
     print(optional_fn is None)
-    square: Callable[[int], int] = lambda value: value * value
+    square = lambda value: value * value
     print(apply(square, -(1 << 80)))
     named: Callable[[int], int] = lambda value: first(value)
     print(named(11))

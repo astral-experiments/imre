@@ -56,6 +56,9 @@ def current():
             return self
 
     report = Reporter()
+    print(len.__qualname__, len.__module__, hasattr(report, "__qualname__"))
+    report.__qualname__ = "instance label"
+    print(report.__qualname__, Reporter.__qualname__)
     saved = report.render
     again = report.render
     other = Reporter().render

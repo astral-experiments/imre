@@ -111,7 +111,7 @@ impl Function<'_, '_> {
                 } else {
                     self.expr(&v.func)
                 };
-                let kwargs = self.arguments(&args, &v.arguments);
+                let kwargs = self.arguments(&args, &v.arguments, &callable);
                 let span = self.expression_span(expr, &v.func, b'(');
                 self.call_at(&callable, &args, &kwargs, &mark, span)
             }
@@ -326,7 +326,12 @@ impl Function<'_, '_> {
         target
     }
 
-    pub(super) fn arguments(&mut self, args: &str, syntax: &ast::Arguments) -> String {
+    pub(super) fn arguments(
+        &mut self,
+        args: &str,
+        syntax: &ast::Arguments,
+        callable: &str,
+    ) -> String {
         let kwargs = self.op("dict", &[]);
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
@@ -338,13 +343,29 @@ impl Function<'_, '_> {
                 self.op("append", &[args, &value]);
             }
         }
-        for key in &syntax.keywords {
-            let value = self.expr(&key.value);
-            if let Some(name) = &key.arg {
-                let name = self.code_name(name.as_str());
-                self.op("keyword", &[&kwargs, &name, &value]);
+        let mut keywords = syntax.keywords.iter().peekable();
+        let mut unpacked = false;
+        while let Some(key) = keywords.peek() {
+            if key.arg.is_none() {
+                let value = self.expr(&keywords.next().unwrap().value);
+                self.op("keywords", &[&kwargs, &value, callable]);
+                unpacked = true;
             } else {
-                self.op("keywords", &[&kwargs, &value]);
+                // Python builds each group of named arguments before merging it
+                // with earlier **mappings. Even a duplicate evaluates the group.
+                let group = if unpacked {
+                    self.op("dict", &[])
+                } else {
+                    kwargs.clone()
+                };
+                while let Some(key) = keywords.next_if(|key| key.arg.is_some()) {
+                    let value = self.expr(&key.value);
+                    let name = self.code_name(key.arg.as_ref().unwrap().as_str());
+                    self.op("keyword", &[&group, &name, &value]);
+                }
+                if unpacked {
+                    self.op("keywords", &[&kwargs, &group, callable]);
+                }
             }
         }
         kwargs

@@ -320,7 +320,7 @@ impl Function<'_, '_> {
                         if !args.keywords.is_empty() {
                             self.unsupported("class keyword arguments");
                         }
-                        self.arguments(&bases, args);
+                        self.arguments(&bases, args, "0");
                     }
                     let init = self.define(
                         v.start(),

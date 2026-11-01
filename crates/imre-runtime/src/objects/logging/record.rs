@@ -618,13 +618,23 @@ fn star_integer(args: &mut impl Iterator<Item = OwnedWord>) -> Result<Int> {
     }
 }
 
-/// An exact scalar supplies its Python class name in a rejected conversion.
-fn scalar_name(kind: WordKind) -> Option<&'static str> {
-    Some(match kind.raw() {
+/// Supply the Python class name of a rejected format operand.
+fn operand_name(value: &OwnedWord) -> Option<&'static str> {
+    Some(match value.kind.raw() {
         0 => "NoneType",
         1 => "bool",
         2 => "int",
         3 => "str",
+        4 => "list",
+        // SAFETY: this non-null kind-five owner roots the storage during inspection.
+        5 if unsafe {
+            object(value.word as *const Object)
+                .0
+                .with(|s| matches!(s, Storage::Sequence(_)))
+        } =>
+        {
+            "list"
+        }
         7 => "float",
         8 => "bytes",
         _ => return None,
@@ -719,7 +729,7 @@ fn percent_value_in<'a>(
                     crate::floats::float_to_integer(f64::from_bits(value.word as u64))?
                 }
                 _ => {
-                    let Some(name) = scalar_name(value.kind) else {
+                    let Some(name) = operand_name(value) else {
                         return Err(Error::new(Kind::TypeError, "format requires a number"));
                     };
                     let required = if "diu".contains(c) {
@@ -801,7 +811,7 @@ fn percent_value_in<'a>(
                         Error::new(Kind::OverflowError, "%c arg not in range(0x110000)")
                     })?
                     .to_string()
-            } else if let Some(name) = scalar_name(value.kind) {
+            } else if let Some(name) = operand_name(value) {
                 return Err(Error::new(
                     Kind::TypeError,
                     format!("%c requires an int or a unicode character, not {name}"),
@@ -820,7 +830,7 @@ fn percent_value_in<'a>(
                 }
                 1 => value.word as f64,
                 _ => {
-                    let message = scalar_name(value.kind).map_or_else(
+                    let message = operand_name(value).map_or_else(
                         || "must be real number".to_owned(),
                         |name| format!("must be real number, not {name}"),
                     );

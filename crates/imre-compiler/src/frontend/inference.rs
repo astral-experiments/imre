@@ -53,6 +53,84 @@ pub(super) fn first_insertion<'ast>(
 }
 
 impl Checker<'_> {
+    /// A later direct call can supply the same Callable context as an inline lambda.
+    /// Its body and every use of the resulting local are still checked normally.
+    pub(super) fn local_lambda_context(&self, local: &str, later: &[ast::Stmt]) -> Option<Type> {
+        struct Calls<'a, F> {
+            hint: Option<Type>,
+            context: &'a F,
+        }
+        impl<'ast, F: Fn(&ast::ExprCall) -> Option<Type>> Visitor<'ast> for Calls<'_, F> {
+            fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+                if self.hint.is_none()
+                    && !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))
+                {
+                    walk_stmt(self, stmt);
+                }
+            }
+
+            fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+                match expr {
+                    ast::Expr::Call(call) if self.hint.is_none() => {
+                        self.hint = (self.context)(call)
+                    }
+                    ast::Expr::Lambda(_)
+                    | ast::Expr::Generator(_)
+                    | ast::Expr::ListComp(_)
+                    | ast::Expr::SetComp(_)
+                    | ast::Expr::DictComp(_) => return,
+                    _ => {}
+                }
+                if self.hint.is_none() {
+                    ruff_python_ast::visitor::walk_expr(self, expr);
+                }
+            }
+        }
+
+        let assigned = narrowing::assigned_names(later);
+        if assigned.contains(local) {
+            return None;
+        }
+        let context = |call: &ast::ExprCall| {
+            let mut root = call.func.as_ref();
+            while let ast::Expr::Attribute(attr) = root {
+                root = &attr.value;
+            }
+            let name = root.as_name_expr()?.id.as_str();
+            if assigned.contains(name)
+                || self.names.contains_key(name)
+                || self.local_functions.contains_key(name)
+            {
+                return None;
+            }
+            let Binding::Definition(definition) = self.resolve(&call.func)? else {
+                return None;
+            };
+            let params = &self.functions.get(&definition)?.params;
+            params.iter().enumerate().find_map(|(index, param)| {
+                let arg = match param.kind {
+                    ParameterKind::PositionalOnly => call.arguments.find_positional(index),
+                    ParameterKind::PositionalOrKeyword => {
+                        call.arguments.find_argument_value(&param.name, index)
+                    }
+                    ParameterKind::KeywordOnly => {
+                        call.arguments.find_keyword(&param.name).map(|kw| &kw.value)
+                    }
+                    _ => None,
+                }?;
+                let ty = self.types.payload(param.ty).unwrap_or(param.ty);
+                (arg.as_name_expr()?.id == local && self.types.signature(ty).is_some())
+                    .then_some(ty)
+            })
+        };
+        let mut calls = Calls {
+            hint: None,
+            context: &context,
+        };
+        calls.visit_body(later);
+        calls.hint
+    }
+
     /// In a truthy branch, an immediately repeated native dict lookup is present
     /// until the first possible effect. An exact local list/set receiver and
     /// a literal string key cannot execute Python code before reading the argument.
@@ -176,6 +254,7 @@ const DEFERRED: &str = "inference is waiting for a function return type";
 struct Pending {
     params: Vec<Option<Type>>,
     none_defaults: Vec<usize>,
+    inferred_params: Vec<bool>,
     returns: Option<Type>,
     infer_return: bool,
 }
@@ -205,6 +284,7 @@ impl Inference {
         let mut pending = self.pending.borrow_mut();
         let id = pending.len();
         pending.push(Pending {
+            inferred_params: params.iter().map(Option::is_none).collect(),
             params,
             none_defaults,
             returns,
@@ -341,6 +421,52 @@ impl Inference {
         }
         self.update(signature);
         Ok(())
+    }
+
+    /// Inherited copies of one method have distinct receivers but identical
+    /// source parameters. At a fixed point, a copy with no direct calls can use
+    /// a parameter type on which the called copies agree. Each body still has
+    /// to type-check for its own receiver, including overridden method calls.
+    fn infer_inherited_parameters(
+        &self,
+        definitions: &[(ModuleId, ast::StmtFunctionDef, Signature)],
+        classes: &ClassInfo,
+    ) -> bool {
+        let mut copies = HashMap::new();
+        for (_, function, signature) in definitions {
+            if let Some(method) = signature.method
+                && method.kind(&classes.declarations) == crate::classes::MethodKind::Instance
+            {
+                let class = &classes.declarations.definitions[method.class];
+                let origin = (
+                    class.method_origins[method.index],
+                    function.name.as_str(),
+                    function.range(),
+                );
+                copies
+                    .entry(origin)
+                    .or_insert_with(Vec::new)
+                    .push(signature.id);
+            }
+        }
+        let mut pending = self.pending.borrow_mut();
+        let mut changed = false;
+        for ids in copies.values().filter(|ids| ids.len() > 1) {
+            for index in 1..pending[ids[0]].params.len() {
+                let mut known = ids.iter().filter_map(|&id| pending[id].params[index]);
+                let Some(first) = known.next() else { continue };
+                if known.any(|ty| ty != first) {
+                    continue;
+                }
+                for &id in ids {
+                    if pending[id].params[index].is_none() {
+                        pending[id].params[index] = Some(first);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        changed
     }
 
     /// Stops when every signature is concrete, or no new type evidence is available.
@@ -489,6 +615,9 @@ impl Inference {
                 if let Some(diagnostic) = errors.into_iter().find(|error| !error.contains(DEFERRED))
                 {
                     return Err(diagnostic);
+                }
+                if self.infer_inherited_parameters(definitions, classes) {
+                    continue;
                 }
                 let pending = self.pending.borrow();
                 for (module, function, signature) in definitions.iter() {
@@ -652,6 +781,31 @@ impl Checker<'_> {
                             return Ok(supplied);
                         }
                         return checker.direct_value(supplied, node, ty, parameter.sign_only);
+                    }
+                    // Only widen an originally inferred parameter. The final pass checks
+                    // the entire helper against the tagged string or string-list layout.
+                    if inference.pending.borrow()[signature.id].inferred_params[index]
+                        && (ty == Type::Str || checker.types.element(ty) == Some(Type::Str))
+                    {
+                        let lines = checker.types.list(Type::Str);
+                        let union = checker.types.union(&[Type::Str, lines]).unwrap();
+                        let value = match argument {
+                            calls::Supplied::Source(node) => {
+                                checker.expr_expected_if(node, ty, |_, actual| {
+                                    actual == Type::Str || actual == lines || actual == union
+                                })?
+                            }
+                            calls::Supplied::Field(value, _) => value,
+                        };
+                        let expected = if value.ty != ty
+                            && (value.ty == Type::Str || value.ty == lines || value.ty == union)
+                        {
+                            inference.widen_parameter(signature.id, index, union);
+                            union
+                        } else {
+                            ty
+                        };
+                        return checker.direct_value(value, node, expected, parameter.sign_only);
                     }
                     if matches!(ty, Type::Class(class) if checker.classes.parsers.namespace(class))
                     {

@@ -3653,7 +3653,8 @@ impl<'a> Checker<'a> {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
         if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
-            && (matches!(args[0].ty, Type::Str | Type::Bytes | Type::Float)
+            && (self.types.element(args[0].ty) == Some(Type::Str)
+                || matches!(args[0].ty, Type::Str | Type::Bytes | Type::Float)
                 || args[0].ty == Type::Int && value.ty == self.types.string_or_int())
         {
             self.narrowed.insert_mut(slot, args[0].ty);
@@ -4446,10 +4447,12 @@ impl<'a> Checker<'a> {
         let mut previous_sum = false;
         let mut length_guard = None;
         for (index, statement) in statements.iter().enumerate() {
+            let mut fresh = None;
             if let ast::Stmt::Assign(assignment) = statement
                 && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
                 && !self.names.contains_key(name.id.as_str())
             {
+                fresh = Some((name, &*assignment.value));
                 let later = &statements[index + 1..];
                 let empty_list =
                     matches!(&*assignment.value, ast::Expr::List(list) if list.elts.is_empty());
@@ -4459,7 +4462,9 @@ impl<'a> Checker<'a> {
                 let returned = || {
                     later.iter().any(|statement| matches!(statement, ast::Stmt::Return(ret) if matches!(ret.value.as_deref(), Some(ast::Expr::Name(value)) if value.id == name.id)))
                 };
-                let context = if (empty_list && self.types.element(self.returns).is_some()
+                let context = if assignment.value.is_lambda_expr() && !self.module_scope {
+                    self.local_lambda_context(name.id.as_str(), later)
+                } else if (empty_list && self.types.element(self.returns).is_some()
                     || empty_dict && self.types.mapping(self.returns).is_some())
                     && returned()
                 {
@@ -4499,6 +4504,11 @@ impl<'a> Checker<'a> {
             let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
             let (mut lowered, continues) = self.statement(statement, &statements[index + 1..])?;
             self.fixed_tuple = enclosing_tuple;
+            if !self.module_scope
+                && let Some((name, rhs)) = fresh
+            {
+                self.widen_reassigned_text(name, rhs, &mut lowered, &statements[index + 1..])?;
+            }
             length_guard = self
                 .list_length_guard(statement)
                 .or_else(|| length_guard.filter(|guard| fixed_tuples::preserves(*guard, &lowered)));

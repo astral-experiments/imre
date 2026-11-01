@@ -255,6 +255,7 @@ impl<'a> Visitor<'a> for References<'_> {
                         "assertMultiLineEqual",
                         "assertListEqual",
                         "_assertTextListEqual",
+                        "_assertTextOrListEqual",
                         "_assertBytesListEqual",
                         "_assertIntListEqual",
                     ]

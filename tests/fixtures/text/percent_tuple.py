@@ -69,3 +69,10 @@ for value in [1.25, -2.5, float("nan"), float("inf"), float("-inf")]:
         print("ValueError: " + str(exc))
     except OverflowError as exc:
         print("OverflowError: " + str(exc))
+
+
+for pattern in ["%r, %s", "%a, %r", "%d, %r", "%r, %c", "%r, %g"]:
+    try:
+        print(pattern % (["a'π", "b"], [1, 2]))
+    except TypeError as exc:
+        print("TypeError: " + str(exc))

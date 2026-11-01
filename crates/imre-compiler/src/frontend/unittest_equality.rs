@@ -151,43 +151,48 @@ impl Checker<'_> {
         } else {
             Type::Int
         };
-        let method = if matches!(ty, Type::List(_) | Type::ListInt) {
-            if self.classes.methods[class].contains_key("assertListEqual") {
-                "assertListEqual"
-            } else {
-                match self.types.element(ty) {
-                    Some(Type::Str) => "_assertTextListEqual",
-                    Some(Type::Bytes) => "_assertBytesListEqual",
-                    Some(Type::Int) => "_assertIntListEqual",
-                    _ => {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "unsupported list element type for unittest equality",
-                        ));
+        let method =
+            if matches!(ty, Type::List(_) | Type::ListInt) {
+                if self.classes.methods[class].contains_key("assertListEqual") {
+                    "assertListEqual"
+                } else {
+                    match self.types.element(ty) {
+                        Some(Type::Str) => "_assertTextListEqual",
+                        Some(Type::Bytes) => "_assertBytesListEqual",
+                        Some(Type::Int) => "_assertIntListEqual",
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                call,
+                                "unsupported list element type for unittest equality",
+                            ));
+                        }
                     }
                 }
-            }
-        } else if name == "assertListEqual" {
-            return Err(error(
-                self.source,
-                call,
-                "native assertListEqual expects list operands",
-            ));
-        } else if self.types.mapping(ty) == Some((Type::Str, Type::Str)) {
-            "assertDictEqual"
-        } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
-            "assertMultiLineEqual"
-        } else if matches!(
-            ty,
-            Type::Calendar(ir::CalendarType::Date | ir::CalendarType::DateTime)
-        ) {
-            "_assertDateEqual"
-        } else if ty == Type::Calendar(ir::CalendarType::Delta) {
-            "_assertDeltaEqual"
-        } else {
-            "_baseAssertEqual"
-        };
+            } else if name == "assertListEqual" {
+                return Err(error(
+                    self.source,
+                    call,
+                    "native assertListEqual expects list operands",
+                ));
+            } else if self.types.members(ty).is_some_and(|members| {
+                members.as_slice() == [Type::Str, self.types.list(Type::Str)]
+            }) {
+                "_assertTextOrListEqual"
+            } else if self.types.mapping(ty) == Some((Type::Str, Type::Str)) {
+                "assertDictEqual"
+            } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
+                "assertMultiLineEqual"
+            } else if matches!(
+                ty,
+                Type::Calendar(ir::CalendarType::Date | ir::CalendarType::DateTime)
+            ) {
+                "_assertDateEqual"
+            } else if ty == Type::Calendar(ir::CalendarType::Delta) {
+                "_assertDeltaEqual"
+            } else {
+                "_baseAssertEqual"
+            };
         let mut signature = self.classes.methods[class]
             .get(method)
             .cloned()

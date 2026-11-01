@@ -9,6 +9,9 @@ class CustomFailure(AssertionError):
 class CustomCase(unittest.TestCase):
     failureException = CustomFailure
 
+    def compare_lines(self, left: str | list[str], right: str | list[str]) -> None:
+        self.assertEqual(left, right, "lines")
+
 
 def failure_type(case: unittest.TestCase) -> None:
     print(f"{case.failureException!r} / {case.failureException!s}")
@@ -54,6 +57,14 @@ for value in (10 ** 79, 10 ** 80):
 failure_type(case)
 failure_type(CustomCase())
 custom = CustomCase()
+custom.compare_lines("equal", "equal")
+custom.compare_lines(["equal"], ["equal"])
+try:
+    custom.compare_lines("one line", ["one line"])
+except custom.failureException as mixed_error:
+    print(str(mixed_error))
+else:
+    raise RuntimeError("text compared equal to a list")
 try:
     custom.assertEqual("incorrect", "correct")
 except custom.failureException as custom_error:
