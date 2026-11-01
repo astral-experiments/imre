@@ -73,6 +73,21 @@ for n in [1000000000, -(10**20)]:
         print(timedelta(days=n))
     except OverflowError as exc:
         print(str(exc))
+tick = timedelta(microseconds=1)
+maximum = timedelta(days=999999999, seconds=86399, microseconds=999999)
+minimum = timedelta(days=-999999999)
+print((zero - tick) + tick)
+print(maximum - timedelta(999999999, 86399, 999998))
+print(maximum - maximum)
+print((maximum + zero) is maximum)
+try:
+    print(maximum + tick)
+except OverflowError as exc:
+    print(str(exc))
+try:
+    print(minimum - tick)
+except OverflowError as exc:
+    print(str(exc))
 for d in [timedelta(days=1), timedelta(days=-1), timedelta(hours=-23, seconds=-1)]:
     try:
         print(timezone(d))

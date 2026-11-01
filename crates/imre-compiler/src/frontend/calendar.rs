@@ -85,8 +85,9 @@ pub(super) fn binary(
 ) -> Result<Expr, String> {
     use ast::Operator::{Add, Sub};
     let (kind, reverse, subtract) = match (a, b, node.op) {
-        (date @ (C::Date | C::DateTime), C::Delta, Add) => (date, false, false),
-        (date @ (C::Date | C::DateTime), C::Delta, Sub) => (date, false, true),
+        (kind @ (C::Date | C::DateTime | C::Delta), C::Delta, Add | Sub) => {
+            (kind, false, node.op == Sub)
+        }
         (C::Delta, date @ (C::Date | C::DateTime), Add) => (date, true, false),
         _ => {
             return Err(error(
