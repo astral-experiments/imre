@@ -18,7 +18,7 @@ mod email;
 mod files;
 mod fnmatch;
 mod formatters;
-mod functools;
+pub(super) mod functools;
 pub(super) mod hash_info;
 mod hashlib;
 mod hmac;
@@ -166,7 +166,12 @@ fn argument(args: &[Id], index: usize) -> Result<Id> {
 }
 
 /// Bind the one positional-or-keyword parameter of a Python function.
-fn single_argument(name: &str, param: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+pub(super) fn single_argument(
+    name: &str,
+    param: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
     let mut value = args.first().copied();
     for (key, arg) in kwargs {
         if key != param {
@@ -551,6 +556,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 ],
             )
         }
+        ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
@@ -631,7 +637,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
-        | ("functools", "lru_cache" | "_unbounded_cache" | "partial" | "update_wrapper")
+        | ("functools", "cache" | "lru_cache" | "_cache_wrapper" | "partial" | "update_wrapper")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
@@ -1584,7 +1590,9 @@ pub(super) fn call(
         "separators",
     ];
     let (max_args, keywords): (usize, &[&str]) = match name {
-        "functools.lru_cache" => (1, &["maxsize"]),
+        "functools.cache" => return functools::cache(ctx, args, kwargs),
+        "functools.lru_cache" => return functools::lru_cache(ctx, args, kwargs),
+        "functools._cache_wrapper" => (3, &[]),
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
@@ -1625,8 +1633,6 @@ pub(super) fn call(
         | "collections.defaultdict.__reduce__"
         | "functools._lru_cache_wrapper.cache_clear"
         | "functools._lru_cache_wrapper.cache_info"
-        | "functools._unbounded_cache"
-        | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
         | "file.readable"
@@ -1865,39 +1871,12 @@ pub(super) fn call(
             json::encode(ctx, input, kwargs, stream)?
         }
         "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
-        "functools.lru_cache" => {
-            if option(args, 0, kwargs, "maxsize")? == Some(NONE) {
-                let module = ctx.module("functools")?;
-                let decorating_function = ctx.lookup_attr(module, "_unbounded_lru_cache")?;
-                ctx.call(decorating_function, Vec::new(), Vec::new())?
-            } else if args.is_empty() && kwargs.is_empty() {
-                ctx.alloc(Value::Native("functools._cached".into()))
-            } else if args.len() == 1 && ctx.callable(args[0]) && kwargs.is_empty() {
-                functools::default_cache(ctx, args[0])?
-            } else {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "custom lru_cache parameters are unsupported",
-                ));
-            }
-        }
-        "functools._cached" => functools::default_cache(ctx, argument(args, 0)?)?,
-        "functools._cache_parameters" => {
-            let maxsize = ctx.text("maxsize");
-            let size = ctx.int(super::value::CACHE_CAPACITY as i64);
-            let typed = ctx.text("typed");
-            ctx.dict(vec![(maxsize, size), (typed, FALSE)])
-        }
-        "functools._unbounded_cache" => {
-            let function = argument(args, 0)?;
-            if !ctx.callable(function) {
-                return Err(Error::new(
-                    "TypeError",
-                    "the first argument must be callable",
-                ));
-            }
-            ctx.new_cache(function, true)
-        }
+        "functools._cache_wrapper" => functools::make_cache(
+            ctx,
+            argument(args, 0)?,
+            argument(args, 1)?,
+            argument(args, 2)?,
+        )?,
         "functools._lru_cache_wrapper.cache_info" | "functools._lru_cache_wrapper.cache_clear" => {
             functools::cache_method(ctx, name, argument(args, 0)?)?
         }

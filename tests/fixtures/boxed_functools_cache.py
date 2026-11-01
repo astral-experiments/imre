@@ -2,6 +2,9 @@ import functools
 
 
 def current():
+    assert "_CacheInfo" in functools.__dict__
+    from functools import _CacheInfo
+
     seen = []
 
     def work(*args, **kwargs):
@@ -44,6 +47,9 @@ def current():
         raise AssertionError('unhashable accepted')
     info = cached.cache_info()
     assert (info.hits, info.misses, info.maxsize, info.currsize) == (4, 165, None, 163)
+    assert type(info) is _CacheInfo
+    assert _CacheInfo is functools._CacheInfo
+    assert info == _CacheInfo(hits=4, misses=165, maxsize=None, currsize=163)
     assert info == (4, 165, None, 163)
     assert cached.__wrapped__(1) == 166
     assert cached(1) == 1

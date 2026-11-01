@@ -1,7 +1,7 @@
 use super::{option, tuple_text};
 use crate::dynamic::{
     Context,
-    value::{CACHE_CAPACITY, Error, Id, NONE, Result, Value},
+    value::{CACHE_CAPACITY, Error, FALSE, Id, NONE, Result, Value},
 };
 
 pub(super) const ASSIGNED: &[&str] = &[
@@ -14,18 +14,91 @@ pub(super) const ASSIGNED: &[&str] = &[
 ];
 pub(super) const UPDATED: &[&str] = &["__dict__"];
 
-pub(super) fn default_cache(ctx: &mut Context, function: Id) -> Result<Id> {
+pub(super) fn cache(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if kwargs.iter().any(|(key, _)| key == "user_function") {
+        return Err(Error::new(
+            "TypeError",
+            "cache() got some positional-only arguments passed as keyword arguments: 'user_function'",
+        ));
+    }
+    let function = super::single_argument("cache", "user_function", args, kwargs)?;
+    let module = ctx.module("functools")?;
+    let lru_cache = ctx.lookup_attr(module, "lru_cache")?;
+    let factory = ctx.call(lru_cache, Vec::new(), vec![("maxsize".into(), NONE)])?;
+    ctx.call(factory, vec![function], Vec::new())
+}
+
+pub(super) fn lru_cache(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [maxsize, typed] = super::builtins::bind("lru_cache", args, kwargs, ["maxsize", "typed"])?;
+    let mut maxsize = maxsize.unwrap_or_else(|| ctx.int(CACHE_CAPACITY as i64));
+    let typed = typed.unwrap_or(FALSE);
+    if ctx.as_int(maxsize).is_ok() {
+        let zero = ctx.int(0);
+        let negative = ctx.binary("<", maxsize, zero)?;
+        if ctx.truth(negative)? {
+            maxsize = zero;
+        }
+    } else if ctx.callable(maxsize) && matches!(ctx.heap.get(typed), Value::Bool(_)) {
+        let capacity = ctx.int(CACHE_CAPACITY as i64);
+        return wrap_cache(ctx, maxsize, capacity, typed);
+    } else if maxsize != NONE {
+        return Err(Error::new(
+            "TypeError",
+            "Expected first argument to be an integer, a callable, or None",
+        ));
+    }
+    // Computed-only imports can expose the intrinsic module without its bundled Python source.
+    let module = ctx.module("functools")?;
+    match ctx.lookup_attr(module, "_lru_cache_decorator") {
+        Ok(factory) => ctx.call(factory, vec![maxsize, typed], Vec::new()),
+        Err(error) if ctx.is_attribute_error(&error) => {
+            Ok(ctx.alloc(Value::CacheDecorator { maxsize, typed }))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn make_cache(ctx: &mut Context, function: Id, maxsize: Id, typed: Id) -> Result<Id> {
+    let typed_keys = ctx.truth(typed)?;
     if !ctx.callable(function) {
         return Err(Error::new(
             "TypeError",
             "the first argument must be callable",
         ));
     }
-    let wrapper = ctx.cached_function(function);
+    let capacity = if maxsize == NONE {
+        None
+    } else {
+        let n = ctx
+            .as_int(maxsize)?
+            .to_i64()
+            .and_then(|n| isize::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        ctx.type_name(maxsize)
+                    ),
+                )
+            })?;
+        Some(n.max(0) as usize)
+    };
+    Ok(ctx.new_cache(function, capacity, typed_keys))
+}
+
+// Attach the same public attributes when no Python decorating function was registered.
+pub(in crate::dynamic) fn wrap_cache(
+    ctx: &mut Context,
+    function: Id,
+    maxsize: Id,
+    typed: Id,
+) -> Result<Id> {
+    let wrapper = make_cache(ctx, function, maxsize, typed)?;
     let mark = ctx.heap.temporary_mark();
     ctx.heap.keep(wrapper);
     let result = (|| {
-        let parameters = ctx.alloc(Value::CacheParameters);
+        let parameters = ctx.alloc(Value::CacheParameters { maxsize, typed });
         ctx.set_attr(wrapper, "cache_parameters", parameters)?;
         update_wrapper(ctx, &[wrapper, function], &[])
     })();
@@ -83,10 +156,23 @@ pub(super) fn update_wrapper(
     Ok(wrapper)
 }
 
+pub(super) fn cache_info_type(ctx: &mut Context) -> Result<Id> {
+    if let Some(&class) = ctx.builtins.get("functools._CacheInfo") {
+        return Ok(class);
+    }
+    let name = ctx.text("CacheInfo");
+    let fields = ctx.text("hits misses maxsize currsize");
+    let module = ctx.text("functools");
+    let class =
+        super::super::namedtuple::factory(ctx, &[name, fields], &[("module".into(), module)])?;
+    ctx.builtins.insert("functools._CacheInfo".into(), class);
+    Ok(class)
+}
+
 pub(super) fn cache_method(ctx: &mut Context, name: &str, wrapper: Id) -> Result<Id> {
     let Value::Cached {
         table,
-        unbounded,
+        capacity,
         hits,
         misses,
         ..
@@ -110,26 +196,9 @@ pub(super) fn cache_method(ctx: &mut Context, name: &str, wrapper: Id) -> Result
         let clear = ctx.lookup_attr(table, "clear")?;
         return ctx.call(clear, Vec::new(), Vec::new());
     }
-    let class = if let Some(&class) = ctx.builtins.get("functools._CacheInfo") {
-        class
-    } else {
-        let class_name = ctx.text("CacheInfo");
-        let fields = ctx.text("hits misses maxsize currsize");
-        let module = ctx.text("functools");
-        let class = super::super::namedtuple::factory(
-            ctx,
-            &[class_name, fields],
-            &[("module".into(), module)],
-        )?;
-        ctx.builtins.insert("functools._CacheInfo".into(), class);
-        class
-    };
+    let class = cache_info_type(ctx)?;
     let size = ctx.dict_entries(table).unwrap().len() as i64;
-    let maxsize = if unbounded {
-        NONE
-    } else {
-        ctx.int(CACHE_CAPACITY as i64)
-    };
+    let maxsize = capacity.map_or(NONE, |size| ctx.int(size as i64));
     let args = vec![ctx.int(hits), ctx.int(misses), maxsize, ctx.int(size)];
     ctx.call(class, args, Vec::new())
 }
