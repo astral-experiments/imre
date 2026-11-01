@@ -2034,6 +2034,8 @@ impl Context {
                     self.bind(scope, name, stream);
                     self.bind(scope, original, stream);
                 }
+                let jit = stdlib::jit_module(self)?;
+                self.bind(scope, "_jit", jit);
             }
             "array" => {
                 let array = self.builtin("array.array");

@@ -49,6 +49,25 @@ mod traceback;
 pub(super) mod urllib;
 mod zipimport;
 
+/// The JIT observer is a sys attribute with its own namespace, outside the import cache.
+pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
+    let class = ctx.builtin("module");
+    let module = ctx.allocate_module(class);
+    let name = ctx.text("sys._jit");
+    let doc = ctx.text("Utilities for observing just-in-time compilation.");
+    ctx.init_module(module, &[name, doc], &[])?;
+    for leaf in ["is_available", "is_enabled", "is_active"] {
+        let callable = ctx.builtin(&format!("sys._jit.{leaf}"));
+        let function = ctx.alloc(Value::Method {
+            callable,
+            receiver: module,
+            explicit: false,
+        });
+        ctx.set_attr(module, leaf, function)?;
+    }
+    Ok(module)
+}
+
 pub(super) fn is_module(name: &str) -> bool {
     if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
         return true;
@@ -913,7 +932,18 @@ pub(super) fn call(
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
+            | "sys._jit.is_available"
+            | "sys._jit.is_enabled"
+            | "sys._jit.is_active"
     ) {
+        // The JIT functions are bound to their actual module object.
+        let args = if name.starts_with("sys._jit.") {
+            args.get(1..).ok_or_else(|| {
+                Error::new("TypeError", format!("{name}() requires a module receiver"))
+            })?
+        } else {
+            args
+        };
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -934,7 +964,9 @@ pub(super) fn call(
                 ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
             }
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
-            _ => ctx.default_encoding,
+            "sys.getdefaultencoding" => ctx.default_encoding,
+            // As in typed SysJitPredicate, Imre compiles before the process starts.
+            _ => FALSE,
         });
     }
     if name == "random.random" {
