@@ -2354,9 +2354,10 @@ impl Context {
             Value::Method {
                 callable,
                 explicit: false,
-                ..
+                receiver,
             } if let Value::Native(symbol) = self.heap.get(*callable)
-                && let Some(leaf) = symbol.strip_prefix("sys._jit.") =>
+                && matches!(self.heap.get(*receiver), Value::Module { .. })
+                && let Some((_, leaf)) = symbol.rsplit_once('.') =>
             {
                 format!("<built-in function {leaf}>")
             }

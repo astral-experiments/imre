@@ -586,6 +586,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         argv: NONE,
         sys_path: NONE,
         default_encoding: NONE,
+        audit_hooks: Vec::new(),
         contexts: Vec::new(),
         bytearray_exports: Vec::new(),
         sorting_lists: Vec::new(),
@@ -1331,6 +1332,7 @@ impl Context {
                 .chain(self.builtins.values())
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
+                .chain(&self.audit_hooks)
                 .copied()
                 .chain(self.contexts.iter().copied())
                 .chain(self.bytearray_exports.iter().copied())
