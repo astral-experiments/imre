@@ -11,11 +11,6 @@ def _validateCaseMethod(case, methodName):
 
 
 def _boxedCheckFixtures(cls):
-    # Inspect the defining module, including for cases re-exported under an alias.
-    module = __import__(cls.__module__, fromlist=("*",))
-    for name in ("setUpModule", "tearDownModule"):
-        if getattr(module, name, None) is not None:
-            raise NotImplementedError("native unittest does not yet support module hooks: " + name)
     if not issubclass(cls, TestCase):
         for name in ("addClassCleanup", "enterClassContext", "doClassCleanups"):
             if getattr(cls, name, None) is not None:
@@ -32,17 +27,10 @@ def _boxedCheckFixtures(cls):
                 break
 
 
-def _boxedCheckResult(result):
-    if (getattr(type(result), "addFailure", None) is not getattr(TestResult, "addFailure", None)
-            or getattr(type(result), "addError", None) is not getattr(TestResult, "addError", None)):
-        raise NotImplementedError("native unittest does not yet support custom result hooks: addFailure/addError")
-
-
 def _runRegistered(self, case, name):
     cls = type(case)
     method_name = case._testMethodName
     method = getattr(case, method_name)
-    _boxedCheckResult(self)
     if not name and isinstance(self, TextTestResult):
         name = str(case)
         if self.descriptions:
@@ -82,6 +70,40 @@ def _caseStr(self):
     return method + " (" + cls.__module__ + "." + cls.__qualname__ + "." + method + ")"
 
 
+def _caseCallSetUp(self):
+    self.setUp()
+
+
+def _caseCallTestMethod(self, method):
+    value = method()
+    if value is not None:
+        import types
+        import warnings
+        message = (f"It is deprecated to return a value that is not None "
+                   f"from a test case ({method} returned {type(value).__name__!r})")
+        if isinstance(value, getattr(types, "CoroutineType", ())):
+            message += ". Maybe you forgot to use IsolatedAsyncioTestCase as the base class?"
+        warnings.warn(message, DeprecationWarning, stacklevel=3)
+
+
+def _caseCallTearDown(self):
+    self.tearDown()
+
+
+def _caseDebug(self):
+    method = getattr(self, self._testMethodName)
+    if getattr(type(self), "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
+        reason = getattr(type(self), "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
+        raise SkipTest(reason)
+    self._callSetUp()
+    self._callTestMethod(method)
+    self._callTearDown()
+    cleanups = getattr(self, "_cleanups", ())
+    while cleanups:
+        function, args, kwargs = cleanups.pop()
+        self._callCleanup(function, *args, **kwargs)
+
+
 def _caseRun(self, result=None):
     if result is None:
         result = TestResult()
@@ -91,7 +113,8 @@ def _caseRun(self, result=None):
         finally:
             result.stopTestRun()
     else:
-        result._runRegistered(self, "")
+        dispatch = result if isinstance(result, TestResult) else _CaseResultDispatch(result)
+        dispatch._runRegistered(self, "")
     return result
 
 
@@ -207,35 +230,34 @@ class _ErrorHolder:
     __call__ = run
 
 
-def _boxedClassPhase(cls, method, result):
-    hook = getattr(cls, method, None)
+def _boxedFixturePhase(hook, method, parent, result):
     if hook is None:
         return True
     try:
         hook()
     except Exception as exc:
-        _boxedClassProblem(cls, method, result, exc, exc.__traceback__)
+        if isinstance(result, _DebugResult):
+            raise
+        _boxedFixtureProblem(parent, method, result, exc, exc.__traceback__)
         return False
     return True
 
 
-def _boxedClassProblem(cls, method, result, exc, tb):
-    label = method + " (" + cls.__module__ + "." + cls.__qualname__ + ")"
+def _boxedFixtureProblem(parent, method, result, exc, tb):
+    label = method + " (" + parent + ")"
     holder = _ErrorHolder(label)
-    result._startCase(label)
+    if isinstance(result, TextTestResult):
+        result._startCase(label)
     if isinstance(exc, SkipTest):
         result.addSkip(holder, str(exc))
-        result._mark("s", "skipped " + repr(str(exc)))
+        if isinstance(result, TextTestResult):
+            result._mark("s", "skipped " + repr(str(exc)))
     else:
-        import traceback
-        # Both the hook invocation and the cleanup invocation start in unittest.
-        if tb is not None:
-            tb = tb.tb_next
-        detail = "".join(traceback.format_exception(type(exc), exc, tb))
-        result.errors.append((holder, detail))
-        result._mark("E", "ERROR")
-        if result.failfast:
-            result.stop()
+        result.addError(holder, (type(exc), exc, tb))
+
+
+def _boxedClassPhase(cls, method, result):
+    return _boxedFixturePhase(getattr(cls, method, None), method, cls.__module__ + "." + cls.__qualname__, result)
 
 
 def _boxedClassCleanups(cls, method, result):
@@ -243,14 +265,44 @@ def _boxedClassCleanups(cls, method, result):
     if hook is not None:
         hook()
         for _, exc, tb in cls.tearDown_exceptions:
-            _boxedClassProblem(cls, method, result, exc, tb)
+            if isinstance(result, _DebugResult):
+                raise exc
+            _boxedFixtureProblem(cls.__module__ + "." + cls.__qualname__, method, result, exc, tb)
 
 
 def _boxedTearDownClass(cls, result):
-    if (cls is not None and not getattr(cls, "_classSetupFailed", False)
+    if (cls is not None and not getattr(result, "_moduleSetUpFailed", False)
+            and not getattr(cls, "_classSetupFailed", False)
             and not getattr(cls, "__unittest_skip__", False)):
         _boxedClassPhase(cls, "tearDownClass", result)
         _boxedClassCleanups(cls, "tearDownClass", result)
+
+
+def _boxedTearDownModule(previous, result):
+    if previous is None or getattr(result, "_moduleSetUpFailed", False):
+        return
+    name = previous.__module__
+    try:
+        module = sys.modules[name]
+    except KeyError:
+        return
+    _boxedFixturePhase(getattr(module, "tearDownModule", None), "tearDownModule", name, result)
+    _boxedFixturePhase(case.doModuleCleanups, "tearDownModule", name, result)
+
+
+def _boxedSetUpModule(previous, cls, result):
+    name = cls.__module__
+    if previous is not None and name == previous.__module__:
+        return
+    _boxedTearDownModule(previous, result)
+    result._moduleSetUpFailed = False
+    try:
+        module = sys.modules[name]
+    except KeyError:
+        return
+    if not _boxedFixturePhase(getattr(module, "setUpModule", None), "setUpModule", name, result):
+        result._moduleSetUpFailed = True
+        _boxedFixturePhase(case.doModuleCleanups, "setUpModule", name, result)
 
 
 def _boxedIsLeaf(test):
@@ -261,7 +313,17 @@ def _boxedIsLeaf(test):
     return False
 
 
-def _suiteRun(self, result):
+class _DebugResult:
+    _previousTestClass = None
+    _moduleSetUpFailed = False
+    shouldStop = False
+
+
+def _suiteDebug(self):
+    self.run(_DebugResult(), True)
+
+
+def _suiteRun(self, result, debug=False):
     outer = not getattr(result, "_testRunEntered", False)
     if outer:
         result._testRunEntered = True
@@ -271,12 +333,13 @@ def _suiteRun(self, result):
                 break
             if _boxedIsLeaf(test):
                 cls = type(test)
-                _boxedCheckFixtures(cls)
-                _boxedCheckResult(result)
+                if not debug:
+                    _boxedCheckFixtures(cls)
                 previous = getattr(result, "_previousTestClass", None)
                 if cls is not previous:
                     _boxedTearDownClass(previous, result)
-                    if not getattr(cls, "__unittest_skip__", False):
+                    _boxedSetUpModule(previous, cls, result)
+                    if not getattr(result, "_moduleSetUpFailed", False) and not getattr(cls, "__unittest_skip__", False):
                         try:
                             cls._classSetupFailed = False
                         except TypeError:
@@ -285,13 +348,18 @@ def _suiteRun(self, result):
                             cls._classSetupFailed = True
                             _boxedClassCleanups(cls, "setUpClass", result)
                     result._previousTestClass = cls
-                if getattr(cls, "_classSetupFailed", False):
+                if getattr(cls, "_classSetupFailed", False) or getattr(result, "_moduleSetUpFailed", False):
                     continue
-            test(result)
+            if debug:
+                test.debug()
+            else:
+                test(result)
             if self._cleanup:
                 self._removeTestAtIndex(index)
         if outer:
-            _boxedTearDownClass(getattr(result, "_previousTestClass", None), result)
+            previous = getattr(result, "_previousTestClass", None)
+            _boxedTearDownClass(previous, result)
+            _boxedTearDownModule(previous, result)
     finally:
         if outer:
             result._testRunEntered = False
@@ -307,6 +375,10 @@ TestCase.__eq__ = _caseEqual
 TestCase.__hash__ = _caseHash
 TestCase.shortDescription = _caseShortDescription
 TestCase.__str__ = _caseStr
+TestCase._callSetUp = _caseCallSetUp
+TestCase._callTestMethod = _caseCallTestMethod
+TestCase._callTearDown = _caseCallTearDown
+TestCase.debug = _caseDebug
 TestCase.run = _caseRun
 TestCase.__call__ = _callTest
 TestSuite._cleanup = True
@@ -318,5 +390,6 @@ TestSuite.countTestCases = _suiteCount
 TestSuite.addTest = _suiteAddTest
 TestSuite.addTests = _suiteAddTests
 TestSuite._removeTestAtIndex = _suiteRemoveTest
+TestSuite.debug = _suiteDebug
 TestSuite.run = _suiteRun
 TestSuite.__call__ = _callTest

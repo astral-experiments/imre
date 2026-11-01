@@ -51,6 +51,10 @@ fn stat_mode_source() -> Option<&'static str> {
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "unittest.case" => Some((
+            "unittest/case.py",
+            include_str!("../stdlib/unittest/boxed_case.py"),
+        )),
         "__hello__" => Some(("__hello__.py", include_str!("../stdlib/__hello__.py"))),
         "stat" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();

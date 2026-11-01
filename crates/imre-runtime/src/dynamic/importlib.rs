@@ -263,7 +263,11 @@ impl Context {
         original: &str,
         filesystem: bool,
     ) -> Result<Id> {
-        if let Some(&module) = self.modules.get(fullname) {
+        let key = self.text(fullname);
+        if let Some(module) = self.registered_module(key)? {
+            if module == NONE {
+                return Ok(NONE);
+            }
             return match self.lookup_attr(module, "__spec__") {
                 Ok(NONE) => Err(Error::new(
                     "ValueError",

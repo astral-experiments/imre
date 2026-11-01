@@ -106,7 +106,7 @@ pub(crate) struct Context {
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     codec_entries: stdlib::codecs::Registry,
     frozen_override: i32,
-    modules: HashMap<String, Id>,
+    modules: Id,
     classes: HashMap<String, Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
@@ -1782,6 +1782,28 @@ impl Context {
         .with_import(Some(name), None, None)
     }
 
+    fn registered_module(&mut self, name: Id) -> Result<Option<Id>> {
+        let (_, index) = self.find_dictionary_key(self.modules, name, None)?;
+        Ok(index.map(|i| self.stored_entries(self.modules)[i].1))
+    }
+
+    fn cached_import(&mut self, name: &str) -> Result<Option<Id>> {
+        let key = self.text(name);
+        match self.registered_module(key)? {
+            Some(NONE) => Err(Error::new(
+                "ModuleNotFoundError",
+                format!("import of {name} halted; None in sys.modules"),
+            )
+            .with_import(Some(name), None, None)),
+            module => Ok(module),
+        }
+    }
+
+    fn publish_module(&mut self, name: &str, module: Id) -> Result<()> {
+        let key = self.text(name);
+        self.put_item(self.modules, key, module)
+    }
+
     fn module(&mut self, name: &str) -> Result<Id> {
         self.find_module(name, false)?
             .ok_or_else(|| Self::missing_module(name))
@@ -1791,7 +1813,7 @@ impl Context {
     fn find_module(&mut self, mut name: &str, filesystem: bool) -> Result<Option<Id>> {
         let mut parents = Vec::new();
         let mut module = loop {
-            if let Some(&id) = self.modules.get(name) {
+            if let Some(id) = self.cached_import(name)? {
                 break Some(id);
             }
             let Some((parent, child)) = name.rsplit_once('.') else {
@@ -1819,7 +1841,7 @@ impl Context {
         filesystem: bool,
         parent: Option<(Id, &str)>,
     ) -> Result<Option<Id>> {
-        if let Some(&id) = self.modules.get(name) {
+        if let Some(id) = self.cached_import(name)? {
             return Ok(Some(id));
         }
         let mut locations = Vec::new();
@@ -1923,7 +1945,36 @@ impl Context {
             initializing: source.is_some(),
             constructor: None,
         });
-        self.modules.insert(name.to_owned(), module);
+        let key = self.text(name);
+        self.put_item(self.modules, key, module)?;
+        if let Err(e) = self.run_initializer(name, module, scope, name_id, origin, source) {
+            builtins::remove_dict_item(self, self.modules, key)?;
+            return Err(e);
+        }
+        // A script can delete its own __main__ binding. Its exit status is determined by the script.
+        if name == "__main__" {
+            return Ok(Some(module));
+        }
+        // An initializer can replace its own registry entry. The successful import
+        // returns that value and moves its binding after the dependencies it imported.
+        let loaded = self.get_item(self.modules, key)?;
+        self.delete_item(self.modules, key)?;
+        self.put_item(self.modules, key, loaded)?;
+        if let Some((parent, child)) = parent {
+            self.set_attr(parent, child, loaded)?;
+        }
+        Ok(Some(loaded))
+    }
+
+    fn run_initializer(
+        &mut self,
+        name: &str,
+        module: Id,
+        scope: Id,
+        name_id: Id,
+        origin: Option<Id>,
+        source: Option<(PathBuf, importlib::SourceBody)>,
+    ) -> Result<()> {
         match name {
             "os" => {
                 let path = self.module("posixpath")?;
@@ -1941,7 +1992,7 @@ impl Context {
                     self.bind(scope, name, value);
                 }
                 self.bind(scope, "path", path);
-                self.modules.insert("os.path".to_owned(), path);
+                self.publish_module("os.path", path)?;
             }
             "posixpath" => {
                 let pathsep = self.text(":");
@@ -1970,12 +2021,10 @@ impl Context {
             }
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => {
-                if let Err(error) = stdlib::readiness::initialize(self, scope) {
-                    self.modules.remove(name);
-                    return Err(error);
-                }
+                stdlib::readiness::initialize(self, scope)?;
             }
             "sys" => {
+                self.bind(scope, "modules", self.modules);
                 for (name, original, stderr) in [
                     ("stdout", "__stdout__", false),
                     ("stderr", "__stderr__", true),
@@ -2001,7 +2050,7 @@ impl Context {
                 self.bind(scope, "namedtuple", namedtuple);
                 let abc = self.module("_collections_abc")?;
                 self.bind(scope, "abc", abc);
-                self.modules.insert("collections.abc".to_owned(), abc);
+                self.publish_module("collections.abc", abc)?;
             }
             _ => {}
         }
@@ -2037,15 +2086,11 @@ impl Context {
                 unreachable!()
             };
             *initializing = false;
-            if let Err(error) = result {
-                self.modules.remove(name);
-                return Err(error);
-            }
+            result?;
             if name == "importlib"
                 && let Some(external) = self.scope_name(scope, "_bootstrap_external")
             {
-                self.modules
-                    .insert("importlib._bootstrap_external".to_owned(), external);
+                self.publish_module("importlib._bootstrap_external", external)?;
             }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")
@@ -2061,9 +2106,6 @@ impl Context {
                 self.classes.insert("decimal.Decimal".into(), class);
             }
         }
-        if let Some((parent, child)) = parent {
-            self.set_attr(parent, child, module)?;
-        }
-        Ok(Some(module))
+        Ok(())
     }
 }

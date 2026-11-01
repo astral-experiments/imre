@@ -25,11 +25,7 @@ impl Checker<'_> {
             .iter()
             .any(|name| entry.bindings.contains_key(*name))
         {
-            return Err(error(
-                self.source,
-                call,
-                "native unittest.main does not yet support module hooks",
-            ));
+            return Err(self.object_runtime_export("unittest module fixtures", call));
         }
         let mut clear = Vec::new();
         let runner = self.hidden(Type::Class(runner_class));
@@ -110,6 +106,11 @@ impl Checker<'_> {
         id: usize,
     ) -> Result<(), String> {
         if self.unittest_case(id) {
+            let class = &self.classes.declarations.definitions[id];
+            let bindings = &self.graph.modules[class.definition.module].bindings;
+            if bindings.contains_key("setUpModule") || bindings.contains_key("tearDownModule") {
+                return Err(self.object_runtime_export("unittest module fixtures", call));
+            }
             let attributes = self.fixed_class_attributes(id);
             if attributes.contains_key("setUpClass") || attributes.contains_key("tearDownClass") {
                 return Err(self.object_runtime_export("unittest class fixtures", call));
@@ -128,17 +129,6 @@ impl Checker<'_> {
             .find(|&&b| self.unittest_case(b))
             .map(|&b| self.classes.declarations.definitions[b].definition)
             .ok_or("missing TestCase base")?;
-        if ["setUpModule", "tearDownModule"].iter().any(|name| {
-            self.graph.modules[class.definition.module]
-                .bindings
-                .contains_key(*name)
-        }) {
-            return Err(error(
-                self.source,
-                call,
-                "native unittest does not yet support module hooks",
-            ));
-        }
         // Fixture lookup uses class declarations even when an inherited
         // classmethod has no explicit call site in the reachable method table.
         let mut seen = HashSet::new();

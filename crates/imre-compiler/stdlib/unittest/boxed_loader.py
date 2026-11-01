@@ -158,3 +158,7 @@ def main():
     suite = defaultTestLoader.loadTestsFromModule(__import__("__main__"))
     runner._runSuite(suite)
     runner._finish()
+
+
+import unittest.case as case
+from unittest.case import addModuleCleanup, doModuleCleanups, enterModuleContext
