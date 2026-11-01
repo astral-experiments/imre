@@ -1,5 +1,6 @@
 //! Closed process signatures preserve evaluation order and exact owned results.
 
+use super::calls::parameter;
 use super::*;
 use crate::ir::{PathOperation, ProcessCapture, ProcessOperation};
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
@@ -997,13 +998,11 @@ impl Checker<'_> {
         .collect::<Vec<_>>();
         if api != LaunchApi::Popen {
             let deadline = self.types.optional(Type::Float);
-            params.push(Parameter {
-                name: "timeout".into(),
-                ty: deadline,
-                default: Some(Expr::absent(deadline)),
-                sign_only: false,
-                kind: ParameterKind::KeywordOnly,
-            });
+            params.push(ParameterKind::KeywordOnly.parameter(
+                "timeout",
+                deadline,
+                Some(Expr::absent(deadline)),
+            ));
         }
         if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run) {
             let input = self
@@ -1053,34 +1052,16 @@ impl Checker<'_> {
         }
         if keyword("pass_fds").is_some() {
             streams |= 1 << 19;
-            params.push(Parameter {
-                name: "pass_fds".into(),
-                ty: Type::ListInt,
-                default: None,
-                sign_only: false,
-                kind: ParameterKind::KeywordOnly,
-            });
+            params.push(ParameterKind::KeywordOnly.parameter("pass_fds", Type::ListInt, None));
         }
         if keyword("pipesize").is_some() {
             streams |= 1 << 21;
-            params.push(Parameter {
-                name: "pipesize".into(),
-                ty: Type::Int,
-                default: None,
-                sign_only: false,
-                kind: ParameterKind::KeywordOnly,
-            });
+            params.push(ParameterKind::KeywordOnly.parameter("pipesize", Type::Int, None));
         }
         if keyword("restore_signals").is_some() {
             // The emitter packs this final boolean into the existing stream word.
             streams |= 1 << 20;
-            params.push(Parameter {
-                name: "restore_signals".into(),
-                ty: Type::Bool,
-                default: None,
-                sign_only: false,
-                kind: ParameterKind::KeywordOnly,
-            });
+            params.push(ParameterKind::KeywordOnly.parameter("restore_signals", Type::Bool, None));
         }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             if index >= child_options {
@@ -1298,13 +1279,7 @@ impl Checker<'_> {
             }
             "wait" => {
                 let timeout = self.types.optional(Type::Float);
-                let param = Parameter {
-                    name: "timeout".into(),
-                    ty: timeout,
-                    kind: ParameterKind::PositionalOrKeyword,
-                    default: Some(Expr::absent(timeout)),
-                    sign_only: false,
-                };
+                let param = parameter("timeout", timeout, Some(Expr::absent(timeout)));
                 let values =
                     self.arguments_with(call, &[param], args.pop(), |checker, _, argument| {
                         checker.deadline_value(argument)
@@ -1316,13 +1291,7 @@ impl Checker<'_> {
                 ));
             }
             "send_signal" => {
-                let param = Parameter {
-                    name: "sig".into(),
-                    ty: Type::Int,
-                    kind: ParameterKind::PositionalOrKeyword,
-                    default: None,
-                    sign_only: false,
-                };
+                let param = parameter("sig", Type::Int, None);
                 let values = self.arguments(call, &[param], args.pop())?;
                 return Ok(self.ordered_builtin(
                     Builtin::Process(ProcessOperation::PopenSignal),
@@ -1429,20 +1398,8 @@ impl Checker<'_> {
     pub(super) fn environ_get(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let optional = self.types.optional(Type::Str);
         let params = [
-            Parameter {
-                name: "key".to_owned(),
-                ty: Type::Str,
-                kind: ParameterKind::PositionalOrKeyword,
-                default: None,
-                sign_only: false,
-            },
-            Parameter {
-                name: "default".to_owned(),
-                ty: optional,
-                kind: ParameterKind::PositionalOrKeyword,
-                default: Some(Expr::absent(optional)),
-                sign_only: false,
-            },
+            parameter("key", Type::Str, None),
+            parameter("default", optional, Some(Expr::absent(optional))),
         ];
         let args = self.arguments_with(call, &params, None, |checker, index, argument| {
             if index == 0 {

@@ -30,6 +30,24 @@ pub(super) enum ParameterKind {
     KeywordRest,
 }
 
+impl ParameterKind {
+    /// Construct a parameter for a builtin call signature.
+    pub(super) fn parameter(self, name: &str, ty: Type, default: Option<Expr>) -> Parameter {
+        Parameter {
+            name: name.into(),
+            ty,
+            kind: self,
+            default,
+            sign_only: false,
+        }
+    }
+}
+
+/// A builtin parameter that accepts either a positional or a keyword argument.
+pub(super) fn parameter(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
+    ParameterKind::PositionalOrKeyword.parameter(name, ty, default)
+}
+
 #[derive(Clone)]
 pub(super) struct Parameter {
     pub name: String,

@@ -1,5 +1,6 @@
 //! Sealed pathlib operations retain concrete path storage and explicit UTF-8 I/O.
 
+use super::calls::parameter;
 use super::*;
 use crate::ir::PathOperation;
 
@@ -11,16 +12,6 @@ pub(super) fn operation(kind: PathOperation, ty: Type, args: Vec<Expr>) -> Expr 
     Expr {
         ty,
         kind: ExprKind::Builtin(Builtin::Path(kind), args),
-    }
-}
-
-fn parameter(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
-    Parameter {
-        name: name.to_owned(),
-        ty,
-        kind: ParameterKind::PositionalOrKeyword,
-        default,
-        sign_only: false,
     }
 }
 
@@ -303,10 +294,11 @@ impl Checker<'_> {
                     query,
                     PathQuery::Exists | PathQuery::Directory | PathQuery::File
                 ) {
-                    let param = Parameter {
-                        kind: ParameterKind::KeywordOnly,
-                        ..parameter("follow_symlinks", Type::Bool, Some(Expr::boolean(true)))
-                    };
+                    let param = ParameterKind::KeywordOnly.parameter(
+                        "follow_symlinks",
+                        Type::Bool,
+                        Some(Expr::boolean(true)),
+                    );
                     let args = self.arguments_with(
                         call,
                         &[param],
@@ -364,10 +356,11 @@ impl Checker<'_> {
             }
             let mut params = vec![parameter("other", Type::Str, None)];
             if name == "relative_to" {
-                params.push(Parameter {
-                    kind: ParameterKind::KeywordOnly,
-                    ..parameter("walk_up", Type::Bool, Some(Expr::boolean(false)))
-                });
+                params.push(ParameterKind::KeywordOnly.parameter(
+                    "walk_up",
+                    Type::Bool,
+                    Some(Expr::boolean(false)),
+                ));
             }
             let arguments =
                 self.arguments_with(call, &params, Some(receiver), |checker, i, arg| {
@@ -413,10 +406,11 @@ impl Checker<'_> {
                     Type::Str,
                     None,
                 ),
-                Parameter {
-                    kind: ParameterKind::KeywordOnly,
-                    ..parameter("case_sensitive", optional_bool, Some(default))
-                },
+                ParameterKind::KeywordOnly.parameter(
+                    "case_sensitive",
+                    optional_bool,
+                    Some(default),
+                ),
             ];
             let arguments =
                 self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
@@ -975,14 +969,12 @@ impl Checker<'_> {
         let default = self.coerce(Expr::none(), optional, call)?;
         let params = [
             parameter("pattern", Type::Str, None),
-            Parameter {
-                kind: ParameterKind::KeywordOnly,
-                ..parameter("case_sensitive", optional, Some(default))
-            },
-            Parameter {
-                kind: ParameterKind::KeywordOnly,
-                ..parameter("recurse_symlinks", Type::Bool, Some(Expr::boolean(false)))
-            },
+            ParameterKind::KeywordOnly.parameter("case_sensitive", optional, Some(default)),
+            ParameterKind::KeywordOnly.parameter(
+                "recurse_symlinks",
+                Type::Bool,
+                Some(Expr::boolean(false)),
+            ),
         ];
         let args = self.arguments_with(call, &params, Some(receiver), |checker, i, value| {
             if i == 0 {

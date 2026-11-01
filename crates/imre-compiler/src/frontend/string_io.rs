@@ -1,19 +1,10 @@
 //! Bind text stream operations without losing the cursor when a StringIO is used as TextIO.
 
+use super::calls::parameter;
 use super::*;
 use ir::StringIoOperation as Op;
 
 /// The C constructor accepts keywords; its cursor and read methods take positional arguments only.
-fn parameter(name: &str, ty: Type, kind: ParameterKind, default: Option<Expr>) -> Parameter {
-    Parameter {
-        name: name.into(),
-        ty,
-        kind,
-        default,
-        sign_only: false,
-    }
-}
-
 /// Stream capabilities raise on a closed StringIO, including those that are false.
 fn string_io_flag(receiver: &Expr, enabled: bool) -> Expr {
     let open = Expr {
@@ -186,18 +177,8 @@ impl Checker<'_> {
             call,
         )?;
         let params = [
-            parameter(
-                "initial_value",
-                string,
-                ParameterKind::PositionalOrKeyword,
-                Some(none),
-            ),
-            parameter(
-                "newline",
-                string,
-                ParameterKind::PositionalOrKeyword,
-                Some(lf),
-            ),
+            parameter("initial_value", string, Some(none)),
+            parameter("newline", string, Some(lf)),
         ];
         let args = self.arguments(call, &params, None)?;
         Ok(self.ordered_builtin(Builtin::StringIo(Op::New), Type::StringIO, args))
@@ -246,7 +227,7 @@ impl Checker<'_> {
         let integer = self.types.optional(Type::Int);
         let none = self.coerce(Expr::none(), integer, call)?;
         let pos = ParameterKind::PositionalOnly;
-        let size = || parameter("size", integer, pos, Some(none.clone()));
+        let size = || pos.parameter("size", integer, Some(none.clone()));
         let (op, returns, params) = match name {
             "getvalue" => (Op::Value, Type::Str, vec![]),
             "readlines" => (Op::Readlines, self.types.list(Type::Str), vec![size()]),
@@ -255,8 +236,8 @@ impl Checker<'_> {
                 Op::Seek,
                 Type::Int,
                 vec![
-                    parameter("pos", Type::Int, pos, None),
-                    parameter("whence", Type::Int, pos, Some(logging::number(0))),
+                    pos.parameter("pos", Type::Int, None),
+                    pos.parameter("whence", Type::Int, Some(logging::number(0))),
                 ],
             ),
             "tell" => (Op::Position, Type::Int, vec![]),

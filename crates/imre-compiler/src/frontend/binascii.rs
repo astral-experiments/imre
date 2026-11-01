@@ -2,16 +2,6 @@
 
 use super::*;
 
-fn param(name: &str, ty: Type, kind: ParameterKind, default: Option<Expr>) -> Parameter {
-    Parameter {
-        name: name.into(),
-        ty,
-        kind,
-        default,
-        sign_only: false,
-    }
-}
-
 fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
     Expr {
         ty: Type::Bytes,
@@ -27,8 +17,8 @@ impl Checker<'_> {
             kind: ExprKind::Int("1".into()),
         };
         let params = [
-            param("data", Type::Bytes, ParameterKind::PositionalOnly, None),
-            param("value", Type::Int, ParameterKind::PositionalOnly, Some(one)),
+            ParameterKind::PositionalOnly.parameter("data", Type::Bytes, None),
+            ParameterKind::PositionalOnly.parameter("value", Type::Int, Some(one)),
         ];
         let args = self.arguments_with(call, &params, None, |checker, _, node| {
             checker.evaluated_argument(node)
@@ -131,11 +121,10 @@ impl Checker<'_> {
         decode: bool,
     ) -> Result<Expr, String> {
         let params = [
-            param("data", Type::Bytes, ParameterKind::PositionalOnly, None),
-            param(
+            ParameterKind::PositionalOnly.parameter("data", Type::Bytes, None),
+            ParameterKind::KeywordOnly.parameter(
                 if decode { "strict_mode" } else { "newline" },
                 Type::Bool,
-                ParameterKind::KeywordOnly,
                 Some(Expr::boolean(!decode)),
             ),
         ];
@@ -164,16 +153,11 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let kind = ParameterKind::PositionalOrKeyword;
         let mut params = vec![
-            param("s", Type::Bytes, kind, None),
-            param("altchars", Type::None, kind, Some(Expr::none())),
+            kind.parameter("s", Type::Bytes, None),
+            kind.parameter("altchars", Type::None, Some(Expr::none())),
         ];
         if decode {
-            params.push(param(
-                "validate",
-                Type::Bool,
-                kind,
-                Some(Expr::boolean(false)),
-            ));
+            params.push(kind.parameter("validate", Type::Bool, Some(Expr::boolean(false))));
         }
         let args =
             self.arguments_with(call, &params, None, |c, _, arg| c.evaluated_argument(arg))?;

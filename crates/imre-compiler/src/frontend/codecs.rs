@@ -1,4 +1,5 @@
 //! Native codec registry lookup and stateless byte/text conversion.
+use super::calls::parameter;
 use super::*;
 use crate::ir::WriterOperation as Writer;
 
@@ -6,16 +7,6 @@ pub(super) fn writer(op: Writer, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
         kind: ExprKind::Builtin(Builtin::CodecWriter(op), args),
-    }
-}
-
-fn parameter(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
-    Parameter {
-        name: name.into(),
-        ty,
-        default,
-        kind: ParameterKind::PositionalOrKeyword,
-        sign_only: false,
     }
 }
 

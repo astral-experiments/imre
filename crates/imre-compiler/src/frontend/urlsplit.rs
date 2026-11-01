@@ -2,18 +2,13 @@
 mod resolution;
 mod urlencode;
 
+use super::calls::parameter;
 use super::*;
 use crate::ir::{TextOperation, UrlProperty};
 use crate::types::{SPLIT_RESULT, SPLIT_RESULT_BYTES};
 
 fn slot(name: &str, default: Option<Expr>) -> Parameter {
-    Parameter {
-        name: name.into(),
-        ty: Type::None,
-        default,
-        kind: ParameterKind::PositionalOrKeyword,
-        sign_only: false,
-    }
+    parameter(name, Type::None, default)
 }
 
 impl Checker<'_> {

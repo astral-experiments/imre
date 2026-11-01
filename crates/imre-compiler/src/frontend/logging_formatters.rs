@@ -1,4 +1,5 @@
 //! Bind logging formatters while retaining the caller's actual defaults dictionary.
+use super::calls::parameter;
 use super::*;
 use ir::FormatterOperation as Op;
 
@@ -8,25 +9,16 @@ fn op(kind: Op, ty: Type, args: Vec<Expr>) -> Expr {
         kind: ExprKind::Builtin(Builtin::Formatter(kind), args),
     }
 }
-fn param(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
-    Parameter {
-        name: name.into(),
-        ty,
-        default,
-        kind: ParameterKind::PositionalOrKeyword,
-        sign_only: false,
-    }
-}
 impl Checker<'_> {
     pub(super) fn log_formatter(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let string = self.types.optional(Type::Str);
-        let mut defaults = param("defaults", Type::None, Some(Expr::none()));
+        let mut defaults = parameter("defaults", Type::None, Some(Expr::none()));
         defaults.kind = ParameterKind::KeywordOnly;
         let params = [
-            param("fmt", string, Some(Expr::absent(string))),
-            param("datefmt", string, Some(Expr::absent(string))),
-            param("style", Type::Str, Some(unpacking::string("%"))),
-            param("validate", Type::Bool, Some(Expr::boolean(true))),
+            parameter("fmt", string, Some(Expr::absent(string))),
+            parameter("datefmt", string, Some(Expr::absent(string))),
+            parameter("style", Type::Str, Some(unpacking::string("%"))),
+            parameter("validate", Type::Bool, Some(Expr::boolean(true))),
             defaults,
         ];
         let args = self.arguments_with(call, &params, None, |this, i, arg| {
@@ -102,7 +94,7 @@ impl Checker<'_> {
         attr: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let rec = param("record", Type::LogRecord, None);
+        let rec = parameter("record", Type::LogRecord, None);
         let (kind, ty, params) = match attr.attr.as_str() {
             "usesTime" => (Op::UsesTime, Type::Bool, vec![]),
             "format" => (Op::Format, Type::Str, vec![rec]),
@@ -112,11 +104,11 @@ impl Checker<'_> {
                 (
                     Op::Time,
                     Type::Str,
-                    vec![rec, param("datefmt", s, Some(Expr::absent(s)))],
+                    vec![rec, parameter("datefmt", s, Some(Expr::absent(s)))],
                 )
             }
             "formatStack" => {
-                let params = [param("stack_info", Type::Str, None)];
+                let params = [parameter("stack_info", Type::Str, None)];
                 let args = self.arguments(call, &params, Some(f))?;
                 // This operation still evaluates and keeps its receiver before the argument.
                 return Ok(self.ordered_builtin(Builtin::Formatter(Op::Stack), Type::Str, args));

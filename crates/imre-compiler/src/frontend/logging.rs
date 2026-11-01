@@ -1,4 +1,5 @@
 //! Bind the standard logger registry and keep message conversion behind the level check.
+use super::calls::parameter;
 use super::*;
 use ir::LogOperation as Log;
 
@@ -20,26 +21,6 @@ fn text(value: &str) -> Expr {
     Expr {
         ty: Type::Str,
         kind: ExprKind::Str(value.to_owned()),
-    }
-}
-
-fn parameter(name: &str, ty: Type, kind: ParameterKind, default: Expr) -> Parameter {
-    Parameter {
-        name: name.to_owned(),
-        ty,
-        kind,
-        default: Some(default),
-        sign_only: false,
-    }
-}
-
-fn required(name: &str, ty: Type) -> Parameter {
-    Parameter {
-        name: name.into(),
-        ty,
-        kind: ParameterKind::PositionalOrKeyword,
-        default: None,
-        sign_only: false,
     }
 }
 
@@ -87,7 +68,7 @@ impl Checker<'_> {
             "write" => (
                 Log::WriteStream,
                 self.types.optional(Type::Int),
-                vec![required("s", Type::Str)],
+                vec![parameter("s", Type::Str, None)],
             ),
             "flush" => (Log::FlushStream, Type::None, vec![]),
             _ => {
@@ -123,25 +104,25 @@ impl Checker<'_> {
                 Log::Emit,
                 Type::None,
                 vec![
-                    required("logger", Type::Logger),
-                    required("level", Type::Int),
-                    required("record", Type::LogRecord),
-                    required("found", Type::Bool),
+                    parameter("logger", Type::Logger, None),
+                    parameter("level", Type::Int, None),
+                    parameter("record", Type::LogRecord, None),
+                    parameter("found", Type::Bool, None),
                 ],
             ),
             Intrinsic::HandlerRename => (
                 Log::HandlerRename,
                 Type::None,
                 vec![
-                    required("handler", handler),
-                    required("old", optional_name),
-                    required("new", optional_name),
+                    parameter("handler", handler, None),
+                    parameter("old", optional_name, None),
+                    parameter("new", optional_name, None),
                 ],
             ),
             Intrinsic::HandlerLookup => (
                 Log::HandlerLookup,
                 self.types.optional(handler),
-                vec![required("name", Type::Str)],
+                vec![parameter("name", Type::Str, None)],
             ),
             Intrinsic::FileEncodingUsesUtf8 => (Log::FileEncodingUsesUtf8, Type::Bool, vec![]),
             Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
@@ -157,7 +138,7 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let parameters = [required("config", documents::MAP)];
+        let parameters = [parameter("config", documents::MAP, None)];
         let mut scalar = None;
         let mut args = self.arguments_with(call, &parameters, None, |checker, _, argument| {
             if matches!(argument, ast::Expr::Dict(_)) {
@@ -192,24 +173,17 @@ impl Checker<'_> {
     /// Read the configuration path only after evaluating all call arguments.
     pub(super) fn logging_file_config(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let parameters = [
-            required("fname", Type::Str),
-            parameter(
-                "defaults",
-                Type::None,
-                ParameterKind::PositionalOrKeyword,
-                Expr::none(),
-            ),
+            parameter("fname", Type::Str, None),
+            parameter("defaults", Type::None, Some(Expr::none())),
             parameter(
                 "disable_existing_loggers",
                 Type::Bool,
-                ParameterKind::PositionalOrKeyword,
-                Expr::boolean(true),
+                Some(Expr::boolean(true)),
             ),
             parameter(
                 "encoding",
                 self.types.optional(Type::Str),
-                ParameterKind::PositionalOrKeyword,
-                Expr::absent(self.types.optional(Type::Str)),
+                Some(Expr::absent(self.types.optional(Type::Str))),
             ),
         ];
         let args = self.arguments(call, &parameters, None)?;
@@ -237,19 +211,14 @@ impl Checker<'_> {
                 self.arguments(
                     call,
                     &[
-                        required("level", Type::Int),
-                        required("levelName", Type::Str),
+                        parameter("level", Type::Int, None),
+                        parameter("levelName", Type::Str, None),
                     ],
                     None,
                 )?,
             ),
             Intrinsic::LoggingDisable => {
-                let params = [parameter(
-                    "level",
-                    Type::Int,
-                    ParameterKind::PositionalOrKeyword,
-                    number(50),
-                )];
+                let params = [parameter("level", Type::Int, Some(number(50)))];
                 (
                     Log::Disable,
                     Type::None,
@@ -266,7 +235,7 @@ impl Checker<'_> {
             Intrinsic::GetLevelName => {
                 let args = self.arguments_with(
                     call,
-                    &[required("level", Type::Int)],
+                    &[parameter("level", Type::Int, None)],
                     None,
                     |checker, _, arg| Ok(Self::string_value(checker.expr(arg)?)),
                 )?;
@@ -298,12 +267,7 @@ impl Checker<'_> {
 
     pub(super) fn get_logger(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let name = self.types.optional(Type::Str);
-        let params = [parameter(
-            "name",
-            name,
-            ParameterKind::PositionalOrKeyword,
-            Expr::absent(name),
-        )];
+        let params = [parameter("name", name, Some(Expr::absent(name)))];
         let args = self.arguments(call, &params, None)?;
         Ok(self.ordered_builtin(Builtin::Logging(Log::Get), Type::Logger, args))
     }
@@ -311,13 +275,8 @@ impl Checker<'_> {
     /// Validate the level inside the constructor, after all caller expressions ran.
     pub(super) fn new_logger(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let params = [
-            required("name", Type::Str),
-            parameter(
-                "level",
-                Type::Int,
-                ParameterKind::PositionalOrKeyword,
-                number(0),
-            ),
+            parameter("name", Type::Str, None),
+            parameter("level", Type::Int, Some(number(0))),
         ];
         let mut scope = calls::ArgumentScope::default();
         let args = self.bind_supplied(
@@ -377,17 +336,17 @@ impl Checker<'_> {
         let default_errors = self.coerce(text("backslashreplace"), string, call)?;
         let kw = ParameterKind::KeywordOnly;
         let mut params = vec![
-            parameter("level", level, kw, Expr::absent(level)),
-            parameter("format", string, kw, Expr::absent(string)),
-            parameter("datefmt", string, kw, Expr::absent(string)),
-            parameter("force", Type::Bool, kw, Expr::boolean(false)),
-            parameter("stream", output, kw, Expr::absent(output)),
-            parameter("style", Type::Str, kw, text("%")),
-            parameter("handlers", handlers, kw, Expr::absent(handlers)),
-            parameter("filename", filename, kw, Expr::absent(filename)),
-            parameter("filemode", Type::Str, kw, text("a")),
-            parameter("encoding", string, kw, Expr::absent(string)),
-            parameter("errors", string, kw, default_errors),
+            kw.parameter("level", level, Some(Expr::absent(level))),
+            kw.parameter("format", string, Some(Expr::absent(string))),
+            kw.parameter("datefmt", string, Some(Expr::absent(string))),
+            kw.parameter("force", Type::Bool, Some(Expr::boolean(false))),
+            kw.parameter("stream", output, Some(Expr::absent(output))),
+            kw.parameter("style", Type::Str, Some(text("%"))),
+            kw.parameter("handlers", handlers, Some(Expr::absent(handlers))),
+            kw.parameter("filename", filename, Some(Expr::absent(filename))),
+            kw.parameter("filemode", Type::Str, Some(text("a"))),
+            kw.parameter("encoding", string, Some(Expr::absent(string))),
+            kw.parameter("errors", string, Some(default_errors)),
         ];
         let known = params.len();
         let mut unused = Vec::new();
@@ -400,10 +359,7 @@ impl Checker<'_> {
                 unused.push(name);
                 unused_with_handlers.push(name);
                 if !params[known..].iter().any(|p| p.name == name) {
-                    params.push(Parameter {
-                        kind: kw,
-                        ..required(name, Type::None)
-                    });
+                    params.push(kw.parameter(name, Type::None, None));
                 }
             } else if name == "filemode" {
                 unused_with_handlers.push(name);
@@ -532,7 +488,7 @@ impl Checker<'_> {
 
     pub(super) fn new_log_manager(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let root = self.types.optional(Type::Logger);
-        let args = self.arguments(call, &[required("rootnode", root)], None)?;
+        let args = self.arguments(call, &[parameter("rootnode", root, None)], None)?;
         Ok(self.ordered_builtin(Builtin::Logging(Log::NewManager), Type::LogManager, args))
     }
 
@@ -626,7 +582,7 @@ impl Checker<'_> {
             let handler = self.handler_type().ok_or_else(|| {
                 error(self.source, attribute, "missing logging.Handler definition")
             })?;
-            let args = self.arguments(call, &[required("hdlr", handler)], Some(logger))?;
+            let args = self.arguments(call, &[parameter("hdlr", handler, None)], Some(logger))?;
             let op = if attribute.attr.as_str() == "addHandler" {
                 Log::AddHandler
             } else {
@@ -649,7 +605,7 @@ impl Checker<'_> {
         if attribute.attr.as_str() == "setLevel" {
             let args = self.arguments_with(
                 call,
-                &[required("level", Type::Int)],
+                &[parameter("level", Type::Int, None)],
                 Some(logger),
                 |checker, _, arg| checker.checked_logging_level(arg),
             )?;
