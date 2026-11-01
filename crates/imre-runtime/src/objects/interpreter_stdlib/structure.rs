@@ -1,4 +1,4 @@
-//! The unsigned integer and native pointer formats of Python's struct module.
+//! Integer, pointer, byte string, and padding fields in native struct records.
 
 #[derive(Clone, Copy)]
 struct Field {
@@ -8,9 +8,17 @@ struct Field {
     width: usize,
 }
 
+/// A value decoded from a struct record. Padding contributes no value.
+#[derive(Debug, PartialEq)]
+pub(crate) enum UnpackedField {
+    Integer(u64),
+    Bytes(Vec<u8>),
+}
+
 pub(crate) struct StructFormat {
     little_endian: bool,
     pub(crate) size: usize,
+    pub(crate) item_count: usize,
     fields: Vec<Field>,
 }
 
@@ -29,6 +37,7 @@ impl StructFormat {
                 _ => cfg!(target_endian = "little"),
             },
             size: 0,
+            item_count: 0,
             fields: Vec::new(),
         };
         let mut repeat = None;
@@ -40,6 +49,7 @@ impl StructFormat {
                         .unwrap_or(0usize)
                         .checked_mul(10)
                         .and_then(|n| n.checked_add(usize::from(c - b'0')))
+                        .filter(|&n| n <= isize::MAX as usize)
                         .ok_or(overflow)?,
                 );
                 continue;
@@ -47,15 +57,23 @@ impl StructFormat {
             if c.is_ascii_whitespace() && repeat.is_none() {
                 continue;
             }
+            let repeat_count = repeat.take().unwrap_or(1);
+            let count = if c == b's' { 1 } else { repeat_count };
             let (width, alignment) = match c {
+                b's' => (repeat_count, 1),
+                b'L' if prefix == b'@' => (
+                    size_of::<std::ffi::c_ulong>(),
+                    align_of::<std::ffi::c_ulong>(),
+                ),
+                b'L' => (4, 1),
                 b'B' => (1, 1),
                 b'H' => (2, align_of::<u16>()),
                 b'I' => (4, align_of::<u32>()),
                 b'Q' => (8, align_of::<u64>()),
+                b'x' => (1, 1),
                 b'P' if prefix == b'@' => (size_of::<usize>(), align_of::<usize>()),
                 _ => return Err("bad char in struct format".into()),
             };
-            let count = repeat.take().unwrap_or(1);
             let offset = if prefix == b'@' {
                 result
                     .size
@@ -68,6 +86,14 @@ impl StructFormat {
                 .checked_mul(width)
                 .and_then(|n| n.checked_add(offset))
                 .filter(|&size| size <= isize::MAX as usize)
+                .ok_or(overflow)?;
+            if c == b'x' {
+                continue; // Padding occupies bytes without consuming a value.
+            }
+            result.item_count = result
+                .item_count
+                .checked_add(count)
+                .filter(|&n| n <= isize::MAX as usize)
                 .ok_or(overflow)?;
             result.fields.push(Field {
                 code: c,
@@ -82,53 +108,44 @@ impl StructFormat {
         Ok(result)
     }
 
-    pub(crate) fn item_count(&self) -> usize {
-        self.fields.iter().map(|field| field.count).sum()
+    /// Yield one argument and byte range per value, including a single empty range for 0s.
+    pub(crate) fn items(&self) -> impl Iterator<Item = (u8, std::ops::Range<usize>)> + '_ {
+        self.fields.iter().flat_map(|field| {
+            (0..field.count).map(move |index| {
+                let start = field.offset + index * field.width;
+                (field.code, start..start + field.width)
+            })
+        })
     }
 
-    /// Fill the checked, zero-padded output in Python argument order.
-    pub(crate) fn write_words<E>(
-        &self,
-        output: &mut [u8],
-        mut word: impl FnMut(u8, usize) -> Result<u64, E>,
-    ) -> Result<(), E> {
-        for field in &self.fields {
-            let end = field.offset + field.count * field.width;
-            for target in output[field.offset..end].chunks_exact_mut(field.width) {
-                let value = word(field.code, field.width)?;
-                if self.little_endian {
-                    target.copy_from_slice(&value.to_le_bytes()[..field.width]);
-                } else {
-                    target.copy_from_slice(&value.to_be_bytes()[8 - field.width..]);
-                }
-            }
+    pub(crate) fn write_integer(&self, target: &mut [u8], value: u64) {
+        if self.little_endian {
+            target.copy_from_slice(&value.to_le_bytes()[..target.len()]);
+        } else {
+            target.copy_from_slice(&value.to_be_bytes()[8 - target.len()..]);
         }
-        Ok(())
     }
 
-    pub(crate) fn unpack(&self, buffer: &[u8]) -> Result<Vec<u64>, String> {
+    pub(crate) fn unpack(&self, buffer: &[u8]) -> Result<Vec<UnpackedField>, String> {
         if buffer.len() != self.size {
             return Err(format!("unpack requires a buffer of {} bytes", self.size));
         }
         let mut result = Vec::new();
-        for &Field {
-            offset,
-            count,
-            width,
-            ..
-        } in &self.fields
-        {
-            for field in buffer[offset..offset + count * width].chunks_exact(width) {
-                let mut word = [0u8; 8];
-                let value = if self.little_endian {
-                    word[..width].copy_from_slice(field);
-                    u64::from_le_bytes(word)
-                } else {
-                    word[8 - width..].copy_from_slice(field);
-                    u64::from_be_bytes(word)
-                };
-                result.push(value);
+        for (code, range) in self.items() {
+            let field = &buffer[range];
+            if code == b's' {
+                result.push(UnpackedField::Bytes(field.to_vec()));
+                continue;
             }
+            let mut word = [0u8; 8];
+            let value = if self.little_endian {
+                word[..field.len()].copy_from_slice(field);
+                u64::from_le_bytes(word)
+            } else {
+                word[8 - field.len()..].copy_from_slice(field);
+                u64::from_be_bytes(word)
+            };
+            result.push(UnpackedField::Integer(value));
         }
         Ok(result)
     }
@@ -142,16 +159,23 @@ mod tests {
         Ok(StructFormat::parse(format)?.size)
     }
 
-    fn struct_unpack(format: &str, buffer: &[u8]) -> Result<Vec<u64>, String> {
+    fn struct_unpack(format: &str, buffer: &[u8]) -> Result<Vec<UnpackedField>, String> {
         StructFormat::parse(format)?.unpack(buffer)
     }
 
     #[test]
     fn elf_integer_fields_respect_byte_order() {
+        use UnpackedField::Integer;
         let header = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
-        assert_eq!(struct_unpack(">HI", &header).unwrap(), [0x0102, 0x03040506]);
-        assert_eq!(struct_unpack("<HI", &header).unwrap(), [0x0201, 0x06050403]);
-        assert_eq!(struct_unpack(">Q", &[255; 8]).unwrap(), [u64::MAX]);
+        assert_eq!(
+            struct_unpack(">HI", &header).unwrap(),
+            [Integer(0x0102), Integer(0x03040506)]
+        );
+        assert_eq!(
+            struct_unpack("<HI", &header).unwrap(),
+            [Integer(0x0201), Integer(0x06050403)]
+        );
+        assert_eq!(struct_unpack(">Q", &[255; 8]).unwrap(), [Integer(u64::MAX)]);
         assert_eq!(struct_calcsize("16B").unwrap(), 16);
         assert_eq!(struct_calcsize("<HHIIIIIHHH").unwrap(), 30);
         assert_eq!(struct_calcsize(">HHIQQQIHHH").unwrap(), 42);
@@ -160,6 +184,12 @@ mod tests {
 
     #[test]
     fn native_alignment_and_invalid_buffers() {
+        let max = isize::MAX as usize;
+        assert_eq!(struct_calcsize(&format!("{max}x0s")), Ok(max));
+        assert_eq!(
+            struct_calcsize(&format!("{max}B0s")).unwrap_err(),
+            "total struct size too long"
+        );
         assert_eq!(struct_calcsize("P").unwrap(), size_of::<usize>());
         assert_eq!(struct_calcsize("@BI").unwrap(), 8);
         assert_eq!(struct_calcsize("=BI").unwrap(), 5);

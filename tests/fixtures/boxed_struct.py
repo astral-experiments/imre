@@ -2,6 +2,22 @@ import struct
 
 
 def current():
+    for prefix in ("", "@", "=", "<", ">", "!"):
+        layout = struct.Struct(prefix + "B2xI")
+        assert layout.size == struct.calcsize(prefix + "3BI")
+        packed = layout.pack(17, 42)
+        assert packed[1:3] == b"\0\0"
+        assert layout.unpack(packed[:1] + b"ab" + packed[3:]) == (17, 42)
+    assert struct.Struct("0x").pack() == b""
+    assert struct.unpack("2x", b"ab") == ()
+    assert struct.calcsize(b">0x3xB") == 4
+    try:
+        struct.Struct("2x").pack(1)
+    except struct.error as error:
+        print(str(error))
+    else:
+        raise AssertionError("padding consumed a value")
+
     time_format = struct.Struct(format=b">Q")
     pack = time_format.pack
     unpack = time_format.unpack
@@ -63,3 +79,27 @@ def current():
             struct.unpack(fmt, Buffer(b"short"))
         except struct.error as error:
             print(str(error))
+
+    # End of central directory record with a fixed byte string and repeated integers.
+    fmt = b"<4s4H2LH"
+    values = (b"PK\x05\x06", 0, 0, 1, 1, 55, 99, 0)
+    record = struct.Struct(fmt)
+    data = struct.pack(fmt, *values)
+    assert struct.calcsize(fmt) == record.size == len(data) == 22
+    assert record.unpack(data) == struct.unpack(fmt, data) == values
+    assert record.pack(*values) == data
+    print(list(data))
+
+    for prefix in ("<", ">", "=", "@", "!"):
+        fmt = prefix + "B0s3s2Ls"
+        values = (1, b"ignored", Buffer(b"z"), 2, 0xfedcba98, Data(b"tail"))
+        encoded = struct.pack(fmt, *values)
+        assert struct.unpack(fmt, encoded) == (1, b"", b"z\0\0", 2, 0xfedcba98, b"t")
+        print(list(encoded))
+    for fmt, value in (("0s", 0), ("s", "text"), ("<L", -1), ("@L", 1 << 70)):
+        try:
+            struct.pack(fmt, value)
+        except struct.error as error:
+            print(str(error))
+        else:
+            raise AssertionError("invalid struct input accepted")
