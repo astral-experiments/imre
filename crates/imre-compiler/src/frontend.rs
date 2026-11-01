@@ -5160,6 +5160,14 @@ impl<'a> Checker<'a> {
         {
             return self.assert_raises_scope(item, remaining, body, class, manager);
         }
+        if let Type::Class(class) = manager.ty {
+            let record = &self.classes.declarations.definitions[class];
+            if record.name == "_SubTestContext"
+                && self.graph.modules[record.definition.module].is_bundled("unittest")
+            {
+                return self.subtest_scope(item, remaining, body, class, manager);
+            }
+        }
         if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {
             return self.handler_lock_scope(item, remaining, body, manager);
         }
