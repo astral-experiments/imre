@@ -64,6 +64,13 @@ def accepts_nullable(x: int | None) -> bool:
     return optional_parameter(**keywords)
 
 
+def describe_pair(*values) -> None:
+    print(values[0])
+    print(values[1])
+
+
+describe_pair("first", witness(5))
+describe_pair("second", witness(6))
 fixed_tuple()
 print(Command().invoke("/"))
 print(Command().invoke("/", "a", "b", suffix="."))

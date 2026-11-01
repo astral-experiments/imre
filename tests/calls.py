@@ -56,7 +56,7 @@ REJECTED = {
     "wrong_optional_keyword": "def take(*, value: int | None = None) -> None:\n    pass\ntake(value=False)\n",
     "starred_arguments": FUNCTION + "print(add(*[1, 2]))\n",
     "computed_keyword": FUNCTION + 'print(add(**{str("first"): 1}))\n',
-    "untyped_variadic_parameter": "def take(*values) -> None:\n    pass\ntake(1)\n",
+    "inconsistent_variadic_shape": "def take(*values) -> None:\n    pass\ntake(1)\ntake(1, 2)\n",
     "variadic_identity": "def take(*values: int) -> None:\n    print(values)\ntake(1)\n",
     "variadic_escape": "def take(*values: int) -> list[int]:\n    return values\n",
     "variadic_index": "def take(*values: int) -> int:\n    return values[0]\n",
