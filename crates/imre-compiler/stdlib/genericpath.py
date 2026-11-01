@@ -36,6 +36,28 @@ def getsize(filename):
     return os.stat(filename).st_size
 
 
+def samestat(s1, s2):
+    """Test whether two stat buffers reference the same file"""
+    return (s1.st_ino == s2.st_ino and
+            s1.st_dev == s2.st_dev)
+
+def samefile(f1, f2):
+    """Test whether two pathnames reference the same actual file or directory
+
+    This is determined by the device number and i-node number and
+    raises an exception if an os.stat() call on either pathname fails.
+    """
+    s1 = os.stat(f1)
+    s2 = os.stat(f2)
+    return samestat(s1, s2)
+
+def sameopenfile(fp1, fp2):
+    """Test whether two open file objects reference the same file"""
+    s1 = os.fstat(fp1)
+    s2 = os.fstat(fp2)
+    return samestat(s1, s2)
+
+
 def commonprefix(m):
     "Given a list of pathnames, returns the longest common leading component"
     if not m: return ''
