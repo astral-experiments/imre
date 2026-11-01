@@ -347,6 +347,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("traceback.{name}"))
         }
         ("types", "ModuleType") => ctx.builtin("module"),
+        ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
@@ -465,11 +466,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("sys", "implementation") => {
             let name = ctx.text("imre");
             let version = version_info(ctx, &compiler_version(ctx))?;
-            instance(
-                ctx,
-                "types.SimpleNamespace",
-                &[("name", name), ("version", version), ("cache_tag", NONE)],
-            )
+            let class = super::namespace::class(ctx)?;
+            let object = ctx.instance(class, None);
+            let dict = ctx.instance_dictionary(object, class);
+            for (key, value) in [("name", name), ("version", version), ("cache_tag", NONE)] {
+                let key = ctx.text(key);
+                ctx.put_item(dict, key, value)?;
+            }
+            object
         }
         ("sys", "pycache_prefix") => {
             let prefix = ctx.config["pycache_prefix"].as_str().map(str::to_owned);
@@ -727,6 +731,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
+        return super::namespace::method(ctx, method, args, kwargs);
+    }
     if name == "collections.defaultdict.__repr__" {
         let Some((&object, args)) = args.split_first() else {
             return Err(Error::new(

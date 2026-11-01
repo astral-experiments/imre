@@ -2314,6 +2314,7 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        super::namespace::check_class_write(self, obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
@@ -2646,7 +2647,7 @@ impl Context {
     }
 
     /// Lazily expose the dictionary that subsequent ordinary attribute operations use.
-    fn instance_dictionary(&mut self, obj: Id, class: Id) -> Id {
+    pub(super) fn instance_dictionary(&mut self, obj: Id, class: Id) -> Id {
         if let Value::Instance {
             namespace: Some(dictionary),
             ..
@@ -2785,6 +2786,7 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        super::namespace::check_class_write(self, obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
         }

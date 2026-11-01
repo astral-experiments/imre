@@ -2311,7 +2311,7 @@ impl Context {
             ),
             Value::Class { name, scope, .. } => self.class_repr(name, *scope),
             Value::Native(name) => super::wrapper_descriptor::BuiltinDescriptor::lookup(name)
-                .and_then(|slot| slot.method_repr())
+                .map(|slot| slot.repr())
                 .unwrap_or_else(|| format!("<class '{name}'>")),
             Value::Module {
                 constructor: Some(_),
