@@ -920,6 +920,8 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "Reversible") => {
                 Intrinsic::ObjectRuntimeExport("collections.abc.Reversible")
             }
+            (Self::Tempfile, "mkstemp") => Intrinsic::ObjectRuntimeExport("tempfile.mkstemp"),
+            (Self::Tempfile, "mkdtemp") => Intrinsic::ObjectRuntimeExport("tempfile.mkdtemp"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }

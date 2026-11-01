@@ -30,7 +30,7 @@ thread_local! {
 
 /// Eight unbiased characters provide over forty random bits; O_EXCL/mkdir is
 /// the final collision guard. No process-global PRNG or predictable counter is used.
-fn random_name() -> io::Result<String> {
+pub(crate) fn random_name() -> io::Result<String> {
     const CHARACTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789_";
     let mut result = String::with_capacity(8);
     while result.len() != 8 {
@@ -50,7 +50,7 @@ fn random_name() -> io::Result<String> {
 
 /// Python's abspath is lexical: collapse `..` without resolving symlinks and
 /// retain exactly two leading slashes. Preserve native bytes until the API boundary.
-fn absolute(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn absolute(path: &Path) -> io::Result<PathBuf> {
     let full = if path.is_absolute() {
         path.to_owned()
     } else {
@@ -130,32 +130,36 @@ fn default_directory() -> Result<Str> {
         if let Some(directory) = cached.borrow().as_ref() {
             return Ok(directory.clone());
         }
-        let candidates = ["TMPDIR", "TEMP", "TMP"]
-            .into_iter()
-            .filter_map(std::env::var_os)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .chain(["/tmp", "/var/tmp", "/usr/tmp"].map(PathBuf::from))
-            .chain(std::iter::once(
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            ));
-        for candidate in candidates {
-            let candidate = if candidate == Path::new(".") {
-                candidate
-            } else {
-                absolute(&candidate).map_err(os_error)?
-            };
-            if probe(&candidate).map_err(os_error)? {
-                let directory = path_text(candidate)?;
-                *cached.borrow_mut() = Some(directory.clone());
-                return Ok(directory);
-            }
-        }
-        Err(Error::new(
-            Kind::FileNotFoundError,
-            "No usable temporary directory found",
-        ))
+        let directory = path_text(find_default_directory()?)?;
+        *cached.borrow_mut() = Some(directory.clone());
+        Ok(directory)
     })
+}
+
+pub(crate) fn find_default_directory() -> Result<PathBuf> {
+    let candidates = ["TMPDIR", "TEMP", "TMP"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .chain(["/tmp", "/var/tmp", "/usr/tmp"].map(PathBuf::from))
+        .chain(std::iter::once(
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        ));
+    for candidate in candidates {
+        let candidate = if candidate == Path::new(".") {
+            candidate
+        } else {
+            absolute(&candidate).map_err(os_error)?
+        };
+        if probe(&candidate).map_err(os_error)? {
+            return Ok(candidate);
+        }
+    }
+    Err(Error::new(
+        Kind::FileNotFoundError,
+        "No usable temporary directory found",
+    ))
 }
 
 /// Linux can create an unnamed inode directly. Other filesystems use exclusive
@@ -200,6 +204,11 @@ pub(super) fn anonymous_file(directory: Option<&str>) -> Result<fs::File> {
     ))
 }
 
+/// Request owner-only access at creation and let mkdir report name collisions.
+pub(crate) fn create_private_directory(path: &Path) -> io::Result<()> {
+    fs::DirBuilder::new().mode(0o700).create(path)
+}
+
 fn create(directory: Option<&str>, prefix: &str, suffix: &str) -> Result<Str> {
     let directory = directory.map_or_else(default_directory, |value| Ok(Str::from(value)))?;
     for _ in 0..ATTEMPTS {
@@ -213,7 +222,7 @@ fn create(directory: Option<&str>, prefix: &str, suffix: &str) -> Result<Str> {
         // Validate the representable result before creating anything. Creation
         // still uses the original spelling, preserving OS traversal through `..`.
         let name = path_text(absolute(&path).map_err(os_error)?)?;
-        match fs::DirBuilder::new().mode(0o700).create(&path) {
+        match create_private_directory(&path) {
             Ok(()) => return Ok(name),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(errno_with_filename(error, path.to_str())),
