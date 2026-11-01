@@ -7,7 +7,7 @@ use crate::objects::{Codec, errno_error};
 pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
-pub(crate) use encoding::file_encoding;
+pub(crate) use encoding::{file_encoding, with_startup_ctype};
 mod input;
 pub(super) use input::read_input_line;
 mod encoding_names;

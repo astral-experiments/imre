@@ -1,12 +1,13 @@
 //! Filesystem and standard stream settings captured before user code runs.
 use crate::objects::Codec;
 use std::borrow::Cow;
-use std::ffi::{CStr, CString, OsStr};
+use std::ffi::{CStr, CString, OsStr, OsString};
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::sync::OnceLock;
 
 struct Locale {
+    ctype_name: OsString,
     codeset: String,
     utf8_mode: bool,
 }
@@ -130,27 +131,61 @@ fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Locale, &'static str
     let coerced = coerce.then(|| {
         ["C.UTF-8", "C.utf8", "UTF-8"]
             .into_iter()
-            .find_map(locale_codeset)
+            .find_map(|name| locale_codeset(name).map(|codeset| (OsString::from(name), codeset)))
     });
-    let codeset = coerced
+    let (ctype_name, codeset) = coerced
         .flatten()
-        .or(charset)
-        .or_else(|| locale_codeset("C"))
-        .unwrap_or_else(|| "utf-8".to_owned());
+        .or_else(|| charset.map(|codeset| (locale.clone(), codeset)))
+        .unwrap_or_else(|| {
+            (
+                "C".into(),
+                locale_codeset("C").unwrap_or_else(|| "utf-8".to_owned()),
+            )
+        });
     let errors =
         if utf8_mode || legacy || matches!(locale.to_str(), Some("C.UTF-8" | "C.utf8" | "UTF-8")) {
             "surrogateescape"
         } else {
             "strict"
         };
-    (Locale { codeset, utf8_mode }, errors)
+    (
+        Locale {
+            ctype_name,
+            codeset,
+            utf8_mode,
+        },
+        errors,
+    )
 }
 
 /// Read the selected character set without changing the process locale.
 fn locale_codeset(name: impl AsRef<OsStr>) -> Option<String> {
+    with_ctype_locale(name, || {
+        // SAFETY: nl_langinfo returns the active locale's NUL-terminated codeset name.
+        let ptr = unsafe { libc::nl_langinfo(libc::CODESET) };
+        (!ptr.is_null())
+            .then(|| {
+                unsafe { CStr::from_ptr(ptr) }
+                    .to_str()
+                    .ok()
+                    .map(str::to_owned)
+            })
+            .flatten()
+            .filter(|name| !name.is_empty())
+    })
+    .flatten()
+}
+
+/// Use the character locale selected at startup, independent of later environment changes.
+pub(crate) fn with_startup_ctype<T>(op: impl FnOnce() -> T) -> Option<T> {
+    with_ctype_locale(&settings(false, None).locale.ctype_name, op)
+}
+
+/// Use the selected character locale on this thread and restore the previous locale.
+fn with_ctype_locale<T>(name: impl AsRef<OsStr>, op: impl FnOnce() -> T) -> Option<T> {
     let name = CString::new(name.as_ref().as_bytes()).ok()?;
     // SAFETY: the locale handle is owned here. Only this thread selects it, the
-    // codeset is copied while it is live, and the previous locale is restored.
+    // callback runs while it is live, and the previous locale is restored.
     unsafe {
         let local = libc::newlocale(libc::LC_CTYPE_MASK, name.as_ptr(), std::ptr::null_mut());
         if local.is_null() {
@@ -161,13 +196,9 @@ fn locale_codeset(name: impl AsRef<OsStr>) -> Option<String> {
             libc::freelocale(local);
             return None;
         }
-        let ptr = libc::nl_langinfo(libc::CODESET);
-        let result = (!ptr.is_null())
-            .then(|| CStr::from_ptr(ptr).to_str().ok().map(str::to_owned))
-            .flatten()
-            .filter(|name| !name.is_empty());
+        let result = op();
         libc::uselocale(previous);
         libc::freelocale(local);
-        result
+        Some(result)
     }
 }

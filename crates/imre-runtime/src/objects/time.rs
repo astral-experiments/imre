@@ -194,7 +194,7 @@ impl LocalTime {
             hour,
             minute,
             second,
-            _weekday,
+            weekday,
             yearday,
             isdst,
         ] = parts;
@@ -208,12 +208,51 @@ impl LocalTime {
         tm.tm_hour = hour;
         tm.tm_min = minute;
         tm.tm_sec = second;
+        tm.tm_wday = weekday.wrapping_add(1) % 7;
         tm.tm_yday = yearday.wrapping_sub(1);
         tm.tm_isdst = isdst;
         Ok(Self {
             tm,
             zone: Vec::new(),
         })
+    }
+
+    pub(crate) fn now() -> Result<Self, Error> {
+        Ok(Self {
+            tm: timed::civil(timed::float_seconds(wall_time())?, false)?,
+            zone: Vec::new(),
+        })
+    }
+
+    pub(crate) fn strftime(mut self, pattern: &[u32]) -> Result<Vec<u32>, Error> {
+        if self.tm.tm_mon == -1 {
+            self.tm.tm_mon = 0;
+        }
+        if self.tm.tm_mday == 0 {
+            self.tm.tm_mday = 1;
+        }
+        if self.tm.tm_yday == -1 {
+            self.tm.tm_yday = 0;
+        }
+        for (field, limit, name) in [
+            (self.tm.tm_mon, 11, "month"),
+            (self.tm.tm_mday, 31, "day of month"),
+            (self.tm.tm_hour, 23, "hour"),
+            (self.tm.tm_min, 59, "minute"),
+            (self.tm.tm_sec, 61, "seconds"),
+            (self.tm.tm_wday, 6, "day of week"),
+            (self.tm.tm_yday, 365, "day of year"),
+        ] {
+            if !(0..=limit).contains(&field) {
+                return Err(Error::new(Kind::ValueError, format!("{name} out of range")));
+            }
+        }
+        self.tm.tm_isdst = self.tm.tm_isdst.clamp(-1, 1);
+        if !self.zone.is_empty() {
+            self.tm.tm_zone = self.zone.as_mut_ptr().cast();
+        }
+        let format = || format_clock(pattern, &self.tm);
+        Ok(crate::sys::with_startup_ctype(format).unwrap_or_else(format))
     }
 
     pub(crate) fn set_zone(&mut self, name: &str) {
@@ -252,6 +291,51 @@ impl LocalTime {
             Ok(stamp as f64)
         }
     }
+}
+
+// POSIX wide formatting counts Unicode characters when applying a field width.
+unsafe extern "C" {
+    fn wcsftime(
+        output: *mut libc::wchar_t,
+        size: usize,
+        format: *const libc::wchar_t,
+        clock: *const libc::tm,
+    ) -> usize;
+}
+
+fn format_clock(mut pattern: &[u32], clock: &libc::tm) -> Vec<u32> {
+    let mut result = Vec::new();
+    let mut buffer = vec![0 as libc::wchar_t; 1024];
+    while !pattern.is_empty() {
+        let len = pattern
+            .iter()
+            .take_while(|&&c| (1..128).contains(&c))
+            .count();
+        if len > 0 {
+            let mut format: Vec<libc::wchar_t> = pattern[..len].iter().map(|&c| c as _).collect();
+            format.push(0);
+            loop {
+                // SAFETY: format is NUL-terminated; the tm and its zone are live, and the buffer is writable.
+                let used =
+                    unsafe { wcsftime(buffer.as_mut_ptr(), buffer.len(), format.as_ptr(), clock) };
+                if used != 0 || buffer.len() >= len.saturating_mul(256) {
+                    result.extend(buffer[..used].iter().map(|&c| c as u32));
+                    break;
+                }
+                buffer.resize(buffer.len() * 2, 0);
+            }
+            pattern = &pattern[len..];
+        }
+        // CPython passes only non-NUL ASCII runs to libc. Preserve literal Unicode,
+        // including lone surrogates, until another conversion begins.
+        let literal = pattern
+            .iter()
+            .position(|&c| c == u32::from(b'%'))
+            .unwrap_or(pattern.len());
+        result.extend_from_slice(&pattern[..literal]);
+        pattern = &pattern[literal..];
+    }
+    result
 }
 
 /// Validate the visible fields and timezone name before converting the offset.
