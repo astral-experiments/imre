@@ -1532,7 +1532,7 @@ impl Context {
             self.builtin(builtins::exception_initializer(name));
         }
         let methods = match name {
-            "object" => &["__hash__", "__format__"],
+            "object" => &["__hash__", "__format__", "__init_subclass__"],
             "dict" => builtins::DICT_METHODS,
             "collections.defaultdict" => {
                 self.builtin("dict");

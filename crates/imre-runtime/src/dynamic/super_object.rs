@@ -196,7 +196,9 @@ impl Context {
                 if let Some(value) = self.own_class_attr(class, name) {
                     return self.bind_attribute(value, instance, owner);
                 }
-                if matches!(self.heap.get(class), Value::Native(_)) {
+                // Native types inherit object's subclass hook. An intervening Python
+                // mixin still takes precedence over object in the new class's MRO.
+                if name != "__init_subclass__" && matches!(self.heap.get(class), Value::Native(_)) {
                     match self.lookup_attr(class, name) {
                         Ok(value) => return self.bind_attribute(value, instance, owner),
                         Err(error) if error.kind == "AttributeError" => {}
