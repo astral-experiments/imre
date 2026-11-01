@@ -381,6 +381,12 @@ pub(super) fn format_owner(class: &str) -> &'static str {
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::Scandir(_) if super::stdlib::os::scandir::ITER_METHODS.contains(&attr) => {
+            super::stdlib::os::scandir::ITER
+        }
+        Value::DirEntry(_) if super::stdlib::os::scandir::ENTRY_METHODS.contains(&attr) => {
+            super::stdlib::os::scandir::ENTRY
+        }
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
@@ -392,7 +398,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             iter.kind
         }
         Value::Slice(_) if super::slice::METHODS.contains(&attr) => "slice",
-        Value::TupleGetterDoc | Value::StatMember(_)
+        Value::TupleGetterDoc | Value::ReadOnlyMember(_, _)
             if super::namedtuple::GETTER_METHODS.contains(&attr) =>
         {
             "member_descriptor"

@@ -1956,10 +1956,10 @@ impl Context {
                             "(...)",
                             Part::Sequence(storage, 0),
                         ),
-                        Value::StatMember(field) => {
+                        Value::ReadOnlyMember(owner, field) => {
                             append_rendered_text(
                                 &mut output,
-                                &format!("<member '{field}' of 'os.stat_result' objects>"),
+                                &format!("<member '{field}' of '{owner}' objects>"),
                             )?;
                             continue;
                         }
@@ -2196,6 +2196,10 @@ impl Context {
                     "<Token{state} var={} at {id:#x}>",
                     self.format_value(*variable, true, active)
                 )
+            }
+            Value::Scandir(scan) => super::stdlib::os::scandir::iterator_repr(scan),
+            Value::DirEntry(entry) => {
+                format!("<DirEntry {}>", self.format_value(entry.name, true, active))
             }
             Value::PrimitiveLock(lock) => {
                 let state = if lock.locked() { "locked" } else { "unlocked" };
