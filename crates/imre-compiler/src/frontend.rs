@@ -2620,6 +2620,11 @@ impl<'a> Checker<'a> {
         {
             return Err(self.object_builtin_error("set.difference_update", attribute));
         }
+        if attribute.attr.as_str() == "readinto"
+            && matches!(receiver.ty, Type::BinaryIO | Type::BytesIO)
+        {
+            return Err(self.object_builtin_error("binary readinto", attribute));
+        }
         if let Type::Class(class) = receiver.ty
             && self.native_mock(class)
             && self.module
@@ -9837,6 +9842,9 @@ impl<'a> Checker<'a> {
                     (_, method) => method,
                 };
                 let (builtin, ty) = match (method, call.arguments.args.len()) {
+                    ("readinto", _) if binary => {
+                        return Err(self.object_builtin_error("binary readinto", call));
+                    }
                     ("read", 0) => (
                         if binary {
                             Builtin::BinaryRead
@@ -10656,6 +10664,9 @@ impl<'a> Checker<'a> {
             return Ok(length);
         }
         let (builtin, ty) = match name.id.as_str() {
+            "bytearray" if self.unshadowed_builtin(&call.func, "bytearray") => {
+                return Err(self.object_builtin_error("bytearray", call));
+            }
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
             "chr" if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool) => {
                 let value = args.into_iter().next().unwrap();

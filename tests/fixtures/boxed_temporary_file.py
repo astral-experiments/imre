@@ -13,7 +13,25 @@ def current():
         print(spill.write(b"last\xff"), spill.tell())
         print(spill.seek(0), spill.readline(), spill.read())
         print(other.tell(), other.seek(0), other.read())
+        print(alias.readable(), alias.seek(1))
+        destination = bytearray(b"????")
+        print(alias.readinto(destination), bytes(destination), alias.tell())
+        alias.seek(-2, 2)
+        print(alias.readinto(destination), bytes(destination), alias.tell())
+        print(alias.readinto(destination), alias.readinto(bytearray()), bytes(destination))
         print(spill.flush(), spill.close(), alias.closed, other.closed)
+        try:
+            alias.readable()
+        except ValueError as error:
+            print(str(error))
+        try:
+            alias.readinto(destination)
+        except ValueError as error:
+            print(str(error))
+        try:
+            alias.readinto(b"")
+        except TypeError as error:
+            print(str(error))
         try:
             alias.flush()
         except ValueError as error:
