@@ -2431,8 +2431,10 @@ impl Context {
             Value::Native(ref class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
             }
-            Value::Native(ref class) if class == "set" && name == "discard" => {
-                return Ok(self.builtin("set.discard"));
+            Value::Native(ref class)
+                if class == "set" && matches!(name, "discard" | "difference_update") =>
+            {
+                return Ok(self.builtin(&format!("set.{name}")));
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")

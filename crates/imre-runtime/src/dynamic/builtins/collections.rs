@@ -744,6 +744,9 @@ pub(super) fn method(
                 "descriptor '{method}' of 'dict' object needs an argument"
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
+            None if name == "set.difference_update" => {
+                type_error(format!("unbound method {name}() needs an argument"))
+            }
             None => type_error("missing collection receiver"),
         })?;
     let receiver = if let Some(method) = name.strip_prefix("dict.") {
@@ -759,6 +762,15 @@ pub(super) fn method(
                 ))
             }
         })?
+    } else if name == "set.difference_update" {
+        let storage = ctx.scalar_value(object);
+        if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
+            return Err(type_error(format!(
+                "descriptor 'difference_update' for 'set' objects doesn't apply to a '{}' object",
+                ctx.type_name(object)
+            )));
+        }
+        storage
     } else {
         object
     };
@@ -798,6 +810,7 @@ pub(super) fn method(
             | "set.issuperset"
             | "frozenset.issuperset"
             | "set.discard"
+            | "set.difference_update"
             | "frozenset.copy"
             | "set.copy"
             | "frozenset.__contains__"
@@ -945,6 +958,12 @@ pub(super) fn method(
                 }
             }
             Ok(TRUE)
+        }
+        "set.difference_update" => {
+            for &source in args {
+                ctx.set_difference_update(receiver, source)?;
+            }
+            Ok(NONE)
         }
         "set.discard" => {
             arity(name, args, 1, 1)?;
