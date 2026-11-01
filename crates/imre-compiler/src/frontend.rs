@@ -2659,8 +2659,9 @@ impl<'a> Checker<'a> {
             .iter()
             .position(|field| field.name == attribute.attr.as_str())
             .ok_or_else(|| {
-                error(
-                    self.source,
+                self.missing_class_member(
+                    class,
+                    attribute.attr.as_str(),
                     attribute,
                     "unknown field; dynamic attributes and first-class methods are unsupported",
                 )

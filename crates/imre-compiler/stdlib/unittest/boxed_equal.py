@@ -25,6 +25,29 @@ def assertNotEqual(self, first, second, msg=None):
         raise self.failureException(msg)
 
 
+def assertIsInstance(self, obj, cls, msg=None):
+    """Same as self.assertTrue(isinstance(obj, cls)), with a nicer
+    default message."""
+    if not isinstance(obj, cls):
+        if isinstance(cls, tuple):
+            standardMsg = f'{_safe_repr(obj)} is not an instance of any of {cls!r}'
+        else:
+            standardMsg = f'{_safe_repr(obj)} is not an instance of {cls!r}'
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
+def assertNotIsInstance(self, obj, cls, msg=None):
+    """Included for symmetry with assertIsInstance."""
+    if isinstance(obj, cls):
+        if isinstance(cls, tuple):
+            for x in cls:
+                if isinstance(obj, x):
+                    cls = x
+                    break
+        standardMsg = f'{_safe_repr(obj)} is an instance of {cls!r}'
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
 def assertIs(self, expr1, expr2, msg=None):
     if expr1 is not expr2:
         _raise_identity_failure(self, _safe_repr(expr1), _safe_repr(expr2), msg)
@@ -38,6 +61,8 @@ def assertIsNot(self, expr1, expr2, msg=None):
 TestCase._baseAssertEqual = _baseAssertEqual
 TestCase.assertEqual = assertEqual
 TestCase.assertNotEqual = assertNotEqual
+TestCase.assertIsInstance = assertIsInstance
+TestCase.assertNotIsInstance = assertNotIsInstance
 TestCase.assertIs = assertIs
 TestCase.assertIsNot = assertIsNot
 
