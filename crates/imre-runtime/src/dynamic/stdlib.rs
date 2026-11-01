@@ -340,6 +340,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return Ok(ctx.int(i64::from(value)));
     }
     let id = match (module, name) {
+        ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
@@ -673,7 +674,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_signature_mapping"
             | "_signature_layout",
         )
-        | ("contextlib", "contextmanager")
         | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
         | ("warnings", "warn")
@@ -805,6 +805,9 @@ pub(super) fn call(
 ) -> Result<Id> {
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
+    }
+    if name == "io.open_code" {
+        return io::open_code(ctx, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);
@@ -1703,7 +1706,6 @@ pub(super) fn call(
         | "collections.defaultdict.__reduce__"
         | "functools._lru_cache_wrapper.cache_clear"
         | "functools._lru_cache_wrapper.cache_info"
-        | "contextlib.contextmanager"
         | "file.close"
         | "file.readable"
         | "file.writable"
@@ -1982,14 +1984,6 @@ pub(super) fn call(
             let items =
                 ctx.dict_iterator(receiver, super::value::DictViewKind::Items, false, false);
             ctx.alloc(Value::Tuple(vec![class, args, NONE, NONE, items]))
-        }
-        "contextlib.contextmanager" => {
-            let callable = ctx.alloc(Value::Native("contextlib._manager".into()));
-            ctx.alloc(Value::Method {
-                callable,
-                receiver: argument(args, 0)?,
-                explicit: false,
-            })
         }
         "warnings.warn" => {
             eprintln!("Warning: {}", ctx.str_value(argument(args, 0)?)?);

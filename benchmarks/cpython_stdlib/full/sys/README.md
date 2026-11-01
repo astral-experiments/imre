@@ -81,7 +81,9 @@ under their CPython fixtures. For every remaining non-skipped method it either
 tries to compile the complete definition or records the original decorator
 that requires an adapter. An unreviewed exception proposal remains a blocker.
 
-Five of the six `ActiveExceptionTests` methods, `test_attributes` and `test_sys_version_info_no_instantiation` compile but stop at the generated top-level `import unittest`. Each record keeps the native child's exit status and traceback. CPython ran the host fixture. The body, assertions and sys operation are unobserved. The sixth method, `test_sys_exception_no_exception`, executes its body natively under the host fixture. The gate also runs two deliberate native body failures under the same TestCase driver, including one that raises the identical `ModuleNotFoundError`. [Original Linux failures](https://github.com/viarius-experiments/imre/actions/runs/40451912852/job/122016395024)
+Outside an exception handler, `test_exc_info_no_exception` compares the native `sys.exc_info()` result with `(None, None, None)` using bundled `unittest`. Like `test_sys_exception_no_exception`, it runs its complete body and assertion on Imre under the original CPython fixture. Changing the expected tuple to `(None, None, 1)` raised `AssertionError` at both optimization levels.
+
+The four active-exception methods that raise a `ValueError` and `test_attributes` stop because the native TestCase lacks `assertIsInstance`. The staged `test_sys_version_info_no_instantiation` stops at its missing `SysModuleTest.assert_raise_on_new_sys_type` helper. The gate also runs two deliberate native body failures under the same TestCase driver, including one that raises `ModuleNotFoundError` for `unittest`.
 
 The unchanged `test_exit` runs under its original CPython fixture and assertions. At O0 and O3, Imre executes six caught calls and seven original child programs. The child with a lone U+DCFF writes the ASCII bytes for `\udcff`, and the Latin-1 child writes `68 e9 0a`. Both exit with status 1 and empty stdout. The [occurrence report](evidence-linux.json) records all 13 operations per level.
 

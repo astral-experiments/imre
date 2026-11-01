@@ -1161,7 +1161,7 @@ impl Value {
                 visit.extend(
                     protected
                         .iter()
-                        .filter_map(super::source_code::FinallyBlock::root),
+                        .flat_map(super::source_code::FinallyBlock::roots),
                 );
             }
             Self::Class {
@@ -2293,6 +2293,10 @@ impl Heap {
 
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
+    }
+
+    pub fn current_location(&self) -> Option<Location> {
+        self.frames.last()?.location.clone()
     }
 
     /// Trace the same roots for collection and for a weak interning lookup between collections.

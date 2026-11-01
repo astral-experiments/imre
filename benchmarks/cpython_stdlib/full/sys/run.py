@@ -88,6 +88,7 @@ def select(toolchain, work, source, module):
                      "original_method_operations": 0}
     for cls, method, fixture, operation in [
         ("SysModuleTest", "test_43581", "import sys\n" + testcase_fixture(), "sys.__stdout__.encoding and sys.__stderr__.encoding"),
+        ("ActiveExceptionTests", "test_exc_info_no_exception", "import sys\n" + testcase_fixture(), "sys.exc_info() outside a handler"),
         ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL, "sys.exception() outside a handler"),
     ]:
         case_id = f"{MODULE}.{cls}.{method}"
