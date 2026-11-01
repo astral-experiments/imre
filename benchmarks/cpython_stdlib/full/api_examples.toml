@@ -51,7 +51,7 @@ numbers = ["Check typed numeric values and builtin classes against `Number` with
 operator = ["`length_hint` for supported iterators.","benchmarks/cpython_stdlib/full/itertools/repeat.py"]
 os = ["File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`.","benchmarks/cpython_stdlib/full/os/README.md"]
 pathlib = ["Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O.","benchmarks/cpython_stdlib/full/pathlib/README.md"]
-pickle = ["Encode integers and booleans with `dumps(value, protocol=2)`.","tests/fixtures/boxed_bytecache.py"]
+pickle = ["Encode integers, booleans, strings, `None` and tuples with `dumps` protocols 0–5. Custom reductions can return an importable global name or a reconstruction callable with positional arguments. Reduction state and cycles are outside this subset. Pre‑4 protocols support top-level globals, with a subset of Python 2 compatibility names for protocols 0–2.","tests/fixtures/boxed_pickle_reduction.py"]
 platform = ["Read `system()`, `machine()`, and the running Python version from `python_version()`.","benchmarks/cpython_stdlib/interpreter_info.py"]
 posix = ["Read and set supported POSIX user and group IDs; the companion suite is counted under `os`.","benchmarks/cpython_stdlib/full/os/CREDENTIALS.md"]
 posixpath = ["POSIX `os.path` operations on strings and bytes; path tests are counted under `os`.","tests/fixtures/paths/os_path.py"]

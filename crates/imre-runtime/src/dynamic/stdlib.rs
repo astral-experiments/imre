@@ -37,7 +37,7 @@ mod metadata;
 mod operator;
 mod ordered_dict;
 pub(super) mod os;
-mod pickle;
+pub(super) mod pickle;
 mod pkgutil;
 mod posixpath;
 pub(super) mod readiness;
