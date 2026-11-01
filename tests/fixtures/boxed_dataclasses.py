@@ -12,7 +12,7 @@ class Entry:
         return self.name.upper()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class Key:
     part: int
     value: str = field(compare=False, repr=False, default="unused")
@@ -49,6 +49,9 @@ def current():
     key = Key(42)
     assert repr(key) == "Key(part=42)"
     assert key == Key(42, "other")
+    assert key < Key(43) and key <= Key(42, "other")
+    assert key > Key(41) and key >= Key(42, "other")
+    assert key.__lt__(a) is NotImplemented
     assert Key.__hash__ is not None and Entry.__hash__ is None
     for bad in (lambda: Entry(), lambda: Entry("x", name="y"), lambda: Entry("x", unknown=0)):
         try:
