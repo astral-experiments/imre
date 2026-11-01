@@ -398,6 +398,7 @@ impl Context {
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
+                | Value::Scandir(_)
                 | Value::DictIterator(_)
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
@@ -533,6 +534,7 @@ impl Context {
             Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
+                | Value::Scandir(_)
                 | Value::DictIterator(_)
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
@@ -827,6 +829,9 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        if let Value::Scandir(scan) = self.heap.get(id) {
+            return stdlib::os::scandir::advance(self, scan.clone());
+        }
         if let Value::SequenceIterator { source, index } = *self.heap.get(id) {
             return self.next_sequence_item(id, source, index);
         }
@@ -1088,6 +1093,7 @@ impl Context {
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
+                | Value::Scandir(_)
                 | Value::DictIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }

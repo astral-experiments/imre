@@ -10,7 +10,17 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
-        let slots = match symbol.split_once('.') {
+        let slots = match symbol.rsplit_once('.') {
+            Some((stdlib::os::scandir::ENTRY, attr)) => Some((
+                stdlib::os::scandir::ENTRY,
+                attr,
+                stdlib::os::scandir::ENTRY_METHODS,
+            )),
+            Some((stdlib::os::scandir::ITER, attr)) => Some((
+                stdlib::os::scandir::ITER,
+                attr,
+                stdlib::os::scandir::ITER_METHODS,
+            )),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
@@ -25,7 +35,11 @@ impl BuiltinDescriptor {
             return Some(Self {
                 owner,
                 name,
-                method: !name.starts_with("__") || matches!(name, "__reversed__" | "__reduce__"),
+                method: !name.starts_with("__")
+                    || matches!(
+                        name,
+                        "__reversed__" | "__reduce__" | "__fspath__" | "__enter__" | "__exit__"
+                    ),
             });
         }
         let (owner, name) = match symbol {
@@ -88,6 +102,8 @@ impl BuiltinDescriptor {
             }
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
+            stdlib::os::scandir::ENTRY => matches!(ctx.heap.get(receiver), Value::DirEntry(_)),
+            stdlib::os::scandir::ITER => matches!(ctx.heap.get(receiver), Value::Scandir(_)),
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),

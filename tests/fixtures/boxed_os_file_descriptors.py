@@ -21,6 +21,16 @@ def current():
     finally:
         os.close(fd)
 
+    from posix import F_OK, R_OK, W_OK, X_OK
+
+    assert (F_OK, R_OK, W_OK, X_OK) == (0, 4, 2, 1)
+    assert (os.F_OK, os.R_OK, os.W_OK, os.X_OK) == (F_OK, R_OK, W_OK, X_OK)
+
+    def which(cmd, mode=os.F_OK | os.X_OK, path=None):
+        return mode
+
+    assert which("python") == X_OK
+
     class Path:
         def __fspath__(self):
             return missing

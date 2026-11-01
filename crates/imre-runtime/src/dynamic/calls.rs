@@ -21,7 +21,15 @@ struct InstanceLayout {
 pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     let (module, function) = symbol.split_once('.')?;
     match module {
-        "posix" => Some((module, function)),
+        "posix"
+            if !function.contains('.')
+                && !matches!(
+                    symbol,
+                    stdlib::os::scandir::ENTRY | stdlib::os::scandir::ITER
+                ) =>
+        {
+            Some((module, function))
+        }
         "zlib" if function == "adler32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -517,7 +525,7 @@ impl Context {
             Value::Property(_)
                 | Value::TupleGetter { .. }
                 | Value::TupleGetterDoc
-                | Value::StatMember(_)
+                | Value::ReadOnlyMember(_, _)
                 | Value::GetSetDescriptor { .. }
                 | Value::WeakrefDescriptor(_)
         )
@@ -572,8 +580,8 @@ impl Context {
         if receiver != NONE {
             let method = match self.heap.get(value) {
                 Value::TupleGetterDoc => return super::namedtuple::document(self, receiver),
-                Value::StatMember(field) => {
-                    return stdlib::os::stat::get_member(self, field, receiver);
+                Value::ReadOnlyMember(owner, field) => {
+                    return self.read_member(owner, field, receiver);
                 }
                 Value::TupleGetter { index, .. } => {
                     return super::namedtuple::read_field(self, *index, receiver);
@@ -806,6 +814,31 @@ impl Context {
             _ => None,
         }
     }
+    pub(super) fn readonly_member(&mut self, owner: &'static str, field: &'static str) -> Id {
+        let symbol = format!("{owner}.{field}");
+        if let Some(&id) = self.builtins.get(&symbol) {
+            return id;
+        }
+        let descriptor = self.alloc(Value::ReadOnlyMember(owner, field));
+        self.builtins.insert(symbol, descriptor);
+        descriptor
+    }
+
+    pub(super) fn read_member(&mut self, owner: &str, field: &str, receiver: Id) -> Result<Id> {
+        let ty = self.exact_type(receiver)?;
+        if ty == self.builtin(owner) {
+            self.lookup_attr(receiver, field)
+        } else {
+            Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
+                    self.type_name(receiver)
+                ),
+            ))
+        }
+    }
+
     /// Check whether an inline value is an immutable tuple position.
     fn has_namedtuple_field(&self, class: Id, name: &str) -> bool {
         matches!(self.heap.get(class), Value::Class { namedtuple_fields: Some(names), .. } if names.iter().any(|field| field == name))
@@ -828,6 +861,8 @@ impl Context {
             | Value::Dict(_)
             | Value::Set { .. }
             | Value::Range(_)
+            | Value::Scandir(_)
+            | Value::DirEntry(_)
             | Value::RangeIterator(_)
             | Value::Slice(_)
             | Value::Enumerate { .. }
@@ -867,7 +902,7 @@ impl Context {
             Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
             Value::TupleGetter { .. } => super::namedtuple::GETTER,
-            Value::TupleGetterDoc | Value::StatMember(_) => "member_descriptor",
+            Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) => "member_descriptor",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
@@ -939,6 +974,8 @@ impl Context {
                             | "weakref.ProxyType"
                             | "weakref.CallableProxyType"
                             | super::thread_local::CLASS
+                            | stdlib::os::scandir::ENTRY
+                            | stdlib::os::scandir::ITER
                             | super::thread_lock::CLASS
                             | "traceback"
                             | "frame"
@@ -1105,7 +1142,7 @@ impl Context {
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
-            | ("member_descriptor", Value::TupleGetterDoc | Value::StatMember(_))
+            | ("member_descriptor", Value::TupleGetterDoc | Value::ReadOnlyMember(_, _))
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
@@ -1113,6 +1150,8 @@ impl Context {
             | (super::deque::REVERSE_ITERATOR, Value::DequeIterator { reverse: true, .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
+            | (stdlib::os::scandir::ENTRY, Value::DirEntry(_))
+            | (stdlib::os::scandir::ITER, Value::Scandir(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
@@ -1601,10 +1640,12 @@ impl Context {
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
-            Value::StatMember(field) => match name {
+            Value::ReadOnlyMember(owner, field) => match name {
                 "__name__" => return Ok(self.text(field)),
-                "__qualname__" => return Ok(self.text(format!("stat_result.{field}"))),
-                "__objclass__" => return Ok(self.builtin(stdlib::os::stat::CLASS)),
+                "__qualname__" => {
+                    return Ok(self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap())));
+                }
+                "__objclass__" => return Ok(self.builtin(owner)),
                 _ => {}
             },
             Value::TupleGetterDoc => match name {
@@ -1905,6 +1946,35 @@ impl Context {
                 "__module__" => return Ok(self.text("datetime")),
                 _ => {}
             },
+            Value::DirEntry(ref entry) if name == "name" => return Ok(entry.name),
+            Value::DirEntry(ref entry) if name == "path" => return Ok(entry.path),
+            Value::Native(ref class)
+                if matches!(
+                    class.as_str(),
+                    stdlib::os::scandir::ENTRY | stdlib::os::scandir::ITER
+                ) =>
+            {
+                match name {
+                    "name" if class == stdlib::os::scandir::ENTRY => {
+                        return Ok(self.readonly_member(stdlib::os::scandir::ENTRY, "name"));
+                    }
+                    "path" if class == stdlib::os::scandir::ENTRY => {
+                        return Ok(self.readonly_member(stdlib::os::scandir::ENTRY, "path"));
+                    }
+                    "__module__" => return Ok(self.text("posix")),
+                    "__name__" | "__qualname__" => {
+                        return Ok(self.text(class.trim_start_matches("posix.").to_owned()));
+                    }
+                    attr if (class == stdlib::os::scandir::ENTRY
+                        && stdlib::os::scandir::ENTRY_METHODS.contains(&attr))
+                        || (class == stdlib::os::scandir::ITER
+                            && stdlib::os::scandir::ITER_METHODS.contains(&attr)) =>
+                    {
+                        return Ok(self.builtin(&format!("{class}.{name}")));
+                    }
+                    _ => {}
+                }
+            }
             Value::Native(ref class) if class == super::thread_lock::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("lock")),
@@ -2487,6 +2557,9 @@ impl Context {
         original: Option<Id>,
     ) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        if matches!(self.heap.get(obj), Value::DirEntry(_)) && matches!(name, "name" | "path") {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_local_attribute(
                 obj,
@@ -2554,7 +2627,7 @@ impl Context {
                 Value::TupleGetterDoc => {
                     return super::namedtuple::set_document(self, obj, None).map(|_| ());
                 }
-                Value::StatMember(_) => {
+                Value::ReadOnlyMember(_, _) => {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
                 Value::TupleGetter { .. } => {
@@ -2946,6 +3019,9 @@ impl Context {
         value: Id,
     ) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        if matches!(self.heap.get(obj), Value::DirEntry(_)) && matches!(name, "name" | "path") {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_local_attribute(
                 obj,
@@ -3126,7 +3202,7 @@ impl Context {
                     format!("attribute '{name}' of '{owner}' objects is not writable"),
                 ));
             }
-            if matches!(self.heap.get(descriptor), Value::StatMember(_)) {
+            if matches!(self.heap.get(descriptor), Value::ReadOnlyMember(_, _)) {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
             if matches!(self.heap.get(descriptor), Value::TupleGetterDoc) {
