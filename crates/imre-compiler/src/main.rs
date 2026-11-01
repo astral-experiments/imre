@@ -78,10 +78,7 @@ fn run() -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
     if command == "--version" {
-        println!(
-            "imre {} (Ruff/ty 0.0.14; LLVM AOT)",
-            env!("CARGO_PKG_VERSION")
-        );
+        println!("imre {}", env!("CARGO_PKG_VERSION"));
         return Ok(ExitCode::SUCCESS);
     }
     if command == "build-target" {
