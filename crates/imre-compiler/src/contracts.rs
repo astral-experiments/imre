@@ -425,12 +425,14 @@ impl Builtin {
             | Self::BytesIoValue
             | Self::CodecWriter(_)
             | Self::HashNew
-            | Self::HashAvailable
+            | Self::HashAlgorithms { .. }
+            | Self::HashUpdateFile
             | Self::Sha1Hex
             | Self::Sha1New
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::HashName
+            | Self::HashType
             | Self::HashDigest { .. }
             | Self::HashCopy
             | Self::DecodeSplitLines
@@ -516,6 +518,8 @@ impl Builtin {
             | Self::JsonDecoderMemo
             | Self::HashUpdate
             | Self::HashDigestSize
+            | Self::HashIdentity
+            | Self::HashBlockSize
             | Self::ActiveException
             | Self::SysIntern
             | Self::SysIsInterned
@@ -1202,16 +1206,21 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_codec_writer_encoding"
                 | "imre_codec_writer_write"
                 | "imre_codec_writer_control"
+                | "imre_hash_type"
                 | "imre_hash_new"
+                | "imre_hash_update_file"
                 | "imre_sha1_new"
                 | "imre_sha256_new"
                 | "imre_sha1_hex"
                 | "imre_sha256_hex"
                 | "imre_hash_copy"
                 | "imre_hash_name"
+                | "imre_hash_xof_digest"
+                | "imre_hash_xof_hexdigest"
                 | "imre_hash_digest"
                 | "imre_hash_hexdigest"
                 | "imre_hash_algorithms_available"
+                | "imre_hash_algorithms_guaranteed"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"

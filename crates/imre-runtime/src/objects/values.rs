@@ -603,6 +603,10 @@ unsafe fn write_repr_with(
                             write!(output, "<{name} object at {owner:p}>")?;
                             Ok(None)
                         }
+                        Storage::Hash(state) => {
+                            write!(output, "{}", state.repr(owner as usize))?;
+                            Ok(None)
+                        }
                         Storage::Calendar(value) => {
                             super::calendar::write_repr(value, output)?;
                             Ok(None)

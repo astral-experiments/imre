@@ -1262,10 +1262,16 @@ pub(crate) enum Builtin {
     StrDescriptor(StrDescriptor),
     Placeholder(PlaceholderKind),
     InspectSentinel,
-    HashAvailable,
+    HashAlgorithms {
+        guaranteed: bool,
+    },
     HashUpdate,
+    HashUpdateFile,
     HashName,
+    HashType,
+    HashIdentity,
     HashDigestSize,
+    HashBlockSize,
     HashDigest {
         hex: bool,
     },

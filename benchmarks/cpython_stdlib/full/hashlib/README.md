@@ -1,6 +1,8 @@
 # hashlib
 
-Imre computes SHA-1 and SHA-256 with exact native bytes. Both constructors support incremental updates, independent copies, repeated digest reads, provider metadata and the `usedforsecurity` keyword. The named constructor recognizes the supported aliases and reports CPython's error for unknown names. Buffer-protocol inputs such as `bytearray` and `memoryview` remain outside the native surface.
+Imre computes MD5, SHA-1, SHA-2 (224, 256, 384 and 512) and SHA-3 (224, 256, 384 and 512) with exact native bytes. These constructors support incremental updates, independent copies, repeated digest reads, provider metadata and the `usedforsecurity` keyword. The named constructor recognizes the supported aliases and reports CPython's error for unknown names. Buffer-protocol inputs such as `bytearray` and `memoryview` remain outside the native surface.
+
+The native SHAKE-128 and SHAKE-256 providers support variable-length output through both digest methods.
 
 The [reference inventory](reference-linux.json) covers every default Linux test in the [pinned CPython 3.14.5 suite](UPSTREAM.json). Its 82 registered methods ran with 69 passes and 13 upstream skips. The [execution ledger](evidence-linux.json) separates the original fixtures and operations.
 

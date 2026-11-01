@@ -6040,24 +6040,53 @@ impl Emitter<'_, '_> {
                     .collect::<Vec<_>>();
                 self.tuple(returns, &names, Some(fields.root()))
             }
-            Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
+            Builtin::HashAlgorithms { guaranteed } => self.call(
+                if *guaranteed {
+                    "imre_hash_algorithms_guaranteed"
+                } else {
+                    "imre_hash_algorithms_available"
+                },
+                returns,
+                &[],
+            ),
             Builtin::Sha1New => self.call("imre_sha1_new", Type::Hash, &[&args[0].value]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Hash, &[&args[0].value]),
             Builtin::HashName => self.call("imre_hash_name", Type::Str, &[&args[0].value]),
+            Builtin::HashType => self.call("imre_hash_type", Type::BuiltinClass, &[&args[0].value]),
+            Builtin::HashIdentity => self.call("imre_hash_identity", Type::Int, &[&args[0].value]),
+            Builtin::HashBlockSize => {
+                self.call("imre_hash_block_size", Type::Int, &[&args[0].value])
+            }
             Builtin::HashDigestSize => {
                 self.call("imre_hash_digest_size", Type::Int, &[&args[0].value])
+            }
+            Builtin::HashUpdateFile => {
+                self.void_call(
+                    "imre_hash_update_file",
+                    &[&args[0].value, &args[1].value, &args[2].value],
+                );
+                none()
             }
             Builtin::HashUpdate => {
                 self.void_call("imre_hash_update", &[&args[0].value, &args[1].value]);
                 none()
             }
             Builtin::HashDigest { hex } => {
-                let symbol = if *hex {
-                    "imre_hash_hexdigest"
+                if let [hash, length] = args.as_slice() {
+                    let symbol = if *hex {
+                        "imre_hash_xof_hexdigest"
+                    } else {
+                        "imre_hash_xof_digest"
+                    };
+                    self.call(symbol, returns, &[&hash.value, &length.value])
                 } else {
-                    "imre_hash_digest"
-                };
-                self.call(symbol, returns, &[&args[0].value])
+                    let symbol = if *hex {
+                        "imre_hash_hexdigest"
+                    } else {
+                        "imre_hash_digest"
+                    };
+                    self.call(symbol, returns, &[&args[0].value])
+                }
             }
             Builtin::HashCopy => self.call("imre_hash_copy", Type::Hash, &[&args[0].value]),
             Builtin::WeakProxyNew => self.call(
@@ -9432,7 +9461,10 @@ declare i64 @imre_socket_getsockopt(ptr, i64, i64)
 declare ptr @imre_sha1_new(ptr)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_name(ptr)
+declare ptr @imre_hash_type(ptr)
+declare i64 @imre_hash_identity(ptr)
 declare i64 @imre_hash_digest_size(ptr)
+declare i64 @imre_hash_block_size(ptr)
 declare ptr @imre_codec_lookup(ptr)
 declare ptr @imre_codec_name(ptr)
 declare ptr @imre_codec_encode(ptr, ptr, ptr)
@@ -9448,7 +9480,11 @@ declare ptr @imre_codec_writer_errors(ptr)
 declare void @imre_codec_writer_set_errors(ptr, ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
+declare ptr @imre_hash_algorithms_guaranteed()
 declare void @imre_hash_update(ptr, ptr)
+declare void @imre_hash_update_file(ptr, ptr, i64)
+declare ptr @imre_hash_xof_digest(ptr, i64)
+declare ptr @imre_hash_xof_hexdigest(ptr, i64)
 declare ptr @imre_hash_digest(ptr)
 declare ptr @imre_hash_hexdigest(ptr)
 declare ptr @imre_hash_copy(ptr)

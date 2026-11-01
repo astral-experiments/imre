@@ -69,13 +69,39 @@ impl References<'_> {
                         .iter()
                         .any(|arg| matches!(arg, ast::Expr::Starred(_))));
         }
-        matches!(call.func.as_ref(), ast::Expr::Attribute(attr) if attr.attr.as_str() == "expandtabs")
-            && call.arguments.args.len() + call.arguments.keywords.len() == 1
-            && call
-                .arguments
-                .keywords
-                .first()
-                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+        let ast::Expr::Attribute(attr) = call.func.as_ref() else {
+            return false;
+        };
+        let keyword = match attr.attr.as_str() {
+            "expandtabs" => "tabsize",
+            "digest" | "hexdigest" => {
+                // An unknown hash receiver can be an XOF. Direct fixed-output
+                // constructors reject length before invoking its index protocol.
+                if let ast::Expr::Call(receiver) = attr.value.as_ref() {
+                    match self.graph.resolve(self.module, &receiver.func) {
+                        Some(Binding::Intrinsic(Intrinsic::Sha1 | Intrinsic::Sha256)) => {
+                            return false;
+                        }
+                        Some(Binding::Intrinsic(Intrinsic::NamedHash(name)))
+                            if !matches!(name, "shake_128" | "shake_256") =>
+                        {
+                            return false;
+                        }
+                        _ => {}
+                    }
+                }
+                "length"
+            }
+            _ => return false,
+        };
+        match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([arg], []) => !matches!(arg, ast::Expr::Starred(_)) && !literal(arg),
+            ([], [kw]) => kw.arg.as_deref() == Some(keyword) && !literal(&kw.value),
+            _ => false,
+        }
     }
 }
 
@@ -1255,6 +1281,42 @@ class Indexed:
             };
             let super::ast::Stmt::FunctionDef(index) = &class.body[0] else {
                 panic!("expected __index__");
+            };
+            assert_eq!(
+                graph.includes_method(graph.entry, index),
+                expected,
+                "{call}"
+            );
+        }
+    }
+
+    #[test]
+    fn hash_length_binding_roots_the_implicit_index_callback() {
+        let source = r#"
+from hashlib import shake_128 as factory, sha256, new
+class Length:
+    def __index__(self) -> int:
+        return 3
+"#;
+        for (call, expected) in [
+            ("factory().digest(Length())", true),
+            ("new('shake_256').hexdigest(length=Length())", true),
+            ("h = factory().copy()\nh.digest(Length())", true),
+            ("factory().digest()", false),
+            ("factory().digest(3)", false),
+            ("factory().hexdigest(other=Length())", false),
+            ("factory().digest(Length(), length=Length())", false),
+            ("sha256().digest(Length())", false),
+        ] {
+            let graph =
+                super::SourceGraph::single_with_mode(&format!("{source}\n{call}\n"), true).unwrap();
+            let super::ast::Stmt::ClassDef(class) =
+                &graph.modules[graph.entry].parsed.syntax().body[1]
+            else {
+                panic!("expected Length")
+            };
+            let super::ast::Stmt::FunctionDef(index) = &class.body[0] else {
+                panic!("expected __index__")
             };
             assert_eq!(
                 graph.includes_method(graph.entry, index),
