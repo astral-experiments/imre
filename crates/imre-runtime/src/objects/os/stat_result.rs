@@ -81,7 +81,7 @@ fn signed(value: i64) -> Int {
 }
 
 /// Match the rounding of CPython's C stat expression on its baseline targets.
-fn float_seconds(seconds: f64, nanoseconds: i64) -> f64 {
+pub(crate) fn float_seconds(seconds: f64, nanoseconds: i64) -> f64 {
     let fraction = nanoseconds as f64;
     if cfg!(target_arch = "aarch64") {
         // AArch64 fuses the multiply and add, which matters just before the epoch.

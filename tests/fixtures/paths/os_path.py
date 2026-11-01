@@ -1,3 +1,4 @@
+import genericpath
 import os
 import os.path as path
 from os import path as imported
@@ -22,6 +23,8 @@ def remove_first(parts: list[str]) -> str:
     return "last"
 
 
+print(genericpath.exists(Path(".")))
+print(genericpath.exists("not-a-path\0"))
 parts = ["a//../b"]
 print(lexical_join(parts[0], remove_first(parts)))
 for spelling in ["", "/", "//", "///", "a//b/", ".dot", ".x...y.", "λ/尾.δ", "a\0b"]:

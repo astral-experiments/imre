@@ -58,8 +58,8 @@ fn literal_path(expr: &Expr) -> Option<PathBuf> {
     }
 }
 
-// The object runtime provides installation metadata (EXTENSION_SUFFIXES);
-// ModuleSpec and its operations belong to the typed frontend.
+// Ordinary files keep their typed ModuleSpec diagnostics unless the graph
+// requests the source importer. Explicit runtime imports can use the boxed class.
 fn typed_machinery_export(name: &str) -> bool {
     crate::modules::IntrinsicModule::ImportlibMachinery
         .symbol(name)
@@ -442,9 +442,8 @@ pub(crate) fn compile(
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     while let Some((owner, package, imports)) = work.pop_front() {
-        // Source imports install the actual boxed ModuleSpec class. Other users
-        // keep the existing typed construction and diagnostics.
-        if !registered_imports.called && imports.needs_typed_machinery() {
+        if !options.runtime_imports && !registered_imports.called && imports.needs_typed_machinery()
+        {
             return Ok(None);
         }
         let mut names = imports.names;
@@ -549,7 +548,14 @@ pub(crate) fn compile(
         ));
     }
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
-    for name in ["__hello__", "platform", "re", "stat", "zipimport"] {
+    for name in [
+        "__hello__",
+        "genericpath",
+        "platform",
+        "re",
+        "stat",
+        "zipimport",
+    ] {
         if !seen.contains(name)
             && let Some((file, source)) = crate::modules::bundled_runtime_source(name)
         {
@@ -568,6 +574,7 @@ pub(crate) fn compile(
         "implementation_version":env!("CARGO_PKG_VERSION"),
         "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
+        "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
         "command":command.is_some(),"paths":paths,

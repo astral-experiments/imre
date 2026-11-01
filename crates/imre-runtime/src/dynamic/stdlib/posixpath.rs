@@ -69,8 +69,10 @@ fn normpath(ctx: &mut Context, path: Id) -> Result<Id> {
     Ok(ctx.alloc(result))
 }
 
-fn stat_predicate(ctx: &mut Context, path: Id, file_only: bool) -> Result<bool> {
-    if !spelling(ctx, path)
+fn stat_predicate(ctx: &mut Context, path: Id, operation: &str) -> Result<bool> {
+    let lstat = operation == "islink";
+    if !lstat
+        && !spelling(ctx, path)
         && let Some(index) = ctx.index_value(path)?
     {
         let fd = index
@@ -90,13 +92,18 @@ fn stat_predicate(ctx: &mut Context, path: Id, file_only: bool) -> Result<bool> 
         // SAFETY: fstat initializes the full buffer on success and never takes ownership of fd.
         return Ok(unsafe {
             libc::fstat(fd, stat.as_mut_ptr()) == 0
-                && (!file_only || stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFREG)
+                && (operation == "exists"
+                    || stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFREG)
         });
     }
     let value = path_arg(
         ctx,
         path,
-        "stat: path should be string, bytes, os.PathLike or integer",
+        if lstat {
+            "lstat: path should be string, bytes or os.PathLike"
+        } else {
+            "stat: path should be string, bytes, os.PathLike or integer"
+        },
     )?;
     let encoded;
     let path = match ctx.heap.get(ctx.scalar_value(value)) {
@@ -108,10 +115,11 @@ fn stat_predicate(ctx: &mut Context, path: Id, file_only: bool) -> Result<bool> 
         Value::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
         _ => unreachable!(),
     };
-    Ok(if file_only {
-        crate::objects::is_file(path)
-    } else {
-        crate::objects::exists(path)
+    Ok(match operation {
+        "exists" => crate::objects::exists(path),
+        "isfile" => crate::objects::is_file(path),
+        "islink" => std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()),
+        _ => unreachable!("registered path predicate"),
     })
 }
 
@@ -146,8 +154,8 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected one path argument"));
     };
     let path = *path;
-    match name {
-        "_imre_posixpath.extension_start" => {
+    match name.strip_prefix("_imre_posixpath.") {
+        Some("extension_start") => {
             let cut = match ctx.heap.get(path) {
                 Value::Str(text) => text
                     [..crate::objects::posixpath::extension_start(text.as_bytes())]
@@ -158,8 +166,8 @@ pub(super) fn call(
             };
             Ok(ctx.int(cut as i64))
         }
-        "_imre_posixpath.exists" | "_imre_posixpath.isfile" => Ok(super::super::builtins::boolean(
-            stat_predicate(ctx, path, name == "_imre_posixpath.isfile")?,
+        Some(op @ ("exists" | "isfile" | "islink")) => Ok(super::super::builtins::boolean(
+            stat_predicate(ctx, path, op)?,
         )),
         _ => unreachable!(),
     }

@@ -2,12 +2,15 @@
 
 
 from _frozen_importlib import ModuleSpec as _ModuleSpec
-from _frozen_importlib_external import SourceFileLoader as _SourceFileLoader
+import _frozen_importlib_external as _bootstrap_external
+
+_bootstrap_external.__name__ = "importlib._bootstrap_external"
+_bootstrap_external.__package__ = "importlib"
 
 
 def _file_spec(name, origin, locations, loader=None):
     if loader is None:
-        loader = _SourceFileLoader(name, origin)
+        loader = _bootstrap_external.SourceFileLoader(name, origin)
     spec = _ModuleSpec(name, loader, origin=origin)
     spec.submodule_search_locations = locations
     spec.has_location = True

@@ -317,16 +317,28 @@ pub(super) fn unobserved_child(pid: libc::pid_t) {
 
 /// CPython checks this argument combination before obtaining the stdio handles.
 pub(super) fn pass_fds_override() -> crate::Result<()> {
-    const LINE: isize = 862; // subprocess.Popen.__init__
-    match filtered(2, "subprocess", LINE, || {
-        "pass_fds overriding close_fds.".into()
-    })
-    .map_err(|()| Error::new(Kind::OverflowError, LINE_OVERFLOW))?
+    runtime_warning(
+        "subprocess",
+        "subprocess.py",
+        862,
+        "pass_fds overriding close_fds.",
+    )
+}
+
+/// Emit a checked RuntimeWarning from an internal standard-library frame.
+pub(crate) fn runtime_warning(
+    module: &'static str,
+    filename: &str,
+    line: isize,
+    message: &str,
+) -> crate::Result<()> {
+    match filtered(2, module, line, || message.into())
+        .map_err(|()| Error::new(Kind::OverflowError, LINE_OVERFLOW))?
     {
         Some((Action::Error, message)) => return Err(Error::new(Kind::RuntimeWarning, message)),
         Some((_, message)) => {
             let _ = crate::sys::write_stderr(
-                &format!("subprocess.py:{LINE}: RuntimeWarning: {message}"),
+                &format!("{filename}:{line}: RuntimeWarning: {message}"),
                 true,
             );
         }

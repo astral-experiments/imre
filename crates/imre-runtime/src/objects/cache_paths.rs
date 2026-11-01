@@ -80,7 +80,12 @@ fn absolute_head(head: &str) -> Result<String, Error> {
     let cwd = super::paths::path_utf8(cwd.into_os_string())?;
     Ok(join(&[&cwd, head.strip_prefix("./").unwrap_or(head)]))
 }
-fn cache_name(path: &str, tag: &str, optimization: &str) -> Result<Str, Error> {
+pub(crate) fn cache_name(
+    path: &str,
+    tag: &str,
+    optimization: &str,
+    prefix: Option<&str>,
+) -> Result<Str, Error> {
     let (head, tail) = split(path);
     let (base, sep, rest) = tail
         .rsplit_once('.')
@@ -97,22 +102,20 @@ fn cache_name(path: &str, tag: &str, optimization: &str) -> Result<Str, Error> {
         name.push_str(optimization);
     }
     name.push_str(".pyc");
-    CONFIG.with_borrow(|c| match &c.prefix {
+    match prefix {
         None => Ok(Str::from(join(&[head, "__pycache__", &name]))),
         Some(p) => Ok(Str::from(join(&[
-            p.as_str(),
+            p,
             absolute_head(head)?.trim_start_matches('/'),
             &name,
         ]))),
-    })
+    }
 }
-fn source_name(path: &str) -> Result<Str, Error> {
+pub(crate) fn source_name(path: &str, prefix: Option<&str>) -> Result<Str, Error> {
     let (head, name) = split(path);
-    let inside = CONFIG.with_borrow(|c| {
-        c.prefix.as_ref().and_then(|p| {
-            head.strip_prefix(p.trim_end_matches('/'))
-                .filter(|s| s.starts_with('/'))
-        })
+    let inside = prefix.and_then(|p| {
+        head.strip_prefix(p.trim_end_matches('/'))
+            .filter(|s| s.starts_with('/'))
     });
     let dir = match inside {
         Some(s) => s,
@@ -171,7 +174,14 @@ pub unsafe extern "C" fn imre_cache_from_source(
     optimization: *const Str,
 ) -> *const Str {
     // SAFETY: all three strings remain live for the call.
-    let result = unsafe { cache_name(&*path, &*tag, &*optimization) };
+    let result = CONFIG.with_borrow(|c| unsafe {
+        cache_name(
+            &*path,
+            &*tag,
+            &*optimization,
+            c.prefix.as_ref().map(|p| p.as_str()),
+        )
+    });
     finish(
         result.map(|s| crate::StrOwner::into_raw(crate::StrOwner::new(s))),
         std::ptr::null(),
@@ -183,7 +193,9 @@ pub unsafe extern "C" fn imre_cache_from_source(
 pub unsafe extern "C" fn imre_source_from_cache(_tag: *const Str, path: *const Str) -> *const Str {
     // SAFETY: the path remains live for the call.
     finish(
-        unsafe { source_name(&*path) }.map(|s| crate::StrOwner::into_raw(crate::StrOwner::new(s))),
+        CONFIG
+            .with_borrow(|c| unsafe { source_name(&*path, c.prefix.as_ref().map(|p| p.as_str())) })
+            .map(|s| crate::StrOwner::into_raw(crate::StrOwner::new(s))),
         std::ptr::null(),
     )
 }
@@ -191,9 +203,20 @@ pub(super) fn module_cache(
     path: &str,
     optimization: &str,
 ) -> Result<Option<crate::StrOwner>, Error> {
-    let tag = CONFIG.with_borrow(|c| c.tag.clone());
-    tag.map(|tag| cache_name(path, &tag, optimization).map(crate::StrOwner::new))
-        .transpose()
+    CONFIG.with_borrow(|c| {
+        c.tag
+            .as_ref()
+            .map(|tag| {
+                cache_name(
+                    path,
+                    tag,
+                    optimization,
+                    c.prefix.as_ref().map(|p| p.as_str()),
+                )
+                .map(crate::StrOwner::new)
+            })
+            .transpose()
+    })
 }
 
 /// Warn before checking conflicting arguments or invoking the truth protocol.
@@ -202,14 +225,8 @@ pub extern "C" fn imre_cache_debug_validate(no_debug: u32, no_opt: u32) {
     if no_debug != 0 {
         return;
     }
-    let result = super::warnings::deprecation(
-        "importlib._bootstrap_external",
-        "<frozen importlib._bootstrap_external>",
-        258,
-        "the debug_override parameter is deprecated; use 'optimization' instead",
-    );
     finish(
-        result.and_then(|()| {
+        warn_debug_override().and_then(|()| {
             if no_opt == 0 {
                 Err(Error::new(
                     Kind::TypeError,
@@ -221,4 +238,13 @@ pub extern "C" fn imre_cache_debug_validate(no_debug: u32, no_opt: u32) {
         }),
         (),
     );
+}
+
+pub(crate) fn warn_debug_override() -> Result<(), Error> {
+    super::warnings::deprecation(
+        "importlib._bootstrap_external",
+        "<frozen importlib._bootstrap_external>",
+        258,
+        "the debug_override parameter is deprecated; use 'optimization' instead",
+    )
 }

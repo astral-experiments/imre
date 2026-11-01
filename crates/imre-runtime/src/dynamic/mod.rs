@@ -1960,6 +1960,12 @@ impl Context {
                 self.modules.remove(name);
                 return Err(error);
             }
+            if name == "importlib"
+                && let Some(external) = self.scope_name(scope, "_bootstrap_external")
+            {
+                self.modules
+                    .insert("importlib._bootstrap_external".to_owned(), external);
+            }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {

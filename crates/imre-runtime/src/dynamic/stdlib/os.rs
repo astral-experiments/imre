@@ -32,6 +32,58 @@ fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
     encoded.map_err(|_| Error::new("ValueError", nul_error))
 }
 
+/// SourceFileLoader obtains size and mtime in one following stat or fstat.
+pub(super) fn source_path_stats(ctx: &mut Context, path: Id) -> Result<Id> {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let spelling = matches!(
+        ctx.heap.get(ctx.scalar_value(path)),
+        Value::Str(_) | Value::Bytes(_)
+    );
+    let syscall_error = |status| (status != 0).then(std::io::Error::last_os_error);
+    let (error, filename) = if !spelling && let Some(index) = ctx.index_value(path)? {
+        if matches!(ctx.heap.get(path), Value::Bool(_)) {
+            crate::objects::runtime_warning(
+                "importlib._bootstrap_external",
+                "<frozen importlib._bootstrap_external>",
+                152,
+                "bool is used as a file descriptor",
+            )?;
+        }
+        let fd = native::directory_fd_number(&index)?;
+        let error = if fd == -1 {
+            // CPython treats -1 as the path converter's sentinel, so stat sees a null pathname.
+            Some(std::io::Error::from_raw_os_error(libc::EFAULT))
+        } else {
+            // SAFETY: fstat borrows the descriptor and initializes stat on success.
+            syscall_error(unsafe { libc::fstat(fd, stat.as_mut_ptr()) })
+        };
+        (error, path)
+    } else {
+        let path = posixpath::path_arg(
+            ctx,
+            path,
+            "stat: path should be string, bytes, os.PathLike or integer",
+        )?;
+        let pathname = c_path(ctx, path, "stat: embedded null character in path")?;
+        // SAFETY: the pathname is NUL-terminated and the output buffer is writable.
+        let error = syscall_error(unsafe { libc::stat(pathname.as_ptr(), stat.as_mut_ptr()) });
+        (error, path)
+    };
+    if let Some(error) = error {
+        return Err(ctx.with_errno_filename(crate::objects::errno_error(error).into(), filename)?);
+    }
+    // SAFETY: either successful POSIX call initialized the full stat structure.
+    let stat = unsafe { stat.assume_init() };
+    let mtime_key = ctx.text("mtime");
+    let mtime = ctx.alloc(Value::Float(native::float_seconds(
+        stat.st_mtime as f64,
+        stat.st_mtime_nsec,
+    )));
+    let size_key = ctx.text("size");
+    let size = ctx.int(stat.st_size);
+    Ok(ctx.dict(vec![(mtime_key, mtime), (size_key, size)]))
+}
+
 /// Direct putenv and unsetenv update libc. Only os.environ assignments also change the dictionary.
 pub(super) fn change_environment(
     ctx: &mut Context,

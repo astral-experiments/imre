@@ -127,6 +127,7 @@ REJECTED = {
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
     "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
+    "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
     "opcode_bytecode_operation": ({"main.py": "from _opcode import stack_effect\n"}, "stack_effect"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
@@ -304,6 +305,74 @@ ACCEPTED = {
             "print(module.text)\n"
             "try:\n    SourceFileLoader('other', path + '.missing').get_code('other')\n"
             "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
+        ),
+    },
+    "source_loader_path_stats": {
+        "main.py": (
+            "import os\nfrom importlib.machinery import SourceFileLoader\n"
+            "class PathLike:\n"
+            "    def __init__(self, path): self.path = path\n"
+            "    def __fspath__(self): return self.path\n"
+            "loader = SourceFileLoader('example', __file__)\n"
+            "stats = loader.path_stats(__file__)\n"
+            "print(stats, type(stats['mtime']).__name__, type(stats['size']).__name__)\n"
+            "assert stats == loader.path_stats(path=PathLike(__file__.encode()))\n"
+            "fd = os.open(__file__, os.O_RDONLY)\n"
+            "try:\n    assert stats == loader.path_stats(fd)\n"
+            "finally:\n    os.close(fd)\n"
+            "missing = b'absent-source-file'\n"
+            "try:\n    loader.path_stats(PathLike(missing))\n"
+            "except FileNotFoundError as error:\n    print(error.filename is missing)\n"
+            "else:\n    raise AssertionError('accepted a missing path')\n"
+        ),
+    },
+    "py_compile_prechecks": {
+        "main.py": "from consumer import check\ncheck()\n",
+        "consumer.py": (
+            "import py_compile\n"
+            "def check():\n"
+            "    print(py_compile.PycInvalidationMode.CHECKED_HASH.name)\n"
+            "    for output in ('.', 'absent.pyc'):\n"
+            "        try:\n"
+            "            py_compile.compile('absent.py', output, doraise=True)\n"
+            "        except (FileExistsError, FileNotFoundError) as error:\n"
+            "            print(type(error).__name__, str(error))\n"
+            "        else:\n"
+            "            raise AssertionError(output)\n"
+        ),
+    },
+    "frozen_external_alias": {
+        "main.py": (
+            "import _frozen_importlib_external as frozen\n"
+            "import importlib._bootstrap_external as external\n"
+            "from importlib import _bootstrap_external\n"
+            "from importlib.machinery import SourceFileLoader\n"
+            "print(external is frozen, external is _bootstrap_external)\n"
+            "print(external.__name__, external.__package__, SourceFileLoader.__module__)\n"
+            "print(external.SourceFileLoader is SourceFileLoader)\n"
+            "loader = external.SourceFileLoader('example', __file__)\n"
+            "print(loader.get_filename('example') == __file__, bool(loader.get_data(__file__)))\n"
+        ),
+    },
+    "loader_source_to_code": {
+        "main.py": (
+            "from importlib.machinery import SourceFileLoader\n"
+            "loader = SourceFileLoader('module', 'unread.py')\n"
+            "for source, level in [('value = 41', -1), (b'value = 42', 0)]:\n"
+            "    code = loader.source_to_code(source, b'display.py', _optimize=level)\n"
+            "    scope = {}\n"
+            "    exec(code, scope)\n"
+            "    print(code.co_filename, scope['value'])\n"
+            "try:\n"
+            "    loader.source_to_code(b'# coding: missing-codec', 'bad.py')\n"
+            "except SyntaxError as error:\n"
+            "    print(error.msg, error.filename, error.lineno)\n"
+            "else:\n"
+            "    raise AssertionError('invalid coding cookie accepted')\n"
+            "try:\n"
+            "    loader.source_to_code(None, b'bad\\x00name', _optimize='no index')\n"
+            "except ValueError as error:\n"
+            "    print(str(error))\n"
         ),
     },
     "registered_source_spec": {
