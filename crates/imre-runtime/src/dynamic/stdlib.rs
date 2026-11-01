@@ -643,7 +643,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
-        | ("struct", "Struct" | "calcsize" | "unpack" | "error")
+        | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
         | ("random", "random")
@@ -1089,6 +1089,19 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::ThreadLocal(Default::default())));
+    }
+    if name == "struct.pack" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_struct.pack() takes no keyword arguments",
+            ));
+        }
+        let Some((&format, values)) = args.split_first() else {
+            return Err(Error::new("TypeError", "missing format argument"));
+        };
+        let (_, layout) = structure::parse(ctx, format)?;
+        return structure::pack(ctx, &layout, values);
     }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
@@ -1910,10 +1923,7 @@ pub(super) fn call(
         }
         "struct.unpack" => {
             let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
-            let values = layout
-                .unpack(ctx.bytes_like(argument(args, 1)?)?)
-                .map_err(|e| Error::new("struct.error", e))?;
-            structure::unsigned_tuple(ctx, values)
+            structure::unpack(ctx, &layout, argument(args, 1)?)?
         }
         "json.loads" => {
             let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {

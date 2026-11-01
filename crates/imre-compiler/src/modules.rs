@@ -924,6 +924,7 @@ impl IntrinsicModule {
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Struct, "Struct") => Intrinsic::ObjectRuntimeExport("struct.Struct"),
             (Self::Struct, "calcsize") => Intrinsic::ObjectRuntimeExport("struct.calcsize"),
+            (Self::Struct, "pack") => Intrinsic::ObjectRuntimeExport("struct.pack"),
             (Self::Struct, "unpack") => Intrinsic::ObjectRuntimeExport("struct.unpack"),
             (Self::Struct, "error") => Intrinsic::ObjectRuntimeExport("struct.error"),
             (Self::CollectionsAbc, "Collection") => {
