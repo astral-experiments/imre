@@ -1161,7 +1161,7 @@ impl Value {
                 visit.extend(
                     protected
                         .iter()
-                        .filter_map(super::source_code::FinallyBlock::root),
+                        .flat_map(super::source_code::FinallyBlock::roots),
                 );
             }
             Self::Class {

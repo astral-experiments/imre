@@ -30,6 +30,14 @@ impl Drop for RawFile {
     }
 }
 
+/// Use CPython's default when the filesystem reports an unusable block size.
+fn file_block_size(size: impl TryInto<i64>) -> i64 {
+    match size.try_into() {
+        Ok(size) if size > 1 => size,
+        _ => super::DEFAULT_BUFFER_SIZE,
+    }
+}
+
 fn closed() -> Error {
     Error::new("ValueError", "I/O operation on closed file")
 }
@@ -244,7 +252,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             ));
         }
         match crate::objects::open_raw_file(filename, flags, mode.ends_with('+')) {
-            Ok((file, metadata)) => (file.into_raw_fd(), metadata.blksize() as i64),
+            Ok((file, metadata)) => (file.into_raw_fd(), file_block_size(metadata.blksize())),
             Err(error) => return Err(ctx.with_errno_filename(error.into(), path)?),
         }
     } else {
@@ -258,7 +266,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
                 let error = os_error(std::io::Error::from_raw_os_error(libc::EISDIR));
                 return Err(ctx.with_errno_filename(error, path)?);
             }
-            stat.st_blksize as i64
+            file_block_size(stat.st_blksize)
         } else {
             let err = std::io::Error::last_os_error();
             if err.raw_os_error() == Some(libc::EBADF) {
@@ -272,11 +280,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         fd: Cell::new(Some(fd)),
         closefd: owns,
         mode,
-        blksize: Cell::new(if blksize > 1 {
-            blksize
-        } else {
-            super::DEFAULT_BUFFER_SIZE
-        }),
+        blksize: Cell::new(blksize),
         repr_active: Cell::new(false),
     });
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {

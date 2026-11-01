@@ -117,7 +117,7 @@ branches. Skipped tests count toward the suite size only.
 | `dataclasses` | 219 | 276 | Selected cases |
 | `datetime` | 1 | 1,098 | Selected cases |
 | `fnmatch` | 24 | 24 | Complete suite on `main` |
-| `functools` | 18 | 329 | Selected cases |
+| `functools` | 21 | 329 | Selected cases |
 | `hashlib` | 63 | 82 | Selected cases |
 | `importlib` | 8 | 1,346 | Selected cases |
 | `io` | 102 | 1,038 | Selected cases |
@@ -126,17 +126,17 @@ branches. Skipped tests count toward the suite size only.
 | `logging` | 21 | 272 | Selected cases |
 | `os` | 6 | 579 | Selected cases on `main` |
 | `pathlib` | 18 | 1,369 | Selected cases |
-| `re` | 118 | 165 | All 165 cases ran on a development branch |
-| `shutil` | 5 | 223 | Selected cases |
+| `re` | 120 | 165 | All 165 cases ran on a development branch |
+| `shutil` | 11 | 223 | Selected cases |
 | `socket` | 31 | 746 | Selected cases |
 | `subprocess` | 16 | 353 | Selected cases |
-| `tempfile` | 3 | 118 | Selected cases |
+| `tempfile` | 5 | 118 | Selected cases |
 | `textwrap` | 68 | 68 | Complete suite on `main` |
 | `threading` | 65 | 228 | All 228 cases ran on a development branch |
 | `typing` | 93 | 712 | Selected cases |
 | `unittest` | 154 | 1,090 | Package runner on a development branch |
 | `urllib` | 84 | 178 | Selected cases |
-| **Total** | **2,663** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **2,676** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
