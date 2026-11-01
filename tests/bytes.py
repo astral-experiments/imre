@@ -9,7 +9,7 @@ from pathlib import Path
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comprehensions import BOOTSTRAP, require_result, run, snapshot, write_files
+from comprehensions import BOOTSTRAP, cases, require_result, run, snapshot, write_files
 from files import run_with_failing_output
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "bytes"
@@ -79,16 +79,6 @@ ERRORS = {
 }
 
 
-def cases(project: Path) -> list[tuple[str, Path, str | None]]:
-    result = [(path.stem, path, None) for path in sorted(project.glob("*.py"))]
-    result.append(("imported", project / "imported/main.py", None))
-    for name, (source, error) in ERRORS.items():
-        path = project / "errors" / name / "main.py"
-        write_files(path.parent, {"main.py": source})
-        result.append((name, path, error))
-    return result
-
-
 def reference(
     python: str, source: Path, cwd: Path, error: str | None, runner
 ) -> subprocess.CompletedProcess[str]:
@@ -143,7 +133,7 @@ def main() -> None:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
-        for name, source, error in cases(project):
+        for name, source, error in cases(project, ERRORS):
             reference_dir = temporary / name / "reference"
             reference_dir.mkdir(parents=True)
             runner = run_with_failing_output if name == "file_failures" else subprocess.run
