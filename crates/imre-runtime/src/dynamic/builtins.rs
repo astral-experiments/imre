@@ -307,6 +307,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "find",
     "format",
     "isalnum",
+    "isidentifier",
     "isspace",
     "isupper",
     "join",

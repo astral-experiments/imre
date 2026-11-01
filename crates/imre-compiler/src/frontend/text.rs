@@ -305,6 +305,7 @@ impl Checker<'_> {
             } else {
                 let predicate = match name {
                     "isalnum" => ir::TextPredicate::Alnum,
+                    "isidentifier" => ir::TextPredicate::Identifier,
                     "isspace" => ir::TextPredicate::Space,
                     "isupper" => ir::TextPredicate::Upper,
                     _ => unreachable!("resolved text predicate"),

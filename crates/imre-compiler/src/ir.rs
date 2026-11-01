@@ -1713,6 +1713,7 @@ pub(crate) enum UrlProperty {
 #[derive(Clone, Copy)]
 pub(crate) enum TextPredicate {
     Alnum,
+    Identifier,
     Space,
     Upper,
 }

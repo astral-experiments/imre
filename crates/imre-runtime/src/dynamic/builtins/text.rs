@@ -1217,6 +1217,7 @@ pub(super) fn method(
     }
     let predicate: Option<fn(&str) -> bool> = match name {
         "isalnum" => Some(crate::objects::python_alnum),
+        "isidentifier" => Some(crate::objects::python_isidentifier),
         "isspace" => Some(crate::objects::python_isspace),
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,

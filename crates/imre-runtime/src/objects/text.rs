@@ -235,11 +235,32 @@ pub(crate) fn python_alnum(text: &str) -> bool {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
     }
     const RANGES: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alnum.rs"));
-    text.chars().all(|ch| {
-        let cp = u32::from(ch);
-        let index = RANGES.partition_point(|&(_, end)| end < cp);
-        RANGES.get(index).is_some_and(|&(start, _)| start <= cp)
-    })
+    text.chars().all(|ch| in_unicode_ranges(ch, RANGES))
+}
+
+fn in_unicode_ranges(ch: char, ranges: &[(u32, u32)]) -> bool {
+    let cp = u32::from(ch);
+    let index = ranges.partition_point(|&(_, end)| end < cp);
+    ranges.get(index).is_some_and(|&(start, _)| start <= cp)
+}
+
+/// Check identifier spelling with CPython's Unicode version. Keywords are valid spellings.
+pub(crate) fn python_isidentifier(text: &str) -> bool {
+    const START: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/identifier_start.rs"));
+    const CONTINUE: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/identifier_continue.rs"));
+    let mut chars = text.chars();
+    chars.next().is_some_and(|ch| in_unicode_ranges(ch, START))
+        && chars.all(|ch| in_unicode_ranges(ch, CONTINUE))
+}
+
+/// Tests the spelling of an identifier.
+///
+/// # Safety
+/// The immutable string is rooted for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isidentifier(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive and no character reference escapes.
+    unsafe { u32::from(python_isidentifier(&*value)) }
 }
 
 /// Tests a native string with Python's alphanumeric predicate.
