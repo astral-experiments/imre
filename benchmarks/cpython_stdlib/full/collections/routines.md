@@ -1,10 +1,10 @@
 # Collections execution evidence
 
-The [versioned per-occurrence report](evidence-linux.json) covers the same
+The [archived per-occurrence report](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/cpython_stdlib/full/collections/runs/8bed1fe03437/evidence-linux.json) covers the same
 659 original IDs separately at O0 and O3 on Imre
-[`8bed1fe03437`](runs/8bed1fe03437/source.json), using merged deque support
+[`8bed1fe03437`](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/cpython_stdlib/full/collections/runs/8bed1fe03437/source.json), using merged deque support
 from [#561](https://github.com/astral-sh/imre/pull/561). The
-[O0](runs/8bed1fe03437/routines-O0.json) and [O3](runs/8bed1fe03437/routines-O3.json)
+[O0](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/cpython_stdlib/full/collections/runs/8bed1fe03437/routines-O0.json) and [O3](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/cpython_stdlib/full/collections/runs/8bed1fe03437/routines-O3.json)
 routine runs retain the first diagnostic or execution for each ID. Each level has thirteen
 methods with native bodies, operations and assertions under the original
 CPython fixture hooks: seven Counter methods, four 100,000-item deque
