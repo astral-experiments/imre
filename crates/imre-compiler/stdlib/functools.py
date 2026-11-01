@@ -134,3 +134,18 @@ def total_ordering(cls):
             opfunc.__name__ = opname
             setattr(cls, opname, opfunc)
     return cls
+
+
+def _unbounded_lru_cache():
+    from functools import _unbounded_cache, update_wrapper
+    def decorating_function(user_function):
+        wrapper = _unbounded_cache(user_function)
+        wrapper.cache_parameters = lambda: {'maxsize': None, 'typed': False}
+        return update_wrapper(wrapper, user_function)
+    return decorating_function
+
+
+def cache(user_function, /):
+    'Simple lightweight unbounded cache.  Sometimes called "memoize".'
+    from functools import lru_cache
+    return lru_cache(maxsize=None)(user_function)

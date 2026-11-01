@@ -1,7 +1,7 @@
 use super::{option, tuple_text};
 use crate::dynamic::{
     Context,
-    value::{Error, Id, Result, Value},
+    value::{CACHE_CAPACITY, Error, Id, NONE, Result, Value},
 };
 
 pub(super) const ASSIGNED: &[&str] = &[
@@ -81,4 +81,55 @@ pub(super) fn update_wrapper(
     // A wrapped function's dictionary can itself contain __wrapped__.
     ctx.set_attr(wrapper, "__wrapped__", wrapped)?;
     Ok(wrapper)
+}
+
+pub(super) fn cache_method(ctx: &mut Context, name: &str, wrapper: Id) -> Result<Id> {
+    let Value::Cached {
+        table,
+        unbounded,
+        hits,
+        misses,
+        ..
+    } = *ctx.heap.get(wrapper)
+    else {
+        return Err(Error::new("TypeError", "expected a cache wrapper"));
+    };
+    if name.ends_with(".cache_clear") {
+        let Value::Cached {
+            entries,
+            hits,
+            misses,
+            ..
+        } = ctx.heap.get_mut(wrapper)
+        else {
+            unreachable!()
+        };
+        entries.clear();
+        *hits = 0;
+        *misses = 0;
+        let clear = ctx.lookup_attr(table, "clear")?;
+        return ctx.call(clear, Vec::new(), Vec::new());
+    }
+    let class = if let Some(&class) = ctx.builtins.get("functools._CacheInfo") {
+        class
+    } else {
+        let class_name = ctx.text("CacheInfo");
+        let fields = ctx.text("hits misses maxsize currsize");
+        let module = ctx.text("functools");
+        let class = super::super::namedtuple::factory(
+            ctx,
+            &[class_name, fields],
+            &[("module".into(), module)],
+        )?;
+        ctx.builtins.insert("functools._CacheInfo".into(), class);
+        class
+    };
+    let size = ctx.dict_entries(table).unwrap().len() as i64;
+    let maxsize = if unbounded {
+        NONE
+    } else {
+        ctx.int(CACHE_CAPACITY as i64)
+    };
+    let args = vec![ctx.int(hits), ctx.int(misses), maxsize, ctx.int(size)];
+    ctx.call(class, args, Vec::new())
 }
