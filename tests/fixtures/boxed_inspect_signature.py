@@ -7,10 +7,6 @@ def omitted(value=inspect._sentinel):
     return value is inspect._sentinel
 
 
-assert omitted() and not omitted(None) and not omitted(object())
-assert type(inspect._sentinel) is object
-
-
 def original(a, /, b: int = 3, *args, flag=False, **kwargs) -> str:
     return str(a)
 
@@ -102,3 +98,6 @@ try:
     Parameter(DeniedName("valid"), Parameter.POSITIONAL_ONLY)
 except ValueError:
     print("identifier override rejected")
+
+assert omitted() and not omitted(None) and not omitted(object())
+assert type(inspect._sentinel) is object
