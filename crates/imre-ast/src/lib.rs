@@ -25,6 +25,8 @@ pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
     }
 }
 
+pub mod code_flags;
+
 /// Names imported by the module scope disable method binding even after reassignment.
 pub fn module_imports(body: &[ast::Stmt]) -> BTreeSet<String> {
     use ast::visitor::{Visitor, walk_stmt};

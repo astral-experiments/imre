@@ -22,6 +22,8 @@ pub(super) struct CodeObject {
     pub first_line: u32,
     pub module_definition: bool,
     pub coroutine: bool,
+    /// CPython flags for boxed Python function definitions.
+    pub flags: Option<u32>,
     pub nested: Vec<(usize, Id)>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
