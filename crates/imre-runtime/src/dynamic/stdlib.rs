@@ -514,7 +514,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
         (
             "sys",
-            "exit" | "exc_info" | "exception" | "intern" | "_is_interned" | "getdefaultencoding",
+            "exit"
+            | "exc_info"
+            | "exception"
+            | "intern"
+            | "_is_interned"
+            | "getdefaultencoding"
+            | "getfilesystemencoding"
+            | "getfilesystemencodeerrors",
         )
         | (
             "sysconfig",
@@ -805,23 +812,29 @@ pub(super) fn call(
         let (heap, roots) = ctx.heap_and_roots();
         return Ok(heap.intern(*value, roots));
     }
-    if name == "sys.getdefaultencoding" {
+    if matches!(
+        name,
+        "sys.getdefaultencoding" | "sys.getfilesystemencoding" | "sys.getfilesystemencodeerrors"
+    ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "sys.getdefaultencoding() takes no keyword arguments",
+                format!("{name}() takes no keyword arguments"),
             ));
         }
         if !args.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!(
-                    "sys.getdefaultencoding() takes no arguments ({} given)",
-                    args.len()
-                ),
+                format!("{name}() takes no arguments ({} given)", args.len()),
             ));
         }
-        return Ok(ctx.default_encoding);
+        return Ok(match name {
+            "sys.getdefaultencoding" => ctx.default_encoding,
+            "sys.getfilesystemencoding" => ctx
+                .heap
+                .code_name(crate::sys::filesystem_encoding()?.as_str()),
+            _ => ctx.heap.code_name(crate::sys::filesystem_errors().as_str()),
+        });
     }
     if name == "random.random" {
         if !kwargs.is_empty() {

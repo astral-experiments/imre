@@ -4,6 +4,20 @@ def current():
     import sys
     from sys import intern
 
+    for method in (sys.getdefaultencoding, sys.getfilesystemencoding, sys.getfilesystemencodeerrors):
+        spelling = method()
+        assert spelling is method() and sys._is_interned(spelling)
+        print(spelling)
+        for args, kwargs in (((None,), {}), ((), {"x": False})):
+            try:
+                method(*args, **kwargs)
+            except TypeError as error:
+                print(str(error))
+            else:
+                raise AssertionError("accepted encoding arguments")
+    if sys.getfilesystemencoding() == sys.getdefaultencoding():
+        assert sys.getfilesystemencoding() is sys.getdefaultencoding()
+
     assert intern is sys.intern
     assert sys._is_interned("jinja_token")
     letter = "é"

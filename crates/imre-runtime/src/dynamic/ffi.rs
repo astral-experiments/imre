@@ -604,7 +604,12 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
     let paths = paths.into_iter().map(|p| ctx.text(p)).collect();
     ctx.sys_path = ctx.alloc(Value::List(paths));
-    ctx.default_encoding = ctx.text(crate::sys::default_encoding().as_str());
+    // Python retains and interns these process configuration strings at startup.
+    ctx.default_encoding = ctx.heap.code_name(crate::sys::default_encoding().as_str());
+    if let Ok(name) = crate::sys::filesystem_encoding() {
+        ctx.heap.code_name(name.as_str());
+    }
+    ctx.heap.code_name(crate::sys::filesystem_errors().as_str());
     let current = ctx.alloc(Value::Context(Default::default()));
     ctx.contexts.push(current);
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
