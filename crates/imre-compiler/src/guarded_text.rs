@@ -109,13 +109,7 @@ fn block(body: &mut Vec<Statement>, private: &[bool], in_loop: bool) {
         let Statement::Assign(_, expression) = &mut guarded[0] else {
             unreachable!()
         };
-        let input = std::mem::replace(
-            source(expression).unwrap(),
-            Expr {
-                ty: Type::Str,
-                kind: ExprKind::Local(slot),
-            },
-        );
+        let input = std::mem::replace(source(expression).unwrap(), Expr::local(slot, Type::Str));
         let projection = std::mem::replace(expression, input);
         guarded.insert(guarded.len() - 1, Statement::Assign(slot, projection));
         // Drop the snapshot at early exits and the owned result after its sole

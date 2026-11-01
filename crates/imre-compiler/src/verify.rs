@@ -794,10 +794,7 @@ mod tests {
     fn weak_proxy_upgrade_returns_its_referent_class() {
         let types = Default::default();
         let check = |input, result| {
-            let arg = Expr {
-                ty: input,
-                kind: ExprKind::Local(0),
-            };
+            let arg = Expr::local(0, input);
             Builtin::WeakProxyTarget.verify_specialization(&[arg], result, &types)
         };
         assert!(check(Type::WeakProxy(0), Type::Class(0)).is_ok());
@@ -809,17 +806,13 @@ mod tests {
     fn checks_specialized_shapes_and_bounds_without_reproving_them() {
         let mut module = empty();
         module.entry.locals = vec![Type::ListInt, Type::Int];
-        let local = |slot, ty| Expr {
-            ty,
-            kind: ExprKind::Local(slot),
-        };
         let read = |min, max, args| {
             Statement::Expr(Expr {
                 ty: Type::Int,
                 kind: ExprKind::Builtin(Builtin::ListGetBoundedInBounds { min, max }, args),
             })
         };
-        let args = vec![local(0, Type::ListInt), local(1, Type::Int)];
+        let args = vec![Expr::local(0, Type::ListInt), Expr::local(1, Type::Int)];
         module.entry.body = vec![read(0, 10, args.clone())];
         super::module(&module).unwrap();
         for (min, max, args) in [
@@ -841,7 +834,7 @@ mod tests {
                 0,
                 10,
                 vec![
-                    local(0, Type::ListInt),
+                    Expr::local(0, Type::ListInt),
                     Expr {
                         ty: Type::Int,
                         kind: ExprKind::Int("-1".into()),

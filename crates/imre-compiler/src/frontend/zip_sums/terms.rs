@@ -46,13 +46,6 @@ impl Operation {
     }
 }
 
-fn local(slot: usize, ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Local(slot),
-    }
-}
-
 pub(super) struct Row {
     items: [usize; 2],
     shared: HashMap<Operation, usize>,
@@ -80,8 +73,14 @@ impl Row {
             return None;
         }
         let bindings = [
-            (slots[0], local(self.items[0], *locals.get(self.items[0])?)),
-            (slots[1], local(self.items[1], *locals.get(self.items[1])?)),
+            (
+                slots[0],
+                Expr::local(self.items[0], *locals.get(self.items[0])?),
+            ),
+            (
+                slots[1],
+                Expr::local(self.items[1], *locals.get(self.items[1])?),
+            ),
         ];
         let first_local = locals.len();
         let first_statement = body.len();
@@ -117,7 +116,7 @@ impl Projection<'_> {
         let ty = value.ty;
         self.locals.push(ty);
         self.body.push(Statement::Assign(slot, value));
-        local(slot, ty)
+        Expr::local(slot, ty)
     }
 
     fn value(&mut self, old: &Expr, bindings: &[(usize, Expr)], eager: bool) -> Option<Expr> {
@@ -182,7 +181,7 @@ impl Projection<'_> {
         let value = Expr { ty, kind };
         if let Some(operation) = operation {
             if let Some(&slot) = self.row.shared.get(&operation) {
-                return Some(local(slot, ty));
+                return Some(Expr::local(slot, ty));
             }
             if eager {
                 self.row.shared.insert(operation, self.locals.len());

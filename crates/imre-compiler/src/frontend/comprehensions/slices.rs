@@ -108,17 +108,11 @@ fn integer(value: i64) -> Expr {
 }
 
 fn local(slot: usize) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Local(slot),
-    }
+    Expr::local(slot, Type::Int)
 }
 
 fn list_local(slot: usize) -> Expr {
-    Expr {
-        ty: Type::ListInt,
-        kind: ExprKind::Local(slot),
-    }
+    Expr::local(slot, Type::ListInt)
 }
 
 fn add(left: Expr, right: Expr) -> Expr {

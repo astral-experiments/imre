@@ -10885,10 +10885,7 @@ print(show("x"))
     fn adjacent_local_handoffs_emit_a_move() {
         use crate::ir::{Expr, ExprKind, Statement, Type};
 
-        let local = Expr {
-            ty: Type::Str,
-            kind: ExprKind::Local(0),
-        };
+        let local = Expr::local(0, Type::Str);
         let graph = crate::modules::SourceGraph::single(
             "def transfer(source: str, target: str) -> str:\n    return target\n",
         )

@@ -122,13 +122,6 @@ enum Backing {
     Owned(crate::types::CachedFunction),
 }
 
-fn local(slot: usize, ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Local(slot),
-    }
-}
-
 fn field(owner: Expr, slot: usize, ty: Type) -> Expr {
     Expr {
         ty,
@@ -169,7 +162,7 @@ fn build_wrapper(
     let args: Vec<_> = parameters
         .iter()
         .enumerate()
-        .map(|(i, &ty)| local(i + usize::from(context.is_some()), ty))
+        .map(|(i, &ty)| Expr::local(i + usize::from(context.is_some()), ty))
         .collect();
     let mut body = Vec::new();
     let len_arg = match args.as_slice() {
@@ -209,7 +202,7 @@ fn build_wrapper(
                     kind: ExprKind::Tuple(args.clone()),
                 },
             ));
-            local(slot, ty)
+            Expr::local(slot, ty)
         }
     };
     let table = cache_table(types, parameters, value);
@@ -221,10 +214,10 @@ fn build_wrapper(
     locals.extend([state_ty, table, value]);
     let captured = match backing {
         Backing::Module { id, .. } => builtin(Builtin::ModuleCache(id), state_ty, vec![]),
-        Backing::Owned(layout) => field(local(0, layout.frame), 1, state_ty),
+        Backing::Owned(layout) => field(Expr::local(0, layout.frame), 1, state_ty),
     };
     body.push(Statement::Assign(state_slot, captured));
-    let state = || local(state_slot, state_ty);
+    let state = || Expr::local(state_slot, state_ty);
     let cache = || builtin(Builtin::CacheTable, table, vec![state()]);
     let probe = builtin(
         Builtin::CacheProbe(policy.capacity),
@@ -235,7 +228,7 @@ fn build_wrapper(
     let hit = builtin(
         Builtin::DictGet,
         stored,
-        vec![local(table_slot, table), key.clone()],
+        vec![Expr::local(table_slot, table), key.clone()],
     );
     let hit = if len_arg.is_some() {
         field(hit, 1, value)
@@ -251,7 +244,7 @@ fn build_wrapper(
             kind: match backing {
                 Backing::Module { raw, .. } => ExprKind::Call(raw, ir::CallArgs::positional(args)),
                 Backing::Owned(layout) => ExprKind::Invoke {
-                    callable: Box::new(field(local(0, layout.frame), 0, layout.callable)),
+                    callable: Box::new(field(Expr::local(0, layout.frame), 0, layout.callable)),
                     args: ir::CallArgs::positional(args),
                 },
             },
@@ -261,14 +254,18 @@ fn build_wrapper(
     let entry = match len_arg {
         Some(arg) => Expr {
             ty: stored,
-            kind: ExprKind::Tuple(vec![arg, local(result_slot, value)]),
+            kind: ExprKind::Tuple(vec![arg, Expr::local(result_slot, value)]),
         },
-        None => local(result_slot, value),
+        None => Expr::local(result_slot, value),
     };
     if policy.capacity < 0 {
         // A callback can clear its own cache. Use the table installed after it returns.
         body.push(Statement::Assign(table_slot, cache()));
-        body.push(Statement::SetItem(local(table_slot, table), key, entry));
+        body.push(Statement::SetItem(
+            Expr::local(table_slot, table),
+            key,
+            entry,
+        ));
     } else if policy.capacity > 0 {
         body.push(Statement::Expr(builtin(
             Builtin::CacheInsert(policy.capacity),
@@ -276,7 +273,7 @@ fn build_wrapper(
             vec![state(), key, entry],
         )));
     }
-    body.push(Statement::Return(local(result_slot, value)));
+    body.push(Statement::Return(Expr::local(result_slot, value)));
     ir::Function {
         params,
         returns: value,
@@ -538,7 +535,7 @@ impl Checker<'_> {
             builtin(
                 Builtin::CacheStat(field),
                 Type::Int,
-                vec![local(slot, state.ty)],
+                vec![Expr::local(slot, state.ty)],
             )
         });
         Ok(Some(Expr {
@@ -584,7 +581,7 @@ impl Checker<'_> {
                 builtin(
                     Builtin::CacheParameter(typed),
                     documents::ANY,
-                    vec![local(slot, ty)],
+                    vec![Expr::local(slot, ty)],
                 )
             };
             (parameter(false), parameter(true))

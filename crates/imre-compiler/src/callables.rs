@@ -111,10 +111,7 @@ mod tests {
                         ty: Type::Class(0),
                         kind: ExprKind::Scope {
                             body: vec![Statement::Expr(callable(second, 2, None))],
-                            value: Box::new(Expr {
-                                ty: Type::Class(0),
-                                kind: ExprKind::Local(0),
-                            }),
+                            value: Box::new(Expr::local(0, Type::Class(0))),
                             clear: Vec::new(),
                         },
                     })),

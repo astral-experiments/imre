@@ -2516,10 +2516,7 @@ impl<'a> Checker<'a> {
 
     /// Reads a hidden binding at its storage type, without source-level narrowing.
     fn local(&self, slot: usize) -> Expr {
-        Expr {
-            ty: self.locals[slot],
-            kind: ExprKind::Local(slot),
-        }
+        Expr::local(slot, self.locals[slot])
     }
 
     fn classified_error(&self, kind: FailureKind, node: &impl Ranged, message: &str) -> String {
