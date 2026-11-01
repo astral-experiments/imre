@@ -48,15 +48,13 @@ pub(super) mod urllib;
 mod zipimport;
 
 pub(super) fn is_module(name: &str) -> bool {
-    if name == "stat" {
-        return cfg!(any(target_os = "linux", target_os = "macos"));
-    }
     if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
         return true;
     }
     matches!(
         name,
         "sys"
+            | "_imp"
             | "threading"
             | "_thread"
             | "abc"
@@ -315,7 +313,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
-        ("_imre_importlib", "find_spec" | "get_code" | "loader_fields")
+        (
+            "_imp",
+            "is_frozen"
+            | "_override_frozen_modules_for_tests"
+            | "_override_multi_interp_extensions_check",
+        )
+        | ("_imre_importlib", "find_spec" | "get_code" | "loader_fields")
         | ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
@@ -1039,6 +1043,9 @@ pub(super) fn call(
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imp.") {
+        return ctx.imp_call(method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("_imre_importlib.") {
         match (method, args, kwargs) {

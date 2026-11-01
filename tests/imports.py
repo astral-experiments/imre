@@ -235,6 +235,20 @@ ACCEPTED = {
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
     },
+    "frozen_import_override": {
+        "main.py": (
+            "import _imp\nfrom _imp import _override_frozen_modules_for_tests as override\n"
+            "print(_imp.is_frozen('__hello__'), _imp.is_frozen('json'))\n"
+            "print(override(-1), _imp.is_frozen('__hello__'), _imp.is_frozen('_frozen_importlib'))\n"
+            "import __hello__ as local\nprint(local.initialized)\n"
+            "print(override(1), _imp.is_frozen('__hello__'))\n"
+            "import __hello__ as cached\nprint(cached is local)\n"
+            "print(override(0), _imp.is_frozen('__hello__'))\n"
+            "try:\n    override(1 << 70)\nexcept OverflowError:\n    print('overflow')\n"
+            "try:\n    _imp._override_multi_interp_extensions_check(1)\nexcept RuntimeError as e:\n    print(e)\n"
+        ),
+        "__hello__.py": "initialized = 'local'\n",
+    },
     "boxed_stat_shadow": {
         "main.py": (
             "import sys\nsys.path = sys.path\n"

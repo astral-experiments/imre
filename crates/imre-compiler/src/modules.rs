@@ -51,6 +51,7 @@ fn stat_mode_source() -> Option<&'static str> {
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "__hello__" => Some(("__hello__.py", include_str!("../stdlib/__hello__.py"))),
         "stat" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             let modes = stat_mode_source()?;
@@ -254,6 +255,7 @@ pub(crate) enum IntrinsicModule {
     ImportlibMetadata,
     ImportlibUtil,
     Array,
+    Imp,
     Ast,
     Marshal,
     Pickle,
@@ -695,6 +697,7 @@ impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
             "array" => Some(Self::Array),
+            "_imp" => Some(Self::Imp),
             "ast" => Some(Self::Ast),
             "marshal" => Some(Self::Marshal),
             "pickle" => Some(Self::Pickle),
@@ -853,6 +856,13 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
             (Self::Numbers, "Number") => Intrinsic::Number,
+            (Self::Imp, "is_frozen") => Intrinsic::ObjectRuntimeExport("_imp.is_frozen"),
+            (Self::Imp, "_override_frozen_modules_for_tests") => {
+                Intrinsic::ObjectRuntimeExport("_imp._override_frozen_modules_for_tests")
+            }
+            (Self::Imp, "_override_multi_interp_extensions_check") => {
+                Intrinsic::ObjectRuntimeExport("_imp._override_multi_interp_extensions_check")
+            }
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
@@ -3225,7 +3235,8 @@ impl<'a> Loader<'a> {
         });
         if let Some(module) = module {
             self.reject_stdlib_shadow(name)?;
-            self.needs_object_imports |= module == IntrinsicModule::Ast;
+            self.needs_object_imports |=
+                matches!(module, IntrinsicModule::Ast | IntrinsicModule::Imp);
         }
         if module == Some(IntrinsicModule::Selectors)
             && cfg!(any(target_os = "linux", target_os = "macos"))

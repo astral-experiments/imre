@@ -584,6 +584,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         source_builtins: None,
         zip_directories: HashMap::new(),
         codec_entries: Default::default(),
+        frozen_override: 0,
         modules: HashMap::new(),
         classes: HashMap::new(),
         typing: super::typing::Registry::default(),
