@@ -62,7 +62,6 @@ REJECTED = {
     "regex_compiled_flags": 'import re\np = re.compile("x")\nre.search(p, "x", re.UNICODE)',
     "regex_search_bytes": 'import re\nre.search("x", b"x")',
     "regex_dynamic_group": 'import re\ndef bad(index: int) -> None:\n    if m := re.search("(x)", "x"):\n        m.group(index)',
-    "regex_unchecked_match": 'import re\nre.search("x", "y").start()',
     "regex_match_bounds": 'import re\nre.compile("x").search("text", 2)',
     "regex_backreference": 'import re\nre.compile(r"(x)\\1")',
     "regex_lookbehind": 'import re\nre.compile(r"(?<=x)y")',

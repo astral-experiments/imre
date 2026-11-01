@@ -9568,7 +9568,9 @@ impl<'a> Checker<'a> {
             if let Some(element) = self.types.deque_element(receiver.ty) {
                 return self.deque_method(call, attribute, receiver, element);
             }
-            if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
+            if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch)
+                || self.types.payload(receiver.ty) == Some(Type::RegexMatch)
+            {
                 return self.regex_method(receiver, attribute, call);
             }
             if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))

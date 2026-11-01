@@ -537,6 +537,16 @@ impl Checker<'_> {
                         .narrowed_instance(self.module, &attr.value) => {}
             _ => return receiver,
         }
+        self.require_attribute_receiver(receiver, payload, attr)
+    }
+
+    /// Evaluate the receiver once and report a missing attribute before the call arguments run.
+    pub(super) fn require_attribute_receiver(
+        &mut self,
+        receiver: Expr,
+        payload: Type,
+        attr: &ast::ExprAttribute,
+    ) -> Expr {
         let slot = self.hidden(receiver.ty);
         let local = self.local(slot);
         let missing = Expr {
