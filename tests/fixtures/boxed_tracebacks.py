@@ -256,3 +256,45 @@ try:
 except ImportError as imported:
     imported.msg = "replacement"
     print(str(imported), imported.args)
+
+
+# Clearing completed frames releases their locals while leaving the traceback chain intact.
+import traceback
+from _weakref import ref
+
+
+class Local:
+    pass
+
+
+def fail_with_local(refs):
+    local = Local()
+    refs.append(ref(local))
+    raise LookupError()
+
+
+def check_clear():
+    refs = []
+    try:
+        fail_with_local(refs)
+    except LookupError as error:
+        tb = error.__traceback__
+        tail = tb.tb_next
+        assert refs[0]() is not None
+        try:
+            tb.tb_frame.clear()
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("cleared an executing frame")
+        traceback.clear_frames(tb)
+        assert refs[0]() is None
+        assert tb.tb_next is tail
+        assert error.with_traceback(None) is error and error.__traceback__ is None
+        try:
+            raise error.with_traceback(tail)
+        except LookupError as raised:
+            assert raised is error and raised.__traceback__.tb_next is tail
+
+
+check_clear()

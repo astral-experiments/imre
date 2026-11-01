@@ -288,6 +288,62 @@ impl Context {
         Ok(head)
     }
 
+    /// Adopt the exact Python traceback chain and replace any previously retained frames.
+    pub(super) fn set_traceback(&mut self, exception: Id, tb: Id) -> Result<()> {
+        let Value::Raised(error) = self.heap.get_mut(exception) else {
+            return Err(Error::new("TypeError", "expected a BaseException instance"));
+        };
+        if tb == NONE {
+            error.clear_traceback();
+            self.heap.collect_next_statement = true;
+            return Ok(());
+        }
+        let mut frames = Vec::new();
+        let mut node = tb;
+        while node != NONE {
+            let Value::Traceback {
+                frame,
+                next,
+                lineno,
+                span,
+            } = *self.heap.get(node)
+            else {
+                return Err(Error::new(
+                    "TypeError",
+                    "__traceback__ must be a traceback or None",
+                ));
+            };
+            let Value::PythonFrame { code, .. } = *self.heap.get(frame) else {
+                unreachable!("traceback retains a frame")
+            };
+            let Value::Code(code) = self.heap.get(code) else {
+                unreachable!("frame retains its code object")
+            };
+            let file = self.str_value(code.filename)?.to_owned().into();
+            frames
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            frames.push((
+                Location {
+                    file,
+                    line: lineno as u32,
+                    span,
+                },
+                frame,
+            ));
+            node = next;
+        }
+        frames.reverse();
+        let Value::Raised(error) = self.heap.get_mut(exception) else {
+            unreachable!()
+        };
+        let trace = error.tracing();
+        trace.cached = Some((frames.len(), tb));
+        trace.frames = frames;
+        self.heap.collect_next_statement = true;
+        Ok(())
+    }
+
     pub(super) fn type_name(&self, value: Id) -> &str {
         match self.heap.get(value) {
             Value::None => "NoneType",
@@ -306,6 +362,7 @@ impl Context {
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
+            Value::Array(_) => "array.array",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::File(file) => match file.as_ref() {
@@ -317,6 +374,7 @@ impl Context {
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(_) => "_io.BufferedRandom",
+            Value::SequenceIterator { .. } => "iterator",
             Value::ReverseSequence { .. } => "reversed",
             Value::Deque(_) => super::deque::CLASS,
             Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
@@ -611,6 +669,7 @@ pub(super) enum Value {
     Str(String),
     /// Python code points for text containing at least one surrogate.
     SurrogateStr(Vec<u32>),
+    Array(super::array::Array),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
     CodecInfo {
@@ -628,6 +687,10 @@ pub(super) enum Value {
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
+    SequenceIterator {
+        source: Option<Id>,
+        index: i64,
+    },
     ReverseSequence {
         source: Option<Id>,
         remaining: usize,
@@ -908,7 +971,9 @@ impl Value {
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
-            Self::ReverseSequence { source, .. } => visit.extend(*source),
+            Self::SequenceIterator { source, .. } | Self::ReverseSequence { source, .. } => {
+                visit.extend(*source)
+            }
             Self::DequeIterator { deque, .. } => visit.push(*deque),
             Self::List(v) | Self::Tuple(v) => visit.extend(v.iter().rev()),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
@@ -1155,6 +1220,7 @@ impl Value {
             | Self::Str(_)
             | Self::SurrogateStr(_)
             | Self::Bytes(_)
+            | Self::Array(_)
             | Self::ByteArray(_)
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
@@ -2136,6 +2202,34 @@ impl Heap {
         });
         self.frames.last_mut().unwrap().object = Some(object);
         Some((location, object))
+    }
+
+    /// Drop the frame's ownership of completed locals without changing captured closure cells.
+    pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
+        let Value::PythonFrame { scope, .. } = *self.get(value) else {
+            return Err(Error::new("TypeError", "expected a frame"));
+        };
+        if scope == NONE {
+            return Ok(());
+        }
+        if self.frames.iter().any(|frame| frame.scope == scope) {
+            return Err(Error::new(
+                "RuntimeError",
+                "cannot clear an executing frame",
+            ));
+        }
+        if self.slots.iter().any(|slot| {
+            matches!(&slot.value,
+            Some(Value::Generator { scope: owner, offset: Some(_), .. }) if *owner == scope)
+        }) {
+            return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
+        }
+        let Value::PythonFrame { scope, .. } = self.get_mut(value) else {
+            unreachable!()
+        };
+        *scope = NONE;
+        self.collect_next_statement = true;
+        Ok(())
     }
 
     pub fn caller_module(&self) -> Id {

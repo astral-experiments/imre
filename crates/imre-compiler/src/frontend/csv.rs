@@ -89,15 +89,35 @@ impl Checker<'_> {
                     }
                 }
                 "doublequote" | "skipinitialspace" | "strict" => {
-                    let ast::Expr::BooleanLiteral(literal) = &option.value else {
-                        return Err(error(self.source, option, "expected a literal CSV boolean"));
+                    // Fold scalar literals only: a container display may evaluate user code.
+                    let value = match &option.value {
+                        ast::Expr::UnaryOp(op)
+                            if matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                                && op.operand.is_number_literal_expr() =>
+                        {
+                            op.operand.as_ref()
+                        }
+                        value if value.is_literal_expr() => value,
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                option,
+                                "expected a literal CSV switch",
+                            ));
+                        }
                     };
+                    if let ast::Expr::StringLiteral(text) = value {
+                        check_string(text, self.source)?;
+                    }
+                    let enabled = ast::helpers::Truthiness::from_expr(value, |_| false)
+                        .into_bool()
+                        .expect("scalar literals have fixed truth values");
                     let bit = match name {
                         "doublequote" => 1,
                         "skipinitialspace" => 2,
                         _ => 4,
                     };
-                    if literal.value {
+                    if enabled {
                         flags |= bit;
                     } else {
                         flags &= !bit;

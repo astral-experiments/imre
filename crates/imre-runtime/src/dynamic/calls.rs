@@ -91,6 +91,7 @@ impl Context {
                 Some(NONE)
             }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
+                "with_traceback" => self.builtins.get("BaseException.with_traceback").copied(),
                 "__new__" => self
                     .builtins
                     .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
@@ -779,6 +780,7 @@ impl Context {
             | Value::Int(_)
             | Value::Str(_)
             | Value::SurrogateStr(_)
+            | Value::Array(_)
             | Value::Bytes(_)
             | Value::List(_)
             | Value::Dict(_)
@@ -814,6 +816,7 @@ impl Context {
             Value::ClassMethod(_) => "classmethod",
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
+            Value::SequenceIterator { .. } => "iterator",
             Value::ReverseSequence { .. } => "reversed",
             Value::Deque(_) => super::deque::CLASS,
             Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
@@ -1014,7 +1017,8 @@ impl Context {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
                     || self.raised_error_matches(error, class)
             }
-            ("bytearray", Value::ByteArray(_))
+            ("array.array", Value::Array(_))
+            | ("bytearray", Value::ByteArray(_))
             | ("object", _)
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
@@ -1386,7 +1390,8 @@ impl Context {
         {
             return Ok(error.stop_value());
         }
-        if matches!(name, "__new__" | "__init__") && matches!(self.heap.get(obj), Value::Raised(_))
+        if matches!(name, "__new__" | "__init__" | "with_traceback")
+            && matches!(self.heap.get(obj), Value::Raised(_))
         {
             let class = self.exact_type(obj)?;
             return self.instance_attribute(obj, class, None, name);
@@ -1407,6 +1412,9 @@ impl Context {
         }
         if let Some(value) = super::typing::attribute(self, obj, name) {
             return value;
+        }
+        if let Some(value) = super::array::attribute(self, obj, name) {
+            return Ok(value);
         }
         if let Some(value) = self.os_attribute(obj, name)? {
             return Ok(value);
@@ -1450,6 +1458,14 @@ impl Context {
                 "tb_lineno" => return Ok(self.int(lineno)),
                 _ => {}
             },
+            Value::Native(ref class) if class == "frame" && name == "clear" => {
+                return Ok(self.builtin("frame.clear"));
+            }
+            Value::PythonFrame { .. } if name == "clear" => {
+                let method = self.builtin("frame.clear");
+                let owner = self.builtin("frame");
+                return self.bind_attribute(method, obj, owner);
+            }
             Value::PythonFrame { code, .. } if name == "f_code" => return Ok(code),
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
@@ -1713,6 +1729,9 @@ impl Context {
             {
                 let class = class.as_str().to_owned();
                 let (module, short) = class.rsplit_once('.').unwrap();
+                if class == "array.array" && matches!(name, "append" | "tolist" | "tobytes") {
+                    return Ok(self.builtin(&format!("array.array.{name}")));
+                }
                 if class == super::namedtuple::GETTER
                     && let Some(value) = super::namedtuple::class_attribute(self, obj, name)
                 {
@@ -2049,7 +2068,7 @@ impl Context {
                     || builtins::is_enum_base(class)
                     || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
-                        && matches!(name, "__new__" | "__init__"))
+                        && matches!(name, "__new__" | "__init__" | "with_traceback"))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
                     || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
@@ -2838,12 +2857,8 @@ impl Context {
             }
             return Ok(());
         }
-        if name == "__traceback__"
-            && value == NONE
-            && let Value::Raised(error) = self.heap.get_mut(obj)
-        {
-            error.clear_traceback();
-            return Ok(());
+        if name == "__traceback__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return self.set_traceback(obj, value);
         }
         if name == "__context__" && matches!(self.heap.get(obj), Value::Raised(_)) {
             if value != NONE && !matches!(self.heap.get(value), Value::Raised(_)) {

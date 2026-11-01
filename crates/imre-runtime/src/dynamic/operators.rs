@@ -387,6 +387,7 @@ impl Context {
                 context: Some(bindings),
                 ..
             } => !bindings.is_empty(),
+            Value::Array(array) => array.len() != 0,
             Value::Range(range) => range.len.as_small() != Some(0),
             Value::Instance { .. } | Value::Raised(_) => {
                 if let Some(hook) = self.bound_slot(id, "__bool__")? {
@@ -2429,6 +2430,7 @@ impl Context {
             Value::Str(_) | Value::SurrogateStr(_) => "string",
             Value::Bytes(_) => "byte",
             Value::ByteArray(_) => "bytearray",
+            Value::Array(_) => "array",
             Value::Range(_) => "range",
             _ => {
                 return Err(Error::new(
@@ -2505,6 +2507,10 @@ impl Context {
             Value::Str(s) => {
                 let c = s.chars().nth(position(s.chars().count())?).unwrap();
                 self.text(c.to_string())
+            }
+            Value::Array(array) => {
+                let item = array.at(position(array.len())?)?;
+                self.alloc(item)
             }
             Value::Bytes(v) | Value::ByteArray(v) => self.int(i64::from(v[position(v.len())?])),
             _ => unreachable!(),

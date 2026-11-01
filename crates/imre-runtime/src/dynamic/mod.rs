@@ -2,6 +2,7 @@
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
 mod abstract_class;
+mod array;
 mod builtins;
 mod calls;
 mod complex;
@@ -54,6 +55,7 @@ struct SourceModule {
 
 enum IteratorSlice<'a> {
     Values(&'a [Id]),
+    Array(&'a array::Array, usize),
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
     ReversedBytes(&'a [u8]),
@@ -70,6 +72,7 @@ impl IteratorSlice<'_> {
             Self::Bytes(bytes) | Self::ReversedBytes(bytes) => bytes.len(),
             Self::ReversedText(text) => text.chars().count(),
             Self::Codepoints(points) | Self::ReversedCodepoints(points) => points.len(),
+            Self::Array(array, offset) => array.len().saturating_sub(*offset),
         }
     }
 
@@ -391,6 +394,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::RangeIterator(_)
+                | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
@@ -437,6 +441,7 @@ impl Context {
                 let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
             }
+            Value::Array(_) => (id, "array.arrayiterator"),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
             Value::SurrogateStr(_) => (id, "str_iterator"),
@@ -478,6 +483,12 @@ impl Context {
             Value::Instance { .. } if let Some((storage, _)) = self.sequence_payload(id) => {
                 return self.iterator(storage);
             }
+            _ if self.slot(id, "__getitem__").is_some() => {
+                return Ok(self.alloc(Value::SequenceIterator {
+                    source: Some(id),
+                    index: 0,
+                }));
+            }
             _ => {
                 let values = self.items(id)?;
                 (self.alloc(Value::Tuple(values)), "iterator")
@@ -518,7 +529,8 @@ impl Context {
         let value = self.heap.get(source);
         if matches!(
             value,
-            Value::ReverseSequence { .. }
+            Value::SequenceIterator { .. }
+                | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::CallableIterator(_)
@@ -564,6 +576,7 @@ impl Context {
                 IteratorSlice::ReversedCodepoints(&points[..*offset])
             }
             Value::SurrogateStr(points) => IteratorSlice::Codepoints(&points[*offset..]),
+            Value::Array(array) => IteratorSlice::Array(array, *offset),
             Value::Str(text) if *reverse => IteratorSlice::ReversedText(&text[..*offset]),
             Value::Bytes(bytes) if *reverse => IteratorSlice::ReversedBytes(&bytes[..*offset]),
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
@@ -632,6 +645,40 @@ impl Context {
                     "cannot fit 'int' into an index-sized integer",
                 )
             })
+    }
+
+    /// Sequence-protocol iteration consults the current __getitem__ at each index.
+    fn next_sequence_item(&mut self, id: Id, source: Option<Id>, index: i64) -> Result<Option<Id>> {
+        let Some(source) = source else {
+            return Ok(None);
+        };
+        if index == i64::MAX {
+            return Err(Error::new("OverflowError", "iter index too large"));
+        }
+        let key = self.int(index);
+        match self.get_item(source, key) {
+            Ok(item) => {
+                let Value::SequenceIterator { index, .. } = self.heap.get_mut(id) else {
+                    unreachable!()
+                };
+                *index += 1;
+                Ok(Some(item))
+            }
+            Err(error) => {
+                let index_error = self.builtin("IndexError");
+                if !self.raised_error_matches(&error, index_error)
+                    && !self.is_stop_iteration(&error)
+                {
+                    return Err(error);
+                }
+                *self.heap.get_mut(id) = Value::SequenceIterator {
+                    source: None,
+                    index: 0,
+                };
+                self.heap.weak_edge_removed(source);
+                Ok(None)
+            }
+        }
     }
 
     fn next_reverse_sequence(
@@ -779,6 +826,9 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        if let Value::SequenceIterator { source, index } = *self.heap.get(id) {
+            return self.next_sequence_item(id, source, index);
+        }
         if let Value::ReverseSequence { source, remaining } = *self.heap.get(id) {
             return self.next_reverse_sequence(id, source, remaining);
         }
@@ -871,6 +921,10 @@ impl Context {
         let (item, width) = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => (values[0], 1),
             IteratorSlice::Reversed(values) => (values[values.len() - 1], 1),
+            IteratorSlice::Array(array, offset) => {
+                let value = array.at(offset)?;
+                (self.alloc(value), 1)
+            }
             IteratorSlice::Bytes(bytes) => (self.int(i64::from(bytes[0])), 1),
             IteratorSlice::ReversedBytes(bytes) => (self.int(i64::from(bytes[bytes.len() - 1])), 1),
             IteratorSlice::Codepoints(points) => (self.text_codepoints(vec![points[0]]), 1),
@@ -1030,6 +1084,7 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
+                | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
@@ -1045,6 +1100,7 @@ impl Context {
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
         ) || self.slot(id, "__iter__").is_some()
+            || self.slot(id, "__getitem__").is_some()
         {
             let iter = self.iterator(id)?;
             let mut items = Vec::new();
@@ -1070,6 +1126,10 @@ impl Context {
                 .map_err(|_| Error::new("MemoryError", ""))?;
             values.extend(&ring.items);
             return Ok(values);
+        }
+        if matches!(self.heap.get(id), Value::Array(_)) {
+            let iterator = self.iterator(id)?;
+            return self.items(iterator);
         }
         if let Some(values) = self.enum_values(id) {
             let Value::Dict(entries) = self.heap.get(values) else {
@@ -1135,7 +1195,8 @@ impl Context {
                 match remaining {
                     IteratorSlice::Values(items) => values.extend_from_slice(items),
                     IteratorSlice::Reversed(items) => values.extend(items.iter().rev().copied()),
-                    IteratorSlice::Bytes(_)
+                    IteratorSlice::Array(..)
+                    | IteratorSlice::Bytes(_)
                     | IteratorSlice::ReversedBytes(_)
                     | IteratorSlice::Codepoints(_)
                     | IteratorSlice::ReversedCodepoints(_)
@@ -1543,6 +1604,7 @@ impl Context {
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));
+            self.builtin("BaseException.with_traceback");
         }
         let methods = match name {
             "object" => &["__hash__", "__format__", "__init_subclass__"],
