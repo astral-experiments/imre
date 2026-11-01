@@ -184,13 +184,7 @@ impl Checker<'_> {
 
     /// A full slice duplicates storage while acquiring each existing element.
     pub(super) fn list_snapshot(&self, list: Expr) -> Expr {
-        let absent = Expr {
-            ty: self.types.optional(Type::Int),
-            kind: ExprKind::Absent(Box::new(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            })),
-        };
+        let absent = Expr::absent(self.types.optional(Type::Int));
         Expr {
             ty: list.ty,
             kind: ExprKind::Builtin(

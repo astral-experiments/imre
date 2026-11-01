@@ -130,13 +130,7 @@ impl Checker<'_> {
                 call,
             )?
         };
-        let reset = slots[2].map_or(
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(false),
-            },
-            |slot| self.local(slot),
-        );
+        let reset = slots[2].map_or(Expr::boolean(false), |slot| self.local(slot));
         let kwargs = Expr {
             ty: dict,
             kind: ExprKind::Dict {

@@ -240,22 +240,10 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(Builtin::SortDetach, vec![self.local(target)]),
                 },
             ));
-            body.push(Statement::Assign(
-                completed,
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(false),
-                },
-            ));
+            body.push(Statement::Assign(completed, Expr::boolean(false)));
             let mut sorting = Vec::new();
             self.sort_values(call, original, callback, reverse, &mut sorting, &mut clear)?;
-            sorting.push(Statement::Assign(
-                completed,
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                },
-            ));
+            sorting.push(Statement::Assign(completed, Expr::boolean(true)));
             body.push(Statement::Try {
                 body: sorting,
                 handlers: Vec::new(),
@@ -279,10 +267,7 @@ impl Checker<'_> {
             ty: Type::None,
             kind: ExprKind::Scope {
                 body,
-                value: Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
+                value: Box::new(Expr::none()),
                 clear,
             },
         })
@@ -307,10 +292,7 @@ impl Checker<'_> {
             }
         }
         let mut callback = None;
-        let mut reverse = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(false),
-        };
+        let mut reverse = Expr::boolean(false);
         for keyword in &call.arguments.keywords {
             let value = match keyword.arg.as_ref().unwrap().as_str() {
                 "key" => self.sort_callback(&keyword.value, element)?,

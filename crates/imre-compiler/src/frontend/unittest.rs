@@ -548,19 +548,19 @@ impl Checker<'_> {
         };
         let Expected { kinds, label, .. } = expected.flatten().unwrap_or_default();
         let optional = self.types.optional(Type::Str);
-        let absent = || Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
         let msg = if let Some(slot) = msg_slot
             && error.is_none()
         {
             self.local(slot)
         } else {
-            absent()
+            Expr::none()
         };
         let msg = self.coerce(msg, optional, call)?;
-        let error = self.coerce(error.map_or_else(absent, unpacking::string), optional, call)?;
+        let error = self.coerce(
+            error.map_or_else(Expr::none, unpacking::string),
+            optional,
+            call,
+        )?;
         let kinds = Expr {
             ty: Type::ListInt,
             kind: ExprKind::List(
@@ -601,7 +601,7 @@ impl Checker<'_> {
         );
         let optional_pattern = self.types.optional(Type::RegexPattern);
         let pattern = self.coerce(
-            pattern.map_or_else(absent, |slot| self.local(slot)),
+            pattern.map_or_else(Expr::none, |slot| self.local(slot)),
             optional_pattern,
             call,
         )?;
@@ -1002,10 +1002,7 @@ impl Checker<'_> {
             kind: ExprKind::Scope {
                 body,
                 clear,
-                value: Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
+                value: Box::new(Expr::none()),
             },
         })
     }
@@ -1101,13 +1098,9 @@ impl Checker<'_> {
     ) -> Result<(Vec<Statement>, bool), String> {
         let root = self.hidden(manager.ty);
         let exceptional = self.hidden(Type::Bool);
-        let flag = |value| Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(value),
-        };
         let mut enter = vec![
             Statement::Assign(root, manager),
-            Statement::Assign(exceptional, flag(false)),
+            Statement::Assign(exceptional, Expr::boolean(false)),
         ];
         if let Some(target) = &item.optional_vars {
             if target.as_name_expr().is_none() {
@@ -1179,7 +1172,7 @@ impl Checker<'_> {
                 kinds: vec![],
                 name: Some(exc),
                 body: vec![
-                    Statement::Assign(exceptional, flag(true)),
+                    Statement::Assign(exceptional, Expr::boolean(true)),
                     Statement::If(matches, vec![store, search], vec![Statement::Raise(None)]),
                 ],
             }],

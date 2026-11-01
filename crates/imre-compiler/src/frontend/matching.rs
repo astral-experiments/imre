@@ -68,24 +68,10 @@ impl Pattern {
     }
 }
 
-fn boolean(value: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(value),
-    }
-}
-
 fn integer(value: impl ToString) -> Expr {
     Expr {
         ty: Type::Int,
         kind: ExprKind::Int(value.to_string()),
-    }
-}
-
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
     }
 }
 
@@ -188,7 +174,7 @@ impl Checker<'_> {
         let selected = self.hidden(Type::Bool);
         let mut body = vec![
             Statement::Assign(subject, value),
-            Statement::Assign(selected, boolean(false)),
+            Statement::Assign(selected, Expr::boolean(false)),
         ];
         let before = Flow::read(self);
         let mut pending = Some(before.clone());
@@ -272,7 +258,7 @@ impl Checker<'_> {
             {
                 *remaining &= !bool_pair_coverage(&case.pattern);
             }
-            let mut chosen = vec![Statement::Assign(selected, boolean(true))];
+            let mut chosen = vec![Statement::Assign(selected, Expr::boolean(true))];
             chosen.extend(case_body);
             if let Some(guard) = guard {
                 matched.push(Statement::If(guard, chosen, Vec::new()));
@@ -289,7 +275,7 @@ impl Checker<'_> {
                     pending = Some(failure);
                 }
             }
-            let mut tests = vec![Statement::Assign(success, boolean(true))];
+            let mut tests = vec![Statement::Assign(success, Expr::boolean(true))];
             tests.append(&mut pattern.body);
             tests.push(Statement::If(self.local(success), matched, Vec::new()));
             pattern.clear.push(success);
@@ -397,7 +383,7 @@ impl Checker<'_> {
         if let ast::Pattern::MatchSingleton(singleton) = node
             && singleton.value == ast::Singleton::None
         {
-            let mut pattern = Pattern::new(none());
+            let mut pattern = Pattern::new(Expr::none());
             pattern.failure = self.types.payload(value.ty);
             pattern.body.push(Statement::Assign(
                 success,
@@ -441,10 +427,10 @@ impl Checker<'_> {
                     compare(
                         value,
                         Compare::Equal,
-                        boolean(singleton.value == ast::Singleton::True),
+                        Expr::boolean(singleton.value == ast::Singleton::True),
                     )
                 } else {
-                    boolean(false)
+                    Expr::boolean(false)
                 };
                 pattern.body.push(Statement::Assign(success, test));
             }
@@ -486,7 +472,7 @@ impl Checker<'_> {
         {
             compare(value, Compare::Equal, literal)
         } else {
-            boolean(false)
+            Expr::boolean(false)
         }
     }
 
@@ -543,7 +529,7 @@ impl Checker<'_> {
         let mut pattern = Pattern::new(value.clone());
         pattern
             .body
-            .push(Statement::Assign(success, boolean(false)));
+            .push(Statement::Assign(success, Expr::boolean(false)));
         let mut alternatives = Vec::new();
         let mut captures: Vec<(String, Type, TextRange)> = Vec::new();
         let mut matched_type = None;
@@ -575,7 +561,7 @@ impl Checker<'_> {
             pattern.captures.push(Capture { name, slot, range });
         }
         for (ready, alternative) in alternatives {
-            let mut body = vec![Statement::Assign(ready, boolean(true))];
+            let mut body = vec![Statement::Assign(ready, Expr::boolean(true))];
             body.extend(alternative.body);
             let mut commit = Vec::new();
             for capture in &pattern.captures {
@@ -593,7 +579,7 @@ impl Checker<'_> {
                     )?,
                 ));
             }
-            commit.push(Statement::Assign(success, boolean(true)));
+            commit.push(Statement::Assign(success, Expr::boolean(true)));
             body.push(Statement::If(self.local(ready), commit, Vec::new()));
             pattern
                 .body
@@ -602,7 +588,7 @@ impl Checker<'_> {
         }
         let ty = matched_type.unwrap();
         pattern.value = if ty == Type::None {
-            none()
+            Expr::none()
         } else if self.types.payload(value.ty) == Some(ty) {
             Expr {
                 ty,
@@ -676,7 +662,7 @@ impl Checker<'_> {
                             ty: self.types.optional(Type::Int),
                             kind: match value {
                                 Some(value) => ExprKind::Present(Box::new(integer(value))),
-                                None => ExprKind::Absent(Box::new(none())),
+                                None => ExprKind::Absent(Box::new(Expr::none())),
                             },
                         };
                         builtin(
@@ -823,7 +809,9 @@ impl Checker<'_> {
                 // A different sealed key domain can never be present. Still
                 // check the nested pattern and keep its statically typed binds.
                 child.body.clear();
-                child.body.push(Statement::Assign(success, boolean(false)));
+                child
+                    .body
+                    .push(Statement::Assign(success, Expr::boolean(false)));
                 pattern.child(self.local(success), child);
             }
         }
@@ -871,7 +859,7 @@ impl Checker<'_> {
                 builtin(Type::Iterator, Builtin::DictIter(true), vec![value]),
             ),
             Statement::While(
-                boolean(true),
+                Expr::boolean(true),
                 vec![
                     Statement::IterNext {
                         iterator,
@@ -944,7 +932,7 @@ impl Checker<'_> {
             pattern.clear.push(unreachable);
             pattern
                 .body
-                .push(Statement::Assign(success, boolean(false)));
+                .push(Statement::Assign(success, Expr::boolean(false)));
             self.local(unreachable)
         };
         let mut seen = HashSet::new();

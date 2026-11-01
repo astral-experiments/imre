@@ -82,19 +82,12 @@ impl Checker<'_> {
             ty: params[i],
             kind: ExprKind::Local(i),
         };
-        let flag = |v| Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(v),
-        };
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         let (op, result, args) = match (op, params.as_slice()) {
             (Intrinsic::Move, [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Move(self.shutil_tree_issue()),
                 self.move_result(*dst),
-                vec![local(0), local(1), flag(true)],
+                vec![local(0), local(1), Expr::boolean(true)],
             ),
             (Intrinsic::DestInSrc, [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::DestInSrc,
@@ -104,7 +97,7 @@ impl Checker<'_> {
             (Intrinsic::Copy(op), [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Copy(op),
                 self.copy_result(op, *dst),
-                vec![local(0), local(1), flag(true)],
+                vec![local(0), local(1), Expr::boolean(true)],
             ),
             (Intrinsic::RmTree, [src] | [src, Type::Bool])
                 if matches!(*src, Type::Str | Type::Bytes) || src.is_path() =>
@@ -117,7 +110,7 @@ impl Checker<'_> {
                         if params.len() == 2 {
                             local(1)
                         } else {
-                            flag(false)
+                            Expr::boolean(false)
                         },
                         none.clone(),
                         none.clone(),
@@ -234,10 +227,7 @@ impl Checker<'_> {
                 return Ok(value);
             }
         };
-        Ok(Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(stat),
-        })
+        Ok(Expr::boolean(stat))
     }
 
     fn shutil_tree_issue(&self) -> Type {
@@ -265,14 +255,7 @@ impl Checker<'_> {
         let params = [
             ("src", Type::Str, None),
             ("dst", Type::Str, None),
-            (
-                "copy_function",
-                Type::Bool,
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                }),
-            ),
+            ("copy_function", Type::Bool, Some(Expr::boolean(true))),
         ]
         .map(|(name, ty, default)| Parameter {
             name: name.into(),
@@ -324,22 +307,19 @@ impl Checker<'_> {
 
     pub(super) fn shutil_copytree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        let boolean = |v| Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(v),
-        };
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         let params = [
             ("src", Type::Str, None),
             ("dst", Type::Str, None),
-            ("symlinks", Type::Bool, Some(boolean(false))),
+            ("symlinks", Type::Bool, Some(Expr::boolean(false))),
             ("ignore", Type::None, Some(none)),
-            ("copy_function", Type::Bool, Some(boolean(true))),
-            ("ignore_dangling_symlinks", Type::Bool, Some(boolean(false))),
-            ("dirs_exist_ok", Type::Bool, Some(boolean(false))),
+            ("copy_function", Type::Bool, Some(Expr::boolean(true))),
+            (
+                "ignore_dangling_symlinks",
+                Type::Bool,
+                Some(Expr::boolean(false)),
+            ),
+            ("dirs_exist_ok", Type::Bool, Some(Expr::boolean(false))),
         ]
         .map(|(name, ty, default)| Parameter {
             name: name.into(),
@@ -404,20 +384,10 @@ impl Checker<'_> {
 
     pub(super) fn shutil_rmtree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         let params = [
             ("path", Type::Str, None),
-            (
-                "ignore_errors",
-                Type::Bool,
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(false),
-                }),
-            ),
+            ("ignore_errors", Type::Bool, Some(Expr::boolean(false))),
             ("onerror", Type::None, Some(none.clone())),
             ("onexc", Type::None, Some(none.clone())),
             ("dir_fd", Type::Int, Some(none)),
@@ -479,10 +449,7 @@ impl Checker<'_> {
                 "follow_symlinks",
                 Type::Bool,
                 ParameterKind::KeywordOnly,
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                }),
+                Some(Expr::boolean(true)),
             ),
         ]
         .map(|(name, ty, kind, default)| Parameter {

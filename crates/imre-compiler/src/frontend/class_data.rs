@@ -52,18 +52,6 @@ impl Storage {
         }
     }
 }
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-fn boolean(v: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(v),
-    }
-}
 fn scope(body: Vec<Statement>, value: Expr, clear: Vec<usize>) -> Expr {
     Expr {
         ty: value.ty,
@@ -344,7 +332,7 @@ impl Checker<'_> {
         };
         Ok(Statement::Expr(scope(
             vec![Statement::Assign(slot, value), store],
-            none(),
+            Expr::none(),
             vec![slot],
         )))
     }
@@ -382,9 +370,9 @@ impl Checker<'_> {
             Ok(scope(
                 vec![
                     Statement::SetField(view.clone(), s.value, v),
-                    Statement::SetField(view, s.ready, boolean(true)),
+                    Statement::SetField(view, s.ready, Expr::boolean(true)),
                 ],
-                none(),
+                Expr::none(),
                 Vec::new(),
             ))
         })?;
@@ -403,7 +391,7 @@ impl Checker<'_> {
         let name = attr.attr.as_str();
         self.dispatch_record(class, receiver, attr, |me, concrete, view| {
             let s = me.writable_shadow(concrete, attr)?;
-            let release = me.coerce(none(), s.stored, attr)?;
+            let release = me.coerce(Expr::none(), s.stored, attr)?;
             let cls = &me.classes.declarations.definitions[concrete].name;
             let exc = Expr {
                 ty: Type::Exception,
@@ -419,11 +407,11 @@ impl Checker<'_> {
                     field(&view, s.ready, Type::Bool),
                     vec![
                         Statement::SetField(view.clone(), s.value, release),
-                        Statement::SetField(view, s.ready, boolean(false)),
+                        Statement::SetField(view, s.ready, Expr::boolean(false)),
                     ],
                     vec![Statement::Raise(Some(exc))],
                 )],
-                none(),
+                Expr::none(),
                 Vec::new(),
             ))
         })

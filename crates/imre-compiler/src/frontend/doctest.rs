@@ -101,10 +101,7 @@ impl Checker<'_> {
                         Type::None,
                         ExprKind::Scope {
                             body: vec![Statement::Assign(slot, value), display],
-                            value: Box::new(Expr {
-                                ty: Type::None,
-                                kind: ExprKind::None,
-                            }),
+                            value: Box::new(Expr::none()),
                             clear: vec![slot],
                         },
                     )

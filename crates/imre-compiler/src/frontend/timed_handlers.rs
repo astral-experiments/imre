@@ -12,16 +12,6 @@ fn param(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
     }
 }
 
-fn absent(ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Absent(Box::new(Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        })),
-    }
-}
-
 fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -39,14 +29,7 @@ impl Checker<'_> {
             integer("minute"),
             integer("second"),
             integer("microsecond"),
-            param(
-                "tzinfo",
-                Type::None,
-                Some(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
-            ),
+            param("tzinfo", Type::None, Some(Expr::none())),
             fold,
         ];
         let args = self.arguments(call, &params, None)?;
@@ -56,10 +39,7 @@ impl Checker<'_> {
     pub(super) fn timed_handler(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let string = self.types.optional(Type::Str);
         let clock = self.types.optional(Type::ClockTime);
-        let off = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(false),
-        };
+        let off = Expr::boolean(false);
         let params = [
             param("filename", Type::Str, None),
             param(
@@ -72,11 +52,11 @@ impl Checker<'_> {
             ),
             param("interval", Type::Int, Some(logging::number(1))),
             param("backupCount", Type::Int, Some(logging::number(0))),
-            param("encoding", string, Some(absent(string))),
+            param("encoding", string, Some(Expr::absent(string))),
             param("delay", Type::Bool, Some(off.clone())),
             param("utc", Type::Bool, Some(off)),
-            param("atTime", clock, Some(absent(clock))),
-            param("errors", string, Some(absent(string))),
+            param("atTime", clock, Some(Expr::absent(clock))),
+            param("errors", string, Some(Expr::absent(string))),
         ];
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             if index == 0 {

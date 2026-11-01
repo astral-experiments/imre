@@ -127,10 +127,7 @@ impl Checker<'_> {
                 .builtin_subclass_values(subject, mapping, call)
                 .map(Some);
         };
-        Ok(Some(Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(matched),
-        }))
+        Ok(Some(Expr::boolean(matched)))
     }
 
     pub(super) fn mapping_class(&self, ty: Type) -> Option<usize> {
@@ -220,17 +217,13 @@ impl Checker<'_> {
             )
         } else {
             let result = self.hidden(Type::Bool);
-            let flag = |value| Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(value),
-            };
             (
                 result,
                 vec![
                     Statement::Expr(lookup),
-                    Statement::Assign(result, flag(true)),
+                    Statement::Assign(result, Expr::boolean(true)),
                 ],
-                flag(false),
+                Expr::boolean(false),
             )
         };
         let attempt = Statement::Try {
@@ -333,10 +326,9 @@ impl Checker<'_> {
             slots[position] = Some(slot);
         }
         let key = slots[0].ok_or_else(|| error(self.source, call, "Mapping.get requires a key"))?;
-        let default = slots[1].map(|slot| self.local(slot)).unwrap_or(Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        });
+        let default = slots[1]
+            .map(|slot| self.local(slot))
+            .unwrap_or(Expr::none());
         let value = self.mapping_lookup(self.local(owner), self.local(key), Some(default), call)?;
         if !call.arguments.keywords.is_empty() {
             self.graph.checked_overload(self.module, call.range());

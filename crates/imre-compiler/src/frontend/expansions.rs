@@ -578,10 +578,7 @@ impl Checker<'_> {
                         Vec::new(),
                     ),
                 ],
-                value: Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
+                value: Box::new(Expr::none()),
                 clear: vec![buffer, input, saved],
             },
         })
@@ -634,13 +631,7 @@ impl Checker<'_> {
                     let next = std::mem::take(&mut prepared.next);
                     prepared.next = vec![Statement::If(
                         self.local(list.selected),
-                        vec![Statement::Assign(
-                            prepared.ready,
-                            Expr {
-                                ty: Type::Bool,
-                                kind: ExprKind::Bool(false),
-                            },
-                        )],
+                        vec![Statement::Assign(prepared.ready, Expr::boolean(false))],
                         next,
                     )];
                 }
@@ -688,10 +679,7 @@ impl Checker<'_> {
             ty: Type::None,
             kind: ExprKind::Scope {
                 body,
-                value: Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
+                value: Box::new(Expr::none()),
                 clear: vec![destination],
             },
         })
@@ -1052,14 +1040,7 @@ impl Checker<'_> {
                         ),
                     },
                 ),
-                Statement::While(
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(true),
-                    },
-                    body,
-                    Vec::new(),
-                ),
+                Statement::While(Expr::boolean(true), body, Vec::new()),
             ],
             clear: vec![source_slot, iterator, key, value],
         })

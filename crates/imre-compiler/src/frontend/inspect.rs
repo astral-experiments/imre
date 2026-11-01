@@ -62,13 +62,7 @@ pub(super) fn equality(left: &Expr, right: &Expr, op: ast::CmpOp) -> Option<Expr
     }
     Some(evaluated(
         left.clone(),
-        evaluated(
-            right.clone(),
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(op == ast::CmpOp::NotEq),
-            },
-        ),
+        evaluated(right.clone(), Expr::boolean(op == ast::CmpOp::NotEq)),
     ))
 }
 
@@ -220,13 +214,7 @@ impl Checker<'_> {
                     | Type::Coroutine(_)
             )
         {
-            return Ok(evaluated(
-                value,
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(false),
-                },
-            ));
+            return Ok(evaluated(value, Expr::boolean(false)));
         }
         Err(error(
             self.source,
@@ -298,13 +286,7 @@ impl Checker<'_> {
                 ));
             }
         };
-        Ok(evaluated(
-            value,
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(result),
-            },
-        ))
+        Ok(evaluated(value, Expr::boolean(result)))
     }
 
     pub(super) fn invoke_descriptor(

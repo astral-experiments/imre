@@ -53,14 +53,7 @@ impl Checker<'_> {
         let slot = self.hidden(Type::Str);
         let limit = pipelines::integer(100);
         let index_type = self.types.optional(Type::Int);
-        let absent = self.coerce(
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            },
-            index_type,
-            call,
-        )?;
+        let absent = self.coerce(Expr::none(), index_type, call)?;
         let stop = self.coerce(limit.clone(), index_type, call)?;
         let len = Expr {
             ty: Type::Int,
@@ -347,13 +340,7 @@ impl Checker<'_> {
                 }
                 _ if value.ty == Type::ObjectValue => ExprKind::Builtin(
                     Builtin::ExceptionFieldIdentity { reversed: false },
-                    vec![
-                        value,
-                        Expr {
-                            ty: Type::None,
-                            kind: ExprKind::None,
-                        },
-                    ],
+                    vec![value, Expr::none()],
                 ),
                 _ => ExprKind::Builtin(Builtin::IsNone, vec![value]),
             },
@@ -515,10 +502,7 @@ impl Checker<'_> {
                 ty: Type::Bool,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Expr(left), Statement::Expr(right)],
-                    value: Box::new(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(identical == (op == ast::CmpOp::Is)),
-                    }),
+                    value: Box::new(Expr::boolean(identical == (op == ast::CmpOp::Is))),
                     clear: Vec::new(),
                 },
             });
@@ -539,10 +523,7 @@ impl Checker<'_> {
                 ty: Type::Bool,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Expr(left), Statement::Expr(right)],
-                    value: Box::new(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(op == ast::CmpOp::IsNot),
-                    }),
+                    value: Box::new(Expr::boolean(op == ast::CmpOp::IsNot)),
                     clear: vec![],
                 },
             });
@@ -680,10 +661,7 @@ impl Checker<'_> {
                 ty: Type::Bool,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Expr(left), Statement::Expr(right)],
-                    value: Box::new(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(op == ast::CmpOp::IsNot),
-                    }),
+                    value: Box::new(Expr::boolean(op == ast::CmpOp::IsNot)),
                     clear: vec![],
                 },
             });

@@ -32,10 +32,7 @@ fn string_io_flag(receiver: &Expr, enabled: bool) -> Expr {
 
 impl Checker<'_> {
     pub(super) fn string_io_attribute(&self, receiver: &Expr, name: &str) -> Option<Expr> {
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         let (check, value) = match name {
             "newlines" => {
                 return Some(Expr {
@@ -152,10 +149,7 @@ impl Checker<'_> {
             kind: ExprKind::Scope {
                 body,
                 clear,
-                value: Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
+                value: Box::new(Expr::none()),
             },
         })
     }
@@ -182,14 +176,7 @@ impl Checker<'_> {
     /// Distinguish the omitted newline (LF) from a supplied None (universal newlines).
     pub(super) fn string_io(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let string = self.types.optional(Type::Str);
-        let none = self.coerce(
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            },
-            string,
-            call,
-        )?;
+        let none = self.coerce(Expr::none(), string, call)?;
         let lf = self.coerce(
             Expr {
                 ty: Type::Str,
@@ -240,10 +227,7 @@ impl Checker<'_> {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::TextEnter, vec![receiver.clone()]),
                     })],
-                    value: Box::new(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(false),
-                    }),
+                    value: Box::new(Expr::boolean(false)),
                     clear: Vec::new(),
                 },
             },
@@ -260,14 +244,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let integer = self.types.optional(Type::Int);
-        let none = self.coerce(
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            },
-            integer,
-            call,
-        )?;
+        let none = self.coerce(Expr::none(), integer, call)?;
         let pos = ParameterKind::PositionalOnly;
         let size = || parameter("size", integer, pos, Some(none.clone()));
         let (op, returns, params) = match name {
@@ -295,10 +272,7 @@ impl Checker<'_> {
             append(none);
         }
         if matches!(op, Op::Read | Op::Position) {
-            append(Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(matches!(name, "readline" | "truncate")),
-            });
+            append(Expr::boolean(matches!(name, "readline" | "truncate")));
         }
         Ok(self.ordered_builtin(Builtin::StringIo(op), returns, args))
     }
