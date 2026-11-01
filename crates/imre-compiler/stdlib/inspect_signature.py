@@ -10,6 +10,9 @@ from keyword import iskeyword
 from inspect import _signature_identifier, _signature_layout, _signature_mapping
 
 
+_sentinel = object()
+
+
 class _ParameterKind(enum.IntEnum):
     POSITIONAL_ONLY = 0
     POSITIONAL_OR_KEYWORD = 1
