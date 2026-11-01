@@ -931,6 +931,9 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "Reversible") => {
                 Intrinsic::ObjectRuntimeExport("collections.abc.Reversible")
             }
+            (Self::Tempfile, "NamedTemporaryFile") => {
+                Intrinsic::ObjectRuntimeExport("tempfile.NamedTemporaryFile")
+            }
             (Self::Tempfile, "mkstemp") => Intrinsic::ObjectRuntimeExport("tempfile.mkstemp"),
             (Self::Tempfile, "mkdtemp") => Intrinsic::ObjectRuntimeExport("tempfile.mkdtemp"),
             (Self::CollectionsAbc, "Sequence") => {
