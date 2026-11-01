@@ -209,7 +209,7 @@ impl Context {
         }))
     }
 
-    /// Return the compiled body belonging to this filesystem loader.
+    /// Return the compiled body for this loader, or None to read the source through get_data.
     pub(super) fn registered_code(&mut self, name: Id, path: Id) -> Result<Id> {
         let name = self.str_value(name)?;
         let filename = self.str_value(path)?;
@@ -221,18 +221,7 @@ impl Context {
             let (entry, path) = (source.code, source.path.clone());
             return Ok(self.module_code(entry, &path));
         }
-        if self.modules.get(name).is_some_and(|&module| {
-            matches!(self.heap.get(module), Value::Module { origin: Some(origin), .. }
-                if self.str_value(*origin).ok() == Some(filename))
-        }) {
-            let source = self.text(crate::objects::read_path_text(filename)?);
-            let mode = self.text("exec");
-            return self.compile_source(source, path, mode);
-        }
-        Err(Error::new(
-            "NotImplementedError",
-            format!("no registered source for {name:?} at {filename:?}"),
-        ))
+        Ok(NONE)
     }
 
     fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {

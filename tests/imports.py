@@ -292,6 +292,20 @@ ACCEPTED = {
             "after.__module__ is None)\n"
         ),
     },
+    "unregistered_source_loader": {
+        "main.py": (
+            "from importlib.machinery import SourceFileLoader\n"
+            "from types import ModuleType\n"
+            "path = __file__ + '.plugin.py'\n"
+            "with open(path, 'wb') as out:\n"
+            "    out.write(b\"# coding: latin-1\\ntext = 'caf\\xe9'\\n\")\n"
+            "module = ModuleType('plugin')\n"
+            "SourceFileLoader('plugin', path).exec_module(module)\n"
+            "print(module.text)\n"
+            "try:\n    SourceFileLoader('other', path + '.missing').get_code('other')\n"
+            "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
+        ),
+    },
     "registered_source_spec": {
         "main.py": (
             "from importlib.util import find_spec\nfrom importlib import import_module\n"
