@@ -34,6 +34,7 @@ mod runtime;
 mod socket;
 mod stdlib;
 mod string_enums;
+mod struct_runs;
 mod structs;
 mod text;
 mod truthiness;
@@ -2431,7 +2432,9 @@ impl Emitter<'_, '_> {
                 } else {
                     self.label()
                 };
-                self.jump(&condition);
+                if !self.struct_run_loop(test, body, &condition, &exhausted) {
+                    self.jump(&condition);
+                }
                 self.start(&condition);
                 let test = self.while_condition(test, raw_subtotal.is_some());
                 self.branch(&test, &body_label, &exhausted);
@@ -9728,6 +9731,60 @@ read:
   ret ptr %row
 }
 
+; The cursor holds a valid, nonempty span after a sparse row read. A dense
+; span or a boxed single row retains the original one-element advance.
+define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline nounwind {
+  %lp = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 1
+  %mp = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 2
+  %start = load i64, ptr %span
+  %len = load i64, ptr %lp
+  %mask = load i64, ptr %mp
+  %end = add i64 %start, %len
+  %repeat = icmp eq i64 %mask, 0
+  %selected = select i1 %repeat, i64 %end, i64 %next
+  ret i64 %selected
+}
+
+; Reassociation is exact only if the integral term, count and every partial
+; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
+define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
+entry:
+  %single = icmp eq i64 %count, 1
+  br i1 %single, label %one, label %bounds
+one:
+  %single_sum = fadd double %sum, %term
+  ret double %single_sum
+bounds:
+  %n = uitofp i64 %count to double
+  %ni = icmp ule i64 %count, 9007199254740992
+  %t = call double @llvm.trunc.f64(double %term)
+  %s = call double @llvm.trunc.f64(double %sum)
+  %ti = fcmp oeq double %term, %t
+  %si = fcmp oeq double %sum, %s
+  %a = call double @llvm.fabs.f64(double %sum)
+  %b = call double @llvm.fabs.f64(double %term)
+  %delta = fmul double %b, %n
+  %limit = fadd double %a, %delta
+  %bounded = fcmp olt double %limit, 9007199254740992.0
+  %integral = and i1 %ti, %si
+  %fits = and i1 %ni, %bounded
+  %exact = and i1 %integral, %fits
+  br i1 %exact, label %bulk, label %ordered
+bulk:
+  %product = fmul double %term, %n
+  %result = fadd double %sum, %product
+  ret double %result
+ordered:
+  %left = phi i64 [%count, %bounds], [%remaining, %ordered]
+  %acc = phi double [%sum, %bounds], [%added, %ordered]
+  %added = fadd double %acc, %term
+  %remaining = sub i64 %left, 1
+  %done = icmp eq i64 %remaining, 0
+  br i1 %done, label %finish, label %ordered
+finish:
+  ret double %added
+}
+
 define internal i64 @imre_seq_len_fast(ptr %sequence) alwaysinline nounwind {
   %length = call i32 @sequence_header(ptr %sequence)
   %short = icmp ult i32 %length, -2
@@ -9913,6 +9970,7 @@ declare void @imre_subprocess_to_stderr(ptr, i32)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
+declare double @llvm.trunc.f64(double)
 declare ptr @imre_int_str(i64)
 declare ptr @imre_decimal_int_text(i64)
 declare ptr @imre_bool_str(i32)
