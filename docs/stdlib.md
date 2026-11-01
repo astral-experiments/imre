@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 90 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 186 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 90 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 189 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -93,7 +93,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `types` | Yes | Fixed-layout `SimpleNamespace` construction and attributes. [Evidence](../benchmarks/cpython_stdlib/full/types/README.md) | [0 / 129](../benchmarks/cpython_stdlib/full/types/) | 3 | 0 |
 | `typing` | Yes | Use selected annotations and aliases; register, look up and clear overloads for supported named functions. [Evidence](../benchmarks/cpython_stdlib/full/typing/README.md) | [0 / 712](../benchmarks/cpython_stdlib/full/typing/) | 3 | 2 |
 | `unicodedata` | Yes | Normalize Unicode scalar strings in NFC, NFD, NFKC and NFKD, and check whether they are normalized using Unicode 16. [Evidence](../tests/fixtures/text/unicodedata_normalize.py) | — | — | — |
-| `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [17 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 11 | 12 |
+| `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [20 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 11 | 12 |
 | `urllib` | Yes | `urllib.parse.urlsplit` exposes named result fields. `quote` and `unquote` accept codec options, and `quote_from_bytes` escapes octets. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [2 / 178](../benchmarks/cpython_stdlib/full/urllib/) | 4 | 5 |
 | `uuid` | Yes | Construct a `UUID` from hexadecimal text or a 128-bit integer and read its canonical spelling, `hex` and `int`. [Evidence](../tests/fixtures/text/uuid_conversion.py) | — | — | — |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |

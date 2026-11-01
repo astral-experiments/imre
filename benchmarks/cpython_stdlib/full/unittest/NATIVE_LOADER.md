@@ -23,7 +23,7 @@ private prefixes and matching unsupported descriptors raise `NotImplementedError
 
 After the declaration the loader can inspect a local class's methods, inherited names, and class attributes that shadow them. Its [executable example](loader_local_classes.py) uses the original qualified name, including `<locals>`. [Boundary controls](loader_class_boundaries.py) cover access before the declaration, conditional bindings, rebinding and defaults with side effects.
 
-The [primary report](native-linux.json) attempts the constructor and all ten original `Test_TestLoader` methods that call `getTestCaseNames`. The [four-configuration run](https://github.com/astral-sh/imre/actions/runs/40220036532) used CPython blob `cdff6d1a20c8dfda384178ab48403074e66409bd`. Each outcome matches in ordinary and reachable builds at O0 and O3.
+The [primary report](native-linux.json) attempts the constructor and all ten original `Test_TestLoader` methods that call `getTestCaseNames`. The [four-configuration run](https://github.com/astral-sh/imre/actions/runs/40220036532) used CPython blob `cdff6d1a20c8dfda384178ab48403074e66409bd`. The table records that run’s outcomes in ordinary and reachable builds at O0 and O3.
 
 | Original method | Native result |
 | --- | --- |
@@ -39,7 +39,7 @@ The [primary report](native-linux.json) attempts the constructor and all ten ori
 | `test_sortTestMethodsUsing__getTestCaseNames` | Blocked: unannotated local comparator |
 | `test_sortTestMethodsUsing__None` | Blocked: assignment to `sortTestMethodsUsing` |
 
-For the six passes, the original body, assertions, loader operation and default fixture all execute on Imre. The other five pass on CPython and remain native compiler failures; their records include the exact diagnostic and method hash. The [earlier module-level receipt](loader-names-linux.json.gz) covers the constructor and the seven methods named for `getTestCaseNames`.
+In that run, Imre executed the original body, assertions, loader operation and default fixture for six methods. The other five passed on CPython, and Imre recorded their compiler diagnostics and method hashes. The current Linux report also records a native pass for `test_getTestCaseNames__not_a_TestCase` at O0 and O3. The [earlier module-level receipt](loader-names-linux.json.gz) covers the constructor and the seven methods named for `getTestCaseNames`.
 
 Of the 1,090 occurrences, 13 were fully native, 8 used native bodies with host fixtures, 9 had host bodies calling native operations, 15 were blocked, 1,043 were reference-only, and two had upstream signal skips.
 
