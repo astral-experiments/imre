@@ -11,6 +11,15 @@ def current():
         return value
     print(parse.urlencode([("key", values)], doseq=True, quote_via=change_next))
     print(urllib.parse is parse, parse.urlsplit is urlsplit)
+    for url in ("tel:123-4;phone-context=+1-650-516", b"http://example/a;b/c;p?q#frag"):
+        parsed = parse.urlparse(url)
+        result_type = parse.ParseResultBytes if isinstance(url, bytes) else parse.ParseResult
+        print(type(parsed) is result_type, isinstance(parsed, result_type), tuple(parsed), parsed.params)
+        print(parsed.geturl(), parse.urlunparse(parsed))
+    try:
+        print(parse.urlparse("http://example:oracle").port)
+    except ValueError as error:
+        print(str(error))
     from urllib.parse import uses_netloc
     print(uses_netloc is parse.uses_netloc, uses_netloc)
     parts = urlsplit("custom:/path")

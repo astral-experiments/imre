@@ -932,6 +932,14 @@ impl Context {
                 class: Some("time.struct_time"),
                 ..
             } => Ok(self.builtin("time.struct_time")),
+            Value::NamedTuple {
+                class:
+                    Some(
+                        name @ ("SplitResult" | "SplitResultBytes" | "ParseResult"
+                        | "ParseResultBytes"),
+                    ),
+                ..
+            } => Ok(self.builtin(&format!("urllib.parse.{name}"))),
             Value::Raised(error) => {
                 if let Some(class) = error.class() {
                     return Ok(class);
@@ -1041,19 +1049,17 @@ impl Context {
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
-                "urllib.parse.SplitResult",
+                qualified,
                 Value::NamedTuple {
-                    class: Some("SplitResult"),
-                    ..
+                    class: Some(name), ..
                 },
-            )
-            | (
-                "urllib.parse.SplitResultBytes",
-                Value::NamedTuple {
-                    class: Some("SplitResultBytes"),
-                    ..
-                },
-            ) => true,
+            ) if matches!(
+                *name,
+                "SplitResult" | "SplitResultBytes" | "ParseResult" | "ParseResultBytes"
+            ) =>
+            {
+                qualified.strip_prefix("urllib.parse.") == Some(*name)
+            }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (
                 "time.struct_time",
@@ -2188,8 +2194,10 @@ impl Context {
                 if class == Some("time.struct_time") && name == "__class__" {
                     return Ok(self.builtin("time.struct_time"));
                 }
-                if matches!(class, Some("SplitResult" | "SplitResultBytes"))
-                    && let Some(property) = stdlib::urllib::property(self, values[1], name)?
+                if matches!(
+                    class,
+                    Some("SplitResult" | "SplitResultBytes" | "ParseResult" | "ParseResultBytes")
+                ) && let Some(property) = stdlib::urllib::property(self, values[1], name)?
                 {
                     return Ok(property);
                 }

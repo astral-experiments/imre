@@ -507,11 +507,27 @@ fn unsplit(
 /// Recombine the five public split fields, omitting empty query and fragment delimiters.
 pub(crate) fn join_fields(fields: [&str; 5], scheme_uses_netloc: bool) -> Result<String> {
     let [scheme, netloc, path, query, fragment] = fields;
+    join_parse_fields(
+        [scheme, netloc, path, "", query, fragment],
+        scheme_uses_netloc,
+    )
+}
+
+/// The presence of an empty authority is decided before restoring path parameters.
+pub(crate) fn join_parse_fields(fields: [&str; 6], scheme_uses_netloc: bool) -> Result<String> {
+    let [scheme, netloc, path, params, query, fragment] = fields;
     let netloc = (!netloc.is_empty()
         || (scheme_uses_netloc
             && !scheme.is_empty()
             && (path.is_empty() || path.starts_with('/'))))
     .then_some(netloc);
+    let with_params;
+    let path = if params.is_empty() {
+        path
+    } else {
+        with_params = format!("{path};{params}");
+        &with_params
+    };
     unsplit(
         scheme,
         netloc,

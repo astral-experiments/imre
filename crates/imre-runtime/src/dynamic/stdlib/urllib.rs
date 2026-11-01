@@ -8,14 +8,32 @@ mod quote;
 mod urlencode;
 
 const FIELDS: [&str; 5] = ["scheme", "netloc", "path", "query", "fragment"];
+const PARSE_FIELDS: [&str; 6] = ["scheme", "netloc", "path", "params", "query", "fragment"];
+const PARSE: &str = "ParseResult";
+const PARSE_BYTES: &str = "ParseResultBytes";
 const SPLIT: &str = "SplitResult";
 const SPLIT_BYTES: &str = "SplitResultBytes";
 
 /// Bind the mutable scheme registry once, in this module's Python namespace.
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
-    let schemes = urlsplit::USES_NETLOC.iter().map(|&s| ctx.text(s)).collect();
-    let registry = ctx.alloc(Value::List(schemes));
-    ctx.bind(scope, "uses_netloc", registry);
+    for (name, schemes) in [
+        ("uses_netloc", urlsplit::USES_NETLOC),
+        (
+            "uses_params",
+            &[
+                "", "ftp", "hdl", "prospero", "http", "imap", "https", "shttp", "rtsp", "rtsps",
+                "rtspu", "sip", "sips", "mms", "sftp", "tel",
+            ][..],
+        ),
+    ] {
+        let items = schemes.iter().map(|&scheme| ctx.text(scheme)).collect();
+        let registry = ctx.alloc(Value::List(items));
+        ctx.bind(scope, name, registry);
+    }
+    for name in ["urlparse", "urlunparse", PARSE, PARSE_BYTES] {
+        let operation = ctx.builtin(&format!("urllib.parse.{name}"));
+        ctx.bind(scope, name, operation);
+    }
 }
 
 fn input(ctx: &Context, id: Id) -> Result<UrlInput<'_>> {
@@ -52,27 +70,29 @@ pub(super) fn call(
                 bind(name, args, kwargs, ["string", "encoding", "errors"])?;
             unquote(ctx, required(text, name, "string")?, encoding, errors)
         }
-        "urlsplit" => {
+        "urlsplit" | "urlparse" => {
             let [url, scheme, fragments] =
                 bind(name, args, kwargs, ["url", "scheme", "allow_fragments"])?;
-            split(ctx, required(url, name, "url")?, scheme, fragments)
+            split(
+                ctx,
+                required(url, name, "url")?,
+                scheme,
+                fragments,
+                name == "urlparse",
+            )
         }
         "urlunsplit" | "SplitResult.geturl" => {
             let [parts] = bind(name, args, kwargs, ["components"])?;
-            unsplit(ctx, required(parts, name, "components")?)
+            unsplit::<5>(ctx, required(parts, name, "components")?)
         }
-        SPLIT | SPLIT_BYTES => {
-            let arguments = bind(name, args, kwargs, FIELDS)?;
-            let mut values = [NONE; 5];
-            for (i, field) in FIELDS.iter().enumerate() {
-                values[i] = required(arguments[i], name, field)?;
-            }
-            Ok(result(
-                ctx,
-                if name == SPLIT { SPLIT } else { SPLIT_BYTES },
-                values,
-            ))
+        "urlunparse" | "ParseResult.geturl" => {
+            let [parts] = bind(name, args, kwargs, ["components"])?;
+            unsplit::<6>(ctx, required(parts, name, "components")?)
         }
+        SPLIT => construct(ctx, SPLIT, FIELDS, args, kwargs),
+        SPLIT_BYTES => construct(ctx, SPLIT_BYTES, FIELDS, args, kwargs),
+        PARSE => construct(ctx, PARSE, PARSE_FIELDS, args, kwargs),
+        PARSE_BYTES => construct(ctx, PARSE_BYTES, PARSE_FIELDS, args, kwargs),
         _ => unreachable!("registered urllib.parse operation"),
     }
 }
@@ -166,16 +186,50 @@ fn unquote(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) 
     Ok(ctx.text(text))
 }
 
-fn result(ctx: &mut Context, class: &'static str, fields: [Id; 5]) -> Id {
+fn construct<const N: usize>(
+    ctx: &mut Context,
+    class: &'static str,
+    names: [&str; N],
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let arguments = bind(class, args, kwargs, names)?;
+    let mut fields = [NONE; N];
+    for (i, &field) in names.iter().enumerate() {
+        fields[i] = required(arguments[i], class, field)?;
+    }
+    Ok(result(ctx, class, names, fields))
+}
+
+fn result<const N: usize>(
+    ctx: &mut Context,
+    class: &'static str,
+    names: [&str; N],
+    fields: [Id; N],
+) -> Id {
     ctx.alloc(Value::NamedTuple {
         class: Some(class),
-        names: FIELDS.map(str::to_owned).into(),
+        names: names.map(str::to_owned).into(),
         values: fields.into(),
         extras: Vec::new(),
     })
 }
 
-fn split(ctx: &mut Context, url: Id, scheme: Option<Id>, fragments: Option<Id>) -> Result<Id> {
+fn component(text: &str, bytes: bool) -> Value {
+    if bytes {
+        Value::Bytes(text.as_bytes().to_vec())
+    } else {
+        Value::Str(text.to_owned())
+    }
+}
+
+fn split(
+    ctx: &mut Context,
+    url: Id,
+    scheme: Option<Id>,
+    fragments: Option<Id>,
+    parse: bool,
+) -> Result<Id> {
     let fragments = ctx.optional_truth(fragments, true)?;
     let url = input(ctx, url)?;
     let scheme = scheme
@@ -198,16 +252,43 @@ fn split(ctx: &mut Context, url: Id, scheme: Option<Id>, fragments: Option<Id>) 
         ));
     }
     let fields = urlsplit::with_split_fields(url, scheme.decoded()?, fragments, |fields| {
-        Ok(fields.map(|s| {
-            if bytes {
-                Value::Bytes(s.as_bytes().to_vec())
-            } else {
-                Value::Str(s.to_owned())
-            }
-        }))
+        Ok(fields.map(|s| component(s, bytes)))
     })?;
     let ids = fields.map(|field| ctx.alloc(field));
-    Ok(result(ctx, if bytes { SPLIT_BYTES } else { SPLIT }, ids))
+    if !parse {
+        return Ok(result(
+            ctx,
+            if bytes { SPLIT_BYTES } else { SPLIT },
+            FIELDS,
+            ids,
+        ));
+    }
+    let [scheme, netloc, mut path, query, fragment] = ids;
+    let scheme_text = if bytes {
+        let text = input(ctx, scheme)?.decoded()?.to_owned();
+        ctx.text(text)
+    } else {
+        scheme
+    };
+    let module = ctx.module("urllib.parse")?;
+    let registry = ctx.lookup_attr(module, "uses_params")?;
+    let mut params = component("", bytes);
+    if ctx.contains(scheme_text, registry)? {
+        let text = input(ctx, path)?.decoded()?;
+        let last_segment = text.rfind('/').unwrap_or(0);
+        if let Some(offset) = text[last_segment..].find(';') {
+            let (prefix, suffix) = text.split_at(last_segment + offset);
+            params = component(&suffix[1..], bytes);
+            path = ctx.alloc(component(prefix, bytes));
+        }
+    }
+    let params = ctx.alloc(params);
+    Ok(result(
+        ctx,
+        if bytes { PARSE_BYTES } else { PARSE },
+        PARSE_FIELDS,
+        [scheme, netloc, path, params, query, fragment],
+    ))
 }
 
 pub(in crate::dynamic) fn property(
@@ -238,27 +319,29 @@ pub(in crate::dynamic) fn property(
     Ok(Some(value))
 }
 
-fn unsplit(ctx: &mut Context, components: Id) -> Result<Id> {
+fn unsplit<const N: usize>(ctx: &mut Context, components: Id) -> Result<Id> {
     let items = ctx.items(components)?;
     if items.is_empty() {
         return Err(Error::new("IndexError", "tuple index out of range"));
     }
-    if items.len() != 5 {
-        let message = if items.len() > 5 {
+    if items.len() != N {
+        let message = if items.len() > N {
             format!(
-                "too many values to unpack (expected 6, got {})",
+                "too many values to unpack (expected {}, got {})",
+                N + 1,
                 items.len() + 1
             )
         } else {
             format!(
-                "not enough values to unpack (expected 6, got {})",
+                "not enough values to unpack (expected {}, got {})",
+                N + 1,
                 items.len() + 1
             )
         };
         return Err(Error::new("ValueError", message));
     }
     let bytes = matches!(input(ctx, items[0])?, UrlInput::Bytes(_));
-    let mut text = [NONE; 5];
+    let mut text = [NONE; N];
     for (field, id) in text.iter_mut().zip(items) {
         let value = input(ctx, id)?;
         if bytes != matches!(value, UrlInput::Bytes(_)) && !value.as_bytes().is_empty() {
@@ -283,7 +366,13 @@ fn unsplit(ctx: &mut Context, components: Id) -> Result<Id> {
         false
     };
     let fields = text.map(|id| ctx.str_value(id).expect("coerced URL component"));
-    let out = urlsplit::join_fields(fields, registered)?;
+    let out = match fields.as_slice() {
+        &[s, n, p, q, f] => urlsplit::join_fields([s, n, p, q, f], registered)?,
+        &[s, n, p, params, q, f] => {
+            urlsplit::join_parse_fields([s, n, p, params, q, f], registered)?
+        }
+        _ => unreachable!("URL result arity"),
+    };
     Ok(if bytes {
         ctx.alloc(Value::Bytes(out.into_bytes()))
     } else {
