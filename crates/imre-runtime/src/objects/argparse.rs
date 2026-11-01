@@ -4,7 +4,6 @@
 use crate::StrOwner;
 use std::borrow::Cow;
 use std::collections::{HashSet, TryReserveError};
-use std::io::{self, Write};
 
 use serde::Deserialize;
 
@@ -821,20 +820,11 @@ pub unsafe extern "C" fn imre_argparse_parse(
             return Error::exit_status(0).returning(std::ptr::null_mut());
         }
         Err(Stop::Error(active, error)) => {
-            let _ = crate::flush_stdout();
-            let _ = crate::sys::flush_stderr();
-            if writeln!(
-                io::stderr().lock(),
-                "{}{}: error: {}",
-                active.usage(help::width()),
-                active.prog,
-                error
-            )
-            .is_err()
-            {
-                return Error::new(exceptions::Kind::OSError, "could not write standard error")
-                    .returning(std::ptr::null_mut());
-            }
+            // ArgumentParser.error prints usage, then exit prints the diagnostic.
+            // Both use the configured standard error stream and ignore write errors.
+            let _ = crate::sys::write_stderr(&active.usage(help::width()), false);
+            let message = format!("{}: error: {error}\n", active.prog);
+            let _ = crate::sys::write_stderr(&message, false);
             return Error::exit_status(2).returning(std::ptr::null_mut());
         }
     };

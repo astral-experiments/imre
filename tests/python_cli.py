@@ -1010,6 +1010,8 @@ def main():
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
         compare("-IB", "-c", "raise SystemExit")
+        compare("-IB", "-c", "import sys\ntry: sys.exit(2)\nexcept SystemExit as e: print(e.code, e.args)")
+        compare("-IB", "-c", "import sys\ne = SystemExit(1, 2)\nprint(e.code is e.args)\ne.args = ()\ne.code = 17\nraise e", status=17)
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)

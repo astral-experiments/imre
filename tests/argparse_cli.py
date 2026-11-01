@@ -246,6 +246,14 @@ def main():
                     ],
                     check=True,
                 )
+                if name == "two":
+                    env = {**os.environ, "PYTHONIOENCODING": "ascii", "PYTHON_COLORS": "0", "COLUMNS": "80"}
+                    arguments = ["--未知"]
+                    expected = result([args.python, source, *arguments], env)
+                    actual = result([native, *arguments], env)
+                    if actual != expected:
+                        raise AssertionError((name, arguments, level, expected, actual))
+                    checks += 1
                 for arguments, width, color in samples:
                     env = {
                         **os.environ,

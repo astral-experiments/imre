@@ -637,13 +637,23 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let mut ctx = unsafe { Box::from_raw(ctx) };
     match ctx.module("__main__") {
         Ok(_) => 0,
-        Err(e) if e.kind == "SystemExit" => match e.exit_status {
-            Some(status) => status.report(),
-            None => {
-                eprintln!("{}", e.message);
-                1
+        Err(e) if ctx.is_builtin_error(&e, "SystemExit") => {
+            use crate::objects::exceptions::ExitStatus;
+            let code = e.exit_code;
+            match ctx.heap.get(ctx.scalar_value(code)) {
+                Value::None => 0,
+                Value::Int(i) => ExitStatus::from_i64(i.to_i64()).report(),
+                Value::Bool(b) => i32::from(*b),
+                _ => {
+                    ctx.heap.keep(code);
+                    let str_type = ctx.builtin("str");
+                    if let Ok(text) = ctx.call(str_type, vec![code], Vec::new()) {
+                        eprintln!("{}", ctx.str_value(text).unwrap_or(""));
+                    }
+                    1
+                }
             }
-        },
+        }
         Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
             ctx.report_os_error(error);
             1

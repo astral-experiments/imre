@@ -139,16 +139,12 @@ impl Context {
         Ok(Some(entries.remove(0)))
     }
 
-    /// Find the exception storage only when the object inherits StopIteration.
-    fn stop_iteration_error(&mut self, object: Id) -> Option<&mut Error> {
+    /// Find the exception storage when the object inherits the named built-in.
+    fn exception_with_base(&mut self, object: Id, base: &str) -> Option<&mut Error> {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
-        let stop = error.class().map_or_else(
-            || error.kind == "StopIteration",
-            |class| self.has_base(class, "StopIteration"),
-        );
-        if !stop {
+        if !self.is_builtin_error(error, base) {
             return None;
         }
         let Value::Raised(error) = self.heap.get_mut(object) else {
@@ -507,6 +503,7 @@ impl Context {
                             | "BaseException.__init__"
                             | "ImportError.__init__"
                             | "OSError.__init__"
+                            | "SystemExit.__init__"
                             | "StopIteration.__init__"
                             | "module.__init__"
                             | "bytes.decode"
@@ -1306,9 +1303,14 @@ impl Context {
             }
         }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_with_base(obj, "StopIteration")
         {
             return Ok(error.stop_value());
+        }
+        if name == "code"
+            && let Some(error) = self.exception_with_base(obj, "SystemExit")
+        {
+            return Ok(error.exit_code);
         }
         if matches!(name, "__new__" | "__init__") && matches!(self.heap.get(obj), Value::Raised(_))
         {
@@ -2276,9 +2278,15 @@ impl Context {
             return Err(Error::new("TypeError", "cannot delete __dict__"));
         }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_with_base(obj, "StopIteration")
         {
             error.set_stop_value(NONE);
+            return Ok(());
+        }
+        if name == "code"
+            && let Some(error) = self.exception_with_base(obj, "SystemExit")
+        {
+            error.exit_code = NONE;
             return Ok(());
         }
         if name == "msg" && self.import_error_message(obj, Some(NONE)).is_some() {
@@ -2820,9 +2828,15 @@ impl Context {
             return Ok(());
         }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_with_base(obj, "StopIteration")
         {
             error.set_stop_value(value);
+            return Ok(());
+        }
+        if name == "code"
+            && let Some(error) = self.exception_with_base(obj, "SystemExit")
+        {
+            error.exit_code = value;
             return Ok(());
         }
         if member.is_none()
@@ -3164,6 +3178,7 @@ impl Context {
                         "BaseException.__init__"
                             | "ImportError.__init__"
                             | "OSError.__init__"
+                            | "SystemExit.__init__"
                             | "StopIteration.__init__"
                             | "float.__format__"
                     )
