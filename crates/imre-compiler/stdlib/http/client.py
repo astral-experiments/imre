@@ -2,6 +2,12 @@
 from __future__ import annotations
 
 
+class HTTPException(Exception):
+    # Subclasses that define an __init__ must call Exception.__init__
+    # or define self.args.  Otherwise, str() will fail.
+    pass
+
+
 def _valid_field_name(name: str) -> bool:
     for char in name:
         if char == ":" or not 33 <= ord(char) <= 126:
