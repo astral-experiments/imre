@@ -244,6 +244,9 @@ fn object_fallback<T>(
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
+    let object_builtin = graph
+        .as_ref()
+        .is_some_and(|g| g.object_builtin_errors.borrow().contains(&error));
     let registered_imports = graph
         .as_ref()
         .filter(|_| runtime_imports)
@@ -264,6 +267,7 @@ fn object_fallback<T>(
         module_root,
         options,
         runtime_imports,
+        object_builtin,
         registered_imports,
         check_returns,
     )? {

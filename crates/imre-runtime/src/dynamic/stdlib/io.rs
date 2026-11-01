@@ -5,6 +5,8 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod buffered_io;
 mod bytes_io;
+mod file_io;
+pub(in crate::dynamic) use file_io::open_raw;
 mod text_wrapper;
 
 #[derive(Clone)]
@@ -12,12 +14,50 @@ pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
+    Raw(std::rc::Rc<file_io::RawFile>),
 }
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
+pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!("open_code() takes at most 1 argument ({count} given)"),
+        ));
+    }
+    let path = match (args, kwargs) {
+        ([path], []) => *path,
+        ([], [(name, path)]) if name == "path" => *path,
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                "open_code() missing required argument 'path' (pos 1)",
+            ));
+        }
+    };
+    if ctx.string_storage(path).is_none() {
+        let kind = if path == NONE {
+            "None"
+        } else {
+            ctx.type_name(path)
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("open_code() argument 'path' must be str, not {kind}"),
+        ));
+    }
+    let module = ctx.module("_io")?;
+    let open = ctx.lookup_attr(module, "open")?;
+    let mode = ctx.text("rb");
+    ctx.call(open, vec![path, mode], Vec::new())
+}
+
 /// Install canonical class objects so subclasses inherit the same methods across imports.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
+    let open = ctx.builtin("open");
+    ctx.bind(module, "open", open);
     let unsupported = ctx.builtin("UnsupportedOperation");
     ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
@@ -48,13 +88,15 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
             "__exit__",
         ],
     );
-    class(
+    let raw = class(
         ctx,
         module,
         "RawIOBase",
         io,
         &["read", "readall", "readinto"],
     );
+    let file = class(ctx, module, "FileIO", raw, file_io::METHODS);
+    ctx.builtins.insert("_io.FileIO".into(), file);
     let buffered = class(ctx, module, "BufferedIOBase", io, buffered_io::METHODS);
     ctx.builtins.insert("_io._BufferedIOBase".into(), buffered);
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
@@ -97,7 +139,7 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
         .allocate_class(name.into(), scope, vec![base])
         .expect("a single I/O base has a linearization");
     let module_name = ctx.text(
-        if matches!(name, "StringIO" | "BytesIO" | "TextIOWrapper") {
+        if matches!(name, "StringIO" | "BytesIO" | "TextIOWrapper" | "FileIO") {
             "_io"
         } else {
             "io"
@@ -110,6 +152,7 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     let descriptor_owner = match name {
         "TextIOBase" => "_io._TextIOBase",
         "StringIO" => "_io.StringIO",
+        "FileIO" => "_io.FileIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
         "BytesIO" => "_io.BytesIO",
         _ => "_io._IOBase",
@@ -119,7 +162,9 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
         let attr = if matches!(
             name,
             "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
-        ) || wrapper && text_wrapper::property(name)
+        ) || descriptor_owner == "_io.FileIO"
+            && matches!(name, "mode" | "closefd" | "_blksize")
+            || wrapper && text_wrapper::property(name)
         {
             let set = (wrapper && name == "_CHUNK_SIZE").then(|| {
                 ctx.alloc(Value::IoMethod {
@@ -315,6 +360,13 @@ pub(in super::super) fn call(
             return super::files::text_method(ctx, name, args, kwargs);
         }
         return text_wrapper::call(ctx, receiver, name, rest, kwargs);
+    }
+    if let Some(&file) = ctx.builtins.get("_io.FileIO")
+        && (owner == file
+            || matches!(name, "__enter__" | "__exit__" | "flush")
+                && ctx.instance_of(receiver, file))
+    {
+        return file_io::call(ctx, receiver, name, rest, kwargs);
     }
     if ctx.builtins.get("_io._BufferedIOBase") == Some(&owner) {
         return buffered_io::call(ctx, receiver, name, rest, kwargs);

@@ -54,6 +54,11 @@ enum Instruction {
         handler: usize,
         end: usize,
     },
+    EnterWith {
+        item: ast::WithItem,
+        handler: usize,
+    },
+    ExitWith,
     StartFinally,
     EndFinally,
     Delegate,
@@ -204,14 +209,15 @@ pub(super) struct FinallyBlock {
     end: usize,
     depth: usize,
     pending: Option<Transfer>,
+    exit: Option<Id>,
 }
 
 impl FinallyBlock {
-    pub(super) fn root(&self) -> Option<Id> {
-        match self.pending {
+    pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
+        self.exit.into_iter().chain(match self.pending {
             Some(Transfer::Raise(id) | Transfer::Return(id)) => Some(id),
             _ => None,
-        }
+        })
     }
 }
 
@@ -378,6 +384,12 @@ impl Program {
                 Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
                     strings.visit_expr(e)
                 }
+                Instruction::EnterWith { item, .. } => {
+                    strings.visit_expr(&item.context_expr);
+                    if let Some(target) = &item.optional_vars {
+                        strings.visit_expr(target);
+                    }
+                }
                 Instruction::DeleteItem(item) => {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
@@ -458,6 +470,7 @@ impl Program {
                 | Instruction::Jump(_)
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
+                | Instruction::ExitWith
                 | Instruction::StartFinally
                 | Instruction::EndFinally
                 | Instruction::Delegate => {}
@@ -748,6 +761,30 @@ impl Program {
                         } else {
                             Instruction::Jump(end)
                         };
+                    }
+                    continue;
+                }
+                Stmt::With(s) if !s.is_async => {
+                    let first = self.instructions.len();
+                    for item in s.items {
+                        if let Some(target) = &item.optional_vars {
+                            self.declare_target(target)?;
+                        }
+                        self.instructions
+                            .push((line, Instruction::EnterWith { item, handler: 0 }));
+                    }
+                    let entered = first..self.instructions.len();
+                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    for i in entered.rev() {
+                        self.instructions.push((line, Instruction::StartFinally));
+                        let cleanup = self.instructions.len();
+                        self.instructions.push((line, Instruction::ExitWith));
+                        self.instructions.push((line, Instruction::EndFinally));
+                        let Instruction::EnterWith { handler, .. } = &mut self.instructions[i].1
+                        else {
+                            unreachable!("context manager entry")
+                        };
+                        *handler = cleanup;
                     }
                     continue;
                 }
@@ -1814,7 +1851,7 @@ impl Context {
                     let roots = if extra {
                         live.clear();
                         live.extend_from_slice(cursor.iterators);
-                        live.extend(cursor.protected.iter().filter_map(FinallyBlock::root));
+                        live.extend(cursor.protected.iter().flat_map(FinallyBlock::roots));
                         live.push(cursor.sent);
                         if let Some((error, args)) = &cursor.thrown {
                             live.extend(error.roots());
@@ -1857,6 +1894,7 @@ impl Context {
                                 end: *end,
                                 depth: cursor.iterators.len(),
                                 pending: None,
+                                exit: None,
                             });
                             continue;
                         }
@@ -2141,6 +2179,45 @@ impl Context {
             Instruction::Unless(e, destination) => {
                 if !self.source_condition(code, scope, e)? {
                     *ip = *destination;
+                }
+            }
+            Instruction::EnterWith { item, handler } => {
+                cursor
+                    .protected
+                    .try_reserve(1)
+                    .map_err(|_| crate::Error::allocation())?;
+                let manager = eval(self, &item.context_expr)?;
+                let exit = self.context_method(manager, "__exit__")?;
+                self.heap.keep(exit);
+                let enter = self.context_method(manager, "__enter__")?;
+                let value = self.call(enter, Vec::new(), Vec::new())?;
+                // Binding belongs to the protected suite: a failed unpack must invoke __exit__.
+                cursor.protected.push(FinallyBlock {
+                    start: *ip,
+                    handler: *handler,
+                    end: handler + 2,
+                    depth: iterators.len(),
+                    pending: None,
+                    exit: Some(exit),
+                });
+                if let Some(target) = &item.optional_vars {
+                    self.bind_target(code, scope, target, value)?;
+                }
+            }
+            Instruction::ExitWith => {
+                let block = cursor.protected.last_mut().expect("active context manager");
+                let exit = block.exit.expect("context manager exit");
+                let exception = match block.pending {
+                    Some(Transfer::Raise(error)) => error,
+                    _ => NONE,
+                };
+                let active = self.heap.active_exception();
+                let result = self.op("exit_context", exit, exception, active)?;
+                if exception != NONE && result == TRUE {
+                    block.pending = Some(Transfer::Jump {
+                        destination: block.end,
+                        pop_iter: false,
+                    });
                 }
             }
             Instruction::EnterFinally { .. }

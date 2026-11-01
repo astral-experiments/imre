@@ -34,6 +34,7 @@ mod runtime;
 mod socket;
 mod stdlib;
 mod string_enums;
+mod struct_runs;
 mod structs;
 mod text;
 mod truthiness;
@@ -2431,7 +2432,9 @@ impl Emitter<'_, '_> {
                 } else {
                     self.label()
                 };
-                self.jump(&condition);
+                if !self.struct_run_loop(test, body, &condition, &exhausted) {
+                    self.jump(&condition);
+                }
                 self.start(&condition);
                 let test = self.while_condition(test, raw_subtotal.is_some());
                 self.branch(&test, &body_label, &exhausted);
@@ -2951,7 +2954,7 @@ impl Emitter<'_, '_> {
         {
             return false;
         }
-        let expressions = concat_leaves(expression);
+        let expressions = concat_leaves(self, expression);
         if !matches!(expressions[0].kind, ExprKind::Local(source) if source == slot) {
             return false;
         }
@@ -3012,7 +3015,7 @@ impl Emitter<'_, '_> {
     /// string. The completed result is published only after allocation succeeds.
     /// Unique entry-block scratch avoids loop stack growth and nested overwrite.
     fn concat(&mut self, expression: &Expr) -> Value {
-        let expressions = concat_leaves(expression);
+        let expressions = concat_leaves(self, expression);
         if let [left, right] = expressions.as_slice()
             && !matches!(left.kind, ExprKind::Str(_))
             && !matches!(right.kind, ExprKind::Str(_))
@@ -3196,7 +3199,7 @@ impl Emitter<'_, '_> {
     fn write_discard(&mut self, args: &[Expr]) {
         let receiver = self.operand(&args[0]);
         let (status, owners) = if matches!(args[1].kind, ExprKind::Binary(Binary::Concat, ..)) {
-            let (scratch, count, owners) = self.concat_parts(concat_leaves(&args[1]));
+            let (scratch, count, owners) = self.concat_parts(concat_leaves(self, &args[1]));
             let status = self.instruction(format!(
                 "call i32 @imre_text_write_parts(ptr {}, ptr {scratch}, i64 {count})",
                 receiver.value.operand
@@ -8795,20 +8798,27 @@ const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
 
 /// Flattens only exact string additions, preserving both source nesting shapes'
 /// leaf order without evaluating through calls or other expression boundaries.
-fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
-    fn visit<'a>(expression: &'a Expr, output: &mut Vec<&'a Expr>) {
+fn concat_leaves<'e>(emitter: &Emitter<'_, '_>, expression: &'e Expr) -> Vec<&'e Expr> {
+    fn visit<'a>(emitter: &Emitter<'_, '_>, expression: &'a Expr, output: &mut Vec<&'a Expr>) {
         if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
             // A completed left addition can raise before the right operand runs.
-            // Only move its allocation past an immutable read or a literal.
+            // An in-bounds ASCII lookup with an already evaluated index is
+            // also an immutable read. The range proof alone does not establish
+            // that evaluating an arbitrary index expression is effect-free.
+            let bounded_read = matches!(&right.kind,
+                ExprKind::Builtin(Builtin::StringGet, args)
+                    if matches!(args[1].kind, ExprKind::Local(_) | ExprKind::Int(_))
+                        && emitter.ascii_index_literal(right).is_some());
             if matches!(
                 right.kind,
                 ExprKind::Str(_) | ExprKind::Local(_) | ExprKind::Builtin(Builtin::GlobalGet(_), _)
-            ) {
-                visit(left, output);
+            ) || bounded_read
+            {
+                visit(emitter, left, output);
             } else {
                 output.push(left);
             }
-            visit(right, output);
+            visit(emitter, right, output);
         } else {
             debug_assert_eq!(expression.ty, Type::Str);
             output.push(expression);
@@ -8816,7 +8826,7 @@ fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
     }
 
     let mut result = Vec::new();
-    visit(expression, &mut result);
+    visit(emitter, expression, &mut result);
     result
 }
 
@@ -9721,6 +9731,60 @@ read:
   ret ptr %row
 }
 
+; The cursor holds a valid, nonempty span after a sparse row read. A dense
+; span or a boxed single row retains the original one-element advance.
+define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline nounwind {
+  %lp = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 1
+  %mp = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 2
+  %start = load i64, ptr %span
+  %len = load i64, ptr %lp
+  %mask = load i64, ptr %mp
+  %end = add i64 %start, %len
+  %repeat = icmp eq i64 %mask, 0
+  %selected = select i1 %repeat, i64 %end, i64 %next
+  ret i64 %selected
+}
+
+; Reassociation is exact only if the integral term, count and every partial
+; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
+define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
+entry:
+  %single = icmp eq i64 %count, 1
+  br i1 %single, label %one, label %bounds
+one:
+  %single_sum = fadd double %sum, %term
+  ret double %single_sum
+bounds:
+  %n = uitofp i64 %count to double
+  %ni = icmp ule i64 %count, 9007199254740992
+  %t = call double @llvm.trunc.f64(double %term)
+  %s = call double @llvm.trunc.f64(double %sum)
+  %ti = fcmp oeq double %term, %t
+  %si = fcmp oeq double %sum, %s
+  %a = call double @llvm.fabs.f64(double %sum)
+  %b = call double @llvm.fabs.f64(double %term)
+  %delta = fmul double %b, %n
+  %limit = fadd double %a, %delta
+  %bounded = fcmp olt double %limit, 9007199254740992.0
+  %integral = and i1 %ti, %si
+  %fits = and i1 %ni, %bounded
+  %exact = and i1 %integral, %fits
+  br i1 %exact, label %bulk, label %ordered
+bulk:
+  %product = fmul double %term, %n
+  %result = fadd double %sum, %product
+  ret double %result
+ordered:
+  %left = phi i64 [%count, %bounds], [%remaining, %ordered]
+  %acc = phi double [%sum, %bounds], [%added, %ordered]
+  %added = fadd double %acc, %term
+  %remaining = sub i64 %left, 1
+  %done = icmp eq i64 %remaining, 0
+  br i1 %done, label %finish, label %ordered
+finish:
+  ret double %added
+}
+
 define internal i64 @imre_seq_len_fast(ptr %sequence) alwaysinline nounwind {
   %length = call i32 @sequence_header(ptr %sequence)
   %short = icmp ult i32 %length, -2
@@ -9906,6 +9970,7 @@ declare void @imre_subprocess_to_stderr(ptr, i32)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
+declare double @llvm.trunc.f64(double)
 declare ptr @imre_int_str(i64)
 declare ptr @imre_decimal_int_text(i64)
 declare ptr @imre_bool_str(i32)
@@ -10697,6 +10762,25 @@ print(show("x"))
         assert_eq!(llvm.matches("call i64 @imre_int_literal(").count(), 1);
         assert!(llvm.contains("call void @imre_bytes_release(ptr %literal_"));
         assert!(llvm.contains("call void @imre_int_release(i64 %literal_"));
+    }
+
+    #[test]
+    fn bounded_ascii_reads_can_share_a_concat_allocation() {
+        let body = |last: &str| {
+            function_body(&format!(
+                "def group(value: int) -> str:\n    i = value % 4\n    return 'abcd'[i] + 'ABCD'[i] + 'wxyz'[{last}]\ndef later() -> int:\n    print('index')\n    return 0\nprint(group(7))\n"
+            ))
+        };
+        let bounded = body("i");
+        assert_eq!(
+            bounded.matches("call ptr @imre_str_concat_parts(").count(),
+            1
+        );
+        let unknown = body("value");
+        assert!(unknown.matches("call ptr @imre_str_concat_parts(").count() >= 2);
+        let effect = body("later() % 4");
+        let (before, _) = effect.split_once("call i64 @fn_1(").unwrap();
+        assert!(before.contains("call ptr @imre_str_concat_parts("));
     }
 
     #[test]
