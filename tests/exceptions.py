@@ -85,6 +85,7 @@ except KeyError as error:
     "upstream_support_payloads": upstream_support_payloads(),
     "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
+    "http_exception": (Path(__file__).parent / "fixtures/exceptions/http_exception.py").read_text(),
     "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
     **{
         name: (Path(__file__).parent / f"fixtures/exceptions/{name}.py").read_text()
