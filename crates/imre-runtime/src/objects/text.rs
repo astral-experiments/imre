@@ -667,14 +667,6 @@ fn shell_words(source: &str, comments: bool, posix: bool) -> Result<Words> {
 }
 
 /// # Safety
-/// The caller roots the input string. Success transfers a fresh list of strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_shlex_split(value: *const Str) -> *const Object {
-    // SAFETY: preserve the original one-argument ABI with Python's defaults.
-    unsafe { imre_shlex_split_options(value, 0, 1) }
-}
-
-/// # Safety
 /// The optional string stays rooted; a null pointer represents Python None.
 /// Success transfers the list and its strings; failure sets a pending error.
 #[unsafe(no_mangle)]

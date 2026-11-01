@@ -136,34 +136,6 @@ pub unsafe extern "C" fn imre_log_check_level(name: *const Str) -> usize {
     finish(named_level(name).map(Int::into_raw), 0)
 }
 
-/// # Safety
-/// All inputs are rooted as for basicConfig; the first argument is an exact
-/// string. Configuration installs the handler before attempting level lookup.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_config_named(
-    name: *const Str,
-    fmt: usize,
-    datefmt: usize,
-    force: bool,
-) {
-    if !force && super::LOGGERS.with_borrow(|logs| logs.format.is_some()) {
-        return;
-    }
-    // SAFETY: all configuration inputs retain their declared types and lifetime.
-    unsafe {
-        super::imre_log_config(0, fmt, datefmt, force);
-        if super::super::exceptions::imre_error_pending() != 0 {
-            return;
-        }
-        let level = imre_log_check_level(name);
-        if level != 0 {
-            let level = Int(level);
-            let root = crate::ObjectOwner::from_raw(super::imre_log_root(std::ptr::null()));
-            super::imre_log_set_level(crate::ObjectOwner::as_ptr(&root), level.0);
-        }
-    }
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_log_names() -> *const Object {
     LEVELS.with(|levels| crate::ObjectOwner::into_raw(levels.names.clone()))

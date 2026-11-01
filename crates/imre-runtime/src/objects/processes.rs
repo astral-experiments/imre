@@ -1518,41 +1518,6 @@ unsafe fn prepare_command(
     }
 }
 
-/// Launch with the requested POSIX stream descriptors and a nullable deadline.
-///
-/// # Safety
-/// Inputs are rooted through the call. The descriptor contains a string list,
-/// an integer and two stream fields of kind None, str or bytes. A nonzero
-/// deadline is either a rooted integer word (2) or a nullable float pointer (7).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_subprocess_run_modes(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    check: u32,
-    streams: u32,
-    deadline_kind: u32,
-    deadline: usize,
-    descriptor: *const RecordDescriptor,
-) -> *mut usize {
-    if streams & 256 != 0 {
-        return Error::new(
-            Kind::ValueError,
-            "stdout and stderr arguments may not be used with capture_output.",
-        )
-        .returning(std::ptr::null_mut());
-    }
-    if streams & 15 == 5 {
-        return Error::new(Kind::ValueError, "STDOUT can only be used for stderr")
-            .returning(std::ptr::null_mut());
-    }
-    // SAFETY: the caller supplies either None, a rooted integer, or a nullable float.
-    unsafe {
-        let timeout = Deadline::from_word(deadline_kind, deadline);
-        run_process(args, cwd, env, check, streams, timeout, descriptor)
-    }
-}
-
 /// Convert the drained bytes into the exact field type declared by the call site.
 fn completed_stream(data: Vec<u8>, kind: WordKind) -> Result<OwnedWord> {
     let word = match kind.raw() {

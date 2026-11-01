@@ -83,20 +83,6 @@ pub(super) fn standard_field(descriptor: u32, errors: bool) -> StrOwner {
     })
 }
 
-// Preserve the ABI of earlier generated stream accesses.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_sys_stream_encoding() -> *const Str {
-    imre_sys_stream_text(1, 0)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_sys_stderr_encoding() -> *const Str {
-    imre_sys_stream_text(2, 0)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_sys_stdout_errors() -> *const Str {
-    imre_sys_stream_text(1, 1)
-}
-
 /// Allocate exception input only when formatting produced borrowed text.
 pub(super) fn error_text(text: &str) -> super::Result<StrOwner> {
     StrOwner::try_new(Str::new(text)).map_err(|_| crate::Error::allocation())
