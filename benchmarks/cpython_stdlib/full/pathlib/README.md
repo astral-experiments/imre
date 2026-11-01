@@ -160,7 +160,7 @@ order. The [entry report](samefile-entry-linux.json) records 35 matching output
 lines and matching filesystem effects when the program is imported at both
 levels. As a direct script it still stops at the function definition on line
 106, after executable statements. [samefile_entry.py](samefile_entry.py) reproduces both modes;
-neither contributes an upstream occurrence. [Earlier measurements](observations/265e053/samefile-entry-linux.json)
+neither contributes an upstream occurrence. [Earlier measurements](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/pathlib/observations/265e053/samefile-entry-linux.json)
 preserve the same outcomes on `265e053`.
 
 The [link](../../../../tests/fixtures/paths/links.py) and

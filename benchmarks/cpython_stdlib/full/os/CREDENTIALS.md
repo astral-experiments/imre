@@ -2,7 +2,7 @@
 
 The [Linux results](credential-children-linux.json) cover 14 distinct release methods at both `-O0` and `-O3`. Unittest runs the original platform and privilege guards. Each kernel operation runs in an isolated process; a successful setter never changes the process running the test suite.
 
-The [compiler receipt](observations/b50e022b/verification-linux.json) identifies the tested merge tree and the six complete setter method hashes. The [O0](observations/b50e022b/credential-O0.json) and [O3](observations/b50e022b/credential-O3.json) raw results distinguish the 12 native bodies with host fixtures from the two host-driven cases.
+The [compiler receipt](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/b50e022b/verification-linux.json) identifies the tested merge tree and the six complete setter method hashes. The [O0](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/b50e022b/credential-O0.json) and [O3](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/b50e022b/credential-O3.json) raw results distinguish the 12 native bodies with host fixtures from the two host-driven cases.
 
 | Original methods | Body and assertions | OS operations |
 | --- | --- | --- |
