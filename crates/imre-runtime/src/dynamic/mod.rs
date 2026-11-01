@@ -94,6 +94,7 @@ pub(crate) struct Context {
     source_builtins: Option<Id>,
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     codec_entries: stdlib::codecs::Registry,
+    frozen_override: i32,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
     typing: typing::Registry,
@@ -1758,7 +1759,7 @@ impl Context {
                 .get(name)
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
-        } else if stdlib::is_module(name) {
+        } else if stdlib::is_module(name) || self.is_frozen(name) {
             if matches!(name, "email" | "importlib" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {

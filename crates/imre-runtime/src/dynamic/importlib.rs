@@ -26,6 +26,65 @@ impl SourceBody {
 }
 
 impl Context {
+    /// Bootstrap modules remain available even while ordinary frozen imports are disabled.
+    pub(super) fn is_frozen(&self, name: &str) -> bool {
+        match name {
+            "_frozen_importlib" | "_frozen_importlib_external" => true,
+            "zipimport" => cfg!(unix),
+            "stat" => {
+                cfg!(any(target_os = "linux", target_os = "macos")) && self.frozen_override >= 0
+            }
+            "__hello__" => self.frozen_override >= 0,
+            _ => false,
+        }
+    }
+
+    pub(super) fn imp_call(
+        &mut self,
+        method: &str,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("_imp.{method}() takes no keyword arguments"),
+            ));
+        }
+        let [arg] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "_imp.{method}() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        if method == "is_frozen" {
+            let name = self.str_value(*arg)?;
+            return Ok(if self.is_frozen(name) { TRUE } else { FALSE });
+        }
+        let value = self
+            .index_integer(*arg)?
+            .to_i64()
+            .and_then(|v| i32::try_from(v).ok())
+            .ok_or_else(|| {
+                Error::new("OverflowError", "Python int too large to convert to C int")
+            })?;
+        match method {
+            "_override_frozen_modules_for_tests" => {
+                self.frozen_override = value;
+                Ok(NONE)
+            }
+            // Imre programs currently run in a single main interpreter.
+            "_override_multi_interp_extensions_check" => Err(Error::new(
+                "RuntimeError",
+                "_imp._override_multi_interp_extensions_check() cannot be used in the main interpreter",
+            )),
+            _ => unreachable!("unregistered _imp attribute"),
+        }
+    }
+
     /// Select a package or module in search order, including late files for resource lookups.
     pub(super) fn source_on_path(
         &mut self,
@@ -267,7 +326,7 @@ impl Context {
             } else {
                 (fullname, self.sys_path, true)
             };
-        if stdlib::is_module(fullname) {
+        if stdlib::is_module(fullname) || self.is_frozen(fullname) {
             if filesystem {
                 return Ok(NONE);
             }

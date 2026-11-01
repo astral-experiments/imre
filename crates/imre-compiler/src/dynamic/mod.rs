@@ -102,7 +102,13 @@ impl Imports {
         if level == 0
             && matches!(
                 name,
-                "sysconfig" | "platform" | "keyword" | "site" | "importlib.machinery" | "traceback"
+                "_imp"
+                    | "sysconfig"
+                    | "platform"
+                    | "keyword"
+                    | "site"
+                    | "importlib.machinery"
+                    | "traceback"
             )
         {
             self.runtime_imports = true;
@@ -345,6 +351,7 @@ pub(crate) fn compile(
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
         && ![
+            "_imp",
             "sys",
             "platform",
             "keyword",
@@ -432,6 +439,7 @@ pub(crate) fn compile(
         ));
     }
     let mut seen = HashSet::new();
+    let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     while let Some((owner, package, imports)) = work.pop_front() {
         // Source imports install the actual boxed ModuleSpec class. Other users
@@ -449,10 +457,13 @@ pub(crate) fn compile(
             let Some(name) = resolve(&owner, package, level, &requested) else {
                 continue;
             };
-            // Frozen stat is registered below, ahead of any filesystem module or package.
-            if name.split('.').next() == Some("stat")
-                && crate::modules::bundled_runtime_source("stat").is_some()
+            // A frozen import never visits sys.path unless the program can disable
+            // the frozen importer. Defer collecting its filesystem alternatives.
+            if !seen.contains("_imp")
+                && let Some(top @ ("stat" | "__hello__")) = name.split('.').next()
+                && crate::modules::bundled_runtime_source(top).is_some()
             {
+                frozen_imports.names.push((0, name));
                 continue;
             }
             let mut prefix = String::new();
@@ -463,6 +474,9 @@ pub(crate) fn compile(
                 prefix.push_str(part);
                 if !seen.insert(prefix.clone()) {
                     continue;
+                }
+                if prefix == "_imp" && !frozen_imports.names.is_empty() {
+                    work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
                 let bundled = if prefix == "dataclasses" {
                     Some((
@@ -535,7 +549,7 @@ pub(crate) fn compile(
         ));
     }
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
-    for name in ["platform", "re", "stat", "zipimport"] {
+    for name in ["__hello__", "platform", "re", "stat", "zipimport"] {
         if !seen.contains(name)
             && let Some((file, source)) = crate::modules::bundled_runtime_source(name)
         {
