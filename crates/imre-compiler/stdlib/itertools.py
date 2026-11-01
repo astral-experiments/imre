@@ -2,6 +2,8 @@
 
 
 import itertools as _itertools
+from operator import index as _index
+from sys import maxsize as _maxsize
 
 
 def _make_chain(_get, _set, _allocate):
@@ -44,7 +46,101 @@ def _make_chain(_get, _set, _allocate):
 chain = _make_chain(_itertools._chain_get, _itertools._chain_set, _itertools._chain_allocate)
 
 
+class _Combination:
+    __slots__ = ("_pool", "_indices", "_stopped")
+
+    def __init__(self, iterable, r):
+        r = _ssize_index(r)
+        self._pool = tuple(iterable)
+        if r < 0:
+            raise ValueError("r must be non-negative")
+        if r > _maxsize // 8:
+            raise MemoryError
+        if self._with_replacement:
+            self._stopped = not self._pool and r != 0
+            self._indices = [] if self._stopped else [0] * r
+        else:
+            self._stopped = r > len(self._pool)
+            self._indices = [] if self._stopped else list(range(r))
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._stopped:
+            raise StopIteration
+        pool = self._pool
+        indices = self._indices
+        result = tuple(pool[index] for index in indices)
+        width = len(indices)
+        for i in range(width - 1, -1, -1):
+            limit = len(pool) - 1 if self._with_replacement else len(pool) - width + i
+            if indices[i] < limit:
+                indices[i] += 1
+                for j in range(i + 1, width):
+                    indices[j] = indices[i] if self._with_replacement else indices[j - 1] + 1
+                return result
+        self._stopped = True
+        return result
+
+
+class combinations(_Combination):
+    """Yield r-length subsequences of the input, in positional order."""
+
+    __slots__ = ()
+    _with_replacement = False
+
+
+class combinations_with_replacement(_Combination):
+    """Yield r-length subsequences, allowing a position to repeat."""
+
+    __slots__ = ()
+    _with_replacement = True
+
+
 _missing = object()
+
+
+def _ssize_index(value):
+    value = _index(value)
+    if value > _maxsize or value < -_maxsize - 1:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    return value
+
+
+class product:
+    """Cartesian product, advancing the rightmost input first."""
+
+    __slots__ = ("_pools", "_indices", "_stopped")
+
+    def __init__(self, *iterables, repeat=1):
+        repeat = _ssize_index(repeat)
+        if repeat < 0:
+            raise ValueError("repeat argument cannot be negative")
+        # Imre targets 64-bit platforms. Each pool needs a Py_ssize_t index.
+        if len(iterables) * repeat > _maxsize // 8:
+            raise OverflowError("repeat argument too large")
+        pools = [tuple(pool) for pool in iterables] if repeat else []
+        self._pools = pools * repeat
+        self._indices = [0] * len(self._pools)
+        self._stopped = any(len(pool) == 0 for pool in pools)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._stopped:
+            raise StopIteration
+        pools = self._pools
+        indices = self._indices
+        result = tuple(pool[index] for pool, index in zip(pools, indices))
+        for position in range(len(indices) - 1, -1, -1):
+            indices[position] += 1
+            if indices[position] < len(pools[position]):
+                return result
+            indices[position] = 0
+        self._stopped = True
+        return result
 
 
 class groupby:
@@ -105,3 +201,51 @@ class _grouper:
         value = parent._item[1]
         parent._item = None
         return value
+
+
+class permutations:
+    """Yield ordered selections of distinct input positions."""
+
+    __slots__ = ("_pool", "_indices", "_cycles", "_started")
+
+    def __init__(self, iterable, r=None):
+        self._pool = tuple(iterable)
+        n = len(self._pool)
+        if r is None:
+            r = n
+        elif isinstance(r, int):
+            r = _ssize_index(r)
+        else:
+            raise TypeError("Expected int as r")
+        if r < 0:
+            raise ValueError("r must be non-negative")
+        if r > _maxsize // 8:
+            raise MemoryError
+        self._started = False
+        self._indices = list(range(n))
+        self._cycles = list(range(n, n - r, -1)) if r <= n else None
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        cycles = self._cycles
+        if cycles is None:
+            raise StopIteration
+        indices = self._indices
+        if self._started:
+            for i in range(len(cycles) - 1, -1, -1):
+                cycles[i] -= 1
+                if cycles[i] == 0:
+                    # Restore the suffix before advancing the preceding position.
+                    indices.append(indices.pop(i))
+                    cycles[i] = len(indices) - i
+                else:
+                    j = -cycles[i]
+                    indices[i], indices[j] = indices[j], indices[i]
+                    break
+            else:
+                self._cycles = None
+                raise StopIteration
+        self._started = True
+        return tuple(self._pool[indices[i]] for i in range(len(cycles)))

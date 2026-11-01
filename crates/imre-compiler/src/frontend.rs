@@ -8939,6 +8939,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::MathProd)) => return self.integer_product(call),
             Some(Binding::Intrinsic(Intrinsic::ShallowCopy)) => return self.shallow_copy(call),
             Some(Binding::Intrinsic(Intrinsic::DeepCopy)) => return self.deep_copy(call),
+            Some(Binding::Intrinsic(Intrinsic::Combinatorial(op))) => {
+                return self.combinatorial_cursor(call, op);
+            }
             Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Tee)) => return self.tee_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::Count)) => return self.count_cursor(call),
@@ -10220,6 +10223,12 @@ impl<'a> Checker<'a> {
             && let Some(value) = self.weak_proxy_builtin(name.id.as_str(), proxy.clone())
         {
             return Ok(value);
+        }
+        if self.unshadowed_builtin(&call.func, "tuple")
+            && let [value] = args.as_slice()
+            && let Some(tuple) = self.iterable_tuple(value)
+        {
+            return Ok(tuple);
         }
         if name.id == "tuple"
             && self.unshadowed_builtin(&call.func, "tuple")

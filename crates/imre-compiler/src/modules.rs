@@ -584,6 +584,7 @@ pub(crate) enum Intrinsic {
     MathProd,
     Count,
     Islice,
+    Combinatorial(crate::ir::Combinatorial),
     Tee,
     Cycle,
     GroupBy,
@@ -1237,6 +1238,18 @@ impl IntrinsicModule {
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
+            (Self::Itertools, "product") => {
+                Intrinsic::Combinatorial(crate::ir::Combinatorial::Product)
+            }
+            (Self::Itertools, "permutations") => {
+                Intrinsic::Combinatorial(crate::ir::Combinatorial::Permutations)
+            }
+            (Self::Itertools, "combinations") => {
+                Intrinsic::Combinatorial(crate::ir::Combinatorial::Combinations)
+            }
+            (Self::Itertools, "combinations_with_replacement") => {
+                Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
+            }
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
