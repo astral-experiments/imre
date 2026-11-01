@@ -92,6 +92,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "json"
             | "_imre_logging"
             | "_imre_dataclasses"
+            | "gc"
             | "marshal"
             | "pickle"
             | "zlib"
@@ -582,6 +583,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("json", "dump" | "dumps" | "loads")
         | ("random", "random")
         | ("codecs", "encode" | "decode" | "lookup" | "register_error" | "lookup_error")
+        | ("gc", "collect")
         | ("marshal", "loads")
         | ("pickle", "dumps")
         | (
@@ -1300,6 +1302,30 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
+    }
+    if name == "gc.collect" {
+        if !args.is_empty() || !kwargs.is_empty() {
+            let value = single_argument("collect", "generation", args, kwargs)?;
+            let generation = ctx
+                .index_integer(value)?
+                .to_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?;
+            match generation {
+                2 => {}
+                0 | 1 => {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "the native heap supports full collections only",
+                    ));
+                }
+                _ => return Err(Error::new("ValueError", "invalid generation")),
+            }
+        }
+        let reclaimed = ctx.collect_full()?;
+        return Ok(ctx.int(reclaimed as i64));
     }
     if name == "marshal.loads" {
         return marshal::loads(ctx, args, kwargs);

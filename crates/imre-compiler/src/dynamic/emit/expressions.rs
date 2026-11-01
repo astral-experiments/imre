@@ -44,7 +44,12 @@ impl Function<'_, '_> {
             ast::Expr::Set(v) => self.display("set", &v.elts),
             ast::Expr::Tuple(v) => {
                 let list = self.display("list", &v.elts);
-                self.op("tuple", &[&list])
+                let op = if v.elts.iter().all(imre_ast::literal_tuple_element) {
+                    "constant_tuple"
+                } else {
+                    "tuple"
+                };
+                self.op(op, &[&list])
             }
             ast::Expr::Dict(v) => {
                 let dict = self.op("dict", &[]);

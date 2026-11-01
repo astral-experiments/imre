@@ -5,18 +5,22 @@ use num_traits::Signed;
 
 /// Clear container storage, then finalize any buffered writer whose last owner was removed.
 pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
-    let owns_writer = |&id: &Id| ctx.heap.could_own_writer(id, true);
-    let released = ctx.heap.has_unbound_writer(NONE)
+    let owns_finalizer = |&id: &Id| ctx.heap.could_own_finalizer(id, true);
+    let released = ctx.heap.has_unbound_finalizer(NONE)
         && match ctx.heap.get(receiver) {
-            Value::List(items) => items.iter().any(owns_writer),
+            Value::List(items) => items.iter().any(owns_finalizer),
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => entries
                 .iter()
-                .any(|(key, value)| owns_writer(key) || owns_writer(value)),
-            Value::Deque(ring) => ring.items.iter().any(owns_writer),
+                .any(|(key, value)| owns_finalizer(key) || owns_finalizer(value)),
+            Value::Deque(ring) => ring.items.iter().any(owns_finalizer),
             _ => unreachable!("clearable container"),
         };
     match ctx.heap.get_mut(receiver) {
-        Value::List(items) => items.clear(),
+        Value::List(items) => {
+            for item in std::mem::take(items) {
+                ctx.heap.weak_edge_removed(item);
+            }
+        }
         Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
             for (key, value) in entries.clear() {
                 ctx.heap.weak_edge_removed(key);
@@ -512,6 +516,13 @@ pub(super) fn construct(
         .unwrap_or_default();
     match name {
         "list" => Ok(ctx.alloc(Value::List(items))),
+        "tuple"
+            if args
+                .first()
+                .is_some_and(|&id| matches!(ctx.heap.get(id), Value::List(_))) =>
+        {
+            Ok(ctx.heap.packed_tuple(items, false))
+        }
         "tuple" => Ok(ctx.alloc(Value::Tuple(items))),
         _ => Err(type_error(format!("unknown collection {name}"))),
     }

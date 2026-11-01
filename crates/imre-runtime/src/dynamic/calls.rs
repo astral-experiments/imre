@@ -3082,6 +3082,9 @@ impl Context {
                     namespace.annotation_thunks = None;
                 }
                 self.bind(scope, name, value);
+                if name == "__del__" {
+                    self.register_class_finalizers();
+                }
             }
             _ => {
                 let attr = self.text(name);

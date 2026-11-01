@@ -3860,9 +3860,9 @@ impl Context {
         if let Some(dict) = self.dict_storage(obj) {
             let removed = builtins::remove_dict_item(self, dict, key)?
                 .ok_or_else(|| self.lookup_error("KeyError", key))?;
-            if self.heap.has_file_writers()
-                && self.heap.could_own_writer(removed, true)
-                && self.heap.has_unbound_writer(NONE)
+            if self.heap.tracks_finalizers()
+                && self.heap.could_own_finalizer(removed, true)
+                && self.heap.has_unbound_finalizer(NONE)
             {
                 self.collect_unreachable();
             }
