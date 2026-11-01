@@ -51,11 +51,11 @@ impl Checker<'_> {
 
     /// Resolve only a selector whose membership is proved. Unknown names,
     /// negative indices and out-of-range requests still go through IndexError.
-    fn capture_index(&self, receiver: &Expr, selector: &Expr) -> Option<usize> {
+    fn capture_index(layout: Option<&CaptureLayout>, selector: &Expr) -> Option<usize> {
         if matches!(&selector.kind, ExprKind::Int(n) if n == "0") {
             return Some(0);
         }
-        let groups = self.capture_layout(receiver)?;
+        let groups = layout?;
         match &selector.kind {
             ExprKind::Str(name) => groups
                 .iter()
@@ -412,6 +412,12 @@ impl Checker<'_> {
                 )),
             };
         }
+        let layout = self.capture_layout(&receiver);
+        let receiver = if self.types.payload(receiver.ty) == Some(Type::RegexMatch) {
+            self.require_attribute_receiver(receiver, Type::RegexMatch, attribute)
+        } else {
+            receiver
+        };
         if method == "groupdict" && args.is_empty() {
             return Ok(Expr {
                 ty: self.types.dict(Type::Str, self.types.optional(Type::Str)),
@@ -419,7 +425,7 @@ impl Checker<'_> {
             });
         }
         if method == "groups" && args.is_empty() {
-            let groups = self.capture_layout(&receiver).ok_or_else(|| {
+            let groups = layout.ok_or_else(|| {
                 error(
                     self.source,
                     call,
@@ -467,11 +473,11 @@ impl Checker<'_> {
                 },
             });
         }
-        if !matches!(method, "group" | "start" | "end") || args.len() > 1 {
+        if !matches!(method, "group" | "start" | "end" | "span") || args.len() > 1 {
             return Err(error(
                 self.source,
                 call,
-                "a regex match supports group(), start(), end(), groups(), and groupdict()",
+                "a regex match supports group(), start(), end(), span(), groups(), and groupdict()",
             ));
         }
         let mut selector = if let [arg] = args {
@@ -496,18 +502,45 @@ impl Checker<'_> {
         {
             selector.kind = ExprKind::Int("0".into());
         }
-        let index = self.capture_index(&receiver, &selector);
+        let index = Self::capture_index(layout.as_ref(), &selector);
         if let Some(index) = index {
             selector = Expr {
                 ty: Type::Int,
                 kind: ExprKind::Int(index.to_string()),
             };
         }
+        if method == "span" {
+            let slot = self.hidden(Type::RegexMatch);
+            let bounds = [RegexCapture::Start, RegexCapture::End]
+                .into_iter()
+                .map(|operation| Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(
+                        Builtin::RegexCapture {
+                            operation,
+                            known: index.is_some(),
+                        },
+                        vec![self.local(slot), selector.clone()],
+                    ),
+                })
+                .collect();
+            let ty = self.types.tuple(vec![Type::Int, Type::Int]);
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(slot, receiver)],
+                    value: Box::new(Expr {
+                        ty,
+                        kind: ExprKind::Tuple(bounds),
+                    }),
+                    clear: vec![slot],
+                },
+            });
+        }
         let (operation, ty) = if method == "group" {
             let ty = if index == Some(0)
                 || index.is_some_and(|index| {
-                    self.capture_layout(&receiver)
-                        .is_some_and(|groups| groups[index].required)
+                    layout.as_ref().is_some_and(|groups| groups[index].required)
                 }) {
                 Type::Str
             } else {

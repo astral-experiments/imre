@@ -45,6 +45,11 @@ def show(found: re.Match[str] | None) -> None:
         print("no match")
 
 
+def capture_subject() -> str:
+    print("search once")
+    return "🙂éz\n"
+
+
 show(retained("é🙂"))
 for line in ["# E", "# E:", "# E?:  ", "# E[tag++]", "x # no #\x1cE", "#\u00a0E", "#\x1fE", "#\u200bE", "# E:\nA", ""]:
     show(first(MARKER, line))
@@ -94,3 +99,15 @@ if early and late:
     print(early.end(9))
     print(late.start(1))
     print(capture(late.group(9)))
+
+print(re.search(r"(?P<x>é)(a)?z$", capture_subject()).span())
+print(re.search(r"(?P<x>é)(a)?z$", "🙂éz\n").span("x"))
+print(re.search(r"(?P<x>é)(a)?z$", "🙂éz").span(2))
+try:
+    re.search("no", "yes").span()
+except AttributeError as exc:
+    print(str(exc))
+try:
+    re.search("yes", "yes").span("missing")
+except IndexError as exc:
+    print(str(exc))
