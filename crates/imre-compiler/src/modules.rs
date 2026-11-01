@@ -119,14 +119,23 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
-        "collections" => Some((
-            "collections/__init__.py",
-            concat!(
-                include_str!("../stdlib/collections/__init__.py"),
-                "\n",
-                include_str!("../stdlib/collections/namedtuple_repr.py"),
-            ),
-        )),
+        "collections" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some(("collections/__init__.py", SOURCE.get_or_init(|| {
+                // The three user container classes form the tail of the pinned CPython module.
+                let (_, wrappers) = include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/collections/upstream/Lib/collections/__init__.py"
+                )
+                .split_once("### UserDict\n")
+                .expect("CPython 3.14.5 UserDict section");
+                concat!(
+                    include_str!("../stdlib/collections/__init__.py"),
+                    "\n",
+                    include_str!("../stdlib/collections/namedtuple_repr.py"),
+                    "\nimport _collections_abc\nimport sys as _sys\n",
+                ).to_owned() + wrappers
+            })))
+        }
         "contextlib" => Some((
             "contextlib.py",
             concat!(
@@ -1314,6 +1323,15 @@ impl IntrinsicModule {
             (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
+            (Self::Collections, "UserDict") => {
+                Intrinsic::ObjectRuntimeExport("collections.UserDict")
+            }
+            (Self::Collections, "UserList") => {
+                Intrinsic::ObjectRuntimeExport("collections.UserList")
+            }
+            (Self::Collections, "UserString") => {
+                Intrinsic::ObjectRuntimeExport("collections.UserString")
+            }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,

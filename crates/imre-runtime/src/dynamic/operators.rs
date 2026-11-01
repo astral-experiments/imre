@@ -187,6 +187,19 @@ fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usiz
         .map(|i| i as usize)
 }
 
+fn remove_slice_positions<T>(target: &mut Vec<T>, start: i64, end: i64, step: i64) {
+    let mut i = 0_i64;
+    target.retain(|_| {
+        let selected = (if step > 0 {
+            start <= i && i < end
+        } else {
+            end < i && i <= start
+        }) && i.abs_diff(start).is_multiple_of(step.unsigned_abs());
+        i += 1;
+        !selected
+    });
+}
+
 fn slice_memory_error(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "sequence slice is too large")
 }
@@ -2595,6 +2608,9 @@ impl Context {
                 .get_mut(i as usize)
                 .ok_or_else(|| Error::new("IndexError", "bytearray index out of range"))? = byte;
         } else if matches!(self.heap.get(obj), Value::List(_)) {
+            if let Value::Slice(parts) = *self.heap.get(key) {
+                return self.set_list_slice(obj, parts, Some(val));
+            }
             let i = self.list_mutation_position(obj, key)?;
             let Value::List(items) = self.heap.get_mut(obj) else {
                 unreachable!()
@@ -2794,6 +2810,45 @@ impl Context {
         Ok(self.alloc(result))
     }
 
+    /// Materialize the iterable before normalizing against the possibly resized destination.
+    fn set_list_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
+        let bounds = super::slice::sequence_components(self, parts)?;
+        let replacement = source.map(|source| self.items(source)).transpose()?;
+        let Value::List(target) = self.heap.get_mut(obj) else {
+            unreachable!("list slice receiver")
+        };
+        let [start, end, step] = super::slice::normalize(bounds, target.len() as i64);
+        let positions = slice_positions(start, end, step);
+        let count = positions.clone().count();
+        let removed = sliced_values(target, positions.clone(), count)?;
+        if step == 1 {
+            let replacement = replacement.unwrap_or_default();
+            target
+                .try_reserve(replacement.len().saturating_sub(count))
+                .map_err(slice_memory_error)?;
+            target.splice(start as usize..end.max(start) as usize, replacement);
+        } else if let Some(replacement) = replacement {
+            if replacement.len() != count {
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "attempt to assign sequence of size {} to extended slice of size {count}",
+                        replacement.len()
+                    ),
+                ));
+            }
+            for (i, value) in positions.zip(replacement) {
+                target[i] = value;
+            }
+        } else {
+            remove_slice_positions(target, start, end, step);
+        }
+        for item in removed {
+            self.heap.weak_edge_removed(item);
+        }
+        Ok(())
+    }
+
     fn set_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
         let mut bounds = super::slice::sequence_components(self, parts)?;
         let data = match source {
@@ -2825,16 +2880,7 @@ impl Context {
             target.splice(range, data);
         } else if data.is_empty() {
             // Assigning an empty buffer deletes even the non-contiguous positions.
-            let mut i = 0_i64;
-            target.retain(|_| {
-                let selected = (if step > 0 {
-                    start <= i && i < end
-                } else {
-                    end < i && i <= start
-                }) && i.abs_diff(start).is_multiple_of(step.unsigned_abs());
-                i += 1;
-                !selected
-            });
+            remove_slice_positions(target, start, end, step);
         } else {
             let positions = slice_positions(start, end, step);
             let count = positions.clone().count();
@@ -3840,6 +3886,9 @@ impl Context {
                 data.remove(i as usize);
             }
             Value::List(_) => {
+                if let Value::Slice(parts) = *self.heap.get(key) {
+                    return self.set_list_slice(obj, parts, None);
+                }
                 let i = self.list_mutation_position(obj, key)?;
                 let Value::List(entries) = self.heap.get_mut(obj) else {
                     unreachable!()

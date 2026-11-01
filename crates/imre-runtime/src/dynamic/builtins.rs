@@ -305,6 +305,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "__format__",
     "__repr__",
     "capitalize",
+    "count",
     "encode",
     "endswith",
     "expandtabs",
