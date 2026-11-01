@@ -33,7 +33,10 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         let scope = *scope;
         if let Some(method) = ctx.scope_name(scope, "__dir__") {
             ctx.call(method, vec![], vec![])?
-        } else if constructor.is_none() && super::super::stdlib::is_module(name) {
+        } else if constructor.is_none()
+            && name != "builtins"
+            && super::super::stdlib::is_module(name)
+        {
             return Err(Error::new(
                 "NotImplementedError",
                 "dir() cannot enumerate lazy native module exports",

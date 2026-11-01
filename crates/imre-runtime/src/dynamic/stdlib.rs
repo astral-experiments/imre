@@ -76,6 +76,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "builtins"
             | "_imp"
             | "threading"
             | "_thread"

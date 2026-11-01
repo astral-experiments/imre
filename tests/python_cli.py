@@ -1399,6 +1399,8 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        builtins_fixture = fixtures / "boxed_builtins_module.py"
+        compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
             exe = root / "marshal-allocation"
             built = run(imre, "build", fixtures / "boxed_marshal_allocation.py",
