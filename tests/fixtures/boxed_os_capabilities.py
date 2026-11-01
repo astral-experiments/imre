@@ -4,6 +4,7 @@ from os import supports_dir_fd, supports_effective_ids, supports_fd, supports_fo
 
 
 def current():
+    assert os.listdir in os.supports_fd
     capabilities = (supports_dir_fd, supports_fd, supports_follow_symlinks, supports_effective_ids)
     operations = (os.lstat, os.open, os.rmdir, os.stat, os.unlink, os.remove, os.fstat)
     expected = ((True, True, True, True, True, False, False),

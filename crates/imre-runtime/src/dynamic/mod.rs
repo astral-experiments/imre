@@ -12,6 +12,7 @@ mod enums;
 mod ffi;
 mod finalizers;
 mod function_fields;
+mod generator_protocol;
 mod importlib;
 mod iterators;
 mod mapping_abc;
@@ -889,7 +890,7 @@ impl Context {
                     match self.code_object(code).body {
                         value::Body::Native(_) => self.next_generator_item(id),
                         value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                            self.resume_source(id)
+                            self.resume_source(id, NONE)
                         }
                     }
                 });
@@ -1805,11 +1806,11 @@ impl Context {
     }
 
     fn module(&mut self, name: &str) -> Result<Id> {
-        self.find_module(name, false)?
+        self.find_module(name, true)?
             .ok_or_else(|| Self::missing_module(name))
     }
 
-    /// Package resource lookups can initialize filesystem sources added after compilation.
+    /// Resolve registered and filesystem modules against the current import path.
     fn find_module(&mut self, mut name: &str, filesystem: bool) -> Result<Option<Id>> {
         let mut parents = Vec::new();
         let mut module = loop {
@@ -2071,7 +2072,7 @@ impl Context {
                     origin.expect("ZIP source has a filename"),
                     loader,
                 ),
-                importlib::SourceBody::Compiled(_) | importlib::SourceBody::Filesystem
+                importlib::SourceBody::Compiled(_)
                     if let Some(origin) = origin
                         && name != "__main__"
                         && !stdlib::is_module(name)
@@ -2084,7 +2085,11 @@ impl Context {
                     let code = self.module_code(entry, &path);
                     self.execute(code, scope, FrameOwner::Module(name_id))
                 }
-                importlib::SourceBody::Filesystem => Ok(NONE),
+                importlib::SourceBody::Filesystem => match origin {
+                    Some(file) => self.initialize_source(module, scope, name_id, file, NONE),
+                    // Namespace packages have no initializer.
+                    None => Ok(NONE),
+                },
             };
             let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
                 unreachable!()

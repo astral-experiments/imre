@@ -648,6 +648,7 @@ dependencies = [
  "ruff_python_ast",
  "ruff_python_stdlib",
  "ruff_text_size",
+ "stacker",
  "unicode_names2",
 ]
 

@@ -162,3 +162,5 @@ def main():
 
 import unittest.case as case
 from unittest.case import addModuleCleanup, doModuleCleanups, enterModuleContext
+
+from unittest import loader

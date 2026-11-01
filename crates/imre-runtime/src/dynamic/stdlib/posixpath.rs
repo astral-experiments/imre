@@ -91,9 +91,17 @@ fn stat_predicate(ctx: &mut Context, path: Id, operation: &str) -> Result<bool> 
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         // SAFETY: fstat initializes the full buffer on success and never takes ownership of fd.
         return Ok(unsafe {
-            libc::fstat(fd, stat.as_mut_ptr()) == 0
-                && (operation == "exists"
-                    || stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFREG)
+            if libc::fstat(fd, stat.as_mut_ptr()) != 0 {
+                false
+            } else {
+                let mode = stat.assume_init().st_mode & libc::S_IFMT;
+                match operation {
+                    "exists" => true,
+                    "isdir" => mode == libc::S_IFDIR,
+                    "isfile" => mode == libc::S_IFREG,
+                    _ => unreachable!("registered stat predicate"),
+                }
+            }
         });
     }
     let value = path_arg(
@@ -117,9 +125,118 @@ fn stat_predicate(ctx: &mut Context, path: Id, operation: &str) -> Result<bool> 
     };
     Ok(match operation {
         "exists" => crate::objects::exists(path),
+        "isdir" => path.is_dir(),
         "isfile" => crate::objects::is_file(path),
         "islink" => std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()),
         _ => unreachable!("registered path predicate"),
+    })
+}
+
+/// Join unmatched components of two normalized POSIX spellings into a relative path.
+fn relative_parts<T: Copy + Eq + From<u8>>(path: &[T], start: &[T]) -> Vec<T> {
+    let slash = T::from(b'/');
+    let dot = T::from(b'.');
+    let mut path = path
+        .split(|&c| c == slash)
+        .filter(|s| !s.is_empty())
+        .peekable();
+    let mut start = start
+        .split(|&c| c == slash)
+        .filter(|s| !s.is_empty())
+        .peekable();
+    while path.peek().is_some() && path.peek() == start.peek() {
+        path.next();
+        start.next();
+    }
+    let mut result = Vec::new();
+    let parent = [dot, dot];
+    for part in start.map(|_| parent.as_slice()).chain(path) {
+        if !result.is_empty() {
+            result.push(slash);
+        }
+        result.extend_from_slice(part);
+    }
+    if result.is_empty() {
+        result.push(dot);
+    }
+    result
+}
+
+/// POSIX spelling operations for realpath preserve Python code points until each filesystem lookup.
+fn realpath_op(ctx: &mut Context, op: &str, args: &[Id]) -> Result<Id> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let [path] = args else {
+        return Err(Error::new("TypeError", "expected one path argument"));
+    };
+    let path = fspath(ctx, *path)?;
+    let raw = matches!(ctx.heap.get(ctx.scalar_value(path)), Value::Bytes(_));
+    if op == "parts" || op == "parent" {
+        let chars: Vec<u32> = if raw {
+            ctx.bytes_like(path)?
+                .iter()
+                .map(|&c| u32::from(c))
+                .collect()
+        } else {
+            ctx.string_codepoints(path)?.into_owned()
+        };
+        let spelling = |ctx: &mut Context, part: &[u32]| {
+            if raw {
+                ctx.alloc(Value::Bytes(part.iter().map(|&c| c as u8).collect()))
+            } else {
+                ctx.text_codepoints(part.to_vec())
+            }
+        };
+        if op == "parent" {
+            let end = chars
+                .iter()
+                .rposition(|&c| c == u32::from(b'/'))
+                .unwrap_or(0)
+                .max(1);
+            return Ok(spelling(ctx, &chars[..end.min(chars.len())]));
+        }
+        let parts = chars
+            .split(|&c| c == u32::from(b'/'))
+            .map(|part| spelling(ctx, part))
+            .collect();
+        return Ok(ctx.alloc(Value::List(parts)));
+    }
+    let errno = |ctx: &mut Context, error| {
+        let error = crate::objects::errno_error(error).into();
+        ctx.with_errno_filename(error, path)
+            .unwrap_or_else(|error| error)
+    };
+    if matches!(op, "loop" | "notdir") {
+        let code = if op == "loop" {
+            libc::ELOOP
+        } else {
+            libc::ENOTDIR
+        };
+        return Err(errno(ctx, std::io::Error::from_raw_os_error(code)));
+    }
+    let nul_error = if op == "kind" {
+        "lstat: embedded null character in path"
+    } else {
+        "readlink: embedded null character in path"
+    };
+    let native = super::os::c_path(ctx, path, nul_error)?;
+    let native = std::ffi::OsStr::from_bytes(native.as_bytes());
+    if op == "kind" {
+        let metadata = std::fs::symlink_metadata(native).map_err(|e| errno(ctx, e))?;
+        return Ok(ctx.text(if metadata.is_symlink() {
+            "link"
+        } else if metadata.is_dir() {
+            "dir"
+        } else {
+            "other"
+        }));
+    }
+    let target = std::fs::read_link(native).map_err(|e| errno(ctx, e))?;
+    let bytes = target.as_os_str().as_bytes();
+    Ok(if raw {
+        ctx.alloc(Value::Bytes(bytes.to_vec()))
+    } else {
+        ctx.text_codepoints(crate::objects::interpreter_stdlib::fsdecode(bytes).collect())
     })
 }
 
@@ -129,6 +246,27 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(op) = name.strip_prefix("_imre_posixpath.realpath_") {
+        return realpath_op(ctx, op, args);
+    }
+    if name == "_imre_posixpath.relative_parts" {
+        let [path, start] = args else {
+            return Err(Error::new("TypeError", "expected two path arguments"));
+        };
+        return match (ctx.heap.get(*path), ctx.heap.get(*start)) {
+            (Value::Bytes(path), Value::Bytes(start)) => {
+                let result = relative_parts(path, start);
+                Ok(ctx.alloc(Value::Bytes(result)))
+            }
+            _ => {
+                let result = relative_parts(
+                    &ctx.string_codepoints(*path)?,
+                    &ctx.string_codepoints(*start)?,
+                );
+                Ok(ctx.text_codepoints(result))
+            }
+        };
+    }
     if let Some(function) = name.strip_prefix("posix.") {
         let count = args.len() + kwargs.len();
         if count > 1 {
@@ -166,9 +304,9 @@ pub(super) fn call(
             };
             Ok(ctx.int(cut as i64))
         }
-        Some(op @ ("exists" | "isfile" | "islink")) => Ok(super::super::builtins::boolean(
-            stat_predicate(ctx, path, op)?,
-        )),
+        Some(op @ ("exists" | "isdir" | "isfile" | "islink")) => Ok(
+            super::super::builtins::boolean(stat_predicate(ctx, path, op)?),
+        ),
         _ => unreachable!(),
     }
 }

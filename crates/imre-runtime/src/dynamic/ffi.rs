@@ -176,8 +176,7 @@ impl Context {
                     }
                 }
                 let name = copy_label(self.str_value(b)?)?;
-                let value = self.enum_assignment(scope, &name, c)?;
-                let replaced = self.store_source_name(scope, &name, value)?;
+                let replaced = self.store_source_name(scope, &name, c)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
                     Ok(flag(replaced))
                 } else {

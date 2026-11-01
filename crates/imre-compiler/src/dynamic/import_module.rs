@@ -65,6 +65,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/unittest/boxed_runner.py"),
             ),
         )),
+        "unittest.loader" => Some((
+            "unittest/loader.py",
+            include_str!("../../stdlib/unittest/loader_boxed.py"),
+        )),
         "textwrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("textwrap.py", SOURCE.get_or_init(|| {

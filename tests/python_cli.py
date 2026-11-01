@@ -809,6 +809,39 @@ def check_marshal_allocation(exe):
     assert (child.returncode, out, err) == (0, b"refused\nTrue\n", b""), (out, err)
 
 
+def check_unittest_file_discovery(imre, root, run):
+    entry = root / "discover_after_build.py"
+    entry.write_text(
+        "import sys, unittest\n"
+        "suite = unittest.TestLoader().discover(sys.argv[1])\n"
+        "result = unittest.TestResult()\n"
+        "suite.run(result)\n"
+        "print(result.testsRun, [test.id() for test, error in result.failures], len(result.errors))\n"
+    )
+    for optimization in ("0", "3"):
+        directory = root / ("late_tests_" + optimization)
+        directory.mkdir()
+        executable = root / ("discover_" + optimization)
+        built = run(imre, "build", entry, "--runtime-imports", "--no-cache",
+                    "--opt-level", optimization, "-o", executable)
+        assert built.returncode == 0, built
+        # The compiler has already linked the binary when this module first appears.
+        (directory / "test_late.py").write_text(
+            "import unittest\n"
+            "from enum import Enum\n"
+            "class Marker(Enum):\n"
+            "    present = 1\n"
+            "class Late(unittest.TestCase):\n"
+            "    def test_body(self):\n"
+            "        for member in Marker: self.fail(member.name)\n"
+        )
+        for command in ((sys.executable, "-B", entry), (executable,)):
+            result = run(*command, directory)
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, b"1 ['test_late.Late.test_body'] 0\n", b"",
+            ), result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -1535,6 +1568,7 @@ def report(text):
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
         if os.name == "posix":
+            check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
