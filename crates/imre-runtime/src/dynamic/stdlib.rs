@@ -90,6 +90,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "json"
             | "_imre_logging"
             | "_imre_dataclasses"
+            | "_imre_mock"
             | "marshal"
             | "pickle"
             | "zlib"
@@ -334,6 +335,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "source_name"
             | "warn_debug_override",
         )
+        | ("_imre_mock", "is_call_list" | "mark_call_list")
         | ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
@@ -1139,6 +1141,29 @@ pub(super) fn call(
                 ));
             }
         }
+    }
+    if matches!(
+        name,
+        "_imre_mock.mark_call_list" | "_imre_mock.is_call_list"
+    ) {
+        let ([list], []) = (args, kwargs) else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expects one positional argument"),
+            ));
+        };
+        let list = ctx
+            .list_storage(*list)
+            .ok_or_else(|| Error::new("TypeError", "expected a list"))?;
+        if name == "_imre_mock.mark_call_list" {
+            ctx.heap.mock_call_lists.insert(list);
+            return Ok(TRUE);
+        }
+        return Ok(if ctx.heap.mock_call_lists.contains(&list) {
+            TRUE
+        } else {
+            FALSE
+        });
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {

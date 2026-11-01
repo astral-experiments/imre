@@ -2819,6 +2819,13 @@ impl Context {
             }
             return Ok(());
         }
+        if name == "__traceback__"
+            && value == NONE
+            && let Value::Raised(error) = self.heap.get_mut(obj)
+        {
+            error.clear_traceback();
+            return Ok(());
+        }
         if name == "__context__" && matches!(self.heap.get(obj), Value::Raised(_)) {
             if value != NONE && !matches!(self.heap.get(value), Value::Raised(_)) {
                 return Err(Error::new(

@@ -500,6 +500,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "BufferError" => return Some(54),
         "GeneratorExit" => return Some(59),
         "StopAsyncIteration" => return Some(60),
+        "KeyboardInterrupt" => return Some(61),
         "SyntaxError" => return Some(55),
         "IndentationError" => return Some(56),
         "BlockingIOError" => return Some(44),
@@ -5159,6 +5160,14 @@ impl<'a> Checker<'a> {
             && self.unittest_context(class)
         {
             return self.assert_raises_scope(item, remaining, body, class, manager);
+        }
+        if let Type::Class(class) = manager.ty {
+            let record = &self.classes.declarations.definitions[class];
+            if record.name == "_SubTestContext"
+                && self.graph.modules[record.definition.module].is_bundled("unittest")
+            {
+                return self.subtest_scope(item, remaining, body, class, manager);
+            }
         }
         if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {
             return self.handler_lock_scope(item, remaining, body, manager);

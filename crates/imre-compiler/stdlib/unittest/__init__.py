@@ -4,10 +4,11 @@
 import difflib
 import re
 from datetime import date, timedelta
-from fnmatch import fnmatchcase
+import fnmatch
 from io import StringIO
 from types import ModuleType
-from typing import Callable, ClassVar
+import typing
+from typing import Callable
 import sys
 import time
 
@@ -142,23 +143,37 @@ def _mapping_text(mapping: dict[str, str], pretty: bool) -> str:
     return "{" + ",\n ".join(expanded) + "}"
 
 
+class _SubTestStop(Exception):
+    pass
+
+
 class _SuiteMember:
     pass
 
 
 class TestCase(_SuiteMember):
-    failureException: ClassVar[type[Exception]] = AssertionError
+    _subtest_params: dict[str, object]
+    failureException: typing.ClassVar[type[Exception]] = AssertionError
     _testMethodName: str
     longMessage: bool
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self, methodName: str = "runTest") -> None:
+        self._subtest_params = {}
         self._testMethodName = methodName
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
         _validateCaseMethod(self, methodName)
+
+    @property
+    def _runner(self) -> TestResult | None:
+        for index in range(len(_activeResults) - 1, -1, -1):
+            case, result = _activeResults[index]
+            if self is case:
+                return result
+        return None
 
     def _declaredCaseMethods(self) -> tuple[list[str], list[str]]:
         raise RuntimeError("native unittest case requires its class metadata")
@@ -183,6 +198,21 @@ class TestCase(_SuiteMember):
 
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
+
+    def subTest(self, *messages: object, **params: object) -> _SubTestContext:
+        has_message = "msg" in params
+        if len(messages) and has_message:
+            raise TypeError("TestCase.subTest() got multiple values for argument 'msg'")
+        if len(messages) > 1:
+            raise TypeError("TestCase.subTest() takes from 1 to 2 positional arguments but "
+                            + str(len(messages) + 1) + " were given")
+        message: object = None
+        if has_message:
+            message = params.pop("msg")
+        for item in messages:
+            message = item
+            has_message = True
+        return _SubTestContext(self, has_message, message, params)
 
     def assertIsNone(self, obj: object, msg: str | None = None) -> None:
         if obj is not None:
@@ -495,6 +525,76 @@ class _AssertRaisesContext:
         return caught
 
 
+class _SubTest(TestCase):
+    _subtest_id: str
+
+    def __init__(self, parent_id: str, description: str) -> None:
+        super().__init__()
+        self._subtest_id = parent_id + " " + description
+
+    def id(self) -> str:
+        return self._subtest_id
+
+
+class _SubTestContext:
+    case: TestCase
+    has_message: bool
+    message: object
+    params: dict[str, object]
+    previous: dict[str, object]
+    entered: bool
+
+    def __init__(self, case: TestCase, has_message: bool, message: object,
+                 params: dict[str, object]) -> None:
+        self.case = case
+        self.has_message = has_message
+        self.message = message
+        self.params = params
+        self.previous = {}
+        self.entered = False
+
+    def __enter__(self) -> None:
+        # contextlib's generator context manager can be entered only once.
+        if self.entered:
+            raise AttributeError("'_GeneratorContextManager' object has no attribute 'args'")
+        self.entered = True
+        self.previous = self.case._subtest_params
+        for key in self.previous:
+            if key not in self.params:
+                self.params[key] = self.previous[key]
+        self.case._subtest_params = self.params
+
+    def _leave(self) -> None:
+        self.case._subtest_params = self.previous
+
+    def __exit__(self, exc_type: object, exc: BaseException | None, traceback: object) -> bool:
+        try:
+            if exc is not None:
+                return self._handle(exc)
+            return False
+        finally:
+            self._leave()
+
+    def _handle(self, exc: BaseException) -> bool:
+        runner = self.case._runner
+        if runner is None or isinstance(exc, (_SubTestStop, KeyboardInterrupt)):
+            return False
+        parts: list[str] = []
+        if self.has_message:
+            parts.append("[" + str(self.message) + "]")
+        if self.params:
+            items: list[str] = []
+            for key in self.params:
+                items.append(key + "=" + repr(self.params[key]))
+            parts.append("(" + ", ".join(items) + ")")
+        description = " ".join(parts) or "(<subtest>)"
+        case = self.case
+        runner._subtest_result(case, description, exc, isinstance(exc, case.failureException))
+        if runner.failfast:
+            raise _SubTestStop()
+        return True
+
+
 class TestResult:
     testsRun: int
     shouldStop: bool
@@ -548,6 +648,25 @@ class TestResult:
     def _startCase(self, name: str) -> None:
         pass
 
+    def _markSubTest(self, description: str, short: str, long: str) -> None:
+        pass
+
+    def _subtest_result(self, case: TestCase, description: str, exc: BaseException, failure: bool) -> None:
+        subtest: TestCase = _SubTest(case.id(), description)
+        if isinstance(exc, SkipTest):
+            self.addSkip(subtest, str(exc))
+            self._markSubTest(description, "s", "skipped " + repr(str(exc)))
+        else:
+            detail = "AssertionError: " + str(exc) if isinstance(exc, AssertionError) else str(exc)
+            if failure:
+                self.failures.append((subtest, detail))
+                self._markSubTest(description, "F", "FAIL")
+            else:
+                self.errors.append((subtest, detail))
+                self._markSubTest(description, "E", "ERROR")
+            if self.failfast:
+                self.stop()
+
     def _recordException(self, case: TestCase, exc: Exception, detail: str) -> None:
         if isinstance(exc, case.failureException):
             self.failures.append((case, detail))
@@ -561,6 +680,8 @@ class TestResult:
     def _phase(self, action: Callable[[], None], case: TestCase) -> bool:
         try:
             action()
+        except _SubTestStop:
+            return False
         except SkipTest as exc:
             self.addSkip(case, str(exc))
             self._mark("s", "skipped " + repr(str(exc)))
@@ -576,20 +697,28 @@ class TestResult:
             return False
         return True
 
+    def _runCleanups(self, case: TestCase) -> bool:
+        return True
+
     def _run(self, case: TestCase, name: str, setup: Callable[[], None],
              body: Callable[[], None], teardown: Callable[[], None]) -> None:
         if self.shouldStop:
             return
         self.startTest(case)
         self._startCase(name)
+        before = len(self.failures) + len(self.errors) + len(self.skipped)
+        _activeResults.append((case, self))
         try:
-            if self._phase(setup, case):
+            passed = self._phase(setup, case)
+            if passed and before == len(self.failures) + len(self.errors) + len(self.skipped):
                 passed = self._phase(body, case)
-                cleaned = self._phase(teardown, case)
-                if passed and cleaned:
-                    self.addSuccess(case)
-                    self._mark(".", "ok")
+                if not self._phase(teardown, case):
+                    passed = False
+            if self._runCleanups(case) and passed and before == len(self.failures) + len(self.errors) + len(self.skipped):
+                self.addSuccess(case)
+                self._mark(".", "ok")
         finally:
+            _activeResults.pop()
             self.stopTest(case)
 
     def _skip(self, case: TestCase, name: str, reason: str) -> None:
@@ -612,6 +741,11 @@ class TestResult:
     def _runRegistered(self, case: TestCase, name: str) -> None:
         # Lowered to native calls on the case's concrete record.
         raise RuntimeError("native unittest case requires method dispatch")
+
+
+# Storing a result in a native case would close an ownership cycle through
+# the result's retained failed/skipped cases. Scope the binding to _run.
+_activeResults: list[tuple[TestCase, TestResult]] = []
 
 
 class _SuiteEntry:
@@ -734,7 +868,7 @@ class TestLoader:
                     selected.append(name)
                 else:
                     for pattern in patterns:
-                        if fnmatchcase(owner + "." + name, pattern):
+                        if fnmatch.fnmatchcase(owner + "." + name, pattern):
                             selected.append(name)
                             break
         return selected
@@ -812,6 +946,23 @@ class TextTestResult(TestResult):
             if not self.name_pending:
                 self.stream.write(self.current_name + " ... ")
             self.stream.writeln(long)
+            self.name_pending = False
+
+    def _markSubTest(self, description: str, short: str, long: str) -> None:
+        parent = self.current_name.split("\n", 1)
+        name = parent[0] + " " + description
+        if len(parent) == 2:
+            name += "\n" + parent[1]
+        if short == "F":
+            self._failureNames.append(name)
+        elif short == "E":
+            self._errorNames.append(name)
+        if self.verbose == 1:
+            self.stream.write(short)
+        elif self.verbose == 2:
+            if self.name_pending:
+                self.stream.writeln()
+            self.stream.writeln("  " + name + " ... " + long)
             self.name_pending = False
 
     def _reportProblems(self, label: str, names: list[str], problems: list[tuple[TestCase, str]]) -> None:

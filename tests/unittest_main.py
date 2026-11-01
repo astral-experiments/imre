@@ -28,7 +28,7 @@ def report(stderr, failed_fixture):
         line
         for line in output.splitlines()
         if line.startswith(
-            ("test_", "FAIL:", "ERROR:", "Ran ", "OK", "FAILED", "NO TESTS RAN")
+            ("test_", "  test_", "FAIL:", "ERROR:", "Ran ", "OK", "FAILED", "NO TESTS RAN")
         )
     ]
 
@@ -38,7 +38,7 @@ def compare(a, source, work, *, upstream=False):
     if source.stem in {"module_loader", "text_runner"}:
         flags = [[]]
     refs = [(opt, invoke([a.python, "-E", "-B", source, *opt])) for opt in flags]
-    failed = not upstream and source.stem in {"lifecycle", "setup_fields", "identity", "module_loader", "text_runner"}
+    failed = not upstream and source.stem in {"lifecycle", "setup_fields", "identity", "subtests", "module_loader", "text_runner"}
     if upstream and any(
         ref.returncode or not re.search(r"^Ran [1-9]\d* tests? in ", ref.stderr, re.M)
         for _, ref in refs
@@ -194,7 +194,7 @@ def main():
             FIXTURES / name
             for name in (
                 "discover.py", "lifecycle.py", "setup_fields.py", "identity.py",
-                "assert_identity.py", "empty.py", "module_loader.py", "main_hook.py",
+                "assert_identity.py", "subtests.py", "empty.py", "module_loader.py", "main_hook.py",
                 "class_skips.py", "text_runner.py",
             )
         ]
