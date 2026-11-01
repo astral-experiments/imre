@@ -5725,6 +5725,9 @@ impl Emitter<'_, '_> {
                 Type::Bytes,
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
+            Builtin::BinasciiUnhexlify => {
+                self.call("imre_binascii_unhexlify", Type::Bytes, &[&args[0].value])
+            }
             Builtin::BinasciiAsciiInput => {
                 self.call("imre_binascii_ascii_input", Type::Bytes, &[&args[0].value])
             }
@@ -9359,6 +9362,7 @@ declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
+declare ptr @imre_binascii_unhexlify(ptr)
 declare ptr @imre_sha1_hex(ptr)
 declare i1 @imre_hmac_compare_digest_bytes(ptr, ptr)
 declare i1 @imre_hmac_compare_digest_str(ptr, ptr)

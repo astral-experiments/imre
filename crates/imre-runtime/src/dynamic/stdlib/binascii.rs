@@ -5,23 +5,22 @@ fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
     if !decode {
         return ctx.bytes_like(value);
     }
-    if let Ok(text) = ctx.str_value(value) {
-        return if text.is_ascii() {
-            Ok(text.as_bytes())
-        } else {
-            Err(Error::new(
+    if let Some(storage) = ctx.string_storage(value) {
+        // Surrogate-containing strings are Unicode inputs, even though they have no UTF-8 view.
+        return match ctx.heap.get(storage) {
+            Value::Str(text) if text.is_ascii() => Ok(text.as_bytes()),
+            _ => Err(Error::new(
                 "ValueError",
                 "string argument should contain only ASCII characters",
-            ))
+            )),
         };
     }
     ctx.bytes_like(value).map_err(|_| {
+        let name = ctx.type_name(value);
+        let name = &name[..name.floor_char_boundary(100)];
         Error::new(
             "TypeError",
-            format!(
-                "argument should be bytes, buffer or ASCII string, not '{}'",
-                ctx.type_name(value)
-            ),
+            format!("argument should be bytes, buffer or ASCII string, not '{name}'"),
         )
     })
 }
@@ -32,6 +31,25 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "a2b_hex" | "unhexlify") {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("binascii.{name}() takes no keyword arguments"),
+            ));
+        }
+        let [data] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "binascii.{name}() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let result = crate::objects::unhexlify(input(ctx, *data, true)?)?;
+        return Ok(ctx.alloc(Value::Bytes(result)));
+    }
     let count = args.len() + kwargs.len();
     if count > 2 {
         return Err(Error::new(

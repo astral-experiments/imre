@@ -2325,6 +2325,11 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
+            Value::Native(name)
+                if matches!(name.as_str(), "binascii.a2b_hex" | "binascii.unhexlify") =>
+            {
+                format!("<built-in function {}>", name.rsplit('.').next().unwrap())
+            }
             Value::Native(name) => super::wrapper_descriptor::BuiltinDescriptor::lookup(name)
                 .map(|slot| slot.repr())
                 .unwrap_or_else(|| format!("<class '{name}'>")),
