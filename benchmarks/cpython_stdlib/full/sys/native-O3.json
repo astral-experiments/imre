@@ -55,6 +55,13 @@
         "sys.executable"
       ]
     },
+    "test.test_sys.SysModuleTest.test_exit": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "CPython module/class/instance hooks"
+    },
     "test.test_sys.SysModuleTest.test_getdefaultencoding": {
       "status": "pass",
       "execution": "native-body",
