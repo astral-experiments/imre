@@ -1490,6 +1490,18 @@ impl IntrinsicModule {
             (Self::Os, "X_OK") => Intrinsic::AccessMode(1),
             (Self::Os, "W_OK") => Intrinsic::AccessMode(2),
             (Self::Os, "R_OK") => Intrinsic::AccessMode(4),
+            (Self::Os, "supports_dir_fd") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("os.supports_dir_fd")
+            }
+            (Self::Os, "supports_fd") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("os.supports_fd")
+            }
+            (Self::Os, "supports_follow_symlinks") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("os.supports_follow_symlinks")
+            }
+            (Self::Os, "supports_effective_ids") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("os.supports_effective_ids")
+            }
             (Self::Os, "environ") => Intrinsic::Environ,
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,

@@ -1977,6 +1977,8 @@ impl Context {
     ) -> Result<()> {
         match name {
             "os" => {
+                #[cfg(unix)]
+                stdlib::os::install_capabilities(self, module, scope)?;
                 let path = self.module("posixpath")?;
                 let posix_sep = self.lookup_attr(path, "sep")?;
                 for (name, alternate) in [("sep", false), ("altsep", true)] {

@@ -5,6 +5,36 @@ use std::ffi::CString;
 use super::{Context, Error, Id, NONE, Result, Value, builtins, posixpath};
 use crate::objects::os as native;
 
+/// Publish the supported POSIX operations from CPython's Lib/os.py capability tables whose
+/// descriptor and no-follow forms are implemented by the boxed runtime.
+#[cfg(unix)]
+pub(in crate::dynamic) fn install_capabilities(
+    ctx: &mut Context,
+    module: Id,
+    scope: Id,
+) -> Result<()> {
+    for (capability, functions) in [
+        (
+            "supports_dir_fd",
+            &["lstat", "open", "rmdir", "stat", "unlink"][..],
+        ),
+        ("supports_fd", &["stat"][..]),
+        ("supports_follow_symlinks", &["stat"][..]),
+        ("supports_effective_ids", &[][..]),
+    ] {
+        let set = ctx.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        for &function in functions {
+            let value = ctx.lookup_attr(module, function)?;
+            builtins::set_add(ctx, set, value)?;
+        }
+        ctx.bind(scope, capability, set);
+    }
+    Ok(())
+}
+
 /// The posix module caches this dictionary. os.environ wraps the same byte keys and values.
 pub(super) fn environment(ctx: &mut Context) -> Id {
     let entries = crate::objects::initial_environment()
@@ -121,11 +151,16 @@ pub(super) fn change_environment(
     Ok(NONE)
 }
 
+mod unlink;
+
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
     matches!(
         name,
         "open"
+            | "remove"
+            | "unlink"
+            | "rmdir"
             | "dup"
             | "dup2"
             | "isatty"
@@ -197,6 +232,9 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "remove" | "unlink" | "rmdir") {
+        return unlink::call(ctx, name, args, kwargs);
+    }
     if name == "open" {
         return open(ctx, args, kwargs);
     }
