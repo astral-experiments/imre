@@ -360,6 +360,7 @@ impl Context {
             Value::Str(_) | Value::SurrogateStr(_) => "str",
             Value::Map { .. } => "map",
             Value::Filter { .. } => "filter",
+            Value::Hash(state) => state.borrow().class_name(),
             Value::Poll(_) => "select.poll",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",

@@ -463,6 +463,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 })?;
             ctx.int(i64::from(value))
         }
+        ("hashlib", name) if crate::objects::HashState::algorithms().any(|alg| alg == name) => {
+            ctx.alloc(Value::Native(format!("hashlib.{name}")))
+        }
         ("hashlib", "algorithms_available" | "algorithms_guaranteed") => {
             return hashlib::algorithms(ctx);
         }
@@ -623,7 +626,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
             | "quote_plus" | "quote_from_bytes" | "urlencode",
         )
-        | ("hashlib", "new" | "sha1" | "sha256")
+        | ("hashlib", "new" | "file_digest")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
@@ -1437,7 +1440,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
     }
-    if let Some(algorithm @ ("sha1" | "sha256")) = name.strip_prefix("hashlib.") {
+    if let Some(algorithm) = name.strip_prefix("hashlib.")
+        && crate::objects::HashState::algorithms().any(|name| name == algorithm)
+    {
         return hashlib::hash(ctx, algorithm, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("_imre_tempfile.") {
@@ -1546,6 +1551,12 @@ pub(super) fn call(
             coroutine_marker: None,
         }));
     }
+    if let Some(method @ ("digest" | "hexdigest")) = name.strip_prefix("hash.") {
+        return hashlib::digest(ctx, method, args, kwargs);
+    }
+    if name == "hashlib.file_digest" {
+        return hashlib::file_digest(ctx, args, kwargs);
+    }
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
@@ -1584,7 +1595,7 @@ pub(super) fn call(
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
         "hash.update" => (2, &[]),
-        "hash.copy" | "hash.digest" | "hash.hexdigest" => (1, &[]),
+        "hash.copy" => (1, &[]),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
@@ -1703,7 +1714,7 @@ pub(super) fn call(
         "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
         "hmac.compare_digest" => return hmac::compare(ctx, args),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
-        "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
+        "hash.update" | "hash.copy" => {
             return hashlib::method(ctx, name, args);
         }
         "platform.system" | "platform.node" | "platform.release" | "platform.version"

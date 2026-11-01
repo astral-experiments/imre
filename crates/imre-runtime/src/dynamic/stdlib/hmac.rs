@@ -45,13 +45,8 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     let factory = match ctx.heap.get(digest) {
         Value::Str(name) => {
             let name = name.to_ascii_lowercase();
-            if !crate::objects::HashState::ALGORITHMS.contains(&name.as_str()) {
-                return Err(Error::new(
-                    "ValueError",
-                    format!("unsupported hash type {name}"),
-                ));
-            }
-            super::attribute(ctx, "hashlib", &name)?
+            let provider = crate::objects::HashState::provider(&name)?;
+            super::attribute(ctx, "hashlib", provider.name)?
         }
         Value::Module { .. } => ctx.lookup_attr(digest, "new")?,
         _ => digest,
@@ -59,6 +54,9 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
 
     // Invoke the supplied factory for both states, including lazy wheel functions.
     let outer = ctx.call(factory, Vec::new(), Vec::new())?;
+    if matches!(ctx.heap.get(outer), Value::Hash(hash) if hash.borrow().is_xof()) {
+        return Err(Error::new("ValueError", "no reason supplied"));
+    }
     let inner = ctx.call(factory, Vec::new(), Vec::new())?;
     let digest_size = ctx.lookup_attr(inner, "digest_size")?;
     let block_size = match ctx.lookup_attr(inner, "block_size") {

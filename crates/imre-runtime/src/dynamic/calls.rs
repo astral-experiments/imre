@@ -1,3 +1,5 @@
+use crate::objects::HashState;
+
 use super::wrapper_descriptor::BuiltinDescriptor;
 use super::*;
 
@@ -13,6 +15,22 @@ struct InstanceLayout {
     dictionary: bool,
     declared_slot: bool,
     active_slot: bool,
+}
+
+/// Metadata for native callables owned by these module objects.
+pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
+    let (module, function) = symbol.split_once('.')?;
+    match module {
+        "posix" => Some((module, function)),
+        "zlib" if function == "adler32" => Some((module, function)),
+        "hashlib"
+            if matches!(function, "new" | "file_digest")
+                || crate::objects::HashState::algorithms().any(|name| name == function) =>
+        {
+            Some((module, function))
+        }
+        _ => None,
+    }
 }
 
 /// Build a non-callable diagnostic while keeping allocation failure catchable.
@@ -743,6 +761,7 @@ impl Context {
             return matches!(
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
+                    | (HashState::XOF_CLASS, HashState::CLASS)
                     | ("collections.defaultdict", "dict")
                     | ("odict_keys", "dict_keys")
                     | ("odict_items", "dict_items")
@@ -815,6 +834,7 @@ impl Context {
             | Value::Generator { .. }
             | Value::Module { .. }
             | Value::ThreadLocal(_)
+            | Value::Hash(_)
             | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::DefaultDict { .. } => "collections.defaultdict",
@@ -857,6 +877,7 @@ impl Context {
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
+            Value::Native(name) if module_function(name).is_some() => "builtin_function_or_method",
             Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
                 if name == "typing.Any" {
                     return Some("typing._AnyMeta");
@@ -892,6 +913,8 @@ impl Context {
                             | "mappingproxy"
                             | "functools._PlaceholderType"
                             | "functools._lru_cache_wrapper"
+                            | HashState::CLASS
+                            | HashState::XOF_CLASS
                             | "operator.attrgetter"
                             | super::namedtuple::GETTER
                             | "operator.itemgetter"
@@ -924,9 +947,7 @@ impl Context {
                             | "binascii.b2a_base64"
                             | "binascii.a2b_hex"
                             | "binascii.unhexlify"
-                            | "zlib.adler32"
                     )
-                    || name.starts_with("posix.")
                     || name.starts_with("_weakref.")
                 {
                     "builtin_function_or_method"
@@ -1029,6 +1050,8 @@ impl Context {
             }
         }
         match (name, self.heap.get(value)) {
+            (HashState::CLASS, Value::Hash(_)) => true,
+            (HashState::XOF_CLASS, Value::Hash(state)) => state.borrow().class_name() == name,
             (_, Value::Raised(error)) => {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
                     || self.raised_error_matches(error, class)
@@ -1596,10 +1619,7 @@ impl Context {
                 }
                 return Ok(self.text(symbol.clone()));
             }
-            Value::Native(ref symbol)
-                if symbol.starts_with("posix.") || symbol == "zlib.adler32" =>
-            {
-                let (module, function) = symbol.split_once('.').unwrap();
+            Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
@@ -1775,6 +1795,8 @@ impl Context {
                     class.as_str(),
                     "array.array"
                         | "functools._lru_cache_wrapper"
+                        | HashState::CLASS
+                        | HashState::XOF_CLASS
                         | super::namedtuple::GETTER
                         | super::deque::CLASS
                         | super::deque::ITERATOR
@@ -2001,7 +2023,10 @@ impl Context {
                     let size = hash.borrow().digest_size();
                     return Ok(self.int(size as i64));
                 }
-                "block_size" => return Ok(self.int(64)),
+                "block_size" => {
+                    let size = hash.borrow().block_size();
+                    return Ok(self.int(size as i64));
+                }
                 _ => {}
             },
             Value::CodecInfo { ref entry, decode } => match name {
@@ -2905,6 +2930,14 @@ impl Context {
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         super::namespace::check_class_write(self, obj, name)?;
+        if let Value::Native(class) = self.heap.get(obj)
+            && matches!(class.as_str(), HashState::CLASS | HashState::XOF_CLASS)
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{name}' attribute of immutable type '{class}'"),
+            ));
+        }
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
         }
@@ -3542,6 +3575,14 @@ impl Context {
                     ) =>
             {
                 builtins::call(self, &name, &args, &kwargs)
+            }
+            Value::Native(name)
+                if matches!(name.as_str(), HashState::CLASS | HashState::XOF_CLASS) =>
+            {
+                Err(Error::new(
+                    "TypeError",
+                    format!("cannot create '{name}' instances"),
+                ))
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
             Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),

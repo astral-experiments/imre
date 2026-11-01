@@ -56,6 +56,13 @@ def check():
         sha256_mac.block_size,
         sha256_mac.hexdigest(),
     )
+    for name in ["sha224", "sha384", "sha512", "sha3_224", "sha3_256", "sha3_384", "sha3_512"]:
+        factory = getattr(hashlib, name)
+        for size in [64, 65, 128, 129, factory().block_size + 1]:
+            key = b"X" * size
+            factory_mac = hmac.new(key, b"message", factory)
+            print(factory_mac.name, factory_mac.digest_size, factory_mac.block_size, factory_mac.hexdigest())
+            assert factory_mac.digest() == hmac.new(key, b"message", name).digest()
     for _ in range(5000):
         _discard = [None]
     print(long_mac.hexdigest(), mac.hexdigest())
