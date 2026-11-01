@@ -753,14 +753,14 @@ pub unsafe extern "C" fn imre_calendar_now(z: *const Object) -> *const Object {
     ))
 }
 /// # Safety
-/// The first argument is a rooted datetime and the second a rooted timedelta.
+/// The first argument is a rooted date, datetime or timedelta, and the second a rooted timedelta.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_shift(
     dt: *const Object,
     d: *const Object,
     sub: bool,
 ) -> *const Object {
-    // SAFETY: both typed operands remain rooted until the new date or datetime is built.
+    // SAFETY: both typed operands remain rooted until the new calendar value is built.
     let (dt, d) = unsafe { (object(dt), object(d)) };
     let n = delta(d);
     rc_result(with(dt, |dt| match dt {
@@ -775,6 +775,10 @@ pub unsafe extern "C" fn imre_calendar_shift(
         }
         Value::Date { local, zone, .. } => {
             date(if sub { local - n } else { local + n }, zone.clone())
+        }
+        Value::Delta(left) => {
+            let total = if sub { left - n } else { left + n };
+            try_owner(Value::Delta(validate_delta(&BigInt::from(total))?))
         }
         _ => unreachable!(),
     }))
