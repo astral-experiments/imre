@@ -59,6 +59,16 @@ def current():
         ([["p", "x"], ["p", "y"]], ["p"]), ([(1, 2), (1, 3)], (1,)),
     ):
         assert os.path.commonprefix(paths) == expected
+    assert os.path.getsize is posixpath.getsize is genericpath.getsize
+    with open(__file__, "rb") as input_file:
+        assert genericpath.getsize(filename=__file__) == len(input_file.read())
+    missing = __file__ + ".missing"
+    try:
+        os.path.getsize(missing)
+    except FileNotFoundError as error:
+        assert error.filename == missing
+    else:
+        raise AssertionError("missing file unexpectedly had a size")
     assert os.path.exists is posixpath.exists is genericpath.exists
     assert os.path.isfile is posixpath.isfile is genericpath.isfile
     assert genericpath.exists.__module__ == "genericpath"

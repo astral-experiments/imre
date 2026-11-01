@@ -517,6 +517,7 @@ impl Context {
             Value::Property(_)
                 | Value::TupleGetter { .. }
                 | Value::TupleGetterDoc
+                | Value::StatMember(_)
                 | Value::GetSetDescriptor { .. }
                 | Value::WeakrefDescriptor(_)
         )
@@ -571,6 +572,9 @@ impl Context {
         if receiver != NONE {
             let method = match self.heap.get(value) {
                 Value::TupleGetterDoc => return super::namedtuple::document(self, receiver),
+                Value::StatMember(field) => {
+                    return stdlib::os::stat::get_member(self, field, receiver);
+                }
                 Value::TupleGetter { index, .. } => {
                     return super::namedtuple::read_field(self, *index, receiver);
                 }
@@ -769,6 +773,7 @@ impl Context {
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
                     | (HashState::XOF_CLASS, HashState::CLASS)
+                    | (stdlib::os::stat::CLASS, "tuple")
                     | ("collections.defaultdict", "dict")
                     | ("odict_keys", "dict_keys")
                     | ("odict_items", "dict_items")
@@ -861,7 +866,7 @@ impl Context {
             Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
             Value::TupleGetter { .. } => super::namedtuple::GETTER,
-            Value::TupleGetterDoc => "member_descriptor",
+            Value::TupleGetterDoc | Value::StatMember(_) => "member_descriptor",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
@@ -926,6 +931,7 @@ impl Context {
                             | super::namedtuple::GETTER
                             | "operator.itemgetter"
                             | "collections.defaultdict"
+                            | stdlib::os::stat::CLASS
                             | "array.array"
                             | super::deque::CLASS
                             | "weakref.ReferenceType"
@@ -980,7 +986,12 @@ impl Context {
                 ..
             } => Ok(*class),
             Value::NamedTuple {
-                class: Some(class @ ("time.struct_time" | stdlib::hash_info::TYPE)),
+                class:
+                    Some(
+                        class @ ("time.struct_time"
+                        | stdlib::hash_info::TYPE
+                        | stdlib::os::stat::CLASS),
+                    ),
                 ..
             } => Ok(self.builtin(class)),
             Value::NamedTuple {
@@ -1093,7 +1104,7 @@ impl Context {
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
-            | ("member_descriptor", Value::TupleGetterDoc)
+            | ("member_descriptor", Value::TupleGetterDoc | Value::StatMember(_))
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
@@ -1115,6 +1126,13 @@ impl Context {
             {
                 qualified.strip_prefix("urllib.parse.") == Some(*name)
             }
+            (
+                stdlib::os::stat::CLASS,
+                Value::NamedTuple {
+                    class: Some(stdlib::os::stat::CLASS),
+                    ..
+                },
+            ) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (
                 name,
@@ -1582,6 +1600,12 @@ impl Context {
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
+            Value::StatMember(field) => match name {
+                "__name__" => return Ok(self.text(field)),
+                "__qualname__" => return Ok(self.text(format!("stat_result.{field}"))),
+                "__objclass__" => return Ok(self.builtin(stdlib::os::stat::CLASS)),
+                _ => {}
+            },
             Value::TupleGetterDoc => match name {
                 "__name__" => return Ok(self.text("__doc__")),
                 "__qualname__" => return Ok(self.text("_tuplegetter.__doc__")),
@@ -1798,6 +1822,23 @@ impl Context {
             Value::Calendar { ref value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value.clone(), tzinfo, name);
             }
+            Value::Native(ref class) if class == stdlib::os::stat::CLASS => match name {
+                field if let Some(id) = stdlib::os::stat::member(self, field) => return Ok(id),
+                "__module__" => return Ok(self.text("os")),
+                "__name__" | "__qualname__" => return Ok(self.text("stat_result")),
+                "__base__" => return Ok(self.builtin("tuple")),
+                "__match_args__" => {
+                    let names = stdlib::os::stat::FIELDS[..7]
+                        .iter()
+                        .map(|&n| self.text(n))
+                        .collect();
+                    return Ok(self.alloc(Value::Tuple(names)));
+                }
+                field if let Some(n) = stdlib::os::stat::count_attribute(field) => {
+                    return Ok(self.int(n));
+                }
+                _ => {}
+            },
             Value::Native(ref class)
                 if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
             {
@@ -2338,11 +2379,19 @@ impl Context {
                 ref values,
                 ref extras,
             } => {
+                if let Some((_, value)) = extras.iter().find(|(key, _)| *key == name) {
+                    return Ok(*value);
+                }
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
                 }
-                if let Some((_, value)) = extras.iter().find(|(key, _)| *key == name) {
-                    return Ok(*value);
+                if class == Some(stdlib::os::stat::CLASS) {
+                    if name == "__class__" {
+                        return Ok(self.builtin(stdlib::os::stat::CLASS));
+                    }
+                    if let Some(n) = stdlib::os::stat::count_attribute(name) {
+                        return Ok(self.int(n));
+                    }
                 }
                 if let Some(owner @ ("time.struct_time" | stdlib::hash_info::TYPE)) = class
                     && name == "__class__"
@@ -2498,6 +2547,9 @@ impl Context {
             match *self.heap.get(descriptor) {
                 Value::TupleGetterDoc => {
                     return super::namedtuple::set_document(self, obj, None).map(|_| ());
+                }
+                Value::StatMember(_) => {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
                 }
                 Value::TupleGetter { .. } => {
                     return Err(Error::new("AttributeError", "can't delete attribute"));
@@ -2746,7 +2798,17 @@ impl Context {
         layout
     }
 
-    fn writable_attribute_member(&self, obj: Id, name: &str) -> Option<Id> {
+    fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if matches!(
+            self.heap.get(obj),
+            Value::NamedTuple {
+                class: Some(stdlib::os::stat::CLASS),
+                ..
+            }
+        ) && let Some(member) = stdlib::os::stat::member(self, name)
+        {
+            return Some(member);
+        }
         let member = self.slot(obj, name)?;
         if let Value::Instance { class, .. } = *self.heap.get(obj)
             && self.instance_layout(class, name).active_slot
@@ -3057,6 +3119,9 @@ impl Context {
                     "AttributeError",
                     format!("attribute '{name}' of '{owner}' objects is not writable"),
                 ));
+            }
+            if matches!(self.heap.get(descriptor), Value::StatMember(_)) {
+                return Err(Error::new("AttributeError", "readonly attribute"));
             }
             if matches!(self.heap.get(descriptor), Value::TupleGetterDoc) {
                 return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());

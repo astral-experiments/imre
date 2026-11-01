@@ -1,3 +1,5 @@
+pub(in crate::dynamic) mod stat;
+
 use std::ffi::CString;
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins, posixpath};
@@ -16,6 +18,19 @@ pub(super) fn environment(ctx: &mut Context) -> Id {
     ctx.dict(entries)
 }
 
+/// Fetch a fresh kernel pathname on each call, preserving all POSIX filename bytes.
+pub(super) fn getcwd(ctx: &mut Context, as_bytes: bool) -> Result<Id> {
+    let bytes = std::env::current_dir()
+        .map_err(crate::objects::errno_error)?
+        .into_os_string()
+        .into_encoded_bytes();
+    if as_bytes {
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
+    let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+    Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?))
+}
+
 fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     let path = posixpath::fspath(ctx, value)?;
     c_path(ctx, path, "embedded null byte")
@@ -24,9 +39,8 @@ fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
 /// Terminate the validated filesystem spelling before evaluating any later Python argument.
 fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
     let encoded = match ctx.heap.get(ctx.scalar_value(path)) {
-        Value::Str(text) => CString::new(text.as_bytes()),
         Value::Bytes(bytes) => CString::new(bytes.as_slice()),
-        Value::SurrogateStr(_) => CString::new(ctx.encode_filesystem_string(path)?),
+        Value::Str(_) | Value::SurrogateStr(_) => CString::new(ctx.encode_os_path(path)?),
         _ => unreachable!("fspath returns str or bytes"),
     };
     encoded.map_err(|_| Error::new("ValueError", nul_error))
@@ -34,14 +48,8 @@ fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
 
 /// SourceFileLoader obtains size and mtime in one following stat or fstat.
 pub(super) fn source_path_stats(ctx: &mut Context, path: Id) -> Result<Id> {
-    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-    let spelling = matches!(
-        ctx.heap.get(ctx.scalar_value(path)),
-        Value::Str(_) | Value::Bytes(_)
-    );
-    let syscall_error = |status| (status != 0).then(std::io::Error::last_os_error);
-    let (error, filename) = if !spelling && let Some(index) = ctx.index_value(path)? {
-        if matches!(ctx.heap.get(path), Value::Bool(_)) {
+    let stat = stat::query(ctx, "stat", &[path], &[], |ctx, value| {
+        if matches!(ctx.heap.get(value), Value::Bool(_)) {
             crate::objects::runtime_warning(
                 "importlib._bootstrap_external",
                 "<frozen importlib._bootstrap_external>",
@@ -49,31 +57,8 @@ pub(super) fn source_path_stats(ctx: &mut Context, path: Id) -> Result<Id> {
                 "bool is used as a file descriptor",
             )?;
         }
-        let fd = native::directory_fd_number(&index)?;
-        let error = if fd == -1 {
-            // CPython treats -1 as the path converter's sentinel, so stat sees a null pathname.
-            Some(std::io::Error::from_raw_os_error(libc::EFAULT))
-        } else {
-            // SAFETY: fstat borrows the descriptor and initializes stat on success.
-            syscall_error(unsafe { libc::fstat(fd, stat.as_mut_ptr()) })
-        };
-        (error, path)
-    } else {
-        let path = posixpath::path_arg(
-            ctx,
-            path,
-            "stat: path should be string, bytes, os.PathLike or integer",
-        )?;
-        let pathname = c_path(ctx, path, "stat: embedded null character in path")?;
-        // SAFETY: the pathname is NUL-terminated and the output buffer is writable.
-        let error = syscall_error(unsafe { libc::stat(pathname.as_ptr(), stat.as_mut_ptr()) });
-        (error, path)
-    };
-    if let Some(error) = error {
-        return Err(ctx.with_errno_filename(crate::objects::errno_error(error).into(), filename)?);
-    }
-    // SAFETY: either successful POSIX call initialized the full stat structure.
-    let stat = unsafe { stat.assume_init() };
+        Ok(())
+    })?;
     let mtime_key = ctx.text("mtime");
     let mtime = ctx.alloc(Value::Float(native::float_seconds(
         stat.st_mtime as f64,

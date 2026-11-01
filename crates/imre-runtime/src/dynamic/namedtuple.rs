@@ -76,7 +76,13 @@ pub(super) fn doc_method(
     let Some((&member, rest)) = args.split_first() else {
         return Err(Error::new("TypeError", "missing member descriptor"));
     };
-    if !matches!(ctx.heap.get(member), Value::TupleGetterDoc) || !kwargs.is_empty() {
+    let field = match ctx.heap.get(member) {
+        Value::StatMember(field) => Some(*field),
+        _ => None,
+    };
+    if (!matches!(ctx.heap.get(member), Value::TupleGetterDoc) && field.is_none())
+        || !kwargs.is_empty()
+    {
         return Err(Error::new(
             "TypeError",
             format!("invalid arguments to {name}"),
@@ -85,19 +91,31 @@ pub(super) fn doc_method(
     match (name, rest) {
         ("__get__", [obj] | [obj, _]) => {
             if *obj != NONE {
-                document(ctx, *obj)
+                if let Some(field) = field {
+                    super::stdlib::os::stat::get_member(ctx, field, *obj)
+                } else {
+                    document(ctx, *obj)
+                }
             } else if rest.get(1).copied().unwrap_or(NONE) == NONE {
                 Err(Error::new("TypeError", "__get__(None, None) is invalid"))
             } else {
                 Ok(member)
             }
         }
+        ("__set__", [obj, _]) | ("__delete__", [obj]) if let Some(field) = field => {
+            super::stdlib::os::stat::get_member(ctx, field, *obj)?;
+            Err(Error::new("AttributeError", "readonly attribute"))
+        }
         ("__set__", [obj, value]) => set_document(ctx, *obj, Some(*value)),
         ("__delete__", [obj]) => set_document(ctx, *obj, None),
         ("__reduce__", []) => {
             let get = ctx.builtin("getattr");
-            let class = ctx.builtin(GETTER);
-            let doc = ctx.text("__doc__");
+            let class = ctx.builtin(if field.is_some() {
+                super::stdlib::os::stat::CLASS
+            } else {
+                GETTER
+            });
+            let doc = ctx.text(field.unwrap_or("__doc__"));
             let args = ctx.alloc(Value::Tuple(vec![class, doc]));
             Ok(ctx.alloc(Value::Tuple(vec![get, args])))
         }

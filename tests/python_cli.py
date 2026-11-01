@@ -981,6 +981,21 @@ def main():
             for prefix in ("", 'import sys; sys.path.append("unused")\n'):
                 compare("-B", "-c", prefix + hash_calls, extra={"PYTHONHASHSEED": seed})
 
+        if os.name == "posix":
+            compare(
+                "-IB", "-c",
+                "import sys; os = __import__(sys.argv[1]); posix = __import__(sys.argv[2])\n"
+                "text = os.getcwd(); raw = os.getcwdb()\n"
+                "print(type(text) is str, type(raw) is bytes, text, raw)\n"
+                "print(posix.getcwd is os.getcwd, posix.getcwdb is os.getcwdb)\n"
+                "for f in (posix.getcwd, os.getcwdb):\n"
+                "    try: f(0)\n"
+                "    except TypeError as e: print(str(e))\n"
+                "    try: f(bad=True)\n"
+                "    except TypeError as e: print(str(e))",
+                "os", "posix",
+            )
+
         compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
@@ -1399,6 +1414,7 @@ def report(text):
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
+            "boxed_os_stat.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
             "boxed_unicodedata.py",

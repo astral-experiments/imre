@@ -35,7 +35,7 @@ mod math;
 mod metadata;
 mod operator;
 mod ordered_dict;
-mod os;
+pub(super) mod os;
 mod pickle;
 mod pkgutil;
 mod posixpath;
@@ -560,6 +560,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
+        ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
+        ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         ("os" | "posix", name) if os::is_descriptor_function(name) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -949,6 +956,8 @@ pub(super) fn call(
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
+            | "posix.getcwd"
+            | "posix.getcwdb"
     ) {
         // The JIT functions are bound to their actual module object.
         let args = if name.starts_with("sys._jit.") {
@@ -971,6 +980,7 @@ pub(super) fn call(
             ));
         }
         return Ok(match name {
+            "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
             "sys.getfilesystemencoding" => ctx
                 .heap
                 .code_name(crate::sys::filesystem_encoding()?.as_str()),
@@ -1096,6 +1106,12 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
+    }
+    if name == os::stat::CLASS {
+        return os::stat::construct(ctx, args, kwargs);
+    }
+    if let Some(op @ ("stat" | "lstat" | "fstat")) = name.strip_prefix("posix.") {
+        return os::stat::call(ctx, op, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("posix.")
         && os::is_descriptor_function(op)
