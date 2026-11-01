@@ -94,6 +94,72 @@ pub(super) fn snapshot_locals(module: &Module, f: &Function) -> Vec<bool> {
 }
 
 impl Emitter<'_, '_> {
+    /// Collapse a counted loop whose only effect is appending the same
+    /// immutable struct. The runtime guard keeps ordinary list behavior for
+    /// nonempty storage and arbitrary-precision range stops.
+    pub(super) fn uniform_struct_append(
+        &mut self,
+        body: &[Statement],
+        range: &[Value],
+        target: usize,
+        cursor: usize,
+        exhausted: &str,
+    ) {
+        let [
+            Statement::Expr(Expr {
+                kind: ExprKind::Builtin(Builtin::Append, args),
+                ..
+            }),
+        ] = body
+        else {
+            return;
+        };
+        let [receiver, item] = args.as_slice() else {
+            return;
+        };
+        let (ExprKind::Local(list), ExprKind::Local(row)) = (&receiver.kind, &item.kind) else {
+            return;
+        };
+        if !self.module.types.is_value_struct(item.ty)
+            || self.struct_locals[*row]
+            || range[0].operand != small(0).operand
+            || range[2].operand != small(1).operand
+        {
+            return;
+        }
+        let list = self.borrow_slot(*list);
+        let row = self.borrow_slot(*row);
+        let layout = self
+            .output
+            .global_ref(format!("layout_{}", record_name(item.ty)));
+        let stop = &range[1].operand;
+        let did_fill = self.instruction(format!(
+            "call i1 @imre_struct_try_fill_empty(ptr {}, ptr @{layout}, ptr {}, i64 {stop})",
+            list.operand, row.operand
+        ));
+        let (filled, fallback) = (self.label(), self.label());
+        self.branch(&did_fill, &filled, &fallback);
+        self.start(&filled);
+        // A successful guard proves a positive tagged stop. Publish the same
+        // visible target and hidden cursor as the exhausted scalar loop.
+        let last = Value {
+            ty: Type::Int,
+            operand: self.instruction(format!("sub i64 {stop}, 2")),
+            small_integer: true,
+        };
+        self.store(target, &last);
+        self.store(
+            cursor,
+            &Value {
+                ty: Type::Int,
+                operand: stop.clone(),
+                small_integer: true,
+            },
+        );
+        self.jump(exhausted);
+        self.start(&fallback);
+    }
+
     /// Evaluate constructor operands in source order; copy only their checked
     /// scalar values to the destination in declared field order.
     pub(super) fn append_struct_constructor(&mut self, list: &Value, item: &Expr) -> bool {
