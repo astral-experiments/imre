@@ -848,6 +848,18 @@ pub(super) fn call(
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
+    if name == "object.__init_subclass__" {
+        let [class, rest @ ..] = args else {
+            return Err(type_error("missing class for __init_subclass__"));
+        };
+        if !rest.is_empty() || !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "{}.__init_subclass__() takes no arguments",
+                ctx.class_name(*class)
+            )));
+        }
+        return Ok(NONE);
+    }
     if name == "object.__init__" {
         if args.len() != 1 || !kwargs.is_empty() {
             return Err(type_error(

@@ -102,3 +102,87 @@ def current():
             pass
     except TypeError as error:
         print(str(error))
+
+    check_subclass_hooks()
+
+
+def check_subclass_hooks():
+    events = []
+
+    class Root:
+        def __init_subclass__(cls):
+            events.append(("root", cls.__name__))
+            super().__init_subclass__()
+
+    class Left(Root):
+        def __init_subclass__(cls):
+            events.append(("left", cls.__name__))
+            super().__init_subclass__()
+
+    class Right(Root):
+        @classmethod
+        def __init_subclass__(cls):
+            events.append(("right", cls.__name__))
+            super().__init_subclass__()
+
+    class Field:
+        def __set_name__(self, owner, name):
+            events.append((name, owner.__name__))
+
+    def decorate(cls):
+        events.append(("decorator", cls.__name__))
+        return cls
+
+    @decorate
+    class Child(Left, Right):
+        field = Field()
+
+    assert events == [
+        ("root", "Left"), ("root", "Right"),
+        ("field", "Child"), ("left", "Child"), ("right", "Child"),
+        ("root", "Child"), ("decorator", "Child"),
+    ]
+    assert isinstance(Left.__dict__["__init_subclass__"], classmethod)
+    assert Child.__init_subclass__.__self__ is Child
+
+    class Refuse:
+        @staticmethod
+        def __init_subclass__():
+            raise TypeError("refused")
+
+    retained = Child
+    try:
+        class retained(list, Refuse):
+            pass
+    except TypeError as error:
+        assert error.args == ("refused",)
+    assert retained is Child
+
+    class Hook:
+        def __get__(self, obj, owner):
+            assert obj is None
+            return lambda: events.append(("descriptor", owner.__name__))
+
+    class Custom:
+        __init_subclass__ = Hook()
+
+    class CustomChild(Custom):
+        pass
+
+    assert events[-1] == ("descriptor", "CustomChild")
+
+    def replacement():
+        events.append("rebound")
+
+    Custom.__init_subclass__ = replacement
+    class Rebound(Custom):
+        pass
+    assert events[-1] == "rebound"
+    assert object.__init_subclass__.__self__ is object
+    assert (2).__init_subclass__.__self__ is int
+    try:
+        Rebound.__init_subclass__(1)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("rebound hook unexpectedly accepted an argument")

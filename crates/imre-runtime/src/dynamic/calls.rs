@@ -70,6 +70,7 @@ impl Context {
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
+                "__init_subclass__" => self.builtins.get("object.__init_subclass__").copied(),
                 _ => None,
             },
             Value::Native(kind) if kind == "collections.defaultdict" => {
@@ -503,6 +504,14 @@ impl Context {
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
         if matches!(self.heap.get(value), Value::Native(name) if name == "dict.fromkeys") {
             return Ok(self.bind_dict_fromkeys(owner));
+        }
+        if matches!(self.heap.get(value), Value::Native(name) if name == "object.__init_subclass__")
+        {
+            return Ok(self.alloc(Value::Method {
+                callable: value,
+                receiver: owner,
+                explicit: false,
+            }));
         }
         if let Value::ClassMethod(callable) = *self.heap.get(value) {
             return Ok(self.alloc(Value::Method {
@@ -2199,6 +2208,15 @@ impl Context {
     }
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if name == "__init_subclass__" {
+            let class = if self.builtin_type_name(obj) == Some("type") {
+                obj
+            } else {
+                self.exact_type(obj)?
+            };
+            let hook = self.builtin("object.__init_subclass__");
+            return self.bind_attribute(hook, NONE, class);
+        }
         let base = self.scalar_value(obj);
         if name == "__format__" {
             let owner = builtins::format_owner(self.type_name(base));
@@ -3918,6 +3936,13 @@ impl Context {
             );
         }
         super::typing::class_parameters(self, scope, original, &bases)?;
+        // type.__new__ implicitly wraps only plain functions stored under this name.
+        if let Some(function) = self.scope_name(scope, "__init_subclass__")
+            && matches!(self.heap.get(function), Value::Function { .. })
+        {
+            let method = self.alloc(Value::ClassMethod(function));
+            self.bind_local(scope, "__init_subclass__", method);
+        }
         let class = self.allocate_class(name.clone(), scope, bases)?;
         self.install_weakref_descriptor(class, scope);
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
@@ -3960,6 +3985,13 @@ impl Context {
                 self.call(set_name, vec![value, class, name], Vec::new())?;
             }
         }
+        if let Some(kind) = enum_kind {
+            let scalar = kind.scalar_base().map(|base| self.builtin(base));
+            self.populate_enum(class, scalar)?;
+        }
+        // Look up the inherited hook after __set_name__, before publishing the class.
+        let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
+        self.call(hook, Vec::new(), Vec::new())?;
         if module == "_collections_abc"
             && matches!(
                 name.as_str(),
@@ -3971,10 +4003,6 @@ impl Context {
         }
         self.init_abstract_class(class, &name, scope)?;
         self.classes.insert(name, class);
-        if let Some(kind) = enum_kind {
-            let scalar = kind.scalar_base().map(|base| self.builtin(base));
-            self.populate_enum(class, scalar)?;
-        }
         Ok(class)
     }
 }
