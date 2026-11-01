@@ -144,8 +144,14 @@ pure and concrete classes, CPython drives the three `assertRaisesRegex`
 checks in `test_bytes_exc_message`; Imre constructs the paths and raises each
 `TypeError`, including for `PureWindowsPath` on Linux. After native regex
 contexts landed in #995, compiling the complete body reaches `P(b'a')`;
-the indirect call still cannot omit its optional second argument. Verify the roles and
-call counts with `metadata_receipt.py --segments /tmp/pathlib-segments.json`.
+the indirect call could not yet omit its optional second argument. On `ec2f8df` all
+seven unchanged bodies and their assertions pass in Imre at O0 and O3. CPython
+still runs the original fixtures, including concrete setup and teardown. Each
+bytes-error body contains three unconditional regex assertions and constructor
+calls, in the order bytes, bytes/str, str/bytes. The native receipt verifies the
+pinned body and successful completion. The earlier bridge recorded individual
+call counts. Check the measurements with
+`metadata_receipt.py --segments /tmp/pathlib-segments.json`.
 
 In both original `test_samefile` occurrences, CPython runs the body, ten
 assertions and filesystem fixture. Imre performs three joins, four path
