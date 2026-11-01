@@ -19,6 +19,12 @@ def assertEqual(self, first, second, msg=None):
     return self._baseAssertEqual(first, second, msg)
 
 
+def assertNotEqual(self, first, second, msg=None):
+    if not first != second:
+        msg = self._formatMessage(msg, f"{_safe_repr(first)!s} == {_safe_repr(second)!s}")
+        raise self.failureException(msg)
+
+
 def assertIs(self, expr1, expr2, msg=None):
     if expr1 is not expr2:
         _raise_identity_failure(self, _safe_repr(expr1), _safe_repr(expr2), msg)
@@ -31,6 +37,7 @@ def assertIsNot(self, expr1, expr2, msg=None):
 
 TestCase._baseAssertEqual = _baseAssertEqual
 TestCase.assertEqual = assertEqual
+TestCase.assertNotEqual = assertNotEqual
 TestCase.assertIs = assertIs
 TestCase.assertIsNot = assertIsNot
 
