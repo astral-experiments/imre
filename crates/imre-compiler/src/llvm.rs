@@ -2951,7 +2951,7 @@ impl Emitter<'_, '_> {
         {
             return false;
         }
-        let expressions = concat_leaves(expression);
+        let expressions = concat_leaves(self, expression);
         if !matches!(expressions[0].kind, ExprKind::Local(source) if source == slot) {
             return false;
         }
@@ -3012,7 +3012,7 @@ impl Emitter<'_, '_> {
     /// string. The completed result is published only after allocation succeeds.
     /// Unique entry-block scratch avoids loop stack growth and nested overwrite.
     fn concat(&mut self, expression: &Expr) -> Value {
-        let expressions = concat_leaves(expression);
+        let expressions = concat_leaves(self, expression);
         if let [left, right] = expressions.as_slice()
             && !matches!(left.kind, ExprKind::Str(_))
             && !matches!(right.kind, ExprKind::Str(_))
@@ -3196,7 +3196,7 @@ impl Emitter<'_, '_> {
     fn write_discard(&mut self, args: &[Expr]) {
         let receiver = self.operand(&args[0]);
         let (status, owners) = if matches!(args[1].kind, ExprKind::Binary(Binary::Concat, ..)) {
-            let (scratch, count, owners) = self.concat_parts(concat_leaves(&args[1]));
+            let (scratch, count, owners) = self.concat_parts(concat_leaves(self, &args[1]));
             let status = self.instruction(format!(
                 "call i32 @imre_text_write_parts(ptr {}, ptr {scratch}, i64 {count})",
                 receiver.value.operand
@@ -8795,20 +8795,27 @@ const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
 
 /// Flattens only exact string additions, preserving both source nesting shapes'
 /// leaf order without evaluating through calls or other expression boundaries.
-fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
-    fn visit<'a>(expression: &'a Expr, output: &mut Vec<&'a Expr>) {
+fn concat_leaves<'e>(emitter: &Emitter<'_, '_>, expression: &'e Expr) -> Vec<&'e Expr> {
+    fn visit<'a>(emitter: &Emitter<'_, '_>, expression: &'a Expr, output: &mut Vec<&'a Expr>) {
         if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
             // A completed left addition can raise before the right operand runs.
-            // Only move its allocation past an immutable read or a literal.
+            // An in-bounds ASCII lookup with an already evaluated index is
+            // also an immutable read. The range proof alone does not establish
+            // that evaluating an arbitrary index expression is effect-free.
+            let bounded_read = matches!(&right.kind,
+                ExprKind::Builtin(Builtin::StringGet, args)
+                    if matches!(args[1].kind, ExprKind::Local(_) | ExprKind::Int(_))
+                        && emitter.ascii_index_literal(right).is_some());
             if matches!(
                 right.kind,
                 ExprKind::Str(_) | ExprKind::Local(_) | ExprKind::Builtin(Builtin::GlobalGet(_), _)
-            ) {
-                visit(left, output);
+            ) || bounded_read
+            {
+                visit(emitter, left, output);
             } else {
                 output.push(left);
             }
-            visit(right, output);
+            visit(emitter, right, output);
         } else {
             debug_assert_eq!(expression.ty, Type::Str);
             output.push(expression);
@@ -8816,7 +8823,7 @@ fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
     }
 
     let mut result = Vec::new();
-    visit(expression, &mut result);
+    visit(emitter, expression, &mut result);
     result
 }
 
@@ -10697,6 +10704,25 @@ print(show("x"))
         assert_eq!(llvm.matches("call i64 @imre_int_literal(").count(), 1);
         assert!(llvm.contains("call void @imre_bytes_release(ptr %literal_"));
         assert!(llvm.contains("call void @imre_int_release(i64 %literal_"));
+    }
+
+    #[test]
+    fn bounded_ascii_reads_can_share_a_concat_allocation() {
+        let body = |last: &str| {
+            function_body(&format!(
+                "def group(value: int) -> str:\n    i = value % 4\n    return 'abcd'[i] + 'ABCD'[i] + 'wxyz'[{last}]\ndef later() -> int:\n    print('index')\n    return 0\nprint(group(7))\n"
+            ))
+        };
+        let bounded = body("i");
+        assert_eq!(
+            bounded.matches("call ptr @imre_str_concat_parts(").count(),
+            1
+        );
+        let unknown = body("value");
+        assert!(unknown.matches("call ptr @imre_str_concat_parts(").count() >= 2);
+        let effect = body("later() % 4");
+        let (before, _) = effect.split_once("call i64 @fn_1(").unwrap();
+        assert!(before.contains("call ptr @imre_str_concat_parts("));
     }
 
     #[test]
