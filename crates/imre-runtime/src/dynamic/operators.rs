@@ -922,6 +922,28 @@ impl Context {
         )
     }
 
+    /// Compare stored set members using their insertion hashes, including for frozen sets.
+    fn order_sets(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        let (subset, superset) = if matches!(op, ">" | ">=") {
+            (b, a)
+        } else {
+            (a, b)
+        };
+        let subset_len = self.stored_entries(subset).len();
+        let superset_len = self.stored_entries(superset).len();
+        if subset_len > superset_len || (subset_len == superset_len && matches!(op, "<" | ">")) {
+            return Ok(FALSE);
+        }
+        let mut position = 0;
+        while let Some((at, key, _, hash)) = self.dictionary_pair(subset, position) {
+            if self.find_dictionary_key(superset, key, hash)?.1.is_none() {
+                return Ok(FALSE);
+            }
+            position = at + 1;
+        }
+        Ok(TRUE)
+    }
+
     /// Return the scalar ordering or the comparison result of the first unequal elements.
     fn order(&mut self, op: &str, original_a: Id, original_b: Id) -> Result<Id> {
         let (a, b) = (self.scalar_value(original_a), self.scalar_value(original_b));
@@ -930,6 +952,7 @@ impl Context {
             Ok((order != 2).then(|| order.cmp(&0)))
         };
         let ordering = match (self.heap.get(a), self.heap.get(b)) {
+            (Value::Set { .. }, Value::Set { .. }) => return self.order_sets(op, a, b),
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => {
                 Ok(Some(self.as_int(a)?.cmp(&self.as_int(b)?)))
             }
@@ -3714,9 +3737,31 @@ impl Context {
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
 
-    /// Call a sequence subclass override or its inherited native comparison.
-    fn sequence_compare_slot(&mut self, name: &str, a: Id, b: Id) -> Result<Option<Id>> {
-        if self.slot(a, name).is_some() {
+    /// Call a container subclass override or its inherited native comparison.
+    fn container_compare_slot(
+        &mut self,
+        name: &str,
+        a: Id,
+        b: Id,
+        set_order: bool,
+    ) -> Result<Option<Id>> {
+        if set_order {
+            if !matches!(self.heap.get(self.scalar_value(a)), Value::Set { .. }) {
+                return self.operator_slot(a, name, b);
+            }
+            let class = self.exact_type(a)?;
+            // A mixin after set or frozenset in the MRO cannot displace its native slot.
+            let native = self.find_in_mro(class, |base| match self.heap.get(base) {
+                Value::Native(kind) if matches!(kind.as_str(), "set" | "frozenset") => Some(true),
+                _ => self.own_class_attr(base, name).map(|_| false),
+            });
+            if native != Some(true) {
+                return self.operator_slot(a, name, b);
+            }
+            if !matches!(self.heap.get(self.scalar_value(b)), Value::Set { .. }) {
+                return Ok(None);
+            }
+        } else if self.slot(a, name).is_some() {
             return self.operator_slot(a, name, b);
         }
         let value = match name {
@@ -3790,7 +3835,11 @@ impl Context {
         if ac.is_none() && bc.is_none() {
             return Ok(None);
         }
-        if inplace.is_empty() && self.same_sequence_family(a, b) {
+        let set_order = matches!(op, "<" | "<=" | ">" | ">=")
+            && [a, b]
+                .into_iter()
+                .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
+        if inplace.is_empty() && (self.same_sequence_family(a, b) || set_order) {
             let ac = self.exact_type(a)?;
             let bc = self.exact_type(b)?;
             // The proper subtype's reflected slot has priority, even when it is inherited.
@@ -3800,7 +3849,7 @@ impl Context {
                 [(left, a, b), (right, b, a)]
             };
             for (name, left, right) in slots {
-                if let Some(result) = self.sequence_compare_slot(name, left, right)? {
+                if let Some(result) = self.container_compare_slot(name, left, right, set_order)? {
                     return Ok(Some(result));
                 }
             }
