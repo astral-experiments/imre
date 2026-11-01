@@ -434,9 +434,10 @@ pub(crate) fn compile(
     let mut seen = HashSet::new();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     while let Some((owner, package, imports)) = work.pop_front() {
-        // Source imports install the actual boxed ModuleSpec class. Other users
-        // keep the existing typed construction and diagnostics.
-        if !registered_imports.called && imports.needs_typed_machinery() {
+        // A registered source import or an explicit object build can use the
+        // bundled machinery.ModuleSpec. Keep typed diagnostics for other builds.
+        if !options.runtime_imports && !registered_imports.called && imports.needs_typed_machinery()
+        {
             return Ok(None);
         }
         let mut names = imports.names;

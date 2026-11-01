@@ -16,6 +16,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/unittest/boxed_cleanup.py"),
             ),
         )),
+        "argparse" => Some((
+            "argparse.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/argparse/upstream/Lib/argparse.py"
+            ),
+        )),
+        "_colorize" => Some((
+            "_colorize.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/argparse/upstream/Lib/_colorize.py"
+            ),
+        )),
         "textwrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("textwrap.py", SOURCE.get_or_init(|| {
