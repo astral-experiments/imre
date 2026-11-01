@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 96 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 191 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 97 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 191 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -236,6 +236,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_collections` | Yes | No API example recorded. | — | — | — |
 | `_frozen_importlib_external` | Yes | No API example recorded. | — | — | — |
 | `_imp` | Yes | `is_frozen` reports frozen modules, and `_override_frozen_modules_for_tests` changes their import precedence. [Evidence](../tests/imports.py) | — | — | — |
+| `_io` | Yes | No API example recorded. | — | — | — |
 | `_locale` | Yes | No API example recorded. | — | — | — |
 | `_opcode` | Yes | `ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` are both zero for Imre’s native executables. [Evidence](../tests/fixtures/imports/opcode_flags.py) | — | — | — |
 | `_string` | Yes | `formatter_parser` and `formatter_field_name_split` iterate format fields and their components. [Evidence](../tests/fixtures/text/formatter_ownership.py) | — | — | — |
@@ -283,7 +284,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_interpchannels` |
 | `_interpqueues` |
 | `_interpreters` |
-| `_io` |
 | `_ios_support` |
 | `_json` |
 | `_lsprof` |

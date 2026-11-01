@@ -359,6 +359,7 @@ pub(crate) enum IntrinsicModule {
     Operator,
     Textwrap,
     Io,
+    IoNative,
     Gzip,
     UnicodeData,
     WeakRef,
@@ -813,6 +814,7 @@ impl IntrinsicModule {
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
+            "_io" => Some(Self::IoNative),
             "gzip" => Some(Self::Gzip),
             "types" => Some(Self::Types),
             "unicodedata" => Some(Self::UnicodeData),
@@ -1350,7 +1352,11 @@ impl IntrinsicModule {
             (Self::Io, "SEEK_SET") => Intrinsic::IntConstant(0),
             (Self::Io, "SEEK_CUR") => Intrinsic::IntConstant(1),
             (Self::Io, "SEEK_END") => Intrinsic::IntConstant(2),
+            (Self::Io | Self::IoNative, "open_code") => {
+                Intrinsic::ObjectRuntimeExport("io.open_code")
+            }
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
+            (Self::Io | Self::IoNative, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),
             (Self::Io, "IOBase") => Intrinsic::IoBase(crate::ir::IoBase::Any),
             (Self::Io, "RawIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Raw),
             (Self::Io, "BufferedIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Buffered),
@@ -1659,6 +1665,7 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
+    pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
     pub(crate) return_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) entry_profile: entry_profile::Profile,
@@ -2843,6 +2850,7 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
+            object_builtin_errors: Default::default(),
             deferred_object_error: Default::default(),
             return_errors: Default::default(),
             entry_profile: profile

@@ -349,6 +349,7 @@ pub(crate) fn compile(
     module_root: Option<&Path>,
     options: &CompileOptions,
     runtime_imports: bool,
+    object_builtin: bool,
     registered_imports: RegisteredImports,
     check_returns: impl FnOnce() -> Result<(), String>,
 ) -> Result<Option<Compilation>, String> {
@@ -393,7 +394,12 @@ pub(crate) fn compile(
             SourceKind::File
         },
     ) {
-        Ok(i) if i.runtime_imports || (runtime_imports && !i.names.is_empty()) => i,
+        // A checked builtin can require the object ABI even in a file without imports.
+        Ok(i)
+            if i.runtime_imports || object_builtin || (runtime_imports && !i.names.is_empty()) =>
+        {
+            i
+        }
         // Closed file builds still require a statically resolved import graph.
         Ok(i) if i.uses_import_builtin && (startup.is_some() || options.runtime_imports) => i,
         _ => return Ok(None),
