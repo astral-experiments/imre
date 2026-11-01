@@ -88,7 +88,7 @@ fn civil(ctx: &mut Context, stamp: Id, utc: bool) -> Result<ClockParts> {
 }
 
 /// Convert the tuple in field order, including any struct_time timezone attributes.
-fn mktime(ctx: &mut Context, value: Id) -> Result<Id> {
+fn tuple_time(ctx: &mut Context, value: Id, name: &str) -> Result<LocalTime> {
     let tuple = ctx.builtin("tuple");
     if !ctx.instance_of(value, tuple) {
         return Err(Error::new(
@@ -97,9 +97,14 @@ fn mktime(ctx: &mut Context, value: Id) -> Result<Id> {
         ));
     }
     let fields: [Id; 9] = ctx
-        .items(value)?
-        .try_into()
-        .map_err(|_| Error::new("TypeError", "mktime(): illegal time tuple argument"))?;
+        .sequence(value)
+        .and_then(|fields| fields.try_into().ok())
+        .ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!("{name}(): illegal time tuple argument"),
+            )
+        })?;
     let mut parts = [0; 9];
     for (part, field) in parts.iter_mut().zip(fields) {
         *part = Calendar::component(&ctx.index_integer(field)?)?;
@@ -114,16 +119,22 @@ fn mktime(ctx: &mut Context, value: Id) -> Result<Id> {
     ) {
         let zone = ctx.lookup_attr(value, "tm_zone")?;
         if zone != NONE {
-            local.set_zone(ctx.str_value(zone).map_err(|_| {
+            let storage = ctx.string_storage(zone).ok_or_else(|| {
                 Error::new("TypeError", "bad argument type for built-in operation")
-            })?);
+            })?;
+            if let Ok(name) = ctx.str_value(storage) {
+                local.set_zone(name);
+            } else {
+                // A lone surrogate cannot be represented in the native timezone name.
+                ctx.encode_utf8_codepoints(storage, false, "strict")?;
+            }
         }
         let offset = ctx.lookup_attr(value, "tm_gmtoff")?;
         if offset != NONE {
             local.set_offset(&ctx.index_integer(offset)?)?;
         }
     }
-    Ok(ctx.alloc(Value::Float(local.timestamp()?)))
+    Ok(local)
 }
 
 pub(super) fn call(
@@ -153,7 +164,10 @@ pub(super) fn call(
             format!("time.time() takes no arguments ({} given)", args.len()),
         )),
         "mktime" => match args {
-            [value] => mktime(ctx, *value),
+            [value] => {
+                let stamp = tuple_time(ctx, *value, name)?.timestamp()?;
+                Ok(ctx.alloc(Value::Float(stamp)))
+            }
             _ => Err(Error::new(
                 "TypeError",
                 format!(
@@ -162,6 +176,41 @@ pub(super) fn call(
                 ),
             )),
         },
+        "strftime" => {
+            let format = match args {
+                [format] | [format, _] => *format,
+                _ => {
+                    let bound = if args.is_empty() {
+                        "at least 1 argument"
+                    } else {
+                        "at most 2 arguments"
+                    };
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("strftime() takes {bound} ({} given)", args.len()),
+                    ));
+                }
+            };
+            let format = ctx.string_storage(format).ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "strftime() argument 1 must be str, not {}",
+                        if format == NONE {
+                            "None"
+                        } else {
+                            ctx.type_name(format)
+                        }
+                    ),
+                )
+            })?;
+            let clock = match args.get(1) {
+                Some(&value) => tuple_time(ctx, value, name)?,
+                None => LocalTime::now()?,
+            };
+            let points = clock.strftime(&ctx.string_codepoints(format)?)?;
+            Ok(ctx.text_codepoints(points))
+        }
         "gmtime" | "localtime" => {
             if args.len() > 1 {
                 return Err(Error::new(

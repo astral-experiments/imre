@@ -413,7 +413,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         ("datetime", "UTC") => datetime::utc(ctx),
-        ("time", "time" | "gmtime" | "localtime" | "mktime" | "struct_time") => {
+        ("time", "time" | "gmtime" | "localtime" | "mktime" | "strftime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
         }
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
