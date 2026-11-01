@@ -1475,6 +1475,7 @@ def report(text):
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_stat.py",
+            "boxed_os_makedirs.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
             "boxed_unicodedata.py",
