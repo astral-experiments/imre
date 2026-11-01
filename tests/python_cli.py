@@ -1423,6 +1423,7 @@ def report(text):
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
             "boxed_mapping_abc.py",
+            "boxed_user_containers.py",
             "boxed_dict_pop.py",
             "boxed_recursive_equality.py",
             "boxed_selector_modify_data.py",

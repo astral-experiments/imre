@@ -26,6 +26,24 @@ def current():
     source = bytearray(b"abcd")
     source[slice(1, 3)] = b"X"
     print(bytes(source))
+    numbers = [0, 1, 2, 3, 4]
+    numbers[::-1] = numbers
+    assert numbers == [4, 3, 2, 1, 0]
+    try:
+        numbers[::2] = []
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("extended slice length was not checked")
+    del numbers[4:0:-2]
+    assert numbers == [4, 3, 1]
+
+    def resize():
+        numbers.clear()
+        yield 7
+
+    numbers[1:2] = resize()
+    assert numbers == [7]
     rec = Recorder()
     key = rec[1:4:2]
     rec[::-1] = key
