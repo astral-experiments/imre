@@ -286,6 +286,17 @@ class TestCase:
         changes = list(difflib.ndiff(_pretty_list(flat1, pretty1), _pretty_list(flat2, pretty2)))
         self.fail(self._formatMessage(msg, self._truncateMessage(message, "\n" + "\n".join(changes))))
 
+    def _assertTextOrListEqual(self, first: str | list[str], second: str | list[str],
+                               msg: str | None = None) -> None:
+        if isinstance(first, str):
+            if isinstance(second, str):
+                self.assertMultiLineEqual(first, second, msg)
+                return
+        elif isinstance(second, list):
+            self.assertListEqual(first, second, msg)
+            return
+        self.fail(self._formatMessage(msg, _inequality_message(repr(first), repr(second))))
+
     def _assertTextListEqual(self, list1: list[str], list2: list[str], msg: str | None = None) -> None:
         same = len(list1) == len(list2)
         if same:

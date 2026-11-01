@@ -30,6 +30,19 @@ class ItemsBox:
         return [value]
 
 
+class Formatter:
+    def render(self, value):
+        return self.prefix() + value
+
+    def prefix(self):
+        return "base:"
+
+
+class DerivedFormatter(Formatter):
+    def prefix(self):
+        return "derived:"
+
+
 def create(value):
     return Row(value, ["created"])
 
@@ -49,3 +62,5 @@ print(expanded[0])
 extended: list[int] = []
 extended.extend(box.items(3))
 print(extended[0])
+
+print(DerivedFormatter().render("value"))

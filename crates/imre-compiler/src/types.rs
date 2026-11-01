@@ -1140,6 +1140,10 @@ impl Types {
                             | Type::StrLiteral(_)
                             | Type::Bytes
                     ) || self.payload(field) == Some(Type::Str)
+                        || matches!(
+                            self.element(field),
+                            Some(Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes)
+                        )
                 })
             })
     }
