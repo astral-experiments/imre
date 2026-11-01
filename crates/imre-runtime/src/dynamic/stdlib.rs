@@ -340,6 +340,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return Ok(ctx.int(i64::from(value)));
     }
     let id = match (module, name) {
+        ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
@@ -805,6 +806,9 @@ pub(super) fn call(
 ) -> Result<Id> {
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
+    }
+    if name == "io.open_code" {
+        return io::open_code(ctx, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);

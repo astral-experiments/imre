@@ -31,6 +31,15 @@ fn boolean(value: bool) -> Expr {
     }
 }
 
+/// A raw binary mode contains one access letter, one b and an optional +.
+pub(super) fn is_raw_binary_mode(mode: &str) -> bool {
+    let mode = mode.as_bytes();
+    let expected_len = if mode.contains(&b'+') { 3 } else { 2 };
+    mode.len() == expected_len
+        && mode.contains(&b'b')
+        && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
+}
+
 pub(super) fn file_open_mode(mode: &str) -> Option<(Type, Builtin)> {
     Some(match mode {
         "r" => (Type::TextIO, Builtin::TextOpen(0)),

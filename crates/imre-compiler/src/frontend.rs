@@ -10873,6 +10873,29 @@ impl<'a> Checker<'a> {
 
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
+        let args = &call.arguments;
+        // A raw descriptor can return a short count or None on a nonblocking write.
+        // The ordinary buffered BinaryIO ABI cannot represent those results.
+        if !gzip
+            && self.unshadowed_builtin(&call.func, "open")
+            && args.len() == 3
+            && let Some(path) = args.find_argument_value("file", 0)
+            && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
+            && paths::is_raw_binary_mode(mode.value.to_str())
+            && let Some(ast::Expr::NumberLiteral(size)) = args.find_argument_value("buffering", 2)
+            && matches!(&size.value, ast::Number::Int(n) if n.as_i64() == Some(0))
+            && self.expr(path)?.ty == Type::Str
+        {
+            let error = self.object_runtime_export("unbuffered binary open", call);
+            self.graph
+                .object_builtin_errors
+                .borrow_mut()
+                .insert(format!(
+                    "{}:{error}",
+                    self.graph.modules[self.module].path.display()
+                ));
+            return Err(error);
+        }
         let (path, mode) = match call.arguments.args.as_ref() {
             [path] if !gzip => (path, "r"),
             [path, ast::Expr::StringLiteral(mode)] => {
