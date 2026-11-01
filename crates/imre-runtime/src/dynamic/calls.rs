@@ -3263,6 +3263,21 @@ impl Context {
                 weakref::Kind::Proxy => Err(non_callable_error("weakref.ProxyType")),
             },
             Value::GenericAlias(alias) => {
+                if !alias.instantiable {
+                    let origin_name = self.lookup_attr(alias.origin, "__name__")?;
+                    let origin_name = self.str_value(origin_name)?;
+                    let alias_name = alias
+                        .name
+                        .map(|name| self.str_value(name))
+                        .transpose()?
+                        .unwrap_or("None");
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "Type {alias_name} cannot be instantiated; use {origin_name}() instead"
+                        ),
+                    ));
+                }
                 let result = self.call(alias.origin, args, kwargs)?;
                 if matches!(self.heap.get(result), Value::Instance { .. })
                     && let Err(error) = self.set_attr(result, "__orig_class__", callable)

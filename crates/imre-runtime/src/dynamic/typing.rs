@@ -121,6 +121,8 @@ pub(super) struct Alias {
     pub args: Id,
     pub parameters: Id,
     pub kind: AliasKind,
+    pub name: Option<Id>,
+    pub instantiable: bool,
 }
 
 #[derive(Default)]
@@ -197,7 +199,7 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
     let (index, constructor) = match kind {
         AliasKind::Generic => (0, "typing._GenericAlias"),
         AliasKind::Callable => (1, "typing._CallableGenericAlias"),
-        _ => return Ok(allocate_alias(ctx, kind, origin, args)),
+        _ => return Ok(allocate_alias(ctx, kind, origin, args, None, true)),
     };
     let cached = if let Some(id) = ctx.typing.alias_caches[index] {
         id
@@ -211,13 +213,20 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
     if let Err(error) = &result {
         let type_error = ctx.builtin("TypeError");
         if ctx.raised_error_matches(error, type_error) {
-            return Ok(allocate_alias(ctx, kind, origin, args));
+            return Ok(allocate_alias(ctx, kind, origin, args, None, true));
         }
     }
     result
 }
 
-fn allocate_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Id) -> Id {
+fn allocate_alias(
+    ctx: &mut Context,
+    kind: AliasKind,
+    origin: Id,
+    args: Id,
+    name: Option<Id>,
+    instantiable: bool,
+) -> Id {
     let Value::Tuple(items) = ctx.heap.get(args) else {
         unreachable!()
     };
@@ -228,6 +237,8 @@ fn allocate_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Id) -> I
         args,
         parameters,
         kind,
+        name,
+        instantiable,
     }))
 }
 
@@ -309,6 +320,8 @@ fn literal_alias(ctx: &mut Context, origin: Id, parameters: Id) -> Result<Id> {
         AliasKind::Literal(members),
         origin,
         args,
+        None,
+        true,
     ))
 }
 
@@ -319,12 +332,29 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     } else {
         ctx.alloc(Value::Tuple(vec![args]))
     };
-    allocate_alias(ctx, AliasKind::Builtin, origin, args)
+    allocate_alias(ctx, AliasKind::Builtin, origin, args, None, true)
+}
+
+fn named_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
+    let method = ctx.module_value("typing", name).ok_or_else(|| {
+        Error::new(
+            "AttributeError",
+            format!("module 'typing' has no attribute '{name}'"),
+        )
+    })?;
+    ctx.call(method, args, Vec::new())
 }
 
 /// Apply the subscription protocol for a supported type. Ordinary instance indexing
 /// continues through the object runtime.
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
+    if matches!(ctx.heap.get(target), Value::GenericAlias(alias) if alias.name.is_some()) {
+        return Some(named_alias_helper(
+            ctx,
+            "_specialize_named_alias",
+            vec![target, index],
+        ));
+    }
     if let Value::GenericAlias(alias) = ctx.heap.get(target)
         && matches!(alias.kind, AliasKind::Literal(_))
         && matches!(ctx.heap.get(alias.parameters), Value::Tuple(params) if params.is_empty())
@@ -572,6 +602,9 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
+    if matches!(ctx.heap.get(id), Value::GenericAlias(alias) if alias.name.is_some()) {
+        return named_alias_helper(ctx, "_named_alias_bases", vec![id, bases]);
+    }
     let Value::GenericAlias(alias) = ctx.heap.get(id) else {
         unreachable!()
     };
@@ -735,9 +768,21 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             _ => return None,
         },
         Value::GenericAlias(a) => match name {
+            "__name__" | "__qualname__" | "_name" if let Some(label) = a.name => label,
+            "__module__" if a.name.is_some() => ctx.text("typing"),
+            "_inst" if a.name.is_some() => {
+                if a.instantiable {
+                    TRUE
+                } else {
+                    FALSE
+                }
+            }
             "__args__" => a.args,
             "__origin__" => a.origin,
             "__parameters__" => a.parameters,
+            attr if a.name.is_some() && !(attr.starts_with("__") && attr.ends_with("__")) => {
+                return Some(ctx.lookup_attr(a.origin, attr));
+            }
             _ => return None,
         },
         Value::Class { scope, .. } if name == "__bases__" || name == "__mro__" => {
@@ -846,6 +891,37 @@ pub(super) fn call(
             "cast() requires a type and a value",
         ));
     }
+    if matches!(operation, "_GenericAlias" | "_CallableGenericAlias") {
+        let [origin, parameters, inst, name] = super::builtins::bind_method_arguments(
+            operation,
+            args,
+            kwargs,
+            ["origin", "args", "inst", "name"],
+            2,
+        )?;
+        let (Some(origin), Some(parameters)) = (origin, parameters) else {
+            return Err(Error::new(
+                "TypeError",
+                "_GenericAlias.__init__() requires an origin and arguments",
+            ));
+        };
+        let args = if matches!(ctx.heap.get(parameters), Value::Tuple(_)) {
+            parameters
+        } else {
+            ctx.alloc(Value::Tuple(vec![parameters]))
+        };
+        let name = name.filter(|&name| name != NONE);
+        if let Some(name) = name {
+            ctx.str_value(name)?;
+        }
+        let instantiable = ctx.truth(inst.unwrap_or(TRUE))?;
+        let kind = if operation == "_CallableGenericAlias" {
+            AliasKind::Callable
+        } else {
+            AliasKind::Generic
+        };
+        return Ok(allocate_alias(ctx, kind, origin, args, name, instantiable));
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -854,25 +930,19 @@ pub(super) fn call(
     }
     match (operation, args) {
         ("Any", _) => Err(Error::new("TypeError", "Any cannot be instantiated")),
-        ("_GenericAlias" | "_CallableGenericAlias", [origin, parameters]) => {
-            let args = if matches!(ctx.heap.get(*parameters), Value::Tuple(_)) {
-                *parameters
-            } else {
-                ctx.alloc(Value::Tuple(vec![*parameters]))
-            };
-            let kind = if operation == "_CallableGenericAlias" {
-                AliasKind::Callable
-            } else {
-                AliasKind::Generic
-            };
-            Ok(allocate_alias(ctx, kind, *origin, args))
-        }
         ("_LiteralGenericAlias", [origin, parameters]) => literal_alias(ctx, *origin, *parameters),
-        ("_LiteralGenericAlias" | "_GenericAlias", _) => Err(Error::new(
+        ("_LiteralGenericAlias", _) => Err(Error::new(
             "TypeError",
             "_GenericAlias.__init__() requires an origin and arguments",
         )),
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
+            Value::Instance { .. }
+                if ctx
+                    .module_value("typing", "_SpecialGenericAlias")
+                    .is_some_and(|class| ctx.instance_of(*v, class)) =>
+            {
+                ctx.lookup_attr(*v, "__origin__")?
+            }
             Value::GenericAlias(a) => a.origin,
             Value::Union(_) => super::union::class(ctx),
             Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(v) => *v,

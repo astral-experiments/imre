@@ -1217,6 +1217,7 @@ impl IntrinsicModule {
             (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
             (Self::MockRuntime, "mark_call_list") => Intrinsic::MockCallList { mark: true },
             (Self::MockRuntime, "is_call_list") => Intrinsic::MockCallList { mark: false },
+            (Self::Typing, "List") => Intrinsic::ObjectRuntimeExport("typing.List"),
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
