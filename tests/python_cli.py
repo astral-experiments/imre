@@ -1361,6 +1361,7 @@ def report(text):
             "boxed_pkgutil.py",
             "boxed_lru_cache_equality.py",
             "boxed_lru_cache_metadata.py",
+            "boxed_functools_cache.py",
             "boxed_total_ordering.py",
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
