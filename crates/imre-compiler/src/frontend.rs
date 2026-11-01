@@ -9878,7 +9878,12 @@ impl<'a> Checker<'a> {
                         ),
                     });
                 }
-                let (builtin, ty) = match (attribute.attr.as_str(), call.arguments.args.len()) {
+                // BytesIO has no raw device to refill, so read1 uses its ordinary memory read.
+                let method = match (receiver.ty, attribute.attr.as_str()) {
+                    (Type::BytesIO, "read1") => "read",
+                    (_, method) => method,
+                };
+                let (builtin, ty) = match (method, call.arguments.args.len()) {
                     ("read", 0) => (
                         if binary {
                             Builtin::BinaryRead

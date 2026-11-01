@@ -42,7 +42,7 @@ pub(crate) mod exceptions;
 mod files;
 pub(crate) use files::read_path_text;
 mod text_file;
-pub(crate) use text_file::TextFile;
+pub(crate) use text_file::{MemoryText, TextFile};
 pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;

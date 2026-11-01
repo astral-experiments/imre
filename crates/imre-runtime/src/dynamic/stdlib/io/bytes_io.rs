@@ -8,8 +8,27 @@ use super::{Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value};
 use crate::objects::FileState;
 
 pub(super) const METHODS: &[&str] = &[
-    "__init__", "read", "read1", "readline", "readinto", "truncate", "write", "seek", "tell",
-    "getvalue", "isatty", "closed", "close", "flush", "readable", "writable", "seekable",
+    "__init__",
+    "__iter__",
+    "__next__",
+    "read",
+    "read1",
+    "readline",
+    "readlines",
+    "readinto",
+    "truncate",
+    "write",
+    "writelines",
+    "seek",
+    "tell",
+    "getvalue",
+    "isatty",
+    "closed",
+    "close",
+    "flush",
+    "readable",
+    "writable",
+    "seekable",
 ];
 
 pub(in crate::dynamic) struct BytesIo {
@@ -43,6 +62,64 @@ impl BytesIo {
         let id = ctx.alloc(Value::Bytes(copy_bytes(&bytes)?));
         self.snapshot.set(Some(id));
         Ok(id)
+    }
+
+    fn read(&self, ctx: &mut Context, limit: Option<usize>, line: bool) -> Result<Id> {
+        let data = self.file.borrow_mut().read_memory_bytes(limit, line)?;
+        if let Some(bytes) = data {
+            return Ok(ctx.alloc(Value::Bytes(bytes)));
+        }
+        let value = self.getvalue(ctx)?;
+        self.file.borrow_mut().seek(SeekFrom::End(0))?;
+        Ok(value)
+    }
+
+    fn write(&self, data: &[u8]) -> Result<()> {
+        self.file.borrow_mut().write_bytes(data)?;
+        if !data.is_empty() {
+            self.snapshot.set(None);
+        }
+        Ok(())
+    }
+
+    fn readlines(&self, ctx: &mut Context, hint: Option<Id>) -> Result<Id> {
+        let mut file = self.file.borrow_mut();
+        file.flush()?;
+        let limit = match hint {
+            None | Some(NONE) => 0,
+            Some(id) => ctx
+                .as_int(id)
+                .map_err(|_| {
+                    Error::new(
+                        "TypeError",
+                        format!("integer argument expected, got '{}'", ctx.type_name(id)),
+                    )
+                })?
+                .to_i64()
+                .ok_or_else(|| {
+                    Error::new(
+                        "OverflowError",
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?,
+        };
+        let mut lines = Vec::new();
+        let mut size = 0;
+        loop {
+            let line = file.read_line_bytes()?;
+            if line.is_empty() {
+                break;
+            }
+            size += line.len();
+            lines
+                .try_reserve(1)
+                .map_err(|_| crate::Error::allocation())?;
+            lines.push(ctx.alloc(Value::Bytes(line)));
+            if limit > 0 && size >= limit as usize {
+                break;
+            }
+        }
+        Ok(ctx.alloc(Value::List(lines)))
     }
 
     fn init(&self, ctx: &Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -142,18 +219,15 @@ pub(super) fn call(
                 }
             };
             let limit = size.and_then(|n| usize::try_from(n).ok());
-            let bytes = stream
-                .file
-                .borrow_mut()
-                .read_memory_bytes(limit, name == "readline")?;
-            match bytes {
-                Some(bytes) => Ok(ctx.alloc(Value::Bytes(bytes))),
-                None => {
-                    let value = stream.getvalue(ctx)?;
-                    stream.file.borrow_mut().seek(SeekFrom::End(0))?;
-                    Ok(value)
-                }
+            stream.read(ctx, limit, name == "readline")
+        }
+        "__iter__" => Ok(receiver),
+        "__next__" => {
+            let line = stream.read(ctx, None, true)?;
+            if ctx.bytes_like(line)?.is_empty() {
+                return Err(Error::new("StopIteration", ""));
             }
+            Ok(line)
         }
         "truncate" => {
             // Unlike read, truncate checks the stream before it invokes the size's __index__.
@@ -172,11 +246,17 @@ pub(super) fn call(
         }
         "write" => {
             let input = ctx.bytes_like(args[0])?;
-            stream.file.borrow_mut().write_bytes(input)?;
-            if !input.is_empty() {
-                stream.snapshot.set(None);
-            }
+            stream.write(input)?;
             Ok(ctx.int(input.len() as i64))
+        }
+        "readlines" => stream.readlines(ctx, args.first().copied()),
+        "writelines" => {
+            stream.file.borrow_mut().flush()?;
+            let iterator = ctx.iterator(args[0])?;
+            while let Some(line) = ctx.next_item(iterator)? {
+                stream.write(ctx.bytes_like(line)?)?;
+            }
+            Ok(NONE)
         }
         "readinto" => {
             let id = args[0];

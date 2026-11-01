@@ -1,4 +1,4 @@
-use super::{Codec, Context, Id, NONE, Result, Value};
+use super::{Codec, Context, Id, Result};
 
 /// Keep incomplete encoding sequences and CRLF pairs across arbitrary binary read boundaries.
 pub(super) struct Reader {
@@ -250,16 +250,6 @@ impl Reader {
         Ok(Some(part))
     }
     pub(super) fn newlines(&self, ctx: &mut Context) -> Id {
-        let mut found = Vec::new();
-        for (bit, s) in [(1, "\r"), (2, "\n"), (4, "\r\n")] {
-            if self.seen & bit != 0 {
-                found.push(ctx.text(s));
-            }
-        }
-        match found.as_slice() {
-            [] => NONE,
-            [id] => *id,
-            _ => ctx.alloc(Value::Tuple(found)),
-        }
+        super::super::newline_history(ctx, self.seen)
     }
 }
