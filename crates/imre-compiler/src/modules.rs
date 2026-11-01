@@ -167,7 +167,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/contextlib_exitstack.py"),
                 "\n",
-                include_str!("../stdlib/contextlib_redirect.py")
+                include_str!("../stdlib/contextlib_redirect.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_contextmanager.py")
             ),
         )),
         "_imre_socketserver_poll" => Some((
