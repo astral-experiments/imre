@@ -3,8 +3,13 @@
 use std::cell::RefCell;
 use std::ptr;
 
+use md5::Md5;
+use num_traits::{Signed, ToPrimitive};
 use sha1::Sha1;
-use sha2::{Digest, Sha256};
+use sha2::digest::common::BlockSizeUser;
+use sha2::{Digest, Sha224, Sha256, Sha384, Sha512};
+use sha3::digest::ExtendableOutput;
+use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Object, Storage, StorageCell, Str, object};
@@ -12,66 +17,262 @@ use crate::{BytesOwner, Int, ObjectOwner};
 
 #[derive(Clone)]
 pub(crate) enum State {
+    Md5(Md5),
     Sha1(Sha1),
+    Sha224(Sha224),
     Sha256(Sha256),
+    Sha384(Sha384),
+    Sha512(Sha512),
+    Sha3_224(Sha3_224),
+    Sha3_256(Sha3_256),
+    Sha3_384(Sha3_384),
+    Sha3_512(Sha3_512),
+    Shake128(Shake128),
+    Shake256(Shake256),
 }
 
-impl State {
-    pub(crate) const ALGORITHMS: [&str; 2] = ["sha1", "sha256"];
+pub(crate) struct Provider {
+    pub(crate) name: &'static str,
+    aliases: &'static [&'static str],
+    pub(crate) create: fn(&[u8]) -> State,
+}
 
-    pub(crate) fn constructor(name: &str) -> Result<fn(&[u8]) -> Self> {
-        let matches =
-            |aliases: &[&str]| aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias));
-        if matches(&["sha1", "sha-1", "ssl3-sha1", "1.3.14.3.2.26"]) {
-            Ok(Self::sha1)
-        } else if matches(&["sha256", "sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"]) {
-            Ok(Self::sha256)
+const PROVIDERS: &[Provider] = &[
+    Provider {
+        name: "md5",
+        aliases: &["ssl3-md5", "1.2.840.113549.2.5"],
+        create: |data| State::Md5(Md5::new_with_prefix(data)),
+    },
+    Provider {
+        name: "sha1",
+        aliases: &["sha-1", "ssl3-sha1", "1.3.14.3.2.26"],
+        create: State::sha1,
+    },
+    Provider {
+        name: "sha224",
+        aliases: &["sha-224", "sha2-224", "2.16.840.1.101.3.4.2.4"],
+        create: |data| State::Sha224(Sha224::new_with_prefix(data)),
+    },
+    Provider {
+        name: "sha256",
+        aliases: &["sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"],
+        create: |data| State::Sha256(Sha256::new_with_prefix(data)),
+    },
+    Provider {
+        name: "sha384",
+        aliases: &["sha-384", "sha2-384", "2.16.840.1.101.3.4.2.2"],
+        create: |data| State::Sha384(Sha384::new_with_prefix(data)),
+    },
+    Provider {
+        name: "sha512",
+        aliases: &["sha-512", "sha2-512", "2.16.840.1.101.3.4.2.3"],
+        create: |data| State::Sha512(Sha512::new_with_prefix(data)),
+    },
+    Provider {
+        name: "sha3_224",
+        aliases: &["sha3-224", "2.16.840.1.101.3.4.2.7"],
+        create: |data| State::Sha3_224(Sha3_224::new_with_prefix(data)),
+    },
+    Provider {
+        name: "sha3_256",
+        aliases: &["sha3-256", "2.16.840.1.101.3.4.2.8"],
+        create: |data| State::Sha3_256(Sha3_256::new_with_prefix(data)),
+    },
+    Provider {
+        name: "sha3_384",
+        aliases: &["sha3-384", "2.16.840.1.101.3.4.2.9"],
+        create: |data| State::Sha3_384(Sha3_384::new_with_prefix(data)),
+    },
+    Provider {
+        name: "sha3_512",
+        aliases: &["sha3-512", "2.16.840.1.101.3.4.2.10"],
+        create: |data| State::Sha3_512(Sha3_512::new_with_prefix(data)),
+    },
+    Provider {
+        name: "shake_128",
+        aliases: &["shake128", "shake-128", "2.16.840.1.101.3.4.2.11"],
+        create: |data| State::Shake128(sha3::digest::Update::chain(Shake128::default(), data)),
+    },
+    Provider {
+        name: "shake_256",
+        aliases: &["shake256", "shake-256", "2.16.840.1.101.3.4.2.12"],
+        create: |data| State::Shake256(sha3::digest::Update::chain(Shake256::default(), data)),
+    },
+];
+
+impl State {
+    pub(crate) fn is_xof(&self) -> bool {
+        matches!(self, Self::Shake128(_) | Self::Shake256(_))
+    }
+
+    pub(crate) fn algorithms() -> impl Iterator<Item = &'static str> {
+        PROVIDERS.iter().map(|provider| provider.name)
+    }
+
+    pub(crate) fn provider(name: &str) -> Result<&'static Provider> {
+        PROVIDERS
+            .iter()
+            .find(|provider| {
+                // Python maps canonical SHA-3 names exactly; OpenSSL accepts its
+                // hyphenated names and OIDs independently of ASCII case.
+                provider.name == name
+                    || (!provider.name.contains('_') && provider.name.eq_ignore_ascii_case(name))
+                    || provider
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(name))
+            })
+            .ok_or_else(|| Error::new(Kind::ValueError, format!("unsupported hash type {name}")))
+    }
+
+    pub(crate) const CLASS: &'static str = "hashlib._Hash";
+    pub(crate) const XOF_CLASS: &'static str = "hashlib._HashXOF";
+
+    pub(crate) fn class_name(&self) -> &'static str {
+        // XOFs have no fixed digest size; their digest methods take a length.
+        if self.digest_size() == 0 {
+            Self::XOF_CLASS
         } else {
-            Err(Error::new(
-                Kind::ValueError,
-                format!("unsupported hash type {name}"),
-            ))
+            Self::CLASS
         }
+    }
+
+    pub(crate) fn repr(&self, identity: usize) -> impl std::fmt::Display {
+        std::fmt::from_fn(move |f| {
+            write!(
+                f,
+                "<{} {} object @ {identity:#x}>",
+                self.name(),
+                self.class_name()
+            )
+        })
     }
 
     pub(crate) fn sha1(data: &[u8]) -> Self {
         Self::Sha1(Sha1::new_with_prefix(data))
     }
 
-    pub(crate) fn sha256(data: &[u8]) -> Self {
-        Self::Sha256(Sha256::new_with_prefix(data))
-    }
-
     pub(crate) fn name(&self) -> &'static str {
         match self {
+            Self::Md5(_) => "md5",
             Self::Sha1(_) => "sha1",
+            Self::Sha224(_) => "sha224",
             Self::Sha256(_) => "sha256",
+            Self::Sha384(_) => "sha384",
+            Self::Sha512(_) => "sha512",
+            Self::Sha3_224(_) => "sha3_224",
+            Self::Sha3_256(_) => "sha3_256",
+            Self::Sha3_384(_) => "sha3_384",
+            Self::Sha3_512(_) => "sha3_512",
+            Self::Shake128(_) => "shake_128",
+            Self::Shake256(_) => "shake_256",
         }
     }
 
     pub(crate) fn update(&mut self, data: &[u8]) {
         match self {
+            Self::Md5(h) => h.update(data),
             Self::Sha1(h) => h.update(data),
+            Self::Sha224(h) => h.update(data),
             Self::Sha256(h) => h.update(data),
+            Self::Sha384(h) => h.update(data),
+            Self::Sha512(h) => h.update(data),
+            Self::Sha3_224(h) => h.update(data),
+            Self::Sha3_256(h) => h.update(data),
+            Self::Sha3_384(h) => h.update(data),
+            Self::Sha3_512(h) => h.update(data),
+            Self::Shake128(h) => sha3::digest::Update::update(h, data),
+            Self::Shake256(h) => sha3::digest::Update::update(h, data),
+        }
+    }
+
+    pub(crate) fn block_size(&self) -> usize {
+        match self {
+            Self::Md5(_) => Md5::block_size(),
+            Self::Sha1(_) => Sha1::block_size(),
+            Self::Sha224(_) => Sha224::block_size(),
+            Self::Sha256(_) => Sha256::block_size(),
+            Self::Sha384(_) => Sha384::block_size(),
+            Self::Sha512(_) => Sha512::block_size(),
+            Self::Sha3_224(_) => Sha3_224::block_size(),
+            Self::Sha3_256(_) => Sha3_256::block_size(),
+            Self::Sha3_384(_) => Sha3_384::block_size(),
+            Self::Sha3_512(_) => Sha3_512::block_size(),
+            Self::Shake128(_) => Shake128::block_size(),
+            Self::Shake256(_) => Shake256::block_size(),
         }
     }
 
     pub(crate) fn digest_size(&self) -> usize {
         match self {
+            Self::Md5(_) => Md5::output_size(),
             Self::Sha1(_) => Sha1::output_size(),
+            Self::Sha224(_) => Sha224::output_size(),
             Self::Sha256(_) => Sha256::output_size(),
+            Self::Sha384(_) => Sha384::output_size(),
+            Self::Sha512(_) => Sha512::output_size(),
+            Self::Sha3_224(_) => Sha3_224::output_size(),
+            Self::Sha3_256(_) => Sha3_256::output_size(),
+            Self::Sha3_384(_) => Sha3_384::output_size(),
+            Self::Sha3_512(_) => Sha3_512::output_size(),
+            Self::Shake128(_) | Self::Shake256(_) => 0,
         }
     }
 
-    pub(crate) fn digest<T>(&self, result: impl FnOnce(&[u8]) -> T) -> T {
+    pub(crate) fn fixed_digest<T>(
+        &self,
+        method: &str,
+        result: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
         match self {
+            Self::Md5(h) => result(&h.clone().finalize()),
             Self::Sha1(h) => result(&h.clone().finalize()),
+            Self::Sha224(h) => result(&h.clone().finalize()),
             Self::Sha256(h) => result(&h.clone().finalize()),
+            Self::Sha384(h) => result(&h.clone().finalize()),
+            Self::Sha512(h) => result(&h.clone().finalize()),
+            Self::Sha3_224(h) => result(&h.clone().finalize()),
+            Self::Sha3_256(h) => result(&h.clone().finalize()),
+            Self::Sha3_384(h) => result(&h.clone().finalize()),
+            Self::Sha3_512(h) => result(&h.clone().finalize()),
+            Self::Shake128(_) | Self::Shake256(_) => Err(Error::new(
+                Kind::TypeError,
+                format!("{method}() missing required argument 'length' (pos 1)"),
+            )),
         }
+    }
+
+    // Match the non-OpenSSL SHAKE provider's unsigned-long conversion and squeeze limit.
+    pub(crate) fn xof_digest(&self, length: &Int) -> Result<Bytes> {
+        let length = length.big();
+        if length.is_negative() {
+            return Err(Error::new(Kind::ValueError, "Cannot convert negative int"));
+        }
+        let length = length.to_u64().ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large for C unsigned long",
+            )
+        })?;
+        if length >= 1 << 29 {
+            return Err(Error::new(Kind::ValueError, "length is too large"));
+        }
+        let mut bytes = super::bytes::allocate(length as usize)?;
+        bytes.resize(length as usize, 0);
+        match self {
+            Self::Shake128(h) => h.clone().finalize_xof_into(&mut bytes),
+            Self::Shake256(h) => h.clone().finalize_xof_into(&mut bytes),
+            _ => unreachable!("checked XOF receiver"),
+        }
+        Ok(bytes)
+    }
+
+    pub(crate) fn xof_hexdigest(&self, length: &Int) -> Result<Str> {
+        hex_text(&self.xof_digest(length)?)
     }
 
     pub(crate) fn hexdigest(&self) -> Result<Str> {
-        self.digest(hex_text)
+        self.fixed_digest("hexdigest", hex_text)
     }
 }
 
@@ -88,30 +289,40 @@ fn handle(state: State) -> Result<*const Object> {
 pub unsafe extern "C" fn imre_hash_new(name: *const Str, data: *const Bytes) -> *const Object {
     // SAFETY: both operands remain owned for this operation.
     let (name, data) = unsafe { (&*name, &*data) };
-    let result = State::constructor(name).and_then(|create| handle(create(data)));
+    let result = State::provider(name).and_then(|provider| handle((provider.create)(data)));
     finish(result, ptr::null())
 }
 
-thread_local! { static AVAILABLE: RefCell<Option<ObjectOwner>> = const { RefCell::new(None) }; }
+thread_local! {
+    static AVAILABLE: RefCell<Option<ObjectOwner>> = const { RefCell::new(None) };
+    static GUARANTEED: RefCell<Option<ObjectOwner>> = const { RefCell::new(None) };
+}
 
-/// The public algorithms set has a stable identity. Changing it does not enable a provider.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_hash_algorithms_available() -> *const Object {
-    let result = AVAILABLE.with_borrow_mut(|slot| {
+fn algorithms(root: &'static std::thread::LocalKey<RefCell<Option<ObjectOwner>>>) -> *const Object {
+    let result = root.with_borrow_mut(|slot| {
         let set = match slot {
             Some(set) => set,
-            None => slot.insert(super::mappings::Set::names(
-                State::ALGORITHMS.into_iter(),
-                false,
-            )?),
+            None => slot.insert(super::mappings::Set::names(State::algorithms(), false)?),
         };
         Ok(ObjectOwner::into_raw(ObjectOwner::clone(set)))
     });
     finish(result, ptr::null())
 }
 
+/// The public sets have independent, stable identities. Mutating them does not enable a provider.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_hash_algorithms_available() -> *const Object {
+    algorithms(&AVAILABLE)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_hash_algorithms_guaranteed() -> *const Object {
+    algorithms(&GUARANTEED)
+}
+
 pub(super) fn clear_algorithms() {
     AVAILABLE.with(RefCell::take);
+    GUARANTEED.with(RefCell::take);
 }
 
 fn hex_text(digest: &[u8]) -> Result<Str> {
@@ -178,6 +389,101 @@ pub unsafe extern "C" fn imre_hash_update(hash: *const Object, value: *const Byt
     }
 }
 
+/// Read through the buffered stream so its pending bytes and cursor are respected.
+fn update_buffered_file(state: &mut State, file: &mut super::FileState, size: &Int) -> Result<()> {
+    match file.binary_type_name() {
+        "_io.BytesIO" => {
+            state.update(&file.memory_value()?);
+            return Ok(());
+        }
+        "_io.BufferedReader" | "_io.BufferedRandom" => {}
+        "_io.BufferedWriter" => {
+            let Some(path) = &file.name else {
+                return Err(Error::new(
+                    Kind::NotImplementedError,
+                    "file_digest does not support an unnamed buffered writer",
+                ));
+            };
+            let name = super::exceptions::string_repr(path);
+            return Err(Error::new(
+                Kind::ValueError,
+                format!(
+                    "'<_io.BufferedWriter name={name}>' is not a file-like object in binary reading mode."
+                ),
+            ));
+        }
+        _ => {
+            return Err(Error::new(
+                Kind::NotImplementedError,
+                "file_digest requires a buffered binary file or BytesIO",
+            ));
+        }
+    }
+    if file.closed() {
+        return Err(Error::new(Kind::ValueError, "I/O operation on closed file"));
+    }
+    let size = usize::try_from(super::bytes::native_size(size)?)
+        .map_err(|_| Error::new(Kind::ValueError, "negative count"))?;
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(size)
+        .map_err(|_| Error::memory_error())?;
+    buffer.resize(size, 0);
+    loop {
+        match file.read_into(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(count) => state.update(&buffer[..count]),
+            Err(error) => match error.os_args().map(|args| args.errno) {
+                Some(code) if code == i64::from(libc::EINTR) => continue,
+                Some(code)
+                    if code == i64::from(libc::EAGAIN) || code == i64::from(libc::EWOULDBLOCK) =>
+                {
+                    return Err(Error::new(
+                        Kind::BlockingIOError,
+                        "I/O operation would block.",
+                    ));
+                }
+                _ => return Err(error),
+            },
+        }
+    }
+}
+
+/// Update an initialized digest from an exact native binary stream.
+///
+/// # Safety
+/// Both distinct typed handles and the tagged size are rooted throughout. Reading
+/// the native stream and updating the digest cannot call Python or reenter either owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_hash_update_file(
+    hash: *const Object,
+    file: *const Object,
+    size: usize,
+) {
+    // SAFETY: the compiler supplies an exact file handle with stable class metadata.
+    if unsafe { super::files::imre_file_is_raw(file) } != 0 {
+        Error::new(
+            Kind::NotImplementedError,
+            "file_digest does not support raw FileIO",
+        )
+        .raise();
+        return;
+    }
+    // SAFETY: both live, distinct handles are borrowed exclusively in these callbacks.
+    let result = unsafe {
+        let size = Int::borrow(size);
+        object(hash).0.with_mut(|storage| {
+            let Storage::Hash(state) = storage else {
+                unreachable!()
+            };
+            object(file)
+                .0
+                .with_mut(|stream| update_buffered_file(state, stream.file_mut(), &size))
+        })
+    };
+    finish(result, ());
+}
+
 /// # Safety
 /// The caller roots an exact hash object and the operation cannot invoke Python code.
 unsafe fn with_state<T>(hash: *const Object, f: impl FnOnce(&State) -> T) -> T {
@@ -190,6 +496,26 @@ unsafe fn with_state<T>(hash: *const Object, f: impl FnOnce(&State) -> T) -> T {
             f(state)
         })
     }
+}
+
+/// # Safety
+/// The compiler roots the hash while selecting its interned nominal class name.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_hash_type(hash: *const Object) -> *const Str {
+    // SAFETY: the name is static and does not borrow storage from the rooted handle.
+    let name = unsafe { with_state(hash, State::class_name) };
+    let class = crate::StrOwner::try_new(Str::const_new(name))
+        .ok()
+        .and_then(|name| crate::sys::try_intern_owner(&name))
+        .map(crate::StrOwner::into_raw)
+        .ok_or_else(Error::allocation);
+    finish(class, ptr::null())
+}
+
+/// The address is stable while an alias retains the rooted native hash.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_hash_identity(hash: *const Object) -> usize {
+    Int::from_usize(hash as usize).into_raw()
 }
 
 /// # Safety
@@ -211,6 +537,15 @@ pub unsafe extern "C" fn imre_hash_digest_size(hash: *const Object) -> usize {
 }
 
 /// # Safety
+/// The compiler roots the exact hash during the metadata lookup.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_hash_block_size(hash: *const Object) -> usize {
+    // SAFETY: the lookup only reads the hash's algorithm tag.
+    let size = unsafe { with_state(hash, State::block_size) };
+    Int::from_usize(size).into_raw()
+}
+
+/// # Safety
 /// The caller roots the hash. Its independent copy can be updated separately.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_copy(hash: *const Object) -> *const Object {
@@ -226,7 +561,11 @@ pub unsafe extern "C" fn imre_hash_copy(hash: *const Object) -> *const Object {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_digest(hash: *const Object) -> *const Bytes {
     // SAFETY: finalize reads a snapshot of the rooted hash.
-    let digest = unsafe { with_state(hash, |s| s.digest(super::bytes::owned_input)) };
+    let digest = unsafe {
+        with_state(hash, |s| {
+            s.fixed_digest("digest", super::bytes::owned_input)
+        })
+    };
     finish(digest.map(BytesOwner::into_raw), ptr::null())
 }
 
@@ -237,4 +576,27 @@ pub unsafe extern "C" fn imre_hash_hexdigest(hash: *const Object) -> *const Str 
     // SAFETY: finalize reads a snapshot of the rooted hash.
     let result = unsafe { with_state(hash, State::hexdigest) };
     finish(result.and_then(crate::checked_owned_str), ptr::null())
+}
+
+/// # Safety
+/// The compiler roots the XOF handle and the exact integer until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_hash_xof_digest(hash: *const Object, length: usize) -> *const Bytes {
+    // SAFETY: the checked handle and tagged integer remain owned by the caller.
+    let bytes = unsafe { with_state(hash, |s| s.xof_digest(&Int::borrow(length))) };
+    finish(
+        bytes
+            .and_then(|bytes| BytesOwner::try_new(bytes).map_err(|_| Error::memory_error()))
+            .map(BytesOwner::into_raw),
+        ptr::null(),
+    )
+}
+
+/// # Safety
+/// The compiler roots the XOF handle and the exact integer until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_hash_xof_hexdigest(hash: *const Object, length: usize) -> *const Str {
+    // SAFETY: the checked handle and tagged integer remain owned by the caller.
+    let text = unsafe { with_state(hash, |s| s.xof_hexdigest(&Int::borrow(length))) };
+    finish(text.and_then(crate::checked_owned_str), ptr::null())
 }

@@ -1,9 +1,11 @@
-"""Run pinned SHA-1 and SHA-256 vectors and incremental hash tests against native Imre."""
+"""Run pinned MD5 and SHA vectors and hash operations against native Imre."""
 import argparse
 import ast
 from collections import Counter
+from copy import copy
 import hashlib
 import inspect
+from itertools import count
 import json
 from pathlib import Path
 import subprocess
@@ -16,13 +18,58 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from upstream import verify_upstream
 
+VECTOR_COUNTS = {"md5": 3, "sha1": 4, "sha224": 4, "sha256": 4, "sha384": 4, "sha512": 4}
+SHA3 = ("sha3_224", "sha3_256", "sha3_384", "sha3_512")
+SHAKE = ("shake_128", "shake_256")
+ALGORITHMS = (*VECTOR_COUNTS, *SHA3, *SHAKE)
+
 DRIVER = """import hashlib
 import sys
 
-with open(sys.argv[1], "rb") as stream:
-    data = stream.read()
-h = hashlib.sha1(data) if sys.argv[2] == "sha1" else hashlib.sha256(data)
-print(repr((h.hexdigest(), h.digest(), h.digest_size)))
+has_data = bool(sys.argv[1])
+data = b""
+if has_data:
+    with open(sys.argv[1], "rb") as stream:
+        data = stream.read()
+algorithm = sys.argv[2]
+secure = sys.argv[4] == "True"
+if sys.argv[3] == "new":
+    first = (hashlib.new(algorithm, data, usedforsecurity=secure) if has_data else
+             hashlib.new(algorithm, usedforsecurity=secure))
+""" + "".join(f'''elif algorithm == "{algorithm}":
+    first = (hashlib.{algorithm}(data, usedforsecurity=secure) if has_data else
+             hashlib.{algorithm}(usedforsecurity=secure))
+''' for algorithm in ALGORITHMS) + """else:
+    raise ValueError("unknown hash algorithm")
+states = [first]
+for index in range(5, len(sys.argv), 3):
+    operation = sys.argv[index]
+    state = states[int(sys.argv[index + 1])]
+    if operation == "copy":
+        states.append(state.copy())
+    elif operation == "update":
+        with open(sys.argv[index + 2], "rb") as stream:
+            state.update(stream.read())
+    elif operation == "name":
+        print(repr(state.name))
+    elif operation == "repr":
+        print(repr(repr(state)))
+    elif operation == "block_size":
+        print(repr(state.block_size))
+    elif operation == "digest_size":
+        print(repr(state.digest_size))
+    elif operation == "hexdigest":
+        if sys.argv[index + 2]:
+            print(repr(state.hexdigest(int(sys.argv[index + 2]))))
+        else:
+            print(repr(state.hexdigest()))
+    elif operation == "digest":
+        if sys.argv[index + 2]:
+            print(repr(state.digest(int(sys.argv[index + 2]))))
+        else:
+            print(repr(state.digest()))
+    else:
+        raise ValueError("unknown hash operation")
 """
 
 
@@ -43,113 +90,185 @@ for name in ["sha1", "SHA-1", "ssl3-sha1", "1.3.14.3.2.26", "sha_1", "sha1\\x00"
 """
 
 
-def run_case(suite, algorithm, name, program, payload):
+def payload(directory, data):
+    with tempfile.NamedTemporaryFile(dir=directory, delete=False) as path:
+        path.write(data)
+    return path.name
+
+
+MISSING = object()
+
+
+class NativeHash:
+    """Replay the calls on one native hash and its copies, preserving their shared history."""
+
+    def __init__(self, program, directory, algorithm, variant, counts, data=MISSING, *, usedforsecurity=True):
+        self.directory = directory
+        source = "" if data is MISSING else payload(directory, data)
+        self.command = [program, source, algorithm, variant, str(usedforsecurity)]
+        self.slot = 0
+        self.slots = count(1)
+        self.counts = counts
+        self.execute()
+        counts["construct"] += 1
+
+    def execute(self):
+        result = subprocess.run(self.command, capture_output=True, timeout=30)
+        if result.returncode or result.stderr:
+            raise AssertionError(f"native hash driver exited {result.returncode}: {result.stderr!r}")
+        lines = result.stdout.splitlines()
+        reads = sum(op not in ("copy", "update") for op in self.command[5::3])
+        if len(lines) != reads:
+            raise AssertionError(f"native hash driver returned {len(lines)} results for {reads} reads")
+        return lines
+
+    def operation(self, name, argument=""):
+        self.command.extend((name, str(self.slot), argument))
+        lines = self.execute()
+        key = f"{name}({argument})" if name in ("digest", "hexdigest") and argument else name
+        self.counts[key] += 1
+        if name not in ("copy", "update"):
+            return ast.literal_eval(lines[-1].decode("ascii"))
+
+    def update(self, data):
+        self.operation("update", payload(self.directory, data))
+
+    def copy(self):
+        self.operation("copy")
+        other = copy(self)
+        other.slot = next(self.slots)
+        return other
+
+    def __repr__(self):
+        return self.operation("repr")
+
+    def hexdigest(self, length=MISSING):
+        return self.operation("hexdigest", "" if length is MISSING else str(length))
+
+    def digest(self, length=MISSING):
+        return self.operation("digest", "" if length is MISSING else str(length))
+
+    @property
+    def name(self):
+        return self.operation("name")
+
+    @property
+    def block_size(self):
+        return self.operation("block_size")
+
+    @property
+    def digest_size(self):
+        return self.operation("digest_size")
+
+
+def run_case(suite, name, algorithms, program, work):
     case = suite.HashLibTestCase(name)
-    original = getattr(suite.hashlib, algorithm)
-    constructors = case.constructors_to_test[algorithm]
-    constructors.remove(original)
-    host_constructors = {f"{ctor.__module__}.{ctor.__name__}": mock.Mock(wraps=ctor) for ctor in constructors}
-    constructors.clear()
-    constructors.update(host_constructors.values())
+    counts = {algorithm: {"direct": Counter(), "new": Counter()} for algorithm in algorithms}
     host_calls = Counter()
-    checked = Counter()
-    lengths = []
+    private = {}
+    lengths = {"direct": [], "new": []}
+    original_new = suite.hashlib.new
+    vector = name.startswith("test_case_")
+    public = {}
 
-    class NativeVector:
-        def __init__(self, data):
-            payload.write_bytes(data)
-            result = subprocess.run([program, payload, algorithm], check=True, capture_output=True, timeout=30)
-            if result.stderr:
-                raise AssertionError(result.stderr)
-            self.hex, self.raw, self.size = ast.literal_eval(result.stdout.decode("ascii"))
-            lengths.append(len(data))
+    def native(algorithm, variant, data=MISSING, *, usedforsecurity=True):
+        if vector:
+            lengths[variant].append(len(data))
+        return NativeHash(program, work, algorithm, variant, counts[algorithm][variant], data,
+                          usedforsecurity=usedforsecurity)
 
-        def hexdigest(self):
-            checked["hexdigest"] += 1
-            return self.hex
+    def direct(algorithm, original):
+        def construct(*args, **kwargs):
+            if not args and "data" not in kwargs and vector:
+                host_calls["empty direct constructor for file_digest"] += 1
+                return original(**kwargs)
+            return native(algorithm, "direct", *args, **kwargs)
+        return construct
 
-        def digest(self):
-            checked["digest"] += 1
-            return self.raw
+    def named(algorithm, *args, **kwargs):
+        if algorithm not in counts:
+            return original_new(algorithm, *args, **kwargs)
+        if not args and "data" not in kwargs and vector:
+            # Preserve the upstream crypto-policy probe and both file_digest fixtures.
+            host_calls["empty named constructor for file_digest or policy probe"] += 1
+            return original_new(algorithm, **kwargs)
+        return native(algorithm, "new", *args, **kwargs)
 
-        @property
-        def digest_size(self):
-            checked["digest_size"] += 1
-            return self.size
+    for algorithm in algorithms:
+        constructors = case.constructors_to_test[algorithm]
+        original = getattr(suite.hashlib, algorithm)
+        constructors.remove(original)
+        # Keep upstream's named-constructor closure: its actual hashlib.new lookup
+        # reaches the named native path. The remaining private providers run unchanged.
+        for ctor in constructors.copy():
+            if ctor.__module__ != suite.__name__:
+                spy = mock.Mock(wraps=ctor)
+                private[f"{ctor.__module__}.{ctor.__name__}"] = spy
+                constructors.remove(ctor)
+                constructors.add(spy)
+        public[algorithm] = direct(algorithm, original)
+        constructors.add(public[algorithm])
 
-    def direct(*args):
-        if args:  # The vector calls the public constructor with its input bytes.
-            return NativeVector(*args)
-        # The file_digest helper requests an empty, mutable host constructor.
-        host_calls["empty constructor for file_digest"] += 1
-        return original()
-
-    constructors.add(direct)
-    with mock.patch.object(suite.hashlib, "file_digest", wraps=suite.hashlib.file_digest) as files:
+    with (
+        mock.patch.multiple(suite.hashlib, new=named, **public),
+        mock.patch.object(case, "check", wraps=case.check) as checks,
+        mock.patch.object(suite.hashlib, "file_digest", wraps=suite.hashlib.file_digest) as files,
+    ):
         result = unittest.TestResult()
         case.run(result)
     host_calls["file_digest"] = files.call_count
-    passed = (result.wasSuccessful() and result.testsRun == 1 and not result.skipped and len(lengths) == 1
-              and checked == {"hexdigest": 1, "digest": 1, "digest_size": 1})
-    return case.id(), {
+    diagnostics = [reason for _, reason in result.failures + result.errors]
+    if result.wasSuccessful() and not result.skipped:
+        for algorithm, variants in counts.items():
+            for variant, observed in variants.items():
+                if vector:
+                    # A cached URL resource can supply multiple vectors in one case.
+                    n = max(1, checks.call_count)
+                    expected = {"construct": n, "hexdigest": n, "digest": n}
+                    if algorithm not in SHAKE:
+                        expected["digest_size"] = n
+                elif name == "test_large_update":
+                    expected = {"construct": 4, "update": 6, "name": 1, "digest": 8, "copy": 1}
+                elif name == "test_hexdigest":
+                    expected = {"construct": 1, "name": 1, "digest": 2, "hexdigest": 1}
+                elif name in ("test_blocksize_and_name", "test_blocksize_name_sha3"):
+                    expected = {"construct": 1, "block_size": 1, "digest_size": 1,
+                                "digest": 1, "hexdigest": 1, "name": 1, "repr": 1}
+                elif name == "test_name_attribute":
+                    # Every provider, including private CPython constructors, also
+                    # constructs a hash by name to compare its canonical name.
+                    extra = len(case.constructors_to_test[algorithm]) if variant == "new" else 0
+                    expected = {"construct": 1 + extra, "name": 5 + extra}
+                elif name in ("test_usedforsecurity_true", "test_usedforsecurity_false"):
+                    # The method explicitly probes named SHA-256 and public MD5 in
+                    # addition to the two calls on each registered constructor.
+                    extra = algorithm == "md5" or (algorithm == "sha256" and variant == "new")
+                    expected = {"construct": 2 + extra}
+                else:
+                    raise ValueError(f"unknown case {name}")
+                totals = Counter()
+                for operation, count in observed.items():
+                    totals[operation.partition("(")[0]] += count
+                if totals != expected:
+                    diagnostics.append(f"{algorithm} {variant}: expected {expected}, observed {dict(observed)}")
+    passed = result.wasSuccessful() and result.testsRun == 1 and not diagnostics
+    row = {
         "status": "mixed" if passed else "fail",
-        "native_one_shot_input_bytes": lengths,
-        "native_results_checked": dict(checked),
+        "native_operations": counts,
         "host_operations": dict(host_calls),
-        "host_reference_constructors": {name: fn.call_count for name, fn in sorted(host_constructors.items())},
-        "diagnostics": [reason for _, reason in result.failures + result.errors + result.skipped],
+        "host_reference_constructors": {key: spy.call_count for key, spy in sorted(private.items())},
+        "diagnostics": diagnostics,
     }
-
-
-def run_sha1_updates(suite, work, build):
-    # Keep upstream's complete constructor fixture. Only substitute the public
-    # SHA-1 constructor. CPython runs the test body and its assertions.
-    case = suite.HashLibTestCase("test_large_update")
-    operations = []
-    lines = ["from hashlib import sha1"]
-    source = work / "incremental.py"
-
-    def read(expression):
-        source.write_text("\n".join([*lines, f"print(repr({expression}))", ""]))
-        return ast.literal_eval(subprocess.check_output([build(source)], timeout=30).decode())
-
-    class NativeHash:
-        def __init__(self, data=b"", *, usedforsecurity):
-            self.var = f"h{len(lines)}"
-            lines.append(f"{self.var} = sha1({data!r}, usedforsecurity={usedforsecurity!r})")
-            operations.append("construct")
-
-        @property
-        def name(self):
-            operations.append("name")
-            return read(f"{self.var}.name")
-
-        def update(self, data):
-            lines.append(f"{self.var}.update({data!r})")
-            operations.append("update")
-
-        def copy(self):
-            other = object.__new__(NativeHash)
-            other.var = f"h{len(lines)}"
-            lines.append(f"{other.var} = {self.var}.copy()")
-            operations.append("copy")
-            return other
-
-        def digest(self):
-            operations.append("digest")
-            return read(f"{self.var}.digest()")
-
-    constructors = case.constructors_to_test["sha1"]
-    constructors.remove(suite.hashlib.sha1)
-    constructors.add(NativeHash)
-    result = unittest.TestResult()
-    case.run(result)
-    counts = Counter(operations)
-    passed = result.wasSuccessful() and not result.skipped and counts == {
-        "construct": 4, "update": 6, "name": 1, "digest": 8, "copy": 1}
-    return case.id(), {"status": "mixed" if passed else "fail",
-                       "native_sha1_operations": dict(counts),
-                       "diagnostics": [message for _, message in result.errors + result.failures + result.skipped]}
+    if passed and result.skipped:
+        row["status"] = "skip"
+        row["skip_reasons"] = [reason for _, reason in result.skipped]
+    if vector:
+        row["native_one_shot_input_bytes"] = lengths
+    elif name in ("test_blocksize_and_name", "test_blocksize_name_sha3"):
+        row["unmodified_cpython_algorithms"] = []
+    else:
+        row["unmodified_cpython_algorithms"] = sorted(case.constructors_to_test.keys() - counts.keys())
+    return case.id(), row
 
 
 def werkzeug_etags(wheelhouse, work, build):
@@ -263,9 +382,22 @@ def main():
         source = work / "hash.py"
         source.write_text(DRIVER)
         program = build(source)
-        cases = dict(run_case(test_hashlib, alg, f"test_case_{alg}_{n}", program, work / "data")
-                     for alg in ("sha1", "sha256") for n in range(4))
-        cases.update([run_sha1_updates(test_hashlib, work, build)])
+        cases = dict(run_case(test_hashlib, f"test_case_{alg}_{n}", [alg], program, work)
+                     for alg, size in VECTOR_COUNTS.items() for n in range(size))
+        # A standalone interpreter enables all test resources. Use the default
+        # regrtest configuration for the original URL-vector methods.
+        with mock.patch.object(test_hashlib.support, "use_resources", {}):
+            for alg in (*SHA3, *SHAKE):
+                url_name = alg.replace("shake_", "shake")
+                cases.update(run_case(test_hashlib, name, [alg], program, work)
+                             for name in (f"test_case_{alg}_0", f"test_case_{url_name}_vector"))
+        cases.update(run_case(test_hashlib, name, ["md5"], program, work)
+                     for name in ("test_case_md5_huge", "test_case_md5_uintmax"))
+        cases.update(run_case(test_hashlib, name, ALGORITHMS, program, work)
+                     for name in ("test_large_update", "test_hexdigest", "test_name_attribute",
+                                  "test_usedforsecurity_true", "test_usedforsecurity_false"))
+        cases.update([run_case(test_hashlib, "test_blocksize_and_name", VECTOR_COUNTS, program, work),
+                      run_case(test_hashlib, "test_blocksize_name_sha3", (*SHA3, *SHAKE), program, work)])
         etags = werkzeug_etags(args.wheelhouse, work, build) if args.wheelhouse else None
         controls = work / "names.py"
         controls.write_text(NAMES)

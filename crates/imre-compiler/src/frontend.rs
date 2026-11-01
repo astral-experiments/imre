@@ -60,6 +60,7 @@ mod fspath;
 mod function_caches;
 mod function_text;
 mod functools;
+mod hash_file;
 mod hashlib;
 mod http_server;
 mod import_errors;
@@ -6385,10 +6386,10 @@ impl<'a> Checker<'a> {
                         ),
                     });
                 }
-                Intrinsic::HashAvailable => {
+                Intrinsic::HashAlgorithms { guaranteed } => {
                     return Ok(Expr {
                         ty: self.types.set(Type::Str),
-                        kind: ExprKind::Builtin(Builtin::HashAvailable, vec![]),
+                        kind: ExprKind::Builtin(Builtin::HashAlgorithms { guaranteed }, vec![]),
                     });
                 }
                 Intrinsic::Linecache(ir::LinecacheOperation::Cache) => {
@@ -8910,9 +8911,15 @@ impl<'a> Checker<'a> {
                 return self.codec_getwriter(call);
             }
             Some(Binding::Intrinsic(
-                op @ (Intrinsic::Sha1 | Intrinsic::Sha256 | Intrinsic::HashNew),
+                op @ (Intrinsic::Sha1
+                | Intrinsic::Sha256
+                | Intrinsic::NamedHash(_)
+                | Intrinsic::HashNew),
             )) => {
                 return self.hash_constructor(call, op);
+            }
+            Some(Binding::Intrinsic(Intrinsic::HashFileDigest)) => {
+                return self.hash_file_digest(call);
             }
             Some(Binding::Intrinsic(Intrinsic::HmacCompareDigest)) => {
                 return self.hmac_compare_digest(call);
@@ -10661,6 +10668,7 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_)
+                        | Type::Hash
                         | Type::SysImplementation
                         | Type::CompletedProcess(..)
                         | Type::Context
@@ -10730,6 +10738,19 @@ impl<'a> Checker<'a> {
                     ty: Type::Str,
                     kind: ExprKind::Str(String::new()),
                 });
+            }
+            "type"
+                if args.len() == 1
+                    && args[0].ty == Type::Hash
+                    && self.unshadowed_builtin(&call.func, "type") =>
+            {
+                (Builtin::HashType, Type::BuiltinClass)
+            }
+            "id" if args.len() == 1
+                && args[0].ty == Type::Hash
+                && self.unshadowed_builtin(&call.func, "id") =>
+            {
+                (Builtin::HashIdentity, Type::Int)
             }
             "id" if args.len() == 1
                 && !self.names.contains_key("id")

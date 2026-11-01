@@ -150,7 +150,6 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::CodecWriterClass
         | Type::CodecWriter
         | Type::TextOutput
-        | Type::Hash
         | Type::JsonDecoder
         | Type::CsvReader
         | Type::RegexPattern

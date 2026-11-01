@@ -114,9 +114,8 @@ impl Session {
             ),
             (
                 "hashlib",
-                // The bundled OpenSSL stub still names the input `string`. CPython
-                // 3.14 calls it `data`; the native constructor takes exact bytes.
-                "from _hashlib import HASH as _Hash\nalgorithms_available: set[str]\ndef sha1(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
+                // Hash constructors accept data and its legacy string spelling, exclusively.
+                "from _hashlib import HASH as _Hash, HASHXOF as _Xof\nfrom typing import BinaryIO as _BinaryIO, Callable as _Callable\ndef file_digest(fileobj: _BinaryIO | None, digest: str | _Callable[[], _Hash], /, *, _bufsize: object = ...) -> _Hash: ...\nalgorithms_available: set[str]\nalgorithms_guaranteed: set[str]\ndef md5(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha1(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef shake_128(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef shake_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\n",
             ),
             (
                 "tomli",
