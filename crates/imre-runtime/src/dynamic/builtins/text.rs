@@ -210,6 +210,98 @@ pub(super) fn construct(
     }
 }
 
+/// Decode one contiguous ASCII buffer, accepting whitespace only between complete pairs.
+pub(super) fn fromhex(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (&class, args) = args
+        .split_first()
+        .ok_or_else(|| type_error("fromhex needs a class"))?;
+    let method_name = ctx
+        .own_class_attr(class, "__qualname__")
+        .and_then(|v| ctx.str_value(v).ok())
+        .map(|qualname| format!("{qualname}.fromhex"));
+    let value = one_positional_arg(method_name.as_deref().unwrap_or(name), args, kwargs)?;
+    let invalid = |position: usize| {
+        Error::new(
+            "ValueError",
+            format!("non-hexadecimal number found in fromhex() arg at position {position}"),
+        )
+    };
+    let data = match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Str(text) => {
+            if let Some(position) = text.as_bytes().iter().position(|b| !b.is_ascii()) {
+                return Err(invalid(position));
+            }
+            text.as_bytes()
+        }
+        Value::SurrogateStr(points) => {
+            return Err(invalid(
+                points
+                    .iter()
+                    .position(|&c| c >= 128)
+                    .expect("surrogate in Python string"),
+            ));
+        }
+        Value::Array(array) => array.as_bytes(),
+        _ => ctx.bytes_like(value).map_err(|err| {
+            if err.kind == "TypeError" {
+                let mut kind = ctx.type_name(value).to_owned();
+                if let Value::Instance { class, .. } = *ctx.heap.get(value) {
+                    if let Some(name) = ctx
+                        .own_class_attr(class, "__qualname__")
+                        .and_then(|v| ctx.str_value(v).ok())
+                    {
+                        kind = name.to_owned();
+                    }
+                    if let Some(module) = ctx
+                        .own_class_attr(class, "__module__")
+                        .and_then(|v| ctx.str_value(v).ok())
+                        && !matches!(module, "builtins" | "__main__")
+                    {
+                        kind = format!("{module}.{kind}");
+                    }
+                }
+                type_error(format!(
+                    "fromhex() argument must be str or bytes-like, not {kind}"
+                ))
+            } else {
+                err
+            }
+        })?,
+    };
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(data.len() / 2)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    let mut digits = data.iter().copied().enumerate();
+    while let Some((position, first)) = digits.next() {
+        if first.is_ascii_whitespace() || first == 0x0b {
+            continue;
+        }
+        let high = crate::objects::hexadecimal(first).ok_or_else(|| invalid(position))?;
+        let (position, second) = digits.next().ok_or_else(|| {
+            Error::new(
+                "ValueError",
+                "fromhex() arg must contain an even number of hexadecimal digits",
+            )
+        })?;
+        let low = crate::objects::hexadecimal(second).ok_or_else(|| invalid(position))?;
+        result.push((high << 4) | low);
+    }
+    match ctx.heap.get(class) {
+        Value::Native(owner) if owner == "bytes" => Ok(ctx.alloc(Value::Bytes(result))),
+        Value::Native(owner) if owner == "bytearray" => Ok(ctx.alloc(Value::ByteArray(result))),
+        _ => {
+            let argument = ctx.alloc(Value::Bytes(result));
+            ctx.call(class, vec![argument], Vec::new())
+        }
+    }
+}
+
 /// Apply a bytearray method to the underlying storage of an exact or subclass receiver.
 pub(super) fn bytearray_method(
     ctx: &mut Context,

@@ -38,6 +38,10 @@ REJECTED = {
         'print(Index() in b"abc")\n'
     ),
     "bytes_mutable": 'value = bytearray(b"abc")\n',
+    "shadowed_fromhex": (
+        'def convert(bytes: int) -> int:\n    return bytes.fromhex("41")\n'
+        "print(convert(1))\n"
+    ),
     "decode_errors": 'print(b"x".decode(errors="replace"))\n',
     "bytes_iterator_escape": 'value = iter(b"abc")\n',
     "bytes_default_wrong_type": 'def bad(value: bytes = "x") -> bytes:\n    return value\n',

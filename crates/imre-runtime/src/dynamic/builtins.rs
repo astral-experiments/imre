@@ -962,6 +962,7 @@ pub(super) fn call(
             "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
+            "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
             "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {

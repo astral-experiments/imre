@@ -556,7 +556,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "float.__getformat__"))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex"))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -2239,6 +2239,22 @@ impl Context {
                 if let Some(value) = stdlib::hash_info::type_attribute(self, name, true) {
                     return Ok(value);
                 }
+            }
+            Value::Native(ref class)
+                if name == "fromhex" && matches!(class.as_str(), "bytes" | "bytearray") =>
+            {
+                let method = self.builtin(&format!("{class}.fromhex"));
+                return Ok(self.bind_native_classmethod(method, obj));
+            }
+            Value::Bytes(_) | Value::ByteArray(_) if name == "fromhex" => {
+                let owner = self.exact_type(obj)?;
+                let symbol = if matches!(self.heap.get(obj), Value::Bytes(_)) {
+                    "bytes.fromhex"
+                } else {
+                    "bytearray.fromhex"
+                };
+                let method = self.builtin(symbol);
+                return Ok(self.bind_native_classmethod(method, owner));
             }
             Value::Native(ref class)
                 if name == "fromkeys"
