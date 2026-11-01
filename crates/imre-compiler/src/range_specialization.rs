@@ -353,10 +353,7 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, plan: Plan) {
 }
 
 fn local(slot: usize) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Local(slot),
-    }
+    Expr::local(slot, Type::Int)
 }
 
 fn integer(value: i64) -> Expr {

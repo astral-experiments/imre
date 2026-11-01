@@ -1356,10 +1356,7 @@ impl Checker<'_> {
         }
         if self.types.payload(value.ty) == Some(Type::Path) {
             let slot = self.hidden(value.ty);
-            let local = Expr {
-                ty: value.ty,
-                kind: ExprKind::Local(slot),
-            };
+            let local = Expr::local(slot, value.ty);
             let test = Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),

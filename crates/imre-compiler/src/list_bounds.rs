@@ -669,10 +669,7 @@ def caller(text: str, unknown: list[int]) -> int:
 "#,
         );
         let unknown = module.functions[0].params[1];
-        let argument = Expr {
-            ty: Type::ListInt,
-            kind: ExprKind::Local(unknown),
-        };
+        let argument = Expr::local(unknown, Type::ListInt);
         // The frontend rejects recursive source. Inject an additional unknown
         // syntactic site to exercise the pass's independent closed-graph proof.
         module.functions[0].body.push(Statement::Expr(Expr {

@@ -240,10 +240,7 @@ fn is_local(value: &Expr, id: usize) -> bool {
 }
 
 fn local(id: usize) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Local(id),
-    }
+    Expr::local(id, Type::Int)
 }
 
 #[cfg(test)]

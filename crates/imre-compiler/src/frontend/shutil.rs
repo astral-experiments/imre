@@ -78,10 +78,7 @@ impl Checker<'_> {
                 }
             });
         let path = |ty| matches!(ty, Type::Str | Type::Bytes | Type::Path);
-        let local = |i: usize| Expr {
-            ty: params[i],
-            kind: ExprKind::Local(i),
-        };
+        let local = |i: usize| Expr::local(i, params[i]);
         let none = Expr::none();
         let (op, result, args) = match (op, params.as_slice()) {
             (Intrinsic::Move, [src, dst]) if path(*src) && path(*dst) => (
@@ -158,10 +155,7 @@ impl Checker<'_> {
         let args = locals
             .iter()
             .enumerate()
-            .map(|(i, &ty)| Expr {
-                ty,
-                kind: ExprKind::Local(i),
-            })
+            .map(|(i, &ty)| Expr::local(i, ty))
             .collect();
         let result = self.types.set(ty);
         Ok(self.shutil_helper(

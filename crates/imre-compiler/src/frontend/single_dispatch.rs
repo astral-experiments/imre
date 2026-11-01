@@ -325,14 +325,10 @@ impl Checker<'_> {
         }
         let ty = self.types.dispatch_callable(target.ty);
         let layout = self.types.dispatcher(ty).unwrap();
-        let local = |slot, ty| Expr {
-            ty,
-            kind: ExprKind::Local(slot),
-        };
         let args: Vec<_> = parameters
             .iter()
             .enumerate()
-            .map(|(i, &ty)| local(i + 1, ty))
+            .map(|(i, &ty)| Expr::local(i + 1, ty))
             .collect();
         let name = value_class(self.types, &args[0]).ok_or_else(|| {
             error(
@@ -341,7 +337,7 @@ impl Checker<'_> {
                 "single dispatch requires a builtin first argument or a finite union of builtins",
             )
         })?;
-        let table = field(local(0, layout.frame), 1, layout.registry);
+        let table = field(Expr::local(0, layout.frame), 1, layout.registry);
         let chosen = lookup(&table, name, layout.callable);
         let function = ir::Function {
             locals: std::iter::once(layout.frame)

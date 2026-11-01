@@ -282,22 +282,18 @@ mod tests {
     fn local_and_final_analysis_agree_on_packed_list_allocations() {
         let types = crate::types::Types::default();
         types.set_value_structs([0].into());
-        let local = |ty, slot| Expr {
-            ty,
-            kind: ExprKind::Local(slot),
-        };
         let mut functions = Vec::new();
         for (item, packed) in [(Type::Class(0), true), (Type::Float, false)] {
             let list = types.list(item);
             let literal = Expr {
                 ty: list,
-                kind: ExprKind::List(vec![local(item, 0)]),
+                kind: ExprKind::List(vec![Expr::local(0, item)]),
             };
             let read = Expr {
                 ty: item,
                 kind: ExprKind::Builtin(
                     Builtin::SequenceGetInBounds,
-                    vec![local(list, 1), integer()],
+                    vec![Expr::local(1, list), integer()],
                 ),
             };
             for value in [literal, read] {
@@ -330,10 +326,7 @@ mod tests {
             calls: &Targets::default(),
             types: &Default::default(),
         };
-        let callback = Expr {
-            ty: Type::Callable(0),
-            kind: ExprKind::Local(0),
-        };
+        let callback = Expr::local(0, Type::Callable(0));
         let invocation = Expr {
             ty: Type::Int,
             kind: ExprKind::Invoke {
@@ -361,10 +354,7 @@ mod tests {
                 args: CallArgs::positional(args),
             },
         };
-        let local = Expr {
-            ty: callback,
-            kind: ExprKind::Local(0),
-        };
+        let local = Expr::local(0, callback);
         let mut module = Module {
             ignore_python_environment: false,
             types: Default::default(),

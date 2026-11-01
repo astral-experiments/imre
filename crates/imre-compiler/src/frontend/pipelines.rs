@@ -1316,13 +1316,7 @@ impl Checker<'_> {
             clear.push(cursor);
             let length = || Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(
-                    Builtin::Len,
-                    vec![Expr {
-                        ty,
-                        kind: ExprKind::Local(source),
-                    }],
-                ),
+                kind: ExprKind::Builtin(Builtin::Len, vec![Expr::local(source, ty)]),
             };
             acquire.push(Statement::Assign(
                 cursor,

@@ -630,6 +630,14 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    /// Read a local slot with its type at the use site.
+    pub(crate) fn local(slot: usize, ty: Type) -> Self {
+        Self {
+            ty,
+            kind: ExprKind::Local(slot),
+        }
+    }
+
     pub(crate) fn none() -> Self {
         Self {
             ty: Type::None,

@@ -526,10 +526,7 @@ fn rewrite_expression(
                 ExprKind::Tuple(
                     fields
                         .iter()
-                        .map(|&slot| Expr {
-                            ty: locals[slot],
-                            kind: ExprKind::Local(slot),
-                        })
+                        .map(|&slot| Expr::local(slot, locals[slot]))
                         .collect(),
                 )
             }),
@@ -654,16 +651,7 @@ mod tests {
         let mut locals = vec![Type::Int, Type::Str];
         let producer = Producer {
             params: vec![5, 2],
-            elements: vec![
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Local(5),
-                },
-                Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Local(2),
-                },
-            ],
+            elements: vec![Expr::local(5, Type::Int), Expr::local(2, Type::Str)],
         };
         let value = Expr {
             ty: Type::Tuple(0),
