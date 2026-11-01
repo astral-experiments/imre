@@ -1028,6 +1028,16 @@ def main():
                 "os", "posix",
             )
 
+        set_method = root / "set_difference_update.py"
+        for statement in (
+            "items.difference_update([2])",
+            "set.difference_update(items, [2])",
+            "remove = items.difference_update\nremove([2])",
+            "remove = set.difference_update\nremove(items, [2])",
+        ):
+            set_method.write_text("items = {1, 2}\nalias = items\n" + statement + "\nprint(sorted(alias))\n")
+            compare("-B", set_method, native_args=("run", set_method, "--quiet"))
+
         array_import = root / "array_import.py"
         for statement in (
             "from array import array as cls",
@@ -1523,6 +1533,7 @@ def report(text):
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
             "boxed_set_union.py",
+            "boxed_set_difference_update.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
             "boxed_gc_collect.py",
