@@ -8,13 +8,13 @@ the inherited environment mapping tests have no direct codec lookup.
 
 On [the shared registry in #691](https://github.com/astral-sh/imre/pull/691)
 at [c53dc9fc](https://github.com/astral-sh/imre/commit/c53dc9fcdbf1a09339cbe62f5971d5147ff88a86),
-all four unchanged [grouped entry checks](observations/c53dc9fc/whole-suite-startup-linux.json)
+all four unchanged [grouped entry checks](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/c53dc9fc/whole-suite-startup-linux.json)
 advance past `import codecs` and stop on `import decimal` at line 8. The same
 four entries also fail at that import when built at O0 and O3. The only use of
 `decimal` is [Decimal(-1) in the chown argument test](upstream/Lib/test/test_os.py#L2030).
 **No whole-suite occurrence executed: 0 of 579 at each optimization level.**
 
-The [independent entry checks](observations/c53dc9fc/suite-startup-linux.json)
+The [independent entry checks](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/c53dc9fc/suite-startup-linux.json)
 expose the companion failures that the first import in the grouped entry masks:
 
 | Suite | Linux occurrences | First diagnostic on the shared registry |
@@ -27,7 +27,7 @@ The OS comparison reruns [the registry owner's fixture](https://github.com/astra
 against this exact compiler. In a PTY, CPython runs the original fixture, body,
 assertion, and `os.device_encoding`; Imre resolves `UTF-8` to the `utf-8` entry
 and evaluates its truth. With redirected stdin the original method skips and
-no lookup runs. The [O0/O3 results](observations/c53dc9fc/shared-codec-consumer-linux.json)
+no lookup runs. The [O0/O3 results](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/c53dc9fc/shared-codec-consumer-linux.json)
 are byte-identical to the registry owner's release receipt. This observation
 adds no native OS operation or additional suite occurrence.
 
@@ -58,12 +58,12 @@ done
 
 For the separate suites, run [check_suite_startup.py](../check_suite_startup.py)
 with `--compiler "$IMRE" --cpython-git "$CPYTHON_GIT" test.test_os test.test_posix test.test_genericpath`.
-The [provenance](observations/c53dc9fc/registry-provenance-linux.json) records the
+The [provenance](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/c53dc9fc/registry-provenance-linux.json) records the
 release test tree, individual blobs and license, entry scripts, compiler, runtime,
 and report hashes.
 
-The [aaf044ff report](observations/aaf044ff/registry-provenance-linux.json)
-and [624d69d6 report](observations/624d69d6/registry-provenance-linux.json)
+The [aaf044ff report](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/aaf044ff/registry-provenance-linux.json)
+and [624d69d6 report](https://github.com/astral-experiments/imre/blob/6d837c0f0937ff640d28d21f3d0773afb137b515/benchmarks/cpython_stdlib/full/os/observations/624d69d6/registry-provenance-linux.json)
 retain the earlier compiler and runtime hashes. Integrating the registry with
 native `ChainMap` at `c53dc9fc` changed neither the first diagnostics nor the
 consumer report. All three runs used the same unchanged suite entries.
