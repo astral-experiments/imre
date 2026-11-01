@@ -2,9 +2,11 @@
 //! final ownership cleanup only closes resources and never changes error state.
 
 use crate::StrOwner;
+use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 
 use super::exceptions::{Error, Kind, Result, finish};
@@ -712,7 +714,7 @@ fn open_state_with_encoding(
     gzip: bool,
     encoding: Option<(&str, &str)>,
 ) -> Result<FileState> {
-    let (file, metadata) = open_file_with(path, mode, |error| {
+    let (file, metadata) = open_file_with(path.as_bytes(), mode, false, |error| {
         errno_with_filenames(
             error,
             Some(super::exceptions::Filename::Str(path.clone())),
@@ -755,31 +757,40 @@ fn open_state_with_encoding(
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
 pub(crate) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
-    open_file_with(path, mode, |error| errno_with_filename(error, Some(path)))
+    open_file_with(path.as_bytes(), mode, false, |error| {
+        errno_with_filename(error, Some(path))
+    })
+}
+
+pub(crate) fn open_raw_file(
+    path: &[u8],
+    mode: u32,
+    update: bool,
+) -> Result<(std::fs::File, std::fs::Metadata)> {
+    open_file_with(path, mode, update, errno_error)
 }
 
 /// Use the caller's filename when opening the path or rejecting a directory.
 fn open_file_with(
-    path: &str,
+    path: &[u8],
     mode: u32,
+    update: bool,
     path_error: impl Fn(io::Error) -> Error,
 ) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
-    if path.contains('\0') {
+    if path.contains(&0) {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
-    let mut file = match mode {
-        0 | 4 => OpenOptions::new().read(true).open(path),
-        1 => OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path),
-        2 => OpenOptions::new().append(true).create(true).open(path),
-        3 => OpenOptions::new().write(true).create_new(true).open(path),
+    let mut options = OpenOptions::new();
+    options.read(update);
+    match mode {
+        0 | 4 => options.read(true).write(update),
+        1 => options.write(true).create(true).truncate(true),
+        2 => options.append(true).create(true),
+        3 => options.write(true).create_new(true),
         _ => fail("SystemError", "invalid file mode"),
-    }
-    .map_err(&path_error)?;
+    };
+    let mut file = options.open(OsStr::from_bytes(path)).map_err(&path_error)?;
     let metadata = file.metadata().map_err(errno_error)?;
     if metadata.is_dir() {
         return Err(path_error(io::Error::from_raw_os_error(libc::EISDIR)));

@@ -1,23 +1,29 @@
-# CPython CSV reader evidence
+# CPython CSV suite on Linux
 
-The reference is CPython 3.14.5's complete `test.test_csv`: **128 occurrences**, each with a distinct test ID. On the Linux release build 124 pass and four debug-reference-count tests skip. [The manifest](UPSTREAM.json) uses the same unmodified vendored `test_csv.py` and license as the focused CSV reader gate.
+The native unittest loader discovers the same 128 tests in the same order as Linux CPython 3.14.5. Ordinary and runtime-import builds each pass 122 and skip six at both `-O0` and `-O3`. The original tests exercise readers and writers, dictionary field order, quoting and newlines, dialect registration, error handling and dialect detection. Imre runs their bodies, assertions, stream fixtures and cleanups. [Pinned source](UPSTREAM.json) · [Reference outcomes](reference-linux.json) · [Intact native evidence](evidence-linux.json)
 
-At O0 and O3 the [native evidence](native-linux.json) records:
+The pinned CPython release build passes 124 and skips the four `TestLeaks` methods with the reason `requires sys.gettotalrefcount()`. Imre takes the same four skips. Two upstream `cpython_only` decorators also skip `MiscTestCase.test_disallow_instantiation` and `MiscTestCase.test_lazy_import` on Imre. Both report `implementation detail specific to cpython`. The ledger classifies these two as `unexpected-skip` because the reference interpreter runs them.
 
-| Original occurrences | Body | Assertions | CSV parsing |
-| ---: | --- | --- | --- |
-| 18 Excel reader methods | Imre | Imre | Imre |
-| 1 multiline Excel method | CPython | Imre | Imre |
-| 6 `Test_Csv` reader methods | CPython | CPython | Imre |
-| 99 other passing reference methods | Not run natively | | |
-| 4 debug-only reference skips | Not run natively | | |
-
-The first 18 run byte-for-byte upstream definitions. Their native file fixture writes and reads the data, then checks each resulting row and field. The host selects a method and checks that its process completed. For `test_quoted_nl` the original CPython method supplies its input string and list of expected rows to the same native assertion helper; Imre currently reserves the local name `input`. The final six methods run their original Python assertions against 33 observed native reads per optimization level, covering NUL, delimiters, escaping, EOF, strict errors, and line endings. The driver passes each input element as a file so NUL and CRLF survive transport.
-
-Run from the repository root with the pinned test-enabled interpreter. To use a release install without `Lib/test`, add `--cpython-source /path/to/cpython-3.14.5` to the native runner.
+Run from the repository root with a release Imre compiler and runtime, Linux CPython 3.14.5 and the path to Clang in `CLANG`. The runner verifies and stages the pinned test package inside the entry's module root, then calls `unittest.defaultTestLoader.loadTestsFromModule(test_csv)`. It checks the complete ordered discovery and result vectors against the CPython reference.
 
 ```sh
-python3.14 benchmarks/cpython_stdlib/suite_inventory.py benchmarks/cpython_stdlib/full/csv/UPSTREAM.json --result /tmp/csv-reference.json
-python3.14 benchmarks/cpython_stdlib/full/csv/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result /tmp/csv-native.json
-python3.14 benchmarks/cpython_stdlib/suite_evidence.py /tmp/csv-reference.json /tmp/csv-native.json
+suite=benchmarks/cpython_stdlib/full/csv
+python3.14 -B "$suite/run.py" --intact --imre target/release/imre --runtime target/release/libimre_runtime.a --clang "$CLANG" --result /tmp/csv-evidence.json
+python3.14 -B benchmarks/cpython_stdlib/suite_evidence.py "$suite/reference-linux.json" /tmp/csv-evidence.json
 ```
+
+The negative control changes one expected field in a temporary copy of `TestDialectExcel.test_single`. It requires both CPython and the ordinary `-O0` binary to run all 128 tests, fail that original assertion and exit with status 1.
+
+```sh
+python3.14 -B "$suite/run.py" --intact --negative-control --imre target/release/imre --runtime target/release/libimre_runtime.a --clang "$CLANG" --result /tmp/csv-negative.json
+```
+
+## Earlier reader measurements
+
+The focused runner remains available. It recorded 18 fully native Excel reader methods at each optimization level. For one multiline method CPython supplied the input and expected rows. For six other methods CPython ran the assertions against native reads. All 25 IDs appear in the intact suite. [Reader ledger](native-linux.json)
+
+```sh
+python3.14 -B "$suite/run.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang "$CLANG" --result /tmp/csv-reader.json
+```
+
+For the focused runner, add `--cpython-source /path/to/cpython-3.14.5` when the interpreter was installed without `Lib/test`.
