@@ -103,7 +103,7 @@ def current():
         ("🦊", None, None), ("🦊", Index(), None), ("🦊", 1, 1), ("", 6, 6),
         ("", 7, None), (":東", -5, -2), ("🦊", -10**45, 10**45), ("", 2, 1),
     ):
-        print(text.find(needle, start, end))
+        print(text.find(needle, start, end), text.count(needle, start, end))
     print("Host: localhost".find(":"), "localhost".find(":"))
     for value in ("", " ", "\t\n", "\x1c\x1f", " x", Text("\r")):
         print(value.isspace(), str.isspace(value))

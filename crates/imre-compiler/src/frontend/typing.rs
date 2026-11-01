@@ -225,6 +225,23 @@ impl Checker<'_> {
     }
 }
 
+/// Identify a freshly constructed unbound function or its module-level singleton.
+fn direct_source(expr: &Expr, types: &Types) -> Option<usize> {
+    let id = match &expr.kind {
+        ExprKind::Callable {
+            function,
+            receiver: None,
+        } => *function,
+        ExprKind::Builtin(Builtin::StaticFunction(id), _) => *id,
+        _ => return None,
+    };
+    (types.function_site(id).is_some()
+        && types.dispatcher(expr.ty).is_none()
+        && types.cache_adapter(id).is_none()
+        && types.constructor_base(expr.ty).is_none())
+    .then_some(id)
+}
+
 /// Only unbound source functions with a known adapter can enter an overload result.
 pub(super) fn validate_functions(
     functions: &[ir::Function],
@@ -236,6 +253,16 @@ pub(super) fn validate_functions(
     }
     let mut signatures = HashMap::new();
     let mut reflected = HashSet::new();
+    let mut indirect = HashSet::new();
+    let mut direct = HashSet::new();
+    let mut reflect = |expr: &Expr| {
+        reflected.insert(expr.ty);
+        if let Some(id) = direct_source(expr, types) {
+            direct.insert(id);
+        } else {
+            indirect.insert(expr.ty);
+        }
+    };
     let mut registered = HashSet::new();
     let mut recovered = HashSet::new();
     for function in functions.iter().chain([entry]) {
@@ -255,7 +282,7 @@ pub(super) fn validate_functions(
                 ),
                 args,
             ) if matches!(args[0].ty, Type::Callable(_)) => {
-                reflected.insert(args[0].ty);
+                reflect(&args[0]);
                 if *op == ir::TypingOperation::Register {
                     registered.insert(args[0].ty);
                 }
@@ -268,7 +295,7 @@ pub(super) fn validate_functions(
             ExprKind::Builtin(Builtin::Typing(ir::TypingOperation::SetAttr(_)), args)
                 if matches!(args[1].ty, Type::Callable(_)) =>
             {
-                reflected.insert(args[1].ty);
+                reflect(&args[1]);
             }
             _ => {}
         });
@@ -277,7 +304,7 @@ pub(super) fn validate_functions(
         .into_iter()
         .filter_map(|(t, v)| v.then_some(t))
         .collect();
-    if !reflected.is_subset(&safe) {
+    if !indirect.is_subset(&safe) {
         return Err(
             "typing overloads require plain source functions for every possible argument".into(),
         );
@@ -288,6 +315,7 @@ pub(super) fn validate_functions(
         );
     }
     // Leave unrelated callback signatures on the existing representation.
-    types.allow_plain_callbacks(reflected);
+    reflected.retain(|ty| safe.contains(ty));
+    types.set_reflected_functions(reflected, direct);
     Ok(())
 }

@@ -1083,7 +1083,10 @@ pub(super) fn method(
             },
         );
     }
-    if matches!(name, "find" | "rfind") {
+    if matches!(
+        (owner, name),
+        ("str", "find" | "rfind" | "count") | ("bytes", "rfind")
+    ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "{owner}.{name}() takes no keyword arguments"
@@ -1100,7 +1103,12 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        if owner == "str" && ctx.str_value(needle).is_err() {
+        let invalid_needle = match (owner, name) {
+            ("str", "count") => ctx.string_storage(needle).is_none(),
+            ("str", _) => ctx.str_value(needle).is_err(),
+            _ => false,
+        };
+        if invalid_needle {
             let kind = if needle == NONE {
                 "None"
             } else {
@@ -1149,6 +1157,23 @@ pub(super) fn method(
                 .get(start..end)
                 .and_then(|v| memchr::memmem::rfind(v, &needle));
             return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
+        }
+        if name == "count" {
+            let value = match (
+                ctx.heap.get(ctx.scalar_value(receiver)),
+                ctx.heap.get(ctx.scalar_value(needle)),
+            ) {
+                (Value::Str(source), Value::Str(needle)) => {
+                    crate::objects::count_text(source, needle, start.as_ref(), end.as_ref())
+                }
+                _ => crate::objects::count_codepoints(
+                    &ctx.string_codepoints(receiver)?,
+                    &ctx.string_codepoints(needle)?,
+                    start.as_ref(),
+                    end.as_ref(),
+                ),
+            };
+            return Ok(ctx.alloc(Value::Int(value)));
         }
         let found = crate::objects::find_text(
             ctx.str_value(receiver)?,

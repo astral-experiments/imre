@@ -142,11 +142,17 @@ def _mapping_text(mapping: dict[str, str], pretty: bool) -> str:
     return "{" + ",\n ".join(expanded) + "}"
 
 
+class _SubTestStop(Exception):
+    pass
+
+
 class _SuiteMember:
     pass
 
 
 class TestCase(_SuiteMember):
+    _runner: _SubTestState | None
+    _subtest_params: dict[str, object]
     failureException: ClassVar[type[Exception]] = AssertionError
     _testMethodName: str
     longMessage: bool
@@ -154,6 +160,8 @@ class TestCase(_SuiteMember):
     _diffThreshold: int
 
     def __init__(self, methodName: str = "runTest") -> None:
+        self._runner = None
+        self._subtest_params = {}
         self._testMethodName = methodName
         self.longMessage = True
         self.maxDiff = 640
@@ -183,6 +191,21 @@ class TestCase(_SuiteMember):
 
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
+
+    def subTest(self, *messages: object, **params: object) -> _SubTestContext:
+        has_message = "msg" in params
+        if len(messages) and has_message:
+            raise TypeError("TestCase.subTest() got multiple values for argument 'msg'")
+        if len(messages) > 1:
+            raise TypeError("TestCase.subTest() takes from 1 to 2 positional arguments but "
+                            + str(len(messages) + 1) + " were given")
+        message: object = None
+        if has_message:
+            message = params.pop("msg")
+        for item in messages:
+            message = item
+            has_message = True
+        return _SubTestContext(self, has_message, message, params)
 
     def assertIsNone(self, obj: object, msg: str | None = None) -> None:
         if obj is not None:
@@ -495,6 +518,109 @@ class _AssertRaisesContext:
         return caught
 
 
+class _SubTestContext:
+    case: TestCase
+    has_message: bool
+    message: object
+    params: dict[str, object]
+    previous: dict[str, object]
+    entered: bool
+
+    def __init__(self, case: TestCase, has_message: bool, message: object,
+                 params: dict[str, object]) -> None:
+        self.case = case
+        self.has_message = has_message
+        self.message = message
+        self.params = params
+        self.previous = {}
+        self.entered = False
+
+    def __enter__(self) -> None:
+        # contextlib's generator context manager can be entered only once.
+        if self.entered:
+            raise AttributeError("'_GeneratorContextManager' object has no attribute 'args'")
+        self.entered = True
+        self.previous = self.case._subtest_params
+        for key in self.previous:
+            if key not in self.params:
+                self.params[key] = self.previous[key]
+        self.case._subtest_params = self.params
+
+    def _leave(self) -> None:
+        self.case._subtest_params = self.previous
+
+    def __exit__(self, exc_type: object, exc: BaseException | None, traceback: object) -> bool:
+        try:
+            if exc is not None:
+                return self._handle(exc)
+            return False
+        finally:
+            self._leave()
+
+    def _handle(self, exc: BaseException) -> bool:
+        runner = self.case._runner
+        if runner is None or isinstance(exc, _SubTestStop):
+            return False
+        # Exceptions outside the supported unittest result categories propagate.
+        if not isinstance(exc, Exception) and not isinstance(exc, SystemExit):
+            return False
+        parts: list[str] = []
+        if self.has_message:
+            parts.append("[" + str(self.message) + "]")
+        if self.params:
+            items: list[str] = []
+            for key in self.params:
+                items.append(key + "=" + repr(self.params[key]))
+            parts.append("(" + ", ".join(items) + ")")
+        description = " ".join(parts) or "(<subtest>)"
+        runner._subtest_result(self.case, description, exc)
+        if runner.failfast:
+            raise _SubTestStop()
+        return True
+
+
+class _SubTestState:
+    # TestResult owns cases in its result lists. Keep just this phase's events
+    # on the case so no strong reference points back to the result.
+    name: str
+    failfast: bool
+    verbosity: int
+    name_pending: bool
+    stream: _WritelnDecorator
+    events: list[tuple[str, str, str]]
+
+    def __init__(self, name: str, failfast: bool, verbosity: int, stream: _WritelnDecorator) -> None:
+        self.stream = stream
+        self.name = name
+        self.failfast = failfast
+        self.verbosity = verbosity
+        self.name_pending = True
+        self.events = []
+
+    def _subtest_result(self, case: TestCase, description: str, exc: BaseException) -> None:
+        parent = self.name.split("\n", 1)
+        name = parent[0] + " " + description
+        if len(parent) == 2:
+            name += "\n" + parent[1]
+        if isinstance(exc, SkipTest):
+            detail = str(exc)
+            short, status = "s", "skipped " + repr(detail)
+        else:
+            detail = "AssertionError: " + str(exc) if isinstance(exc, AssertionError) else str(exc)
+            if isinstance(exc, case.failureException):
+                short, status = "F", "FAIL"
+            else:
+                short, status = "E", "ERROR"
+        self.events.append((short, name, detail))
+        if self.verbosity == 1:
+            self.stream.write(short)
+        elif self.verbosity == 2:
+            if self.name_pending:
+                self.stream.writeln()
+            self.stream.writeln("  " + name + " ... " + status)
+            self.name_pending = False
+
+
 class TestResult:
     testsRun: int
     shouldStop: bool
@@ -548,6 +674,12 @@ class TestResult:
     def _startCase(self, name: str) -> None:
         pass
 
+    def _subtestState(self, name: str) -> _SubTestState:
+        return _SubTestState(name, self.failfast, 0, _WritelnDecorator())
+
+    def _subtestReported(self, short: str, name: str) -> None:
+        pass
+
     def _recordException(self, case: TestCase, exc: Exception, detail: str) -> None:
         if isinstance(exc, case.failureException):
             self.failures.append((case, detail))
@@ -560,7 +692,24 @@ class TestResult:
 
     def _phase(self, action: Callable[[], None], case: TestCase) -> bool:
         try:
-            action()
+            try:
+                action()
+            finally:
+                state = case._runner
+                if state is not None and state.events:
+                    for short, subtest_name, detail in state.events:
+                        if short == "s":
+                            self.addSkip(case, detail)
+                        elif short == "F":
+                            self.failures.append((case, detail))
+                        else:
+                            self.errors.append((case, detail))
+                        if self.failfast and short != "s":
+                            self.stop()
+                        self._subtestReported(short, subtest_name)
+                    state.events.clear()
+        except _SubTestStop:
+            return False
         except SkipTest as exc:
             self.addSkip(case, str(exc))
             self._mark("s", "skipped " + repr(str(exc)))
@@ -582,14 +731,17 @@ class TestResult:
             return
         self.startTest(case)
         self._startCase(name)
+        before = len(self.failures) + len(self.errors) + len(self.skipped)
+        case._runner = self._subtestState(name)
         try:
-            if self._phase(setup, case):
+            if self._phase(setup, case) and before == len(self.failures) + len(self.errors) + len(self.skipped):
                 passed = self._phase(body, case)
                 cleaned = self._phase(teardown, case)
-                if passed and cleaned:
+                if passed and cleaned and before == len(self.failures) + len(self.errors) + len(self.skipped):
                     self.addSuccess(case)
                     self._mark(".", "ok")
         finally:
+            case._runner = None
             self.stopTest(case)
 
     def _skip(self, case: TestCase, name: str, reason: str) -> None:
@@ -795,17 +947,27 @@ class TextTestResult(TestResult):
         self.started = time.time()
         super().__init__()
 
+    def _subtestState(self, name: str) -> _SubTestState:
+        return _SubTestState(self.current_name, self.failfast, self.verbose, self.stream)
+
+    def _subtestReported(self, short: str, name: str) -> None:
+        self._recordProblemName(short, name)
+        self.name_pending = False
+
     def _startCase(self, name: str) -> None:
         self.current_name = name if self.descriptions else name.split("\n", 1)[0]
         if self.verbose == 2:
             self.name_pending = True
             self.stream.write(self.current_name + " ... ")
 
-    def _mark(self, short: str, long: str) -> None:
+    def _recordProblemName(self, short: str, name: str) -> None:
         if short == "F":
-            self._failureNames.append(self.current_name)
+            self._failureNames.append(name)
         elif short == "E":
-            self._errorNames.append(self.current_name)
+            self._errorNames.append(name)
+
+    def _mark(self, short: str, long: str) -> None:
+        self._recordProblemName(short, self.current_name)
         if self.verbose == 1:
             self.stream.write(short)
         elif self.verbose == 2:

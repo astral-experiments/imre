@@ -218,6 +218,37 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name) || is_exception(name) || is_enum_base(name)
 }
 
+/// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
+pub(super) fn is_static_gc_type(name: &str) -> bool {
+    TYPES.contains(&name)
+        || EXCEPTIONS.contains(&name)
+        || (is_iterator_type(name) && !name.contains('.'))
+        || matches!(
+            name,
+            "NoneType"
+                | "NotImplementedType"
+                | "ellipsis"
+                | "code"
+                | "cell"
+                | "function"
+                | "module"
+                | "method"
+                | "builtin_function_or_method"
+                | "method-wrapper"
+                | "wrapper_descriptor"
+                | "method_descriptor"
+                | "getset_descriptor"
+                | "member_descriptor"
+                | "mappingproxy"
+                | "traceback"
+                | "frame"
+                | "types.GenericAlias"
+                | "weakref.ReferenceType"
+                | "weakref.ProxyType"
+                | "weakref.CallableProxyType"
+        )
+}
+
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
     matches!(
@@ -305,6 +336,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "__format__",
     "__repr__",
     "capitalize",
+    "count",
     "encode",
     "endswith",
     "expandtabs",

@@ -4,8 +4,12 @@
 use super::super::records::{RecordDescriptor, allocate_record};
 use super::*;
 use crate::StrOwner;
+use crate::objects::MemoryText;
 use crate::objects::{bytes::native_size, c_int, exceptions::string_repr};
 use num_traits::ToPrimitive;
+
+const CR: u32 = b'\r' as u32;
+const LF: u32 = b'\n' as u32;
 
 #[derive(Clone, Copy)]
 enum Newline {
@@ -17,7 +21,7 @@ enum Newline {
 }
 
 pub(super) struct TextMemory {
-    data: Vec<char>,
+    data: Vec<u32>,
     pos: usize,
     newline: Newline,
     seen: u8,
@@ -26,16 +30,23 @@ pub(super) struct TextMemory {
 impl TextMemory {
     /// Translate each write independently, then overwrite by character index.
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
-        if text.is_empty() {
-            return Ok(());
+        self.write_points(text.chars().map(u32::from))
+    }
+
+    fn write_points(&mut self, points: impl Iterator<Item = u32> + Clone) -> Result<()> {
+        // Reserve the translated size before modifying the stream, including any gap after a seek.
+        let mut previous = 0;
+        let mut length = 0;
+        for point in points.clone() {
+            length += match (self.newline, point) {
+                (Newline::Universal, LF) if previous == CR => 0,
+                (Newline::CrLf, LF) => 2,
+                _ => 1,
+            };
+            previous = point;
         }
-        // Count translated characters before changing the live buffer. A write
-        // overwrites in place; only the gap after an overseek is zero-filled.
-        let mut length = text.chars().count();
-        if matches!(self.newline, Newline::Universal) {
-            length -= text.as_bytes().windows(2).filter(|w| *w == b"\r\n").count();
-        } else if matches!(self.newline, Newline::CrLf) {
-            length += text.bytes().filter(|&b| b == b'\n').count();
+        if length == 0 {
+            return Ok(());
         }
         let end = self
             .pos
@@ -46,36 +57,36 @@ impl TextMemory {
             self.data
                 .try_reserve(end - self.data.len())
                 .map_err(|_| Error::allocation())?;
-            self.data.resize(end, '\0');
+            self.data.resize(end, 0);
         }
         let mut written = self.data[self.pos..end].iter_mut();
-        let mut input = text.chars().peekable();
+        let mut input = points.peekable();
         while let Some(ch) = input.next() {
             let out = match (self.newline, ch) {
-                (Newline::Universal | Newline::Preserve, '\r') if input.peek() == Some(&'\n') => {
+                (Newline::Universal | Newline::Preserve, CR) if input.peek() == Some(&LF) => {
                     input.next();
                     self.seen |= 4;
                     if matches!(self.newline, Newline::Preserve) {
-                        *written.next().unwrap() = '\r';
+                        *written.next().unwrap() = CR;
                     }
-                    '\n'
+                    LF
                 }
-                (Newline::Universal | Newline::Preserve, '\r') => {
+                (Newline::Universal | Newline::Preserve, CR) => {
                     self.seen |= 1;
                     if matches!(self.newline, Newline::Universal) {
-                        '\n'
+                        LF
                     } else {
-                        '\r'
+                        CR
                     }
                 }
-                (Newline::Universal | Newline::Preserve, '\n') => {
+                (Newline::Universal | Newline::Preserve, LF) => {
                     self.seen |= 2;
-                    '\n'
+                    LF
                 }
-                (Newline::Cr, '\n') => '\r',
-                (Newline::CrLf, '\n') => {
-                    *written.next().unwrap() = '\r';
-                    '\n'
+                (Newline::Cr, LF) => CR,
+                (Newline::CrLf, LF) => {
+                    *written.next().unwrap() = CR;
+                    LF
                 }
                 _ => ch,
             };
@@ -85,36 +96,66 @@ impl TextMemory {
         Ok(())
     }
 
-    /// Encode only the requested slice; every element is a valid Unicode scalar.
-    fn text(data: &[char]) -> Result<Str> {
-        let mut text = String::new();
-        let bytes = data.iter().map(|c| c.len_utf8()).sum();
-        text.try_reserve_exact(bytes)
-            .map_err(|_| Error::allocation())?;
-        text.extend(data);
-        Ok(Str::from(text))
+    /// Keep the single, fallible UTF-8 allocation for ordinary strings, and preserve
+    /// every code point when an unpaired surrogate precludes UTF-8.
+    fn snapshot(data: &[u32]) -> Result<MemoryText> {
+        let scalars = || data.iter().copied().map(char::from_u32);
+        let bytes = scalars().try_fold(0, |length, ch| Some(length + ch?.len_utf8()));
+        if let Some(bytes) = bytes {
+            let mut text = String::new();
+            text.try_reserve_exact(bytes)
+                .map_err(|_| Error::allocation())?;
+            text.extend(scalars().flatten());
+            Ok(MemoryText::Utf8(Str::from(text)))
+        } else {
+            let mut points = Vec::new();
+            points
+                .try_reserve_exact(data.len())
+                .map_err(|_| Error::allocation())?;
+            points.extend_from_slice(data);
+            Ok(MemoryText::Surrogates(points))
+        }
     }
 
-    /// Find the next configured line ending and cap the result in characters.
+    fn text(data: &[u32]) -> Result<Str> {
+        match Self::snapshot(data)? {
+            MemoryText::Utf8(text) => Ok(text),
+            MemoryText::Surrogates(_) => Err(Error::new(
+                Kind::UnicodeError,
+                "surrogate in a scalar-only text result",
+            )),
+        }
+    }
+
     pub(super) fn read(&mut self, size: Option<usize>, line: bool) -> Result<Str> {
+        self.read_with(size, line, Self::text)
+    }
+
+    /// Find the next configured line ending and advance only after constructing the result.
+    fn read_with<T>(
+        &mut self,
+        size: Option<usize>,
+        line: bool,
+        collect: impl FnOnce(&[u32]) -> Result<T>,
+    ) -> Result<T> {
         let remaining = self.data.get(self.pos..).unwrap_or_default();
         let mut n = remaining.len().min(size.unwrap_or(usize::MAX));
         if line {
             for (i, &c) in remaining[..n].iter().enumerate() {
                 let delimiter = match self.newline {
-                    Newline::Preserve if c == '\r' => {
-                        1 + usize::from(remaining.get(i + 1) == Some(&'\n'))
+                    Newline::Preserve if c == CR => {
+                        1 + usize::from(remaining.get(i + 1) == Some(&LF))
                     }
-                    Newline::Preserve | Newline::Lf | Newline::Universal if c == '\n' => 1,
-                    Newline::Cr if c == '\r' => 1,
-                    Newline::CrLf if c == '\r' && remaining.get(i + 1) == Some(&'\n') => 2,
+                    Newline::Preserve | Newline::Lf | Newline::Universal if c == LF => 1,
+                    Newline::Cr if c == CR => 1,
+                    Newline::CrLf if c == CR && remaining.get(i + 1) == Some(&LF) => 2,
                     _ => continue,
                 };
                 n = n.min(i + delimiter);
                 break;
             }
         }
-        let result = Self::text(&remaining[..n])?;
+        let result = collect(&remaining[..n])?;
         self.pos += n;
         Ok(result)
     }
@@ -163,12 +204,76 @@ impl FileState {
         .into_object())
     }
 
-    pub(in crate::objects) fn read_string_io(&mut self, size: Option<usize>) -> Result<Str> {
-        self.text_memory()?.read(size, false)
+    pub(in crate::objects) fn write_string_io_points(&mut self, points: &[u32]) -> Result<()> {
+        self.text_memory()?.write_points(points.iter().copied())
+    }
+
+    pub(in crate::objects) fn string_io_points(&mut self) -> Result<MemoryText> {
+        TextMemory::snapshot(&self.text_memory()?.data)
+    }
+
+    pub(in crate::objects) fn read_string_io_points(
+        &mut self,
+        size: Option<usize>,
+        line: bool,
+    ) -> Result<MemoryText> {
+        self.text_memory()?
+            .read_with(size, line, TextMemory::snapshot)
+    }
+
+    pub(in crate::objects) fn read_string_io(
+        &mut self,
+        size: Option<usize>,
+        line: bool,
+    ) -> Result<Str> {
+        self.text_memory()?.read(size, line)
     }
 
     pub(in crate::objects) fn string_io_position(&mut self) -> Result<usize> {
         Ok(self.text_memory()?.pos)
+    }
+
+    pub(in crate::objects) fn seek_string_io(&mut self, pos: i64, whence: i32) -> Result<usize> {
+        let m = self.text_memory()?;
+        m.pos = match (whence, pos) {
+            (0, p) if p >= 0 => p as usize,
+            (0, _) => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("Negative seek position {pos}"),
+                ));
+            }
+            (1, 0) => m.pos,
+            (2, 0) => m.data.len(),
+            (1 | 2, _) => {
+                return Err(Error::new(
+                    Kind::OSError,
+                    "Can't do nonzero cur-relative seeks",
+                ));
+            }
+            _ => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("Invalid whence ({whence}, should be 0, 1 or 2)"),
+                ));
+            }
+        };
+        Ok(m.pos)
+    }
+
+    pub(in crate::objects) fn truncate_string_io(&mut self, size: Option<isize>) -> Result<usize> {
+        let m = self.text_memory()?;
+        let n = match size {
+            Some(n) => usize::try_from(n)
+                .map_err(|_| Error::new(Kind::ValueError, format!("Negative size value {n}")))?,
+            None => m.pos,
+        };
+        m.data.truncate(n);
+        Ok(n)
+    }
+
+    pub(in crate::objects) fn string_io_newlines(&mut self) -> Result<u8> {
+        Ok(self.text_memory()?.seen)
     }
 
     pub(in crate::objects) fn string_io_value(&mut self) -> Result<Str> {
@@ -240,7 +345,7 @@ pub unsafe extern "C" fn imre_string_io_read(
         unsafe {
             object(file)
                 .0
-                .with_mut(|s| s.file_mut().text_memory()?.read(limit, line))
+                .with_mut(|s| s.file_mut().read_string_io(limit, line))
         }
     })();
     finish(
@@ -272,31 +377,8 @@ pub unsafe extern "C" fn imre_string_io_seek(
         // SAFETY: the rooted file outlives this mutation.
         unsafe {
             object(file).0.with_mut(|s| {
-                let m = s.file_mut().text_memory()?;
-                m.pos = match (whence, pos) {
-                    (0, p) if p >= 0 => p as usize,
-                    (0, _) => {
-                        return Err(Error::new(
-                            Kind::ValueError,
-                            format!("Negative seek position {pos}"),
-                        ));
-                    }
-                    (1, 0) => m.pos,
-                    (2, 0) => m.data.len(),
-                    (1 | 2, _) => {
-                        return Err(Error::new(
-                            Kind::OSError,
-                            "Can't do nonzero cur-relative seeks",
-                        ));
-                    }
-                    _ => {
-                        return Err(Error::new(
-                            Kind::ValueError,
-                            format!("Invalid whence ({whence}, should be 0, 1 or 2)"),
-                        ));
-                    }
-                };
-                Ok(Int::from_usize(m.pos).into_raw())
+                let pos = s.file_mut().seek_string_io(pos, whence)?;
+                Ok(Int::from_usize(pos).into_raw())
             })
         }
     })();
@@ -325,16 +407,12 @@ pub unsafe extern "C" fn imre_string_io_position(
         // SAFETY: the caller retains the file throughout the borrow.
         unsafe {
             object(file).0.with_mut(|s| {
-                let m = s.file_mut().text_memory()?;
-                let n = match size {
-                    Some(n) => usize::try_from(n).map_err(|_| {
-                        Error::new(Kind::ValueError, format!("Negative size value {n}"))
-                    })?,
-                    None => m.pos,
+                let state = s.file_mut();
+                let n = if truncate {
+                    state.truncate_string_io(size)?
+                } else {
+                    state.string_io_position()?
                 };
-                if truncate {
-                    m.data.truncate(n);
-                }
                 Ok(Int::from_usize(n).into_raw())
             })
         }
@@ -358,7 +436,7 @@ pub unsafe extern "C" fn imre_string_io_newlines(
     let seen = unsafe {
         object(file)
             .0
-            .with_mut(|s| Ok(s.file_mut().text_memory()?.seen))
+            .with_mut(|s| s.file_mut().string_io_newlines())
     };
     finish(
         seen.and_then(|seen| {

@@ -1,7 +1,7 @@
 use super::{option, tuple_text};
 use crate::dynamic::{
     Context,
-    value::{Error, Id, Result},
+    value::{Error, Id, Result, Value},
 };
 
 pub(super) const ASSIGNED: &[&str] = &[
@@ -13,6 +13,25 @@ pub(super) const ASSIGNED: &[&str] = &[
     "__type_params__",
 ];
 pub(super) const UPDATED: &[&str] = &["__dict__"];
+
+pub(super) fn default_cache(ctx: &mut Context, function: Id) -> Result<Id> {
+    if !ctx.callable(function) {
+        return Err(Error::new(
+            "TypeError",
+            "the first argument must be callable",
+        ));
+    }
+    let wrapper = ctx.cached_function(function);
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(wrapper);
+    let result = (|| {
+        let parameters = ctx.alloc(Value::CacheParameters);
+        ctx.set_attr(wrapper, "cache_parameters", parameters)?;
+        update_wrapper(ctx, &[wrapper, function], &[])
+    })();
+    ctx.heap.release_temporaries_since(mark);
+    result
+}
 
 pub(super) fn update_wrapper(
     ctx: &mut Context,

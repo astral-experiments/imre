@@ -1272,15 +1272,15 @@ impl Context {
         };
         *scope = NONE;
         *owner = FrameOwner::Module(NONE);
-        if self.heap.has_file_writers()
+        if self.heap.tracks_finalizers()
             && (!active.is_empty()
                 || !self.scope_data(frame_scope).closure.cells.is_empty()
                 || self
                     .scope_data(frame_scope)
                     .names
                     .values()
-                    .any(|&value| self.heap.could_own_writer(value, true)))
-            && self.heap.has_unbound_writer(NONE)
+                    .any(|&value| self.heap.could_own_finalizer(value, true)))
+            && self.heap.has_unbound_finalizer(NONE)
         {
             self.heap.release_scope_temporary(frame_scope);
             match &completed {
@@ -1358,16 +1358,16 @@ impl Context {
 
     /// Release the old binding before the next generator target or instruction can observe it.
     fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
-        if self.store_source_name(scope, name, value)? && self.heap.has_unbound_writer(NONE) {
+        if self.store_source_name(scope, name, value)? && self.heap.has_unbound_finalizer(NONE) {
             self.collect_unreachable();
-            self.heap.release_unbound_writers();
+            self.heap.release_unbound_finalizers();
         }
         Ok(())
     }
 
     /// Publish a binding and report whether its previous value could own a buffered writer.
     pub(super) fn store_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<bool> {
-        let replaced = self.replacing_writer(scope, name, value);
+        let replaced = self.replacing_finalizer(scope, name, value);
         let scope = self.binding_scope(scope, name);
         if let Some(locals) = self.scope_data(scope).exec_locals {
             if matches!(self.heap.get(locals), Value::List(_)) {
@@ -1456,7 +1456,7 @@ impl Context {
 
     /// Keep the iterator's backing sequence available when the final pull drops it.
     fn source_loop_owner(&mut self, iterator: Id) -> Id {
-        if !self.heap.has_file_writers() {
+        if !self.heap.tracks_finalizers() {
             return iterator;
         }
         match self.heap.get(iterator) {
@@ -1476,8 +1476,8 @@ impl Context {
 
     /// Schedule a flush only when the discarded owner could contain a writer.
     fn release_source_loop_owner(&mut self, owner: Id) {
-        if self.heap.has_file_writers() && self.heap.could_own_writer(owner, true) {
-            self.heap.release_unbound_writers();
+        if self.heap.tracks_finalizers() && self.heap.could_own_finalizer(owner, true) {
+            self.heap.release_unbound_finalizers();
         }
     }
 
@@ -1870,7 +1870,9 @@ impl Context {
                     .iter()
                     .map(|x| eval(self, x))
                     .collect::<Result<_>>()?;
-                Ok(self.alloc(Value::Tuple(items)))
+                Ok(self
+                    .heap
+                    .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
             }
             Expr::Set(display) => {
                 let items = display

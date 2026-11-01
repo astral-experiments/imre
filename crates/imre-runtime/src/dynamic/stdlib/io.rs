@@ -3,6 +3,7 @@
 use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+mod buffered_io;
 mod bytes_io;
 mod text_wrapper;
 
@@ -21,6 +22,10 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
+    for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
+        let value = ctx.int(origin);
+        ctx.bind(module, name, value);
+    }
     let object = ctx.builtin("object");
     let io = class(
         ctx,
@@ -50,10 +55,18 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         io,
         &["read", "readall", "readinto"],
     );
-    let buffered = class(ctx, module, "BufferedIOBase", io, &[]);
+    let buffered = class(ctx, module, "BufferedIOBase", io, buffered_io::METHODS);
+    ctx.builtins.insert("_io._BufferedIOBase".into(), buffered);
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
-    let text = class(ctx, module, "TextIOBase", io, &[]);
+    let text = class(
+        ctx,
+        module,
+        "TextIOBase",
+        io,
+        &["encoding", "errors", "newlines", "detach"],
+    );
+    ctx.builtins.insert("_io._TextIOBase".into(), text);
     let wrapper = class(ctx, module, "TextIOWrapper", text, text_wrapper::METHODS);
     ctx.builtins.insert("_io.TextIOWrapper".into(), wrapper);
     let string_io = class(
@@ -61,7 +74,19 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         module,
         "StringIO",
         text,
-        &["__init__", "write", "getvalue", "read", "tell", "isatty"],
+        &[
+            "__init__",
+            "write",
+            "getvalue",
+            "read",
+            "readline",
+            "seek",
+            "tell",
+            "truncate",
+            "isatty",
+            "newlines",
+            "line_buffering",
+        ],
     );
     ctx.builtins.insert("_io.StringIO".into(), string_io);
 }
@@ -83,13 +108,19 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     ctx.bind(scope, "__qualname__", qualname);
     let wrapper = name == "TextIOWrapper";
     let descriptor_owner = match name {
+        "TextIOBase" => "_io._TextIOBase",
+        "StringIO" => "_io.StringIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
         "BytesIO" => "_io.BytesIO",
         _ => "_io._IOBase",
     };
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
-        let attr = if name == "closed" || wrapper && text_wrapper::property(name) {
+        let attr = if matches!(
+            name,
+            "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
+        ) || wrapper && text_wrapper::property(name)
+        {
             let set = (wrapper && name == "_CHUNK_SIZE").then(|| {
                 ctx.alloc(Value::IoMethod {
                     owner,
@@ -235,7 +266,9 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     }
-    if matches!(name, "__iter__" | "__next__" | "readlines" | "writelines") {
+    if bytes_io != Some(owner)
+        && matches!(name, "__iter__" | "__next__" | "readlines" | "writelines")
+    {
         return lines(ctx, receiver, name, rest, kwargs);
     }
     if name == "__del__" {
@@ -260,6 +293,19 @@ pub(in super::super) fn call(
         }
         return Ok(NONE);
     }
+    if name == "detach"
+        && (ctx.builtins.get("_io._TextIOBase") == Some(&owner)
+            || ctx.builtins.get("_io._BufferedIOBase") == Some(&owner))
+    {
+        if !rest.is_empty() || !kwargs.is_empty() {
+            return Err(Error::new("TypeError", "detach() takes no arguments"));
+        }
+        return Err(Error::new("UnsupportedOperation", "detach"));
+    }
+    if ctx.builtins.get("_io._TextIOBase") == Some(&owner) {
+        // The base class getters return None even on a closed or uninitialized subclass.
+        return Ok(NONE);
+    }
     if ctx
         .builtins
         .get("_io.TextIOWrapper")
@@ -269,6 +315,9 @@ pub(in super::super) fn call(
             return super::files::text_method(ctx, name, args, kwargs);
         }
         return text_wrapper::call(ctx, receiver, name, rest, kwargs);
+    }
+    if ctx.builtins.get("_io._BufferedIOBase") == Some(&owner) {
+        return buffered_io::call(ctx, receiver, name, rest, kwargs);
     }
     if bytes_io == Some(owner)
         || matches!(name, "__enter__" | "__exit__")
@@ -284,14 +333,7 @@ pub(in super::super) fn call(
         .get("_io.StringIO")
         .is_some_and(|&class| ctx.instance_of(receiver, class))
     {
-        let Value::Instance { memory_stream, .. } = ctx.heap.get(receiver) else {
-            unreachable!("StringIO methods have an instance receiver");
-        };
-        let file = match memory_stream {
-            Some(MemoryStream::Text(file)) => Some(file.clone()),
-            _ => None,
-        };
-        return string_io_method(ctx, file, receiver, name, rest, kwargs);
+        return string_io_method(ctx, receiver, name, rest, kwargs);
     }
     let arity = match name {
         "read" => 1..=2,
@@ -427,26 +469,42 @@ fn string_io_init(
             ));
         }
     }
-    let text = |id, name| match ctx.heap.get(id) {
-        Value::None => Ok(None),
-        Value::Str(value) => Ok(Some(value.as_str())),
-        _ => Err(Error::new(
-            "TypeError",
-            format!("{name} must be str or None, not {}", ctx.type_name(id)),
-        )),
-    };
+    // The C newline parameter is converted to UTF-8, even when the initial value may
+    // contain lone surrogates. Report the codec's actual exception for that parameter.
     let newline = match values[1] {
         None => Some("\n"),
-        Some(id) => text(id, "newline")?,
+        Some(NONE) => None,
+        Some(id) => match ctx.heap.get(ctx.scalar_value(id)) {
+            Value::Str(value) => Some(value.as_str()),
+            Value::SurrogateStr(_) => {
+                ctx.encode_utf8_codepoints(id, false, "strict")?;
+                unreachable!("a surrogate cannot be encoded in strict UTF-8")
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("newline must be str or None, not {}", ctx.type_name(id)),
+                ));
+            }
+        },
     };
-    let file = match text(values[0].unwrap_or(NONE), "initial_value") {
-        Ok(initial) => crate::objects::TextFile::string_io(initial, newline)?,
-        Err(error) => {
-            // The C constructor validates the newline before the initial contents.
-            crate::objects::TextFile::string_io(None, newline)?;
-            return Err(error);
+    let file = crate::objects::TextFile::string_io(None, newline)?;
+    if let Some(initial) = values[0].filter(|&id| id != NONE) {
+        match ctx.heap.get(ctx.scalar_value(initial)) {
+            Value::Str(text) => file.write(text)?,
+            Value::SurrogateStr(points) => file.write_memory(points)?,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "initial_value must be str or None, not {}",
+                        ctx.type_name(initial)
+                    ),
+                ));
+            }
         }
-    };
+        file.seek_memory(0, 0)?;
+    }
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         unreachable!("StringIO.__init__ has an instance receiver");
     };
@@ -454,9 +512,44 @@ fn string_io_init(
     Ok(NONE)
 }
 
+fn newline_history(ctx: &mut Context, seen: u8) -> Id {
+    let mut found = Vec::new();
+    for (bit, spelling) in [(1, "\r"), (2, "\n"), (4, "\r\n")] {
+        if seen & bit != 0 {
+            found.push(ctx.text(spelling));
+        }
+    }
+    match found.as_slice() {
+        [] => NONE,
+        [id] => *id,
+        _ => ctx.alloc(Value::Tuple(found)),
+    }
+}
+
+impl From<crate::objects::MemoryText> for Value {
+    fn from(snapshot: crate::objects::MemoryText) -> Self {
+        match snapshot {
+            crate::objects::MemoryText::Utf8(text) => Value::Str(text.into_string()),
+            crate::objects::MemoryText::Surrogates(points) => Value::SurrogateStr(points),
+        }
+    }
+}
+
+fn string_io_file(ctx: &Context, receiver: Id) -> Result<&crate::objects::TextFile> {
+    let Value::Instance { memory_stream, .. } = ctx.heap.get(receiver) else {
+        unreachable!("StringIO methods have an instance receiver");
+    };
+    match memory_stream {
+        Some(MemoryStream::Text(file)) => Ok(file),
+        _ => Err(Error::new(
+            "ValueError",
+            "I/O operation on uninitialized object",
+        )),
+    }
+}
+
 fn string_io_method(
     ctx: &mut Context,
-    file: Option<crate::objects::TextFile>,
     receiver: Id,
     name: &str,
     args: &[Id],
@@ -468,81 +561,78 @@ fn string_io_method(
             format!("StringIO.{name}() takes no keyword arguments"),
         ));
     }
-    let expected = match name {
-        "write" if args.len() != 1 => Some("exactly one argument"),
-        "read" if args.len() > 1 => {
-            return Err(Error::new(
-                "TypeError",
-                format!("read expected at most 1 argument, got {}", args.len()),
-            ));
-        }
-        "write" | "read" | "__exit__" => None,
-        _ if !args.is_empty() => Some("no arguments"),
-        _ => None,
-    };
-    if let Some(expected) = expected {
-        return Err(Error::new(
-            "TypeError",
-            format!("StringIO.{name}() takes {expected} ({} given)", args.len()),
-        ));
-    }
+    argument_count("StringIO", name, args.len())?;
     if name == "__exit__" {
         let close = ctx.lookup_attr(receiver, "close")?;
         return ctx.call(close, Vec::new(), Vec::new());
     }
-    let Some(file) = file else {
-        return match name {
-            "close" | "flush" => Ok(NONE),
-            _ => Err(Error::new(
-                "ValueError",
-                "I/O operation on uninitialized object",
-            )),
+    // An index hook can close or reinitialize the receiver. Fetch the live file after conversion.
+    if matches!(name, "read" | "readline" | "truncate") {
+        let size = args
+            .first()
+            .copied()
+            .filter(|&id| id != NONE)
+            .map(|id| super::files::read_length(ctx, Some(id)))
+            .transpose()?;
+        let file = string_io_file(ctx, receiver)?;
+        if name == "truncate" {
+            let n = file.truncate_memory(size.map(|n| n as isize))?;
+            return Ok(ctx.int(n as i64));
+        }
+        let limit = size.and_then(|n| usize::try_from(n).ok());
+        let text = file.read_memory(limit, name == "readline")?;
+        return Ok(ctx.alloc(text.into()));
+    }
+    if name == "seek" {
+        let pos = ctx.index_integer(args[0])?.to_i64().ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+        let whence = if let Some(&id) = args.get(1) {
+            ctx.index_integer(id)?
+                .to_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?
+        } else {
+            0
         };
+        let n = string_io_file(ctx, receiver)?.seek_memory(pos, whence)?;
+        return Ok(ctx.int(n as i64));
+    }
+    let file = match string_io_file(ctx, receiver) {
+        Ok(file) => file,
+        Err(_) if matches!(name, "close" | "flush") => return Ok(NONE),
+        Err(error) => return Err(error),
     };
     match name {
         "write" => {
-            let Value::Str(text) = ctx.heap.get(args[0]) else {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("string argument expected, got '{}'", ctx.type_name(args[0])),
-                ));
-            };
-            file.write(text)?;
-            Ok(ctx.int(text.chars().count() as i64))
-        }
-        "getvalue" => Ok(ctx.text(file.getvalue()?.into_string())),
-        "tell" => Ok(ctx.int(file.memory_position()? as i64)),
-        "read" => {
-            let size = match args.first().copied() {
-                None | Some(NONE) => None,
-                Some(id) => {
-                    let integer = match ctx.heap.get(id) {
-                        Value::Int(_) | Value::Bool(_) => id,
-                        _ => {
-                            let index = ctx.bound_slot(id, "__index__")?.ok_or_else(|| {
-                                Error::new(
-                                    "TypeError",
-                                    format!(
-                                        "argument should be integer or None, not '{}'",
-                                        ctx.type_name(id)
-                                    ),
-                                )
-                            })?;
-                            ctx.call(index, vec![], vec![])?
-                        }
-                    };
-                    Some(ctx.as_int(integer).map_err(|_| {
-                        Error::new(
-                            "TypeError",
-                            format!(
-                                "__index__ returned non-int (type {})",
-                                ctx.type_name(integer)
-                            ),
-                        )
-                    })?)
+            let count = match ctx.heap.get(ctx.scalar_value(args[0])) {
+                Value::Str(text) => {
+                    file.write(text)?;
+                    text.chars().count()
+                }
+                Value::SurrogateStr(points) => {
+                    file.write_memory(points)?;
+                    points.len()
+                }
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("string argument expected, got '{}'", ctx.type_name(args[0])),
+                    ));
                 }
             };
-            Ok(ctx.text(file.read_memory(size.as_ref())?.into_string()))
+            Ok(ctx.int(count as i64))
+        }
+        "getvalue" => Ok(ctx.alloc(file.memory_value()?.into())),
+        "tell" => Ok(ctx.int(file.memory_position()? as i64)),
+        "newlines" => {
+            let seen = file.memory_newlines()?;
+            Ok(newline_history(ctx, seen))
         }
         "closed" => Ok(if file.closed() { TRUE } else { FALSE }),
         "flush" => {
@@ -558,9 +648,10 @@ fn string_io_method(
         }
         "__enter__" => Ok(receiver),
         "isatty" => Ok(FALSE),
-        "readable" | "writable" | "seekable" if file.closed() => {
+        "readable" | "writable" | "seekable" | "line_buffering" if file.closed() => {
             Err(Error::new("ValueError", "I/O operation on closed file"))
         }
+        "line_buffering" => Ok(FALSE),
         "readable" | "writable" | "seekable" => Ok(TRUE),
         _ => unreachable!("registered StringIO method"),
     }
