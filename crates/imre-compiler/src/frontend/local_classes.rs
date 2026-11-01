@@ -11,7 +11,7 @@ pub(super) struct LocalClass {
     pub(super) name: String,
     pub(super) qualname: String,
     pub(super) attributes: Attributes,
-    pub(super) abstract_base: Option<usize>,
+    pub(super) base: Option<usize>,
     pub(super) abstract_methods: HashSet<String>,
 }
 
@@ -97,22 +97,28 @@ impl Checker<'_> {
                 "local class metadata requires one fixed base and no decorators, metaclass or type parameters",
             ));
         }
-        let mut abstract_base = None;
+        let mut fixed_base = None;
         let mut abstract_methods = HashSet::new();
         let mut attributes =
             if let Some(base) = node.arguments.as_ref().and_then(|a| a.args.first()) {
                 if let Some(parent) = self.local_class(base)? {
-                    abstract_base = parent.abstract_base;
+                    fixed_base = parent.base;
                     abstract_methods.clone_from(&parent.abstract_methods);
                     parent.attributes.clone()
+                } else if self.unshadowed_builtin(base, "int") {
+                    inspect::INT_ATTRIBUTES
+                        .iter()
+                        .map(|&(name, callable)| (name.to_owned(), Some(callable)))
+                        .collect()
                 } else if let Some(id) = self.class_reference(base)
                     && let class = &self.classes.declarations.definitions[id]
                     && let module = &self.graph.modules[class.definition.module]
-                    && ((class.name == "TestCase" && module.bundled && module.name == "unittest")
+                    && ((matches!(class.name.as_str(), "TestSuite" | "TestCase")
+                        && module.is_bundled("unittest"))
                         || (class.abc && !class.abstract_methods.is_empty()))
                 {
+                    fixed_base = Some(id);
                     if !class.abstract_methods.is_empty() {
-                        abstract_base = Some(id);
                         abstract_methods.clone_from(&class.abstract_methods);
                     }
                     self.fixed_class_attributes(id)
@@ -189,7 +195,7 @@ impl Checker<'_> {
             name: name.to_owned(),
             qualname,
             attributes,
-            abstract_base,
+            base: fixed_base,
             abstract_methods,
         });
         Ok(())

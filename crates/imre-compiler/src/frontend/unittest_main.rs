@@ -19,10 +19,9 @@ impl Checker<'_> {
             Some(Binding::Definition(id)) => self.classes.declarations.ids.get(id).copied(),
             _ => None,
         };
-        let case_base = class_id("TestCase").ok_or("missing bundled TestCase")?;
         let runner_class = class_id("_MainRunner").ok_or("missing bundled unittest runner")?;
         let entry = &self.graph.modules[self.graph.entry];
-        if ["load_tests", "setUpModule", "tearDownModule"]
+        if ["setUpModule", "tearDownModule"]
             .iter()
             .any(|name| entry.bindings.contains_key(*name))
         {
@@ -32,78 +31,6 @@ impl Checker<'_> {
                 "native unittest.main does not yet support module hooks",
             ));
         }
-        let mut cases = Vec::new();
-        for (binding, value) in &entry.bindings {
-            let Binding::Definition(def) = value else {
-                continue;
-            };
-            let Some(&id) = self.classes.declarations.ids.get(def) else {
-                continue;
-            };
-            let class = &self.classes.declarations.definitions[id];
-            if !class.bases.contains(&case_base) {
-                continue;
-            }
-            let mut names: Vec<_> = class
-                .methods
-                .iter()
-                .filter(|m| m.name.starts_with("test"))
-                .map(|m| m.name.to_string())
-                .collect();
-            if names.is_empty() && class.methods.iter().any(|m| m.name.as_str() == "runTest") {
-                names.push("runTest".into());
-            }
-            if names.is_empty() {
-                continue;
-            }
-            // These hooks change which callbacks run or how their results are
-            // reported. Reject them until the runner implements their contracts.
-            if class.methods.iter().any(|m| {
-                matches!(
-                    m.name.as_str(),
-                    "setUpClass"
-                        | "tearDownClass"
-                        | "run"
-                        | "__call__"
-                        | "doCleanups"
-                        | "doClassCleanups"
-                        | "shortDescription"
-                        | "defaultTestResult"
-                )
-            }) || !class.node.decorator_list.is_empty()
-                || class
-                    .methods
-                    .iter()
-                    .any(|m| m.name.starts_with("test") && !m.decorator_list.is_empty())
-                || class.static_bindings.keys().any(|k| {
-                    matches!(
-                        k.as_str(),
-                        "__unittest_skip__" | "__unittest_expecting_failure__" | "failureException"
-                    )
-                })
-            {
-                return Err(error(
-                    self.source,
-                    call,
-                    "native unittest.main does not yet support custom result hooks or decorated tests",
-                ));
-            }
-            if let Some(init) = class.initializer
-                && class.method_origins[init]
-                    != self.classes.declarations.definitions[case_base].definition
-            {
-                return Err(error(
-                    self.source,
-                    call,
-                    "native unittest.main requires the inherited TestCase initializer",
-                ));
-            }
-            names.sort();
-            for method in names {
-                cases.push((binding.clone(), method, id));
-            }
-        }
-        cases.sort();
         let mut clear = Vec::new();
         let runner = self.hidden(Type::Class(runner_class));
         clear.push(runner);
@@ -121,89 +48,45 @@ impl Checker<'_> {
             ir::CallArgs::positional(vec![self.local(runner)]),
         );
         body.push(Statement::Expr(started));
-        let run = self.classes.methods[runner_class]
-            .get("_run")
-            .cloned()
-            .ok_or("unittest runner _run is unavailable")?;
         let finish = self.classes.methods[runner_class]
             .get("_finish")
             .cloned()
             .ok_or("unittest runner _finish is unavailable")?;
-        self.calls.extend([start.id, run.id, finish.id]);
-        let callback = self.types.callable(Vec::new(), Type::None);
-        for (_, name, id) in cases {
-            let case = self.hidden(Type::Class(id));
-            let mut invocation = vec![Statement::Assign(case, self.construct(call, id)?)];
-            let class = &self.classes.declarations.definitions[id];
-            let method_slot = class
-                .fields
-                .iter()
-                .position(|field| field.name == "_testMethodName")
-                .ok_or("missing TestCase method name")?;
-            invocation.push(Statement::SetField(
-                self.local(case),
-                method_slot,
-                unpacking::string(&name),
+        self.calls.extend([start.id, finish.id]);
+        if let Some(Binding::Definition(id)) = entry.bindings.get("load_tests")
+            && let ast::Stmt::FunctionDef(f) =
+                &self.graph.modules[id.module].parsed.syntax().body[id.statement]
+            && f.parameters.is_empty()
+        {
+            return Err(error(
+                self.source,
+                call,
+                "unittest module hooks must accept loader, tests, and pattern",
             ));
-            let source = &self.graph.modules[class.definition.module];
-            let origin = if class.definition.module == self.graph.entry {
-                "__main__"
-            } else {
-                &source.name
-            };
-            let str_lit = |s: String| Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(s),
-            };
-            let method = class
-                .methods
-                .iter()
-                .find(|m| m.name.as_str() == name)
-                .unwrap();
-            let description = match method.body.first() {
-                Some(ast::Stmt::Expr(stmt)) => match stmt.value.as_ref() {
-                    ast::Expr::StringLiteral(doc) => doc
-                        .value
-                        .to_str()
-                        .trim()
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .trim(),
-                    _ => "",
-                },
-                _ => "",
-            };
-            let display = format!("{name} ({origin}.{}.{name})", class.name);
-            let mut args = vec![
-                self.local(runner),
-                str_lit(if description.is_empty() {
-                    display
-                } else {
-                    format!("{display}\n{description}")
-                }),
-            ];
-            for method in ["setUp", name.as_str(), "tearDown"] {
-                let signature = self.classes.methods[id]
-                    .get(method)
-                    .cloned()
-                    .ok_or_else(|| format!("unittest method {method} is unavailable"))?;
-                let value =
-                    self.callable_value(&signature, Some(self.local(case)), Some(callback), call)?;
-                self.expect(callback, value.ty, call)?;
-                self.calls.insert(signature.id);
-                args.push(value);
-            }
-            invocation.push(Statement::Expr(self.call_value(
-                &run,
-                Type::None,
-                ir::CallArgs::positional(args),
-            )));
-            body.push(Statement::Scope {
-                body: invocation,
-                clear: vec![case],
-            });
         }
+        let Some(Binding::Value(default)) = unit.bindings.get("defaultTestLoader") else {
+            return Err(error(self.source, call, "missing unittest default loader"));
+        };
+        let (slot, _) = self
+            .globals
+            .get(*default)
+            .ok_or("unittest default loader is unavailable")?;
+        let suite = self.unittest_suite_from_module(
+            call,
+            self.graph.entry,
+            self.globals.slot_value(slot),
+            None,
+        )?;
+        let run = self.classes.methods[runner_class]
+            .get("_runSuite")
+            .cloned()
+            .ok_or("unittest suite runner is unavailable")?;
+        self.calls.insert(run.id);
+        body.push(Statement::Expr(self.call_value(
+            &run,
+            Type::None,
+            ir::CallArgs::positional(vec![self.local(runner), suite]),
+        )));
         let finished = self.call_value(
             &finish,
             Type::None,
@@ -217,5 +100,522 @@ impl Checker<'_> {
                 value: Box::new(finished),
             },
         })
+    }
+
+    fn validate_unittest_case(&self, call: &ast::ExprCall, id: usize) -> Result<(), String> {
+        let class = &self.classes.declarations.definitions[id];
+        let base = class
+            .bases
+            .iter()
+            .rev()
+            .find(|&&b| self.unittest_case(b))
+            .map(|&b| self.classes.declarations.definitions[b].definition)
+            .ok_or("missing TestCase base")?;
+        if ["setUpModule", "tearDownModule"].iter().any(|name| {
+            self.graph.modules[class.definition.module]
+                .bindings
+                .contains_key(*name)
+        }) {
+            return Err(error(
+                self.source,
+                call,
+                "native unittest does not yet support module hooks",
+            ));
+        }
+        // Fixture lookup uses class declarations even when an inherited
+        // classmethod has no explicit call site in the reachable method table.
+        let mut seen = HashSet::new();
+        for &owner in std::iter::once(&id).chain(&class.bases) {
+            let ancestor = &self.classes.declarations.definitions[owner];
+            if ancestor.definition == base {
+                break;
+            }
+            let unsupported = ancestor.node.body.iter().any(|stmt| {
+                let (name, decorated) = match stmt {
+                    ast::Stmt::FunctionDef(f) => (f.name.as_str(), !f.decorator_list.is_empty()),
+                    ast::Stmt::Assign(a) if a.targets.len() == 1 => {
+                        let Some(name) = a.targets[0].as_name_expr() else {
+                            return false;
+                        };
+                        (name.id.as_str(), false)
+                    }
+                    ast::Stmt::AnnAssign(a) if a.value.is_some() => {
+                        let Some(name) = a.target.as_name_expr() else {
+                            return false;
+                        };
+                        (name.id.as_str(), false)
+                    }
+                    _ => return false,
+                };
+                seen.insert(name)
+                    && (matches!(
+                        name,
+                        "setUpClass"
+                            | "tearDownClass"
+                            | "run"
+                            | "__call__"
+                            | "doCleanups"
+                            | "doClassCleanups"
+                            | "shortDescription"
+                            | "defaultTestResult"
+                            | "__unittest_skip__"
+                            | "__unittest_expecting_failure__"
+                    ) || (decorated && (name.starts_with("test") || name == "runTest")))
+            });
+            if unsupported
+                || ancestor.static_bindings.contains_key("failureException")
+                || (!ancestor.node.decorator_list.is_empty() && ancestor.skip_decorators.is_empty())
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "native unittest does not yet support custom result hooks or decorated tests",
+                ));
+            }
+            if ancestor.node.body.iter().any(
+                |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__init__"),
+            ) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "native unittest requires the inherited TestCase initializer",
+                ));
+            }
+        }
+        if let Some(init) = class.initializer
+            && class.method_origins[init] != base
+        {
+            return Err(error(
+                self.source,
+                call,
+                "native unittest requires the inherited TestCase initializer",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn unittest_default_construct(
+        &mut self,
+        call: &ast::ExprCall,
+        class: usize,
+    ) -> Result<Expr, String> {
+        let mut constructor = call.clone();
+        constructor.arguments.args = Default::default();
+        constructor.arguments.keywords = Default::default();
+        self.construct(&constructor, class)
+    }
+    fn unittest_display(
+        &self,
+        call: &ast::ExprCall,
+        id: usize,
+        name: &str,
+    ) -> Result<Expr, String> {
+        let class = &self.classes.declarations.definitions[id];
+        let module = self.runtime_module_name(class.definition.module);
+        let mut display = format!("{name} ({module}.{}.{name})", class.name);
+        let method = class
+            .methods
+            .iter()
+            .find(|m| m.name.as_str() == name)
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    &format!("cannot register native TestCase method {name}"),
+                )
+            })?;
+        if let Some(ast::Stmt::Expr(stmt)) = method.body.first()
+            && let ast::Expr::StringLiteral(doc) = stmt.value.as_ref()
+            && let Some(first) = doc.value.to_str().trim().lines().next()
+        {
+            display.push('\n');
+            display.push_str(first.trim());
+        }
+        Ok(unpacking::string(display))
+    }
+
+    fn unittest_invoke(
+        &mut self,
+        call: &ast::ExprCall,
+        runner: &Expr,
+        case: Expr,
+        id: usize,
+        name: &str,
+        description: Expr,
+    ) -> Result<Expr, String> {
+        let Type::Class(runner_class) = runner.ty else {
+            unreachable!()
+        };
+        // Native result records retain the case and diagnostic text; a custom
+        // addError/addFailure hook also observes the original exc_info tuple.
+        let records = &self.classes.declarations.definitions;
+        let custom_errors = std::iter::once(&runner_class).chain(&records[runner_class].bases).any(|&owner| {
+            !self.graph.modules[records[owner].definition.module].is_bundled("unittest")
+                && records[owner].node.body.iter().any(|stmt| matches!(stmt,
+                    ast::Stmt::FunctionDef(method) if matches!(method.name.as_str(), "addFailure" | "addError")))
+        });
+        if custom_errors {
+            return self.record_slot(
+                runner_class,
+                runner.clone(),
+                "_unsupportedCase",
+                &[unpacking::string(
+                    "custom TestResult error hooks require the original exception information",
+                )],
+                call,
+            );
+        }
+        let run = self.classes.methods[runner_class]
+            .get("_run")
+            .cloned()
+            .ok_or("unittest runner _run is unavailable")?;
+        let mut args = vec![
+            runner.clone(),
+            self.coerce(case.clone(), run.params[1].ty, call)?,
+            description.clone(),
+        ];
+        let callback = self.types.callable(Vec::new(), Type::None);
+        for method in ["setUp", name, "tearDown"] {
+            let signature = self.classes.methods[id]
+                .get(method)
+                .cloned()
+                .ok_or_else(|| format!("unittest method {method} is unavailable"))?;
+            let value =
+                self.callable_value(&signature, Some(case.clone()), Some(callback), call)?;
+            self.expect(callback, value.ty, call)?;
+            self.calls.insert(signature.id);
+            args.push(value);
+        }
+        self.calls.insert(run.id);
+        let mut invoke = self.call_value(&run, Type::None, ir::CallArgs::positional(args));
+        // Applying a false decorator leaves inherited skip metadata in effect.
+        // Among active decorators in the MRO, the nearest class supplies the reason.
+        let class = &self.classes.declarations.definitions[id];
+        for &ancestor in std::iter::once(&id).chain(&class.bases).rev() {
+            let ancestor = &self.classes.declarations.definitions[ancestor];
+            for index in (0..ancestor.skip_decorators.len()).rev() {
+                let (flag, reason) = self
+                    .globals
+                    .unittest_skips
+                    .borrow()
+                    .get(&(ancestor.definition, index))
+                    .copied()
+                    .ok_or("uninitialized unittest skip decorator")?;
+                let skip = self.classes.methods[runner_class]
+                    .get("_skip")
+                    .cloned()
+                    .ok_or("missing native unittest skip handler")?;
+                let args = vec![
+                    runner.clone(),
+                    self.coerce(case.clone(), skip.params[1].ty, call)?,
+                    description.clone(),
+                    self.globals.slot_value(reason),
+                ];
+                self.calls.insert(skip.id);
+                let skipped = self.call_value(&skip, Type::None, ir::CallArgs::positional(args));
+                invoke = Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Conditional(
+                        Box::new(self.globals.slot_value(flag)),
+                        Box::new(skipped),
+                        Box::new(invoke),
+                    ),
+                };
+            }
+        }
+        Ok(invoke)
+    }
+    /// Every TestCase binding in dir(module) order contributes a suite, including aliases.
+    fn unittest_module_classes(&self, module: ModuleId) -> Vec<usize> {
+        let mut bindings = Vec::new();
+        for (name, binding) in &self.graph.modules[module].bindings {
+            if let Binding::Definition(def) = binding
+                && let Some(&id) = self.classes.declarations.ids.get(def)
+                && self.classes.declarations.definitions[id]
+                    .bases
+                    .iter()
+                    .any(|&base| self.unittest_case(base))
+            {
+                bindings.push((name, id));
+            }
+        }
+        bindings.sort();
+        bindings.into_iter().map(|(_, id)| id).collect()
+    }
+
+    fn unittest_method_names(&self, id: usize) -> Vec<String> {
+        self.fixed_class_attributes(id)
+            .into_iter()
+            .filter_map(|(name, callable)| {
+                (callable == Some(true) && (name.starts_with("test") || name == "runTest"))
+                    .then_some(name)
+            })
+            .collect()
+    }
+
+    pub(super) fn unittest_module_cases(
+        &mut self,
+        call: &ast::ExprCall,
+        target: ModuleId,
+        suite: usize,
+        loader: usize,
+    ) -> Result<Vec<Statement>, String> {
+        let Type::Class(suite_class) = self.locals[suite] else {
+            unreachable!()
+        };
+        let mut body = Vec::new();
+        for id in self.unittest_module_classes(target) {
+            let group = self.hidden(Type::Class(suite_class));
+            let mut register = vec![Statement::Assign(
+                group,
+                self.unittest_default_construct(call, suite_class)?,
+            )];
+            register.extend(self.unittest_add_class_cases(call, id, group, loader)?);
+            let add = self.record_slot(
+                suite_class,
+                self.local(suite),
+                "addTest",
+                &[self.local(group)],
+                call,
+            )?;
+            register.push(Statement::Expr(add));
+            body.push(Statement::Scope {
+                body: register,
+                clear: vec![group],
+            });
+        }
+        Ok(body)
+    }
+
+    pub(super) fn unittest_add_class_cases(
+        &mut self,
+        call: &ast::ExprCall,
+        id: usize,
+        group: usize,
+        loader: usize,
+    ) -> Result<Vec<Statement>, String> {
+        let Type::Class(suite_class) = self.locals[group] else {
+            unreachable!()
+        };
+        if self.unittest_case(id)
+            && !self.classes.declarations.definitions[id]
+                .bases
+                .iter()
+                .any(|&parent| self.unittest_case(parent))
+        {
+            return Ok(Vec::new());
+        }
+        let mut register = Vec::new();
+        let selected = self.unittest_fixed_names(call, &self.local(loader), id)?;
+        let names = self.hidden(selected.ty);
+        register.push(Statement::Assign(names, selected));
+        // CPython tries runTest even when the attribute it finds is not a
+        // callable method. Reject an unsupported descriptor rather than
+        // reporting an empty suite when that fallback would be selected.
+        if self
+            .fixed_class_attributes(id)
+            .get("runTest")
+            .is_some_and(|value| *value != Some(true))
+        {
+            return Err(error(
+                self.source,
+                call,
+                "native TestCase needs a callable runTest method",
+            ));
+        }
+        if !self.classes.declarations.definitions[id]
+            .abstract_methods
+            .is_empty()
+        {
+            return Err(error(
+                self.source,
+                call,
+                "native unittest cannot instantiate an abstract test case",
+            ));
+        }
+        let methods = self.unittest_method_names(id);
+        if !methods.is_empty() {
+            self.validate_unittest_case(call, id)?;
+        }
+        for name in methods {
+            let contains = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::StringListContains,
+                    vec![unpacking::string(&name), self.local(names)],
+                ),
+            };
+            let include = if name == "runTest" {
+                let nonempty = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::Bool, vec![self.local(names)]),
+                };
+                let empty = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(nonempty)),
+                };
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Boolean(false, vec![contains, empty]),
+                }
+            } else {
+                contains
+            };
+            // validate_unittest_case established the inherited TestCase initializer.
+            // Pass its real methodName so construction observes the selected method.
+            let init = self.classes.methods[id]["__init__"].id;
+            self.calls.insert(init);
+            let case = Expr {
+                ty: Type::Class(id),
+                kind: ExprKind::Construct {
+                    initializer: init,
+                    args: ir::CallArgs::positional(vec![unpacking::string(&name)]),
+                },
+            };
+            let add = self.record_slot(
+                suite_class,
+                self.local(group),
+                "_addCase",
+                &[case, self.unittest_display(call, id, &name)?],
+                call,
+            )?;
+            register.push(Statement::If(include, vec![Statement::Expr(add)], vec![]));
+        }
+        Ok(vec![Statement::Scope {
+            body: register,
+            clear: vec![names],
+        }])
+    }
+
+    /// Suite records hold ordinary case references. Resolve callbacks only when this
+    /// occurrence runs, so discovery and repeated registration leave fixtures untouched.
+    pub(super) fn unittest_run_registered(
+        &mut self,
+        call: &ast::ExprCall,
+        class: usize,
+        receiver: &Expr,
+    ) -> Result<Option<Expr>, String> {
+        let result = &self.classes.declarations.definitions[class];
+        let Some(origin) = result
+            .methods
+            .iter()
+            .position(|m| m.name.as_str() == "_runRegistered")
+            .map(|slot| result.method_origins[slot])
+        else {
+            return Ok(None);
+        };
+        let module = &self.graph.modules[origin.module];
+        if !module.is_bundled("unittest")
+            || module.bindings.get("TestResult") != Some(&Binding::Definition(origin))
+        {
+            return Ok(None);
+        }
+        let ([case, description], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return Err(error(
+                self.source,
+                call,
+                "_runRegistered expects a TestCase and its description",
+            ));
+        };
+        let class_id = class;
+        let case = self.expr(case)?;
+        let Type::Class(base) = case.ty else {
+            return Err(error(self.source, call, "expected TestCase"));
+        };
+        let description = self.expr(description)?;
+        let runner_slot = self.hidden(receiver.ty);
+        let case_slot = self.hidden(case.ty);
+        let description_slot = self.hidden(description.ty);
+        let result =
+            self.dispatch_record(base, self.local(case_slot), call, |checker, id, case| {
+                let class = &checker.classes.declarations.definitions[id];
+                let index = class
+                    .fields
+                    .iter()
+                    .position(|f| f.name == "_testMethodName")
+                    .ok_or("missing TestCase method name")?;
+                let method_name = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Field(Box::new(case.clone()), index),
+                };
+                let methods = checker.unittest_method_names(id);
+                // Explicit TestSuite.addTest(case) can supply a case outside the
+                // loader. Do not silently execute one with unsupported hooks.
+                if !methods.is_empty()
+                    && !checker.graph.modules[class.definition.module].is_bundled("unittest")
+                    && let Err(reason) = checker.validate_unittest_case(call, id)
+                {
+                    return checker.record_slot(
+                        class_id,
+                        checker.local(runner_slot),
+                        "_unsupportedCase",
+                        &[unpacking::string(reason)],
+                        call,
+                    );
+                }
+                let mut run = checker.record_slot(
+                    class_id,
+                    checker.local(runner_slot),
+                    "_missingMethod",
+                    std::slice::from_ref(&method_name),
+                    call,
+                )?;
+                for method in methods {
+                    let condition = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Compare(
+                            vec![method_name.clone(), unpacking::string(&method)],
+                            vec![Compare::Equal],
+                        ),
+                    };
+                    let explicit = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Compare(
+                            vec![checker.local(description_slot), unpacking::string("")],
+                            vec![Compare::Equal],
+                        ),
+                    };
+                    let display = Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Conditional(
+                            Box::new(explicit),
+                            Box::new(checker.unittest_display(call, id, &method)?),
+                            Box::new(checker.local(description_slot)),
+                        ),
+                    };
+                    let invoke = checker.unittest_invoke(
+                        call,
+                        &checker.local(runner_slot),
+                        case.clone(),
+                        id,
+                        &method,
+                        display,
+                    )?;
+                    run = Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Conditional(
+                            Box::new(condition),
+                            Box::new(invoke),
+                            Box::new(run),
+                        ),
+                    };
+                }
+                Ok(run)
+            })?;
+        Ok(Some(Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(runner_slot, receiver.clone()),
+                    Statement::Assign(case_slot, case),
+                    Statement::Assign(description_slot, description),
+                ],
+                clear: vec![runner_slot, case_slot, description_slot],
+                value: Box::new(result),
+            },
+        }))
     }
 }

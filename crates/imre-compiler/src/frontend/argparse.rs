@@ -799,6 +799,7 @@ fn namespace_class(
     let class = classes.definitions.len();
     layouts.push(fields.iter().map(|field| field.ty).collect());
     classes.definitions.push(Class {
+        skip_decorators: Vec::new(),
         forwarder: None,
         init_hooks: Default::default(),
         init_exposes_self: false,

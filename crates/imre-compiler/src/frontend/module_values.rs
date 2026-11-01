@@ -13,6 +13,7 @@ pub(super) struct ModuleValues {
     pub(super) class_data: RefCell<class_data::Storage>,
     definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
     class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
+    pub(super) unittest_skips: RefCell<HashMap<(DefinitionId, usize), (usize, usize)>>,
     literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
     types: RefCell<Vec<Type>>,
     pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureLayout>>,
@@ -170,6 +171,48 @@ impl Checker<'_> {
     ) -> Result<(), String> {
         use crate::classes::ClassValue;
         let class = &self.classes.declarations.definitions[class_id];
+        for (index, skip) in class.skip_decorators.iter().enumerate() {
+            if !self.unittest_case(class_id) {
+                return Err(error(
+                    self.source,
+                    &class.node,
+                    "native unittest class skip decorators require TestCase",
+                ));
+            }
+            let start = body.len();
+            let initialized = self.globals.types.borrow().len();
+            let condition = self.expr(&skip.condition)?;
+            self.expect(Type::Bool, condition.ty, &skip.condition)?;
+            let flag = if skip.unless {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(condition)),
+                }
+            } else {
+                condition
+            };
+            let reason = self.expr(&skip.reason)?;
+            self.expect(Type::Str, reason.ty, &skip.reason)?;
+            let flag_slot = self.globals.reserve(Type::Bool);
+            let reason_slot = self.globals.reserve(Type::Str);
+            self.globals
+                .unittest_skips
+                .borrow_mut()
+                .insert((definition, index), (flag_slot, reason_slot));
+            for (slot, value) in [(flag_slot, flag), (reason_slot, reason)] {
+                body.push(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
+                }));
+            }
+            checkpoints.push(Checkpoint {
+                statement: definition.statement,
+                body: start..body.len(),
+                initialized,
+                definitions: available.clone(),
+                binding_reads: std::mem::take(self.class_reads.get_mut()),
+            });
+        }
         if !class
             .static_bindings
             .values()
@@ -579,7 +622,17 @@ impl Initialization {
                     Err(error) => return Err(error),
                 }
             } else {
-                body.extend(checker.statement(statement, &[])?.0);
+                let (checked, _) = checker.statement(statement, &[])?;
+                // An imported module's __main__ block must type-check, but it
+                // cannot read definitions that are still being initialized.
+                if checker.module != checker.graph.entry
+                    && !module.bindings.contains_key("__name__")
+                    && inactive_main_guard(statement)
+                {
+                    checker.class_reads.get_mut().clear();
+                    continue;
+                }
+                body.extend(checked);
             }
             checkpoints.push(Checkpoint {
                 statement: index,
@@ -694,6 +747,21 @@ impl Initialization {
         }
         Ok(())
     }
+}
+
+fn inactive_main_guard(stmt: &ast::Stmt) -> bool {
+    let ast::Stmt::If(branch) = stmt else {
+        return false;
+    };
+    let ast::Expr::Compare(test) = branch.test.as_ref() else {
+        return false;
+    };
+    branch.elif_else_clauses.is_empty()
+        && matches!(test.ops.as_ref(), [ast::CmpOp::Eq])
+        && matches!(test.operands.as_ref(),
+            [ast::Expr::Name(name), ast::Expr::StringLiteral(text)]
+            | [ast::Expr::StringLiteral(text), ast::Expr::Name(name)]
+            if name.id == "__name__" && text.value.to_str() == "__main__")
 }
 
 fn collect(

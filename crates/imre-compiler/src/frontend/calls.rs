@@ -485,6 +485,7 @@ impl Checker<'_> {
             if let ast::Expr::Starred(star) = arg
                 && let Some(index) = pack
                 && index == positional
+                && self.types.element(params[index].ty).is_some()
                 && packed.is_empty()
                 && at + 1 == call.arguments.args.len()
                 && star
@@ -514,11 +515,11 @@ impl Checker<'_> {
                     let index = pack.ok_or_else(|| {
                         error(checker.source, arg, "too many positional arguments")
                     })?;
-                    let element = checker
-                        .types
-                        .element(params[index].ty)
-                        .expect("typed positional rest");
-                    let value = input.checked(checker, element, false)?;
+                    let value = if let Some(element) = checker.types.element(params[index].ty) {
+                        input.checked(checker, element, false)?
+                    } else {
+                        input.value(checker)?
+                    };
                     packed.push(if let Some(scope) = scope {
                         scope.hold(checker, value)
                     } else {
@@ -549,10 +550,36 @@ impl Checker<'_> {
         }
         if let Some(index) = pack {
             order[index + offset] = values.len();
-            values.push(forwarded.unwrap_or_else(|| Expr {
-                ty: params[index].ty,
-                kind: ExprKind::List(packed),
-            }));
+            let value = if let Some(forwarded) = forwarded {
+                forwarded
+            } else if self.types.element(params[index].ty).is_some() {
+                Expr {
+                    ty: params[index].ty,
+                    kind: ExprKind::List(packed),
+                }
+            } else {
+                let ty = self.types.tuple(packed.iter().map(|arg| arg.ty).collect());
+                let expected = if let (Some(inference), Some((function, skip))) =
+                    (self.inference, default_owner)
+                {
+                    inference.learn_parameter(function, index + skip, ty);
+                    inference.parameter(function, index + skip)
+                } else {
+                    Some(params[index].ty)
+                };
+                if expected != Some(ty) {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "an unannotated variadic parameter requires the same tuple shape at every call",
+                    ));
+                }
+                Expr {
+                    ty,
+                    kind: ExprKind::Tuple(packed),
+                }
+            };
+            values.push(value);
         }
         for keyword in &call.arguments.keywords {
             let name = keyword

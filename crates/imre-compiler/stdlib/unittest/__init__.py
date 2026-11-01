@@ -5,8 +5,11 @@ import difflib
 import re
 from datetime import date, timedelta
 from fnmatch import fnmatchcase
+from io import StringIO
 from types import ModuleType
-from typing import ClassVar
+from typing import Callable, ClassVar
+import sys
+import time
 
 
 class SkipTest(Exception):
@@ -139,18 +142,26 @@ def _mapping_text(mapping: dict[str, str], pretty: bool) -> str:
     return "{" + ",\n ".join(expanded) + "}"
 
 
-class TestCase:
+class _SuiteMember:
+    pass
+
+
+class TestCase(_SuiteMember):
     failureException: ClassVar[type[Exception]] = AssertionError
     _testMethodName: str
     longMessage: bool
     maxDiff: int | None
     _diffThreshold: int
 
-    def __init__(self) -> None:
-        self._testMethodName = "runTest"
+    def __init__(self, methodName: str = "runTest") -> None:
+        self._testMethodName = methodName
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
+        _validateCaseMethod(self, methodName)
+
+    def _declaredCaseMethods(self) -> tuple[list[str], list[str]]:
+        raise RuntimeError("native unittest case requires its class metadata")
 
     def countTestCases(self) -> int:
         return 1
@@ -393,6 +404,16 @@ class TestCase:
         pass
 
 
+def _validateCaseMethod(case: TestCase, methodName: str) -> None:
+    if methodName != "runTest":
+        methods, descriptors = case._declaredCaseMethods()
+        if methodName not in methods:
+            if methodName in descriptors or methodName.startswith("__"):
+                raise NotImplementedError("native TestCase cannot inspect descriptor " + methodName)
+            owner = case.__class__.__module__ + "." + case.__class__.__qualname__
+            raise ValueError("no such test method in <class '" + owner + "'>: " + methodName)
+
+
 class _BoundAssertion:
     _receiver: TestCase
 
@@ -478,6 +499,8 @@ class TestResult:
     testsRun: int
     shouldStop: bool
     failfast: bool
+    failures: list[tuple[TestCase, str]]
+    errors: list[tuple[TestCase, str]]
     skipped: list[tuple[TestCase, str]]
     unexpectedSuccesses: list[TestCase]
 
@@ -485,6 +508,8 @@ class TestResult:
         self.testsRun = 0
         self.shouldStop = False
         self.failfast = False
+        self.failures = []
+        self.errors = []
         self.skipped = []
         self.unexpectedSuccesses = []
 
@@ -514,13 +539,177 @@ class TestResult:
     def stop(self) -> None:
         self.shouldStop = True
 
+    def wasSuccessful(self) -> bool:
+        return not (self.errors or self.failures or self.unexpectedSuccesses)
 
-from typing import Callable
-import sys
-import time
+    def _mark(self, short: str, long: str) -> None:
+        pass
+
+    def _startCase(self, name: str) -> None:
+        pass
+
+    def _recordException(self, case: TestCase, exc: Exception, detail: str) -> None:
+        if isinstance(exc, case.failureException):
+            self.failures.append((case, detail))
+            self._mark("F", "FAIL")
+        else:
+            self.errors.append((case, detail))
+            self._mark("E", "ERROR")
+        if self.failfast:
+            self.stop()
+
+    def _phase(self, action: Callable[[], None], case: TestCase) -> bool:
+        try:
+            action()
+        except SkipTest as exc:
+            self.addSkip(case, str(exc))
+            self._mark("s", "skipped " + repr(str(exc)))
+            return False
+        except AssertionError as exc:
+            self._recordException(case, exc, "AssertionError: " + str(exc))
+            return False
+        except SystemExit as exc:
+            self._recordException(case, exc, "SystemExit: " + str(exc))
+            return False
+        except Exception as exc:
+            self._recordException(case, exc, str(exc))
+            return False
+        return True
+
+    def _run(self, case: TestCase, name: str, setup: Callable[[], None],
+             body: Callable[[], None], teardown: Callable[[], None]) -> None:
+        if self.shouldStop:
+            return
+        self.startTest(case)
+        self._startCase(name)
+        try:
+            if self._phase(setup, case):
+                passed = self._phase(body, case)
+                cleaned = self._phase(teardown, case)
+                if passed and cleaned:
+                    self.addSuccess(case)
+                    self._mark(".", "ok")
+        finally:
+            self.stopTest(case)
+
+    def _skip(self, case: TestCase, name: str, reason: str) -> None:
+        if self.shouldStop:
+            return
+        self.startTest(case)
+        self._startCase(name)
+        try:
+            self.addSkip(case, reason)
+            self._mark("s", "skipped " + repr(reason))
+        finally:
+            self.stopTest(case)
+
+    def _unsupportedCase(self, reason: str) -> None:
+        raise NotImplementedError(reason)
+
+    def _missingMethod(self, name: str) -> None:
+        raise AttributeError(name)
+
+    def _runRegistered(self, case: TestCase, name: str) -> None:
+        # Lowered to native calls on the case's concrete record.
+        raise RuntimeError("native unittest case requires method dispatch")
+
+
+class _SuiteEntry:
+    case: TestCase | None
+    name: str
+    boundary: bool
+    consumed: bool
+
+    def __init__(self, case: TestCase | None, name: str, boundary: bool) -> None:
+        self.case = case
+        self.name = name
+        self.boundary = boundary
+        self.consumed = False
+
+
+class TestSuite(_SuiteMember):
+    # Entries are shared with enclosing suites so consuming a case releases
+    # the same instance from every view. The boundary represents the parent's
+    # slot for a nested suite, including an empty suite.
+    _entries: list[tuple[int, _SuiteEntry]]
+    _attached: bool
+
+    def __init__(self, tests: list[_SuiteMember] | None = None) -> None:
+        self._entries = _suiteEntries(tests)
+        self._attached = False
+
+    def _addCase(self, case: TestCase, name: str) -> None:
+        if self._attached:
+            raise NotImplementedError("cannot extend a nested native suite after attachment")
+        self._entries.append((0, _SuiteEntry(case, name, False)))
+
+    def addTest(self, test: _SuiteMember) -> None:
+        if self._attached:
+            raise NotImplementedError("cannot extend a nested native suite after attachment")
+        if test is self:
+            raise NotImplementedError("cyclic native test suite")
+        _appendSuiteMember(self._entries, test)
+
+    def addTests(self, tests: TestSuite) -> None:
+        if self._attached:
+            raise NotImplementedError("cannot extend a nested native suite after attachment")
+        if tests is self:
+            raise NotImplementedError("cannot extend a native suite from itself")
+        for depth, entry in tests._entries:
+            if depth == 0:
+                if entry.consumed:
+                    raise TypeError("None is not callable")
+                # Extending a suite copies its direct slots. If a slot holds a
+                # nested suite, the nested suite's own slots remain shared.
+                self._entries.append((0, _SuiteEntry(entry.case, entry.name, entry.boundary)))
+            else:
+                self._entries.append((depth, entry))
+
+    def countTestCases(self) -> int:
+        count = 0
+        for depth, entry in self._entries:
+            if not entry.boundary:
+                count += 1
+        return count
+
+    def run(self, result: TestResult) -> TestResult:
+        for depth, entry in self._entries:
+            if result.shouldStop:
+                break
+            if entry.consumed:
+                raise TypeError("'NoneType' object is not callable")
+            if not entry.boundary:
+                case = entry.case
+                if case is None:
+                    raise TypeError("'NoneType' object is not callable")
+                result._runRegistered(case, entry.name)
+                entry.case = None
+            entry.consumed = True
+        return result
+
+
+def _appendSuiteMember(entries: list[tuple[int, _SuiteEntry]], test: _SuiteMember) -> None:
+    if isinstance(test, TestCase):
+        entries.append((0, _SuiteEntry(test, "", False)))
+        return
+    if not isinstance(test, TestSuite):
+        raise TypeError("expected a TestCase or TestSuite")
+    entries.append((0, _SuiteEntry(None, "", True)))
+    for depth, entry in test._entries:
+        entries.append((depth + 1, entry))
+    test._attached = True
+
+
+def _suiteEntries(tests: list[_SuiteMember] | None) -> list[tuple[int, _SuiteEntry]]:
+    entries: list[tuple[int, _SuiteEntry]] = []
+    if tests is not None:
+        for test in tests:
+            _appendSuiteMember(entries, test)
+    return entries
 
 
 class TestLoader:
+    suiteClass = TestSuite
     testMethodPrefix: str
     testNamePatterns: list[str] | None
     errors: list[str]
@@ -551,6 +740,14 @@ class TestLoader:
         return selected
 
 
+    def _getModuleCaseNames(self, owner: str, names: list[str], descriptors: list[str]) -> list[str]:
+        # Other prefixes can select inherited TestCase API methods whose
+        # executable descriptors the native suite cannot register.
+        if not self.testMethodPrefix.startswith("test") and self.testMethodPrefix != "runTest":
+            raise NotImplementedError("native TestLoader cannot register prefix " + repr(self.testMethodPrefix))
+        return self._getTestCaseNames(owner, names, descriptors)
+
+
 defaultTestLoader = TestLoader()
 
 
@@ -559,27 +756,131 @@ def main() -> None:
     raise RuntimeError("native unittest.main requires a direct call")
 
 
-class _MainRunner:
-    total: int
-    failures: list[str]
-    errors: list[str]
-    skips: int
-    failfast: bool
+class _WritelnDecorator:
+    _memory: StringIO | None
+
+    def __init__(self, stream: StringIO | None = None) -> None:
+        self._memory = stream
+
+    def write(self, text: str) -> int:
+        memory = self._memory
+        if memory is None:
+            return sys.stderr.write(text)
+        return memory.write(text)
+
+    def writeln(self, text: str = "") -> None:
+        self.write(text + "\n")
+
+
+class TextTestResult(TestResult):
     verbose: int
     started: float
     current_name: str
     name_pending: bool
 
-    def __init__(self) -> None:
-        self.total = 0
-        self.failures = []
-        self.errors = []
-        self.skips = 0
-        self.failfast = False
-        self.verbose = 1
+    stream: _WritelnDecorator
+    descriptions: bool
+    _failureNames: list[str]
+    _errorNames: list[str]
+
+    def __init__(self, stream: StringIO | None = None, descriptions: bool = True,
+                 verbosity: int = 1) -> None:
+        self.stream = _WritelnDecorator(stream)
+        self.descriptions = descriptions
+        self._failureNames = []
+        self._errorNames = []
+        self.verbose = verbosity
         self.current_name = ""
         self.name_pending = False
         self.started = time.time()
+        super().__init__()
+
+    def _startCase(self, name: str) -> None:
+        self.current_name = name if self.descriptions else name.split("\n", 1)[0]
+        if self.verbose == 2:
+            self.name_pending = True
+            self.stream.write(self.current_name + " ... ")
+
+    def _mark(self, short: str, long: str) -> None:
+        if short == "F":
+            self._failureNames.append(self.current_name)
+        elif short == "E":
+            self._errorNames.append(self.current_name)
+        if self.verbose == 1:
+            self.stream.write(short)
+        elif self.verbose == 2:
+            if not self.name_pending:
+                self.stream.write(self.current_name + " ... ")
+            self.stream.writeln(long)
+            self.name_pending = False
+
+    def _reportProblems(self, label: str, names: list[str], problems: list[tuple[TestCase, str]]) -> None:
+        for i in range(len(problems)):
+            self.stream.writeln("======================================================================")
+            self.stream.writeln(label + ": " + names[i])
+            self.stream.writeln("----------------------------------------------------------------------")
+            self.stream.writeln(problems[i][1])
+
+    def _report(self) -> None:
+        if self.verbose:
+            self.stream.writeln()
+        self._reportProblems("ERROR", self._errorNames, self.errors)
+        self._reportProblems("FAIL", self._failureNames, self.failures)
+        elapsed = time.time() - self.started
+        plural = "" if self.testsRun == 1 else "s"
+        self.stream.writeln("----------------------------------------------------------------------")
+        self.stream.writeln(f"Ran {self.testsRun} test{plural} in {elapsed:.3f}s\n")
+        parts: list[str] = []
+        if self.failures:
+            parts.append("failures=" + str(len(self.failures)))
+        if self.errors:
+            parts.append("errors=" + str(len(self.errors)))
+        if self.skipped:
+            parts.append("skipped=" + str(len(self.skipped)))
+        message = "FAILED" if self.failures or self.errors else "OK"
+        if parts:
+            message += " (" + ", ".join(parts) + ")"
+        if not self.testsRun:
+            self.stream.writeln("NO TESTS RAN")
+            return
+        self.stream.writeln(message)
+
+
+class TextTestRunner:
+    stream: _WritelnDecorator
+    descriptions: bool
+    verbosity: int
+    failfast: bool
+
+    def __init__(self, stream: StringIO | None = None, descriptions: bool = True,
+                 verbosity: int = 1, failfast: bool = False) -> None:
+        self.stream = _WritelnDecorator(stream)
+        self.descriptions = descriptions
+        self.verbosity = verbosity
+        self.failfast = failfast
+
+    def run(self, test: TestSuite) -> TextTestResult:
+        result = TextTestResult()
+        result.stream = self.stream
+        result.descriptions = self.descriptions
+        result.verbose = self.verbosity
+        result.failfast = self.failfast
+        result.startTestRun()
+        try:
+            test.run(result)
+        finally:
+            result.stopTestRun()
+        result._report()
+        return result
+
+
+class _MainRunner(TextTestResult):
+    def _runSuite(self, suite: TestSuite) -> None:
+        self.startTestRun()
+        try:
+            suite.run(self)
+        finally:
+            self.stopTestRun()
 
     def _start(self) -> None:
         for flag in sys.argv[1:]:
@@ -593,75 +894,35 @@ class _MainRunner:
                 print("unsupported unittest argument: " + flag, file=sys.stderr)
                 sys.exit(2)
 
-    def _mark(self, short: str, long: str) -> None:
-        if self.verbose == 1:
-            sys.stderr.write(short)
-        elif self.verbose == 2:
-            if not self.name_pending:
-                sys.stderr.write(self.current_name + " ... ")
-            print(long, file=sys.stderr)
-            self.name_pending = False
-
-    def _phase(self, action: Callable[[], None], name: str) -> bool:
-        try:
-            action()
-        except SkipTest as exc:
-            self.skips += 1
-            self._mark("s", "skipped " + repr(str(exc)))
-            return False
-        except AssertionError as exc:
-            self.failures.append("FAIL: " + name + "\nAssertionError: " + str(exc))
-            self._mark("F", "FAIL")
-            return False
-        except SystemExit as exc:
-            self.errors.append("ERROR: " + name + "\nSystemExit: " + str(exc))
-            self._mark("E", "ERROR")
-            return False
-        except Exception as exc:
-            self.errors.append("ERROR: " + name + "\n" + str(exc))
-            self._mark("E", "ERROR")
-            return False
-        return True
-
-    def _run(self, name: str, setup: Callable[[], None],
-             body: Callable[[], None], teardown: Callable[[], None]) -> None:
-        if self.failfast and (self.errors or self.failures):
-            return
-        self.total += 1
-        if self.verbose == 2:
-            self.current_name = name
-            self.name_pending = True
-            sys.stderr.write(name + " ... ")
-        if self._phase(setup, name):
-            passed = self._phase(body, name)
-            cleaned = self._phase(teardown, name)
-            if passed and cleaned:
-                self._mark(".", "ok")
-
     def _finish(self) -> None:
-        if self.verbose:
-            print("", file=sys.stderr)
-        for detail in self.errors + self.failures:
-            print("======================================================================", file=sys.stderr)
-            print(detail, file=sys.stderr)
-        elapsed = time.time() - self.started
-        plural = "" if self.total == 1 else "s"
-        print("----------------------------------------------------------------------", file=sys.stderr)
-        print(f"Ran {self.total} test{plural} in {elapsed:.3f}s\n", file=sys.stderr)
-        parts: list[str] = []
-        if self.failures:
-            parts.append("failures=" + str(len(self.failures)))
-        if self.errors:
-            parts.append("errors=" + str(len(self.errors)))
-        if self.skips:
-            parts.append("skipped=" + str(self.skips))
-        message = "FAILED" if self.failures or self.errors else "OK"
-        if parts:
-            message += " (" + ", ".join(parts) + ")"
-        if not self.total:
-            print("NO TESTS RAN", file=sys.stderr)
+        self._report()
+        if not self.testsRun:
             sys.exit(5)
-        print(message, file=sys.stderr)
-        if self.failures or self.errors:
+        if not self.wasSuccessful():
             sys.exit(1)
         sys.exit(0)
+
+
+
+class _FailedTest(TestCase):
+    _exception: Exception
+    _module_name: str
+
+    def __init__(self, module_name: str, exception: Exception) -> None:
+        self._module_name = module_name
+        self._exception = exception
+        super().__init__()
+
+    def id(self) -> str:
+        return "unittest.loader._FailedTest." + self._module_name
+
+    def runTest(self) -> None:
+        raise self._exception
+
+
+def _failedModuleTests(loader: TestLoader, name: str, exception: Exception) -> TestSuite:
+    loader.errors.append("Failed to call load_tests:\n" + repr(exception))
+    suite = TestSuite()
+    failure = _FailedTest(name, exception)
+    suite._addCase(failure, name + " (" + failure.id() + ")")
+    return suite

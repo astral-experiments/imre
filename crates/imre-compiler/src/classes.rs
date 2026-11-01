@@ -48,7 +48,15 @@ pub(crate) enum ExceptionAlias {
     Named(DefinitionId),
 }
 
+/// Arguments to a sealed unittest class decorator, evaluated by the module initializer.
+pub(crate) struct SkipDecorator {
+    pub(crate) unless: bool,
+    pub(crate) condition: ast::Expr,
+    pub(crate) reason: ast::Expr,
+}
+
 pub(crate) struct Class {
+    pub(crate) skip_decorators: Vec<SkipDecorator>,
     pub(crate) definition: DefinitionId,
     pub(crate) name: String,
     pub(crate) node: ast::StmtClassDef,
@@ -156,10 +164,10 @@ impl Classes {
     /// The entry module may need to execute class bodies even without module globals.
     pub(crate) fn has_class_values(&self, module: usize) -> bool {
         self.definitions.iter().any(|class| {
-            class.definition.module == module && class.static_bindings.values().any(|value| {
+            class.definition.module == module && (!class.skip_decorators.is_empty() || class.static_bindings.values().any(|value| {
                 matches!(value, ClassValue::Runtime { .. })
                     || matches!(value, ClassValue::Strings { owner, .. } if *owner == class.definition)
-            })
+            }))
         })
     }
 
@@ -269,6 +277,44 @@ pub(crate) fn mapping_base(graph: &SourceGraph, module: usize, expression: &ast:
     )
 }
 
+fn unittest_skip_decorator(
+    graph: &SourceGraph,
+    module: usize,
+    decorator: &ast::Decorator,
+) -> Result<Option<SkipDecorator>, String> {
+    let ast::Expr::Call(call) = &decorator.expression else {
+        return Ok(None);
+    };
+    let ast::Expr::Attribute(attr) = call.func.as_ref() else {
+        return Ok(None);
+    };
+    let Some(Binding::Module(owner)) = graph.resolve(module, &attr.value) else {
+        return Ok(None);
+    };
+    if !graph.modules[owner].is_bundled("unittest") {
+        return Ok(None);
+    }
+    let unless = match attr.attr.as_str() {
+        "skipIf" => false,
+        "skipUnless" => true,
+        _ => return Ok(None),
+    };
+    let ([condition, reason], []) = (
+        call.arguments.args.as_ref(),
+        call.arguments.keywords.as_ref(),
+    ) else {
+        return Err(graph.modules[module].error(
+            call,
+            "native unittest skip decorators require condition and reason as positional arguments",
+        ));
+    };
+    Ok(Some(SkipDecorator {
+        unless,
+        condition: condition.clone(),
+        reason: reason.clone(),
+    }))
+}
+
 fn collect_class(
     graph: &SourceGraph,
     module: &SourceModule,
@@ -310,7 +356,15 @@ fn collect_class(
                 == Some(Binding::Intrinsic(Intrinsic::StandardEnum))
         });
     }
-    let dataclass = if http.is_some() {
+    let mut skip_decorators = Vec::new();
+    for decorator in &node.decorator_list {
+        let Some(skip) = unittest_skip_decorator(graph, definition.module, decorator)? else {
+            skip_decorators.clear();
+            break;
+        };
+        skip_decorators.push(skip);
+    }
+    let dataclass = if http.is_some() || !skip_decorators.is_empty() {
         None
     } else {
         dataclasses::options(graph, definition.module, node)?
@@ -946,6 +1000,7 @@ fn collect_class(
     }
     Ok(Class {
         definition,
+        skip_decorators,
         forwarder,
         name: node.name.as_str().to_owned(),
         init_hooks,
@@ -1173,7 +1228,11 @@ fn check_initializer(
                     "initialize all instance fields before passing self to a callback",
                 ));
             }
-            return Ok(true);
+            // The bundled method-name check reads the record's layout tag.
+            // It neither publishes the receiver nor reads a subclass field.
+            let metadata_only = module.is_bundled("unittest")
+                && matches!(&*call.func, ast::Expr::Name(name) if name.id == "_validateCaseMethod");
+            return Ok(!metadata_only);
         }
         if exception_layout
             && let ast::Stmt::Expr(stmt) = statement

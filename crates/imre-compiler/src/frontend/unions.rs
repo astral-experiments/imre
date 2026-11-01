@@ -460,6 +460,9 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if let Some(test) = self.unittest_failure_isinstance(&value, classes)? {
+            return Ok(test);
+        }
         if let Some(Binding::Intrinsic(Intrinsic::WeakProxyClass { callable })) =
             self.collection_binding(classes)
         {
