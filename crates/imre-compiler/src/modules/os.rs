@@ -31,6 +31,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
     }
     Some(match name {
+        "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
         "scandir" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.scandir"),
         "DirEntry" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.DirEntry"),
