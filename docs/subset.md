@@ -1528,25 +1528,6 @@ cargo build --workspace --release --locked
 target/release/imre check tests/programs/ownership.py
 target/release/imre build tests/programs/ownership.py -o /tmp/ownership --emit-llvm /tmp/ownership.ll
 /tmp/ownership
-python3 tests/differential.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/imports.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/classes.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/dataclass_records.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/containers.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/comprehensions.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/unpacking.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/fstrings.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/calls.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/inference.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/iterables.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/luhn.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/expressions.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/exceptions.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/files.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/processes.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/toml_records.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
-python3 tests/io.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
 ```
 
 Build the compiler and runtime archive from the same revision. Imre finds the archive beside the compiler executable, or accepts an explicit path with `--runtime`. `--clang` selects the Clang driver and `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, explicit ThinLTO linker, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
@@ -1581,60 +1562,18 @@ Pass a system-allocator archive when supplying a custom runtime to `--sanitize`.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. On macOS, use `--clang` to select a Clang with a matching sanitizer runtime when you also instrument the Rust archive. To instrument Rust runtime code, build a separate sanitizer archive. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 
-The differential suite compares full stdout with CPython at `-O0` and `-O3`, covering 260 integer pairs, aliases, ownership across calls and replacement, evaluation order, short-circuiting, loops, and runtime errors. Separate rejection cases cover type violations, ignored errors, unsupported dynamic operations, and recursive calls. These are correctness checks, not performance measurements.
-
-The imports suite compares multi-file programs with CPython at `-O0` and `-O3`, including package entry points, aliases, re-exports, relative imports, late function-global lookup, and mutation across module boundaries. It also checks invalid imports, unused invalid code, source diagnostics, and protection of imported files from output writes.
-
-The classes suite checks nominal types, imported class aliases, field replacement, temporary receivers, returns, method argument evaluation, and normal-exit ownership at `-O0` and `-O3`. Rejection cases cover incomplete construction, escaping `self`, invalid writes, dynamic class features, recursive calls, and cyclic field types.
-
-The dataclass records suite compares generated construction, keyword-only and fresh defaults, equality/repr, frozen writes, properties, class/static methods, `Self`, callbacks, imported decorator aliases, and typed JSON schemas. It checks argument/getter exceptions and receiver ownership. Rejections protect supported decorator options, exact types, and frozen/property mutation. The shared-NaN equality oracle requires CPython 3.13 or later; older hosts skip only that fixture because dataclass equality changed. The suite runs under ordinary optimization, ThinLTO, and ASan/LSan.
-
-The containers suite covers nested lists, tuple positions and unpacking, list iteration and `enumerate`, optional ownership and local flow narrowing, contextual literals, shallow repetition, string concatenation, and whitespace splitting. Iteration cases exercise alias mutation, source and target rebinding, temporary roots, control flow, and arbitrary-precision counters. It rejects invalid alias writes, unsafe optional accesses, and class cycles hidden inside containers.
-
-The comprehensions suite checks isolated and nested scopes, contextual result types, ordered filters and dictionary key/value evaluation, optional narrowing, alias-visible mutation, arbitrary-precision ranges, and cleanup after partial construction. It compares complete filesystem effects and rejects unsupported targets, escaped names, dynamic operations, and recursion hidden inside helpers.
-
-The f-string suite compares literal decoding, raw and adjacent parts, scalar conversions, nested fields, optional narrowing, and comprehension captures. Fixed-point and percentage cases cover rounding ties, signed zero, nonfinite values, large integers, and the precision limit. Side-effecting fields, conversion overflow, later failures, mutable owners, and file writes check evaluation order and cleanup. Rejection cases cover unsupported formatting/conversions, debug fields, types, surrogate escapes, and builtin rebinding.
-
-The truthiness suite compares concrete scalar/container truth, optional narrowing, operand identity, short-circuit writes and errors, and temporary ownership at `-O0` and `-O3`. It also checks exact result-type restrictions and unsafe optional/assignment facts, and runs with ThinLTO and AddressSanitizer in CI.
-
-The unpacking suite compares chained assignment, nested/starred sequence patterns, field and subscript targets, constructor initialization, eager display expansion, alias mutation, partial failure, and resource cleanup. It also checks exact layouts, contextual empty values, optional facts, and comprehension target scope; the same cases run with ThinLTO and ASan/LSan.
-
-The inference and iterable suites cover propagation through imports and methods, scalar defaults, missing or conflicting evidence, nullable returns, mutation during iteration, source evaluation order, conversion failures, and cleanup. The Luhn suite verifies byte-for-byte upstream sources, executes the original tests and doctests through native adapters, and compares all four string APIs against CPython over decimal digits, invalid inputs, UTF-8 errors, and repeated recovery. All three suites run under ordinary optimization, ThinLTO, and ASan/LSan.
-
-The iterator-pipeline suite compares lazy generator evaluation, live enclosing bindings, private targets, assignment expressions, strict zip errors and probe order, reverse traversal, short-circuit truth tests, and ownership during mutation or exceptions. It compares full filesystem effects and checks that delayed writes cannot create unsafe definite-assignment or optional facts. The same cases run under ordinary optimization, ThinLTO, and ASan/LSan.
-
-The calls suite compares positional/keyword binding, keyword-only parameters, scalar defaults, imported aliases, contextual container types, and optional values. Reordered arguments, temporary receivers, aliased owners, and later exceptions check evaluation order and cleanup. Rejection cases protect exact types, parameter kinds, required/duplicate names, literal defaults, and the positional builtin surface.
-
-The callable suite compares function references, returned and optional callables, bound receiver ownership, noncapturing lambdas, mixed scalar/reference call signatures, and lazy map/filter composition with CPython. It exercises callback and argument failures, partial results, buffered file cleanup, source mutation, and short-circuiting. Rejections protect exact signatures, noncapturing scope, full positional arity, acyclic storage, and recursion restrictions. It shares the assignment suite's full stdout/filesystem oracle and runs under ordinary optimization, ThinLTO, and ASan/LSan.
-
-The typed JSON suite compares native decoding with the checked CPython compatibility module. It covers exact scalar and nullable layouts, nested records/lists, required and defaulted fields, independent empty defaults, arbitrary integers, float rounding and overflow, Unicode, duplicate policy, depth limits, imported schema aliases, and recovery after partially allocated failures. Rejections protect structural constructors and the supported acyclic schema types.
-
-The expressions suite compares lazy conditional arms, contextual result types, optional narrowing, Unicode string indexing and iteration, and list/string slices. It checks 1,701 slices apiece for strings and integer lists, including omitted and arbitrary-precision bounds. Aliased shallow copies, operand mutation, later failures, and recovery check ownership and evaluation order. Rejection cases protect exact types, fixed tuple bounds, and read-only slicing.
-
-The floats suite compares arithmetic and mixed-number matrices, shortest formatting, strict decimal conversion, exact comparisons, and large rational rounding against CPython. Boundary cases include signed zeros, NaNs/infinities, the subnormal and overflow thresholds, and integers too large to convert individually. Concrete classes, tuples, lists, dictionaries, optional values, defaults, and exception cleanup exercise native storage; rejection cases forbid implicit annotation-driven conversions.
-
-The exceptions suite compares nested propagation, handler ordering, builtin hierarchy, stored exception values, dynamically scoped re-raising, lazy assertion messages, and all finally exit reasons. Repeated failures during argument evaluation and partial container/class construction exercise ownership cleanup. Rejection cases protect definite assignment, optional facts, and the sealed exception contract.
-
-The I/O suite checks complete output, large and Unicode writes, normal and fatal exit flushing, LF and CRLF pipe input, terminal line visibility, and output failures. Interactive checks use protocol handshakes and readiness deadlines rather than performance expectations.
-
-The process suite compares complete captures and filesystem effects against CPython, including large dual-pipe output, inherited stdin, descriptor and signal handling, replacement environments, working directories, source-order argument mutation, status errors, and result ownership. Repeated failures run under a reduced descriptor limit; an inherited descriptor above that limit must still close in the child. Invalid Unix environment bytes exercise the explicit Unicode boundary. Rejections protect the exact captured-text mode and sealed result contract. Ordinary optimization, ThinLTO, and ASan/LSan use the same cases.
-
-The paths suite compares lexical normalization, imports, value storage, filesystem predicates and errors, UTF-8 reads/writes, glob patterns, symlinks, pipeline evaluation order, snapshot timing, and complete filesystem effects. Descriptor limits and sanitizer runs cover early exits and repeated recovery. Run it with a CPython 3.14 or newer oracle (`--python python3.14`); earlier versions differ in suffix handling, directory acquisition timing, and failed filesystem predicates.
-
-The workspace suite compares path mutations and scoped temporary directories against CPython 3.14+, including exact file bytes, permissions, hard-link relationships, and symlink targets. It exercises argument order, default-directory selection, aliases, mixed managers, all control transfers, permission repair, opaque Unix filenames, and cleanup failures that replace pending returns or exceptions. Rejections protect the typed arguments and direct-with-only constructor. Every case runs under a reduced descriptor limit and accepts the same optimization, ThinLTO, and sanitizer flags as the other filesystem suites:
+Run differential suites by name from the repository root. This example compares
+expressions and structural pattern matching with CPython at `-O0` and `-O3` and
+writes one log per suite. Choose a new log directory for each run.
 
 ```sh
-python3 tests/workspaces.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --python python3.14 --clang clang-18
+python3.14 tests/run_suites.py --log-dir target/fixture-logs --suites expressions matching -- \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
 ```
 
-The files suite compares complete filesystem effects, strict decoding, newline handling, write counts, alias-visible closure, all `with` exit reasons, failed cleanup, argument aliases, and descriptor recovery under a reduced open-file limit. Rejection cases protect the sealed import, file, context-manager, and argument surfaces. The existing suites also run generated-code and runtime AddressSanitizer checks at `-O1` in CI.
-
-The bytes suite compares full byte-range repr/indexing, strict UTF-8 decoding errors, constructors, exact typed storage and keys, 896 empty/nonempty slices, iterator ownership, and failures during partial construction at `-O0` and `-O3`. Binary fixtures compare complete file contents, append/exclusive modes, imported handle aliases, closed/wrong-direction errors, and every context-manager exit path. It accepts the same target, ThinLTO, and sanitizer options as the other native suites:
-
-```sh
-python3 tests/bytes.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
-```
-
+Use CPython 3.14 or newer for the path and workspace suites. On versions before
+3.13, the dataclass suite skips shared-NaN equality. The [CI workflow](../.github/workflows/ci.yml)
+lists the suites run with the system allocator, ThinLTO, and AddressSanitizer.
 
 ### Closed entry profiles
 
