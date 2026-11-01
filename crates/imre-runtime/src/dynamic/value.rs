@@ -833,10 +833,18 @@ pub(super) enum Value {
         coroutine_marker: Option<Id>,
     },
     PartialPlaceholder,
-    CacheParameters,
+    CacheDecorator {
+        maxsize: Id,
+        typed: Id,
+    },
+    CacheParameters {
+        maxsize: Id,
+        typed: Id,
+    },
     Cached {
         function: Id,
-        unbounded: bool,
+        capacity: Option<usize>,
+        typed: bool,
         hits: i64,
         misses: i64,
         dictionary: Id,
@@ -1200,6 +1208,9 @@ impl Value {
                 visit.extend([*function, *args, *keywords]);
                 visit.extend(coroutine_marker);
             }
+            Self::CacheDecorator { maxsize, typed } | Self::CacheParameters { maxsize, typed } => {
+                visit.extend([*maxsize, *typed]);
+            }
             Self::Cached {
                 function,
                 dictionary,
@@ -1241,7 +1252,6 @@ impl Value {
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TupleGetterDoc
-            | Self::CacheParameters
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)

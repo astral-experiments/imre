@@ -142,11 +142,16 @@ impl Context {
         }
     }
     /// Prepare dictionary deletion before removing the oldest cached call.
-    fn evict_cached_call(&mut self, callable: Id, table: Id) -> Result<Option<value::CachedCall>> {
+    fn evict_cached_call(
+        &mut self,
+        callable: Id,
+        table: Id,
+        capacity: usize,
+    ) -> Result<Option<value::CachedCall>> {
         let Value::Cached { entries, .. } = self.heap.get(callable) else {
             unreachable!()
         };
-        if entries.len() < value::CACHE_CAPACITY {
+        if entries.len() < capacity {
             return Ok(None);
         }
         let Value::Dict(table) = self.heap.get_mut(table) else {
@@ -309,10 +314,10 @@ impl Context {
 
     /// Construct a cache with an independently traced dictionary and keyword marker.
     pub(super) fn cached_function(&mut self, function: Id) -> Id {
-        self.new_cache(function, false)
+        self.new_cache(function, Some(value::CACHE_CAPACITY), false)
     }
 
-    pub(super) fn new_cache(&mut self, function: Id, unbounded: bool) -> Id {
+    pub(super) fn new_cache(&mut self, function: Id, capacity: Option<usize>, typed: bool) -> Id {
         let mark = self.heap.temporary_mark();
         self.heap.keep(function);
         let table = self.dict(Vec::new());
@@ -323,7 +328,8 @@ impl Context {
         self.heap.keep(dictionary);
         let result = self.alloc(Value::Cached {
             function,
-            unbounded,
+            capacity,
+            typed,
             hits: 0,
             misses: 0,
             dictionary,
@@ -493,7 +499,8 @@ impl Context {
                 | Value::AttrGetter(_)
                 | Value::ItemGetter(_)
                 | Value::StaticMethod { .. }
-                | Value::CacheParameters
+                | Value::CacheParameters { .. }
+                | Value::CacheDecorator { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
@@ -3640,21 +3647,47 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
-            Value::CacheParameters => {
-                stdlib::call(self, "functools._cache_parameters", &args, &kwargs)
+            Value::CacheDecorator { maxsize, typed } => {
+                let function = stdlib::single_argument(
+                    "lru_cache.<locals>.decorating_function",
+                    "user_function",
+                    &args,
+                    &kwargs,
+                )?;
+                stdlib::functools::wrap_cache(self, function, maxsize, typed)
+            }
+            Value::CacheParameters { maxsize, typed } => {
+                if !args.is_empty() || !kwargs.is_empty() {
+                    return Err(Error::new(
+                        "TypeError",
+                        "cache_parameters() takes no arguments",
+                    ));
+                }
+                let size_key = self.text("maxsize");
+                let typed_key = self.text("typed");
+                Ok(self.dict(vec![(size_key, maxsize), (typed_key, typed)]))
             }
             Value::Cached {
                 function,
                 table,
                 marker,
-                unbounded,
+                capacity,
+                typed,
                 ..
             } => {
                 let mark = self.heap.temporary_mark();
                 let result = (|| -> Result<Id> {
                     self.heap.keep(callable);
                     self.heap.keep(table);
-                    let fast = args.len() == 1
+                    if capacity == Some(0) {
+                        let Value::Cached { misses, .. } = self.heap.get_mut(callable) else {
+                            unreachable!()
+                        };
+                        *misses += 1;
+                        return self.call(function, args, kwargs);
+                    }
+                    let fast = !typed
+                        && args.len() == 1
                         && kwargs.is_empty()
                         && matches!(
                             self.heap.get(args[0]),
@@ -3673,6 +3706,13 @@ impl Context {
                     for &part in &parts {
                         self.heap.keep(part);
                     }
+                    if typed {
+                        for &value in args.iter().chain(kwargs.iter().map(|(_, value)| value)) {
+                            let class = self.exact_type(value)?;
+                            self.heap.keep(class);
+                            parts.push(class);
+                        }
+                    }
                     let key = if fast {
                         args[0]
                     } else {
@@ -3687,7 +3727,7 @@ impl Context {
                             unreachable!()
                         };
                         *hits += 1;
-                        if !unbounded
+                        if capacity.is_some()
                             && let Some(i) = entries.iter().position(|call| call.key == resident)
                         {
                             let hit = entries.remove(i);
@@ -3701,10 +3741,10 @@ impl Context {
                     *misses += 1;
                     let result = self.call(function, args, kwargs)?;
                     self.heap.keep(result);
-                    if unbounded {
+                    let Some(capacity) = capacity else {
                         self.set_cache_key(table, key, result, hash)?;
                         return Ok(result);
-                    }
+                    };
                     if self
                         .find_dictionary_key(table, key, Some(hash))?
                         .1
@@ -3712,7 +3752,7 @@ impl Context {
                     {
                         return Ok(result);
                     }
-                    let evicted = self.evict_cached_call(callable, table)?;
+                    let evicted = self.evict_cached_call(callable, table, capacity)?;
                     if let Some(old) = evicted {
                         self.heap.keep(old.key);
                         if let Some(i) = self.find_dictionary_key(table, old.key, Some(old.hash))?.1
@@ -3735,7 +3775,7 @@ impl Context {
                         }
                     }
                     loop {
-                        let old = self.evict_cached_call(callable, table)?;
+                        let old = self.evict_cached_call(callable, table, capacity)?;
                         let Some(old) = old else { break };
                         self.heap.keep(old.key);
                         if let Some(i) = self.find_dictionary_key(table, old.key, Some(old.hash))?.1
