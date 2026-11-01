@@ -310,6 +310,7 @@ pub unsafe extern "C" fn imre_csv_reader(
             kind,
             Dialect::new(delimiter, quote, escape, flags),
             Ok("\r\n"),
+            flags,
         )
     }
 }
@@ -341,6 +342,7 @@ pub unsafe extern "C" fn imre_csv_reader_terminator(
             kind,
             Dialect::new(delimiter, quote, escape, flags),
             value,
+            flags,
         )
     }
 }
@@ -350,6 +352,7 @@ unsafe fn create(
     kind: u32,
     dialect: Dialect,
     terminator: std::result::Result<&str, &str>,
+    flags: u32,
 ) -> *const Object {
     // SAFETY: the checked owner and kind agree; entering checks file closure as iter(file) does.
     let lines = unsafe {
@@ -365,6 +368,13 @@ unsafe fn create(
             _ => unreachable!(),
         }
     };
+    // A missing name in the dialect registry wins over any invalid format options.
+    if flags & 16 != 0 {
+        return finish(
+            Err(Error::new(Kind::CsvError, "unknown dialect")),
+            ptr::null(),
+        );
+    }
     finish(
         terminator
             .map_err(|name| {
@@ -373,7 +383,15 @@ unsafe fn create(
                     format!("\"lineterminator\" must be a string, not {name}"),
                 )
             })
-            .and_then(|terminator| dialect.validate(terminator))
+            .and_then(|terminator| {
+                if flags & 8 != 0 && dialect.quote.is_none() {
+                    return Err(Error::new(
+                        Kind::TypeError,
+                        "quotechar must be set if quoting enabled",
+                    ));
+                }
+                dialect.validate(terminator)
+            })
             .map(|()| {
                 crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
                     Storage::CsvReader(Box::new(Reader {

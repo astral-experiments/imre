@@ -4,12 +4,16 @@ use super::*;
 
 impl Checker<'_> {
     pub(super) fn csv_reader(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let [lines] = call.arguments.args.as_ref() else {
-            return Err(error(
-                self.source,
-                call,
-                "csv.reader expects a text stream or list of strings",
-            ));
+        let (lines, mut dialect) = match call.arguments.args.as_ref() {
+            [lines] => (lines, None),
+            [lines, dialect] => (lines, Some(dialect)),
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "csv.reader expects a source and optional dialect",
+                ));
+            }
         };
         let input = if matches!(lines, ast::Expr::List(_)) {
             self.expr_expected(lines, self.types.list(Type::Str))?
@@ -26,7 +30,33 @@ impl Checker<'_> {
                 "csv.reader requires TextIO, str or list[str]",
             ));
         }
+        for option in &call.arguments.keywords {
+            if option.arg.as_deref() == Some("dialect") && dialect.replace(&option.value).is_some()
+            {
+                return Err(error(self.source, option, "repeated csv.reader dialect"));
+            }
+        }
         let (mut delimiter, mut quote, mut escape, mut flags) = (',', Some('"'), None, 1);
+        match dialect {
+            None | Some(ast::Expr::NoneLiteral(_)) => {}
+            Some(ast::Expr::StringLiteral(name)) => {
+                check_string(name, self.source)?;
+                // Named dialects inherit their quoting mode even when quotechar is overridden.
+                flags |= 8;
+                match name.value.to_str() {
+                    "excel" | "unix" => {}
+                    "excel-tab" => delimiter = '\t',
+                    _ => flags |= 16, // Registry lookup follows source iterator construction.
+                }
+            }
+            Some(value) => {
+                return Err(error(
+                    self.source,
+                    value,
+                    "expected a literal CSV dialect name",
+                ));
+            }
+        }
         let mut args = vec![input];
         let mut seen = HashSet::new();
         for option in &call.arguments.keywords {
@@ -35,8 +65,7 @@ impl Checker<'_> {
                 return Err(error(self.source, option, "repeated csv.reader option"));
             }
             match name {
-                "dialect" if matches!(&option.value, ast::Expr::StringLiteral(s) if s.value.to_str() == "excel") =>
-                    {}
+                "dialect" => {}
                 "lineterminator" => args.extend(self.csv_terminator(&option.value)?),
                 "delimiter" | "quotechar" | "escapechar" => {
                     let value = match &option.value {
