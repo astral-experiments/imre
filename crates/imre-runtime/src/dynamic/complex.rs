@@ -11,6 +11,74 @@ pub(super) struct Complex {
 }
 
 impl Complex {
+    fn parse(source: &str) -> Option<Self> {
+        let mut body = source.trim();
+        if let Some(inner) = body.strip_prefix('(') {
+            body = inner.strip_suffix(')')?.trim();
+        }
+        // float() accepts surrounding whitespace, but neither component may have it here.
+        if body.contains(char::is_whitespace) {
+            return None;
+        }
+        let Some(coefficient) = body.strip_suffix(['j', 'J']) else {
+            return Some(Self {
+                real: crate::floats::parse(body)?,
+                imag: 0.0,
+            });
+        };
+        // A sign following an exponent marker belongs to the same component.
+        let separator = coefficient
+            .as_bytes()
+            .windows(2)
+            .position(|pair| matches!(pair[1], b'+' | b'-') && !matches!(pair[0], b'e' | b'E'));
+        let (real, imaginary) = if let Some(index) = separator {
+            let (real, imaginary) = coefficient.split_at(index + 1);
+            (crate::floats::parse(real)?, imaginary)
+        } else {
+            (0.0, coefficient)
+        };
+        let imag = match imaginary {
+            "" | "+" => 1.0,
+            "-" => -1.0,
+            number => crate::floats::parse(number)?,
+        };
+        Some(Self { real, imag })
+    }
+
+    /// CPython diagnoses misplaced underscores before parsing the complex grammar.
+    /// Its Unicode-to-ASCII conversion stops at the first untranslatable character.
+    fn invalid_underscores(source: &str) -> bool {
+        if !source.contains('_') {
+            return false;
+        }
+        let ascii = source.is_ascii();
+        let mut chars = source.chars().peekable();
+        let mut previous_digit = false;
+        let mut saw_underscore = false;
+        while let Some(ch) = chars.next() {
+            if ch == '\0' {
+                return saw_underscore;
+            }
+            if ch == '_' {
+                saw_underscore = true;
+                if !previous_digit
+                    || chars
+                        .peek()
+                        .copied()
+                        .and_then(crate::integer_text::decimal_digit)
+                        .is_none()
+                {
+                    return true;
+                }
+            }
+            previous_digit = crate::integer_text::decimal_digit(ch).is_some();
+            if !ascii && ch >= '\x7f' && !previous_digit && !ch.is_whitespace() {
+                break;
+            }
+        }
+        false
+    }
+
     pub(super) fn repr(self) -> String {
         let imag = crate::floats::render(self.imag);
         let imag = imag.strip_suffix(".0").unwrap_or(&imag);
@@ -59,15 +127,23 @@ impl Context {
         let [mut real, imag] = bind("complex", args, kwargs, ["real", "imag"])?;
         let single = args.len() == 1 && kwargs.is_empty();
         if single {
-            match self.heap.get(args[0]) {
-                Value::Complex(_) => return Ok(args[0]),
-                Value::Str(_) => {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "complex string conversion is unsupported",
-                    ));
+            let value = args[0];
+            if matches!(self.heap.get(value), Value::Complex(_)) {
+                return Ok(value);
+            }
+            if let Ok(source) = self.str_value(value) {
+                if let Some(number) = Complex::parse(source) {
+                    return Ok(self.alloc(Value::Complex(number)));
                 }
-                _ => {}
+                let message = if Complex::invalid_underscores(source) {
+                    format!(
+                        "could not convert string to complex: {}",
+                        self.checked_format(value, true)?
+                    )
+                } else {
+                    "complex() arg is a malformed string".to_owned()
+                };
+                return Err(Error::new("ValueError", message));
             }
         }
         if let Some(value) = real
