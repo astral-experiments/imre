@@ -413,6 +413,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 })?;
             ctx.int(i64::from(value))
         }
+        ("hashlib", "algorithms_available" | "algorithms_guaranteed") => {
+            return hashlib::algorithms(ctx);
+        }
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
@@ -557,7 +560,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
             | "quote_plus" | "quote_from_bytes" | "urlencode",
         )
-        | ("hashlib", "sha1" | "sha256")
+        | ("hashlib", "new" | "sha1" | "sha256")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
@@ -1213,6 +1216,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
     }
+    if let Some(algorithm @ ("sha1" | "sha256")) = name.strip_prefix("hashlib.") {
+        return hashlib::hash(ctx, algorithm, args, kwargs);
+    }
     if name == "tempfile.TemporaryFile" {
         return tempfile::open(ctx, args, kwargs);
     }
@@ -1292,6 +1298,9 @@ pub(super) fn call(
             coroutine_marker: None,
         }));
     }
+    if name == "hashlib.new" {
+        return hashlib::new(ctx, args, kwargs);
+    }
     if name == "pattern.search" {
         return regex::search(ctx, args, kwargs);
     }
@@ -1322,7 +1331,6 @@ pub(super) fn call(
         "json.loads" => (1, &["s"]),
         "json.dump" => (2, JSON_DUMP_KEYWORDS),
         "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
-        "hashlib.sha1" | "hashlib.sha256" => (1, &["data", "usedforsecurity"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -1444,8 +1452,6 @@ pub(super) fn call(
         "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
         "hmac.compare_digest" => return hmac::compare(ctx, args),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
-        "hashlib.sha1" => return hashlib::sha1(ctx, args, kwargs),
-        "hashlib.sha256" => return hashlib::sha256(ctx, args, kwargs),
         "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
             return hashlib::method(ctx, name, args);
         }
