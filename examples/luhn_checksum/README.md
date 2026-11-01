@@ -10,7 +10,7 @@ string call sites for `checksum`, `verify`, `generate`, and `append`. Compilatio
 uses the original `list(map(int, string))`, stepped slices, list comprehension,
 `sum`, and `divmod` expressions.
 
-The [optimization report](../../benchmarks/results/2026-10-20-luhn-performance.md)
+The [optimization report](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-20-luhn-performance.md)
 keeps the library unchanged and passes the upstream tests and 1,144 CPython
 differential cases in each of five native configurations. With ThinLTO,
 4,096-digit calls take 1.21–1.35× the streaming Rust reference's time and run

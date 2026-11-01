@@ -108,8 +108,8 @@ The benchmark has two deliberately separate groups:
 ```sh
 python3 benchmarks/batch_benchmark.py \
   --compiler target/release/imre --runtime target/release/libimre_runtime.a \
-  --baseline benchmarks/local/incremental-artifacts-normal-final/incremental_planner \
-  --baseline-record benchmarks/results/2026-10-17-incremental-planner-normal.json \
+  --baseline "$INCREMENTAL_BASELINE" \
+  --baseline-record "$INCREMENTAL_BASELINE_RECORD" \
   --rust-bigint benchmarks/local/batch-reference-normal/planner-batch-bigint \
   --rust-build-record benchmarks/local/batch-reference-normal/build-record.json \
   --python python3.14 --clang clang-18 --target x86_64-unknown-linux-gnu \
@@ -117,7 +117,7 @@ python3 benchmarks/batch_benchmark.py \
   --output benchmarks/local/batch-normal.json
 ```
 
-Use the actual saved baseline record path if it differs. The harness verifies its
+Set `INCREMENTAL_BASELINE` to the saved executable and `INCREMENTAL_BASELINE_RECORD` to its matching JSON. The [original baseline record](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-17-incremental-planner-normal.json) identifies the binary and inputs used for the published comparison. The harness verifies its
 exact binary and all six original Python source hashes, reconstructs every captured
 input through the independent oracle, and requires matching ordinary/ThinLTO mode
 and target. It compiles each new Imre program once outside timed work, then runs

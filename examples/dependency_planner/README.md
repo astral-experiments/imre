@@ -97,9 +97,9 @@ To compare a new native build with a preserved baseline in the same session, sup
 python3.14 benchmarks/dependency_benchmark.py \
   --compiler target/release/imre \
   --runtime target/release/libimre_runtime.a \
-  --baseline benchmarks/local/dependency-planner-final/dependency_planner \
-  --baseline-record benchmarks/results/2026-10-17-dependency-planner-baseline.json \
-  --python python3.14 --sizes 128 2048 16384 --shapes layered wide \
+  --baseline benchmarks/local/dependency-planner/dependency_planner \
+  --baseline-record benchmarks/local/dependency-planner.json \
+  --python python3.14 \
   --artifact-dir benchmarks/local/dependency-planner-comparison \
   --output benchmarks/local/dependency-planner-comparison.json
 ```
