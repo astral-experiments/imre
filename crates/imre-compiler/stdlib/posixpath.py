@@ -1,20 +1,7 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 import os
-from _imre_posixpath import exists as _exists, extension_start, isfile as _isfile
-
-
-def exists(path):
-    try:
-        return _exists(path)
-    except (OSError, ValueError):
-        return False
-
-
-def isfile(path):
-    try:
-        return _isfile(path)
-    except (OSError, ValueError):
-        return False
+from _imre_posixpath import extension_start
+from genericpath import commonprefix, exists, isfile, islink
 
 
 def normcase(s):

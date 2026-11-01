@@ -84,6 +84,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "re" => Some(("re.py", include_str!("../stdlib/re.py"))),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
+        // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
+        "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
         "difflib" => Some((
             "difflib.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/difflib/upstream/Lib/difflib.py"),
@@ -97,6 +99,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/importlib/__init__.py"),
         )),
         "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
+        "genericpath" => Some(("genericpath.py", include_str!("../stdlib/genericpath.py"))),
         "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
         "pkgutil" => Some((
             "pkgutil.py",
@@ -252,6 +255,7 @@ pub(crate) enum IntrinsicModule {
     ContextVars,
     Importlib,
     ImportlibMachinery,
+    ImportlibBootstrapExternal,
     ImportlibMetadata,
     ImportlibUtil,
     Array,
@@ -306,6 +310,7 @@ pub(crate) enum IntrinsicModule {
     Os,
     Posix,
     OsPath,
+    GenericPath,
     PosixPath,
     Urllib,
     UrllibParse,
@@ -747,6 +752,7 @@ impl IntrinsicModule {
             "os" => Some(Self::Os),
             "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" => Some(Self::OsPath),
+            "genericpath" => Some(Self::GenericPath),
             "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
             "email.utils" => Some(Self::EmailUtils),
@@ -754,6 +760,9 @@ impl IntrinsicModule {
             "urllib.parse" => Some(Self::UrllibParse),
             "importlib" => Some(Self::Importlib),
             "importlib.machinery" => Some(Self::ImportlibMachinery),
+            "_frozen_importlib_external" | "importlib._bootstrap_external" => {
+                Some(Self::ImportlibBootstrapExternal)
+            }
             "importlib.metadata" => Some(Self::ImportlibMetadata),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
@@ -949,6 +958,9 @@ impl IntrinsicModule {
                 Intrinsic::Declaration("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
+                Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
+            }
             (Self::ImportlibUtil, "find_spec") => {
                 Intrinsic::RegisteredImport("importlib.util.find_spec")
             }
@@ -1403,7 +1415,10 @@ impl IntrinsicModule {
             (Self::Os, "fsencode") => Intrinsic::FsEncode,
             (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
             (Self::Os, "devnull") => Intrinsic::OsDevnull,
-            (Self::PosixPath, "exists") => Intrinsic::OsPathExists,
+            (Self::GenericPath | Self::PosixPath, "commonprefix") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
+            }
+            (Self::GenericPath | Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
             (Self::PosixPath, "basename") => Intrinsic::PosixPath(PosixPathOperation::Basename),
@@ -2363,6 +2378,7 @@ fn static_import_scopes(f: &ast::StmtFunctionDef, imports: &mut Vec<LocalStaticI
 fn importlib_child(name: &str) -> Option<IntrinsicModule> {
     match name {
         "machinery" => Some(IntrinsicModule::ImportlibMachinery),
+        "_bootstrap_external" => Some(IntrinsicModule::ImportlibBootstrapExternal),
         "metadata" => Some(IntrinsicModule::ImportlibMetadata),
         "util" => Some(IntrinsicModule::ImportlibUtil),
         _ => None,
@@ -2372,6 +2388,7 @@ fn importlib_child(name: &str) -> Option<IntrinsicModule> {
 fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
     match module {
         IntrinsicModule::ImportlibMachinery => Some("machinery"),
+        IntrinsicModule::ImportlibBootstrapExternal => Some("_bootstrap_external"),
         IntrinsicModule::ImportlibMetadata => Some("metadata"),
         IntrinsicModule::ImportlibUtil => Some("util"),
         _ => None,
@@ -3373,8 +3390,12 @@ impl<'a> Loader<'a> {
         });
         if let Some(module) = module {
             self.reject_stdlib_shadow(name)?;
-            self.needs_object_imports |=
-                matches!(module, IntrinsicModule::Ast | IntrinsicModule::Imp);
+            self.needs_object_imports |= matches!(
+                module,
+                IntrinsicModule::Ast
+                    | IntrinsicModule::Imp
+                    | IntrinsicModule::ImportlibBootstrapExternal
+            );
         }
         if module == Some(IntrinsicModule::Selectors)
             && cfg!(any(target_os = "linux", target_os = "macos"))

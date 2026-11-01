@@ -48,7 +48,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             Some(("_frozen_importlib.py", spec))
         }
         "_frozen_importlib_external" => Some((
-            "_frozen_importlib_external.py",
+            "importlib/_bootstrap_external.py",
             include_str!("../../stdlib/importlib/source_loader.py"),
         )),
         _ => None,

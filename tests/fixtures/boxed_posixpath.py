@@ -1,3 +1,4 @@
+import genericpath
 import os
 import os.path
 import posix
@@ -52,7 +53,15 @@ def current():
     ):
         result = normpath(path=Path(value))
         assert result == expected and type(result) is type(expected)
-    assert os.path.exists is posixpath.exists
+    assert os.path.commonprefix is posixpath.commonprefix is genericpath.commonprefix
+    for paths, expected in (
+        ([], ""), (["café", "cafés"], "café"), ([Path(b"/a"), Path(b"/b")], b"/"),
+        ([["p", "x"], ["p", "y"]], ["p"]), ([(1, 2), (1, 3)], (1,)),
+    ):
+        assert os.path.commonprefix(paths) == expected
+    assert os.path.exists is posixpath.exists is genericpath.exists
+    assert os.path.isfile is posixpath.isfile is genericpath.isfile
+    assert genericpath.exists.__module__ == "genericpath"
     assert os.path.exists(Path(b".")) and not os.path.exists(b"imre\0missing")
     assert not os.path.exists(-1)
     key = "IMRE_BOXED_GETENV_FIXTURE"

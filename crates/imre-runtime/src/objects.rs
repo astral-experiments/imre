@@ -22,7 +22,7 @@ pub(crate) use bytes::{
     bytes_contains, bytes_contains_int, concat_bytes, owned_input as owned_bytes_input,
     repeat_bytes, rsplit_bytes, rstrip_bytes,
 };
-mod cache_paths;
+pub(crate) mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
 mod chainmap;
@@ -107,6 +107,7 @@ pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
 mod warnings;
+pub(crate) use warnings::runtime_warning;
 mod words;
 mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;

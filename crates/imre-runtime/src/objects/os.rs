@@ -13,6 +13,7 @@ use std::io;
 
 pub(super) mod links;
 pub(super) mod stat_result;
+pub(crate) use stat_result::float_seconds;
 
 /// The target's primary or alternate separator, shared by typed and boxed imports.
 pub(crate) fn os_separator(alternate: bool) -> Option<&'static str> {

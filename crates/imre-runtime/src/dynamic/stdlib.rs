@@ -70,6 +70,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "ast"
             | "os"
             | "posix"
+            | "genericpath"
             | "posixpath"
             | "_imre_posixpath"
             | "_imre_metadata"
@@ -323,7 +324,16 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_override_frozen_modules_for_tests"
             | "_override_multi_interp_extensions_check",
         )
-        | ("_imre_importlib", "find_spec" | "get_code" | "loader_fields")
+        | (
+            "_imre_importlib",
+            "find_spec"
+            | "get_code"
+            | "loader_fields"
+            | "path_stats"
+            | "cache_name"
+            | "source_name"
+            | "warn_debug_override",
+        )
         | ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
@@ -459,6 +469,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 &[("name", name), ("version", version), ("cache_tag", NONE)],
             )
         }
+        ("sys", "pycache_prefix") => {
+            let prefix = ctx.config["pycache_prefix"].as_str().map(str::to_owned);
+            prefix.map_or(NONE, |path| ctx.text(path))
+        }
         ("sys", "dont_write_bytecode") => {
             if ctx.config["dont_write_bytecode"].as_bool().unwrap_or(false) {
                 TRUE
@@ -480,9 +494,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let bytecode = ctx.int(i64::from(
                 ctx.config["dont_write_bytecode"].as_bool().unwrap_or(false),
             ));
+            let optimize = ctx.int(ctx.config["optimize"].as_i64().unwrap_or(0));
             record(
                 ctx,
                 &[
+                    ("optimize", optimize),
                     ("isolated", isolated),
                     ("ignore_environment", isolated),
                     ("no_user_site", no_user_site),
@@ -549,7 +565,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("os", "confstr" | "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
-        | ("_imre_posixpath", "exists" | "extension_start" | "isfile")
+        | ("_imre_posixpath", "exists" | "extension_start" | "isfile" | "islink")
         | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
@@ -1075,12 +1091,36 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_importlib.") {
         match (method, args, kwargs) {
+            ("cache_name", [path, tag, optimization, prefix], []) => {
+                let prefix = (*prefix != NONE)
+                    .then(|| ctx.str_value(*prefix))
+                    .transpose()?;
+                let path = crate::objects::cache_paths::cache_name(
+                    ctx.str_value(*path)?,
+                    ctx.str_value(*tag)?,
+                    ctx.str_value(*optimization)?,
+                    prefix,
+                )?;
+                return Ok(ctx.text(path.to_string()));
+            }
+            ("source_name", [path, prefix], []) => {
+                let prefix = (*prefix != NONE)
+                    .then(|| ctx.str_value(*prefix))
+                    .transpose()?;
+                let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
+                return Ok(ctx.text(path.to_string()));
+            }
+            ("warn_debug_override", [], []) => {
+                crate::objects::cache_paths::warn_debug_override()?;
+                return Ok(NONE);
+            }
             ("find_spec", [fullname, original], []) => {
                 let fullname = ctx.str_value(*fullname)?.to_owned();
                 let original = ctx.str_value(*original)?.to_owned();
                 return ctx.find_spec(&fullname, &original, false);
             }
             ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
+            ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),
             ("loader_fields", [object], []) => {
                 if let Value::Instance { fields, .. } = ctx.heap.get(*object) {
                     let fields = fields

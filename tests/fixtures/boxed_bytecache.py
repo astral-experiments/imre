@@ -68,6 +68,35 @@ def current():
 
     print(marshal.loads(data, allow_code=ReplacingPolicy()), data)
 
+    from importlib.util import cache_from_source, source_from_cache
+
+    class Path:
+        def __fspath__(self):
+            return "/pkg/mod.py"
+
+    tag = sys.implementation.cache_tag
+    prefix = sys.pycache_prefix
+    try:
+        sys.implementation.cache_tag = None
+        for operation, path in ((cache_from_source, Path()), (cache_from_source, b"bad"), (source_from_cache, b"bad")):
+            try:
+                operation(path)
+            except (NotImplementedError, TypeError) as error:
+                print(type(error).__name__, str(error))
+        sys.implementation.cache_tag = "target"
+        for cache_root in (None, "/cache"):
+            sys.pycache_prefix = cache_root
+            cache = cache_from_source(Path(), optimization="ö")
+            print(cache, source_from_cache(cache))
+        try:
+            cache_from_source(Path(), optimization="bad!")
+        except ValueError as error:
+            print(str(error))
+    finally:
+        sys.implementation.cache_tag = tag
+        sys.pycache_prefix = prefix
+
+
 def long_allocation():
     import marshal
     packet = b"l" + (512).to_bytes(4, "little") + b"\x01\x00" * 512

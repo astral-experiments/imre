@@ -868,6 +868,17 @@ def main():
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
 
+        spec_entry = root / "runtime_spec.py"
+        spec_entry.write_text(
+            "from importlib.machinery import ModuleSpec\n"
+            "try:\n    import missing_optional_module\n"
+            "except ModuleNotFoundError:\n"
+            "    spec = ModuleSpec('pkg', None, origin='memory', is_package=True)\n"
+            "    print(spec.name, spec.origin, spec.submodule_search_locations)\n"
+        )
+        opted_in = run(imre, "run", spec_entry, "--runtime-imports", "--quiet")
+        assert (opted_in.returncode, opted_in.stdout) == (0, b"pkg memory []\n"), opted_in.stderr
+
         (root / "reader.py").write_text(
             "for _ in range(3):\n    print(repr(input()))\n"
             "try:\n    input()\nexcept EOFError:\n    print('EOF')\n"
