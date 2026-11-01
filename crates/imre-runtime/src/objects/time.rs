@@ -12,6 +12,26 @@ use std::ffi::CStr;
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
+/// Read the process-independent clock used by CPython's monotonic and performance counters.
+pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {
+    // CLOCK_UPTIME_RAW uses mach_absolute_time's time base on Apple platforms.
+    #[cfg(target_vendor = "apple")]
+    let clock = libc::CLOCK_UPTIME_RAW;
+    #[cfg(not(target_vendor = "apple"))]
+    let clock = libc::CLOCK_MONOTONIC;
+    let mut stamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
+    // SAFETY: clock_gettime initializes the supplied timespec on success.
+    if unsafe { libc::clock_gettime(clock, stamp.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: the successful call initialized both fields.
+    let stamp = unsafe { stamp.assume_init() };
+    Ok(std::time::Duration::new(
+        stamp.tv_sec as u64,
+        stamp.tv_nsec as u32,
+    ))
+}
+
 /// The nine sequence fields and two named timezone attributes of a civil time.
 pub(crate) struct ClockParts {
     pub fields: [i64; 9],
