@@ -3,7 +3,6 @@ import ast
 import hashlib
 from pathlib import Path
 
-from exit_case import exit_observation
 import intern_case
 from ioencoding_case import observe as ioencoding_observation
 from locale_stream_cases import observe as locale_stream_observations
@@ -74,9 +73,6 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
         node = methods[cls, method]
         folder = root / (cls + "." + method)
         folder.mkdir()
-        if cls == "SysModuleTest" and method == "test_exit":
-            results[key] = exit_observation(module, toolchain, folder, source)
-            continue
         if cls == "SysModuleTest" and method == "test_ioencoding":
             lines = source.read_bytes().splitlines(keepends=True)
             method_sha256 = hashlib.sha256(b"".join(lines[node.lineno - 1:node.end_lineno])).hexdigest()

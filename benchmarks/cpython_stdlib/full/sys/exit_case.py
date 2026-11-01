@@ -7,25 +7,34 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from suite_evidence import roles
-from suite_inventory import load_suite
-from suite_native import NativeCompileError, method_bytes, run_in_fixtures
+from suite_native import NativeCompileError, method_bytes, retain_partial_observation
 
 
-def exit_observation(module, toolchain, directory, source):
+CASE_ID = "test.test_sys.SysModuleTest.test_exit"
+
+
+def observer(module, toolchain, directory, source):
+    method_sha256 = hashlib.sha256(method_bytes(source, "SysModuleTest", "test_exit")).hexdigest()
+
+    def execute(case, original):
+        return observe(module, toolchain, directory, method_sha256, original)
+
+    return execute
+
+
+def observe(module, toolchain, directory, method_sha256, original):
     from test.support import script_helper
 
-    test_id = "test.test_sys.SysModuleTest.test_exit"
     # script_helper probes the CPython fixture executable once to choose its
     # bootstrap flags. That probe is not an execution of the module operation.
     script_helper.interpreter_requires_environment()
     events = []
-    children = []
 
-    def build(program, kind):
+    def build(program, kind, **receipt):
         path = directory / str(len(events))
         path.mkdir()
         data = program.encode()
-        event = {"kind": kind, "source_sha256": hashlib.sha256(data).hexdigest()}
+        event = {"kind": kind, "source_sha256": hashlib.sha256(data).hexdigest(), **receipt}
         events.append(event)
         try:
             return toolchain.build(data, path), event
@@ -41,12 +50,14 @@ def exit_observation(module, toolchain, directory, source):
             'except SystemExit as error:\n    print("SystemExit")\n    print(repr(error.code))\n'
             'except TypeError as error:\n    print("TypeError")\n    print(repr(str(error)))\n'
         )
-        binary, event = build(program, "caught sys.exit")
-        run = subprocess.run([binary], check=True, capture_output=True, text=True, timeout=15)
+        binary, event = build(program, "caught sys.exit", call=call)
+        run = subprocess.run([binary], capture_output=True, timeout=15)
+        event.update(returncode=run.returncode, stdout_hex=run.stdout.hex(), stderr_hex=run.stderr.hex())
+        run.check_returncode()
         if run.stderr:
             raise AssertionError(run.stderr)
-        name, literal = run.stdout.splitlines()
-        event.update(call=call, exception=name, payload=literal)
+        name, literal = run.stdout.decode().splitlines()
+        event.update(exception=name, payload=literal)
         # Only reconstruct a verified native exception for the original host assertion.
         payload = ast.literal_eval(literal)
         if name == "TypeError":
@@ -61,47 +72,38 @@ def exit_observation(module, toolchain, directory, source):
                                        ["-X", "faulthandler", "-E"], ["-X", "faulthandler"])):
             raise AssertionError(f"unexpected upstream launcher arguments: {argv!r}")
         program = argv[-1]
-        try:
-            binary, event = build(program, "original child")
-        finally:
-            events[-1]["source"] = program
-        # Keep the upstream environment, pipes, cwd and child exit status.
-        proc = subprocess.Popen([binary], **kwargs)
-        children.append((event, proc))
-        return proc
+        binary, event = build(program, "original child", source=program, launcher_flags=argv[1:-2],
+                              PYTHONIOENCODING=kwargs["env"].get("PYTHONIOENCODING"))
 
-    def execute(case, original):
-        child_fixture = SimpleNamespace(PIPE=subprocess.PIPE, Popen=popen, _cleanup=subprocess._cleanup)
-        with (patch.object(module, "sys", SimpleNamespace(exit=exit_call)),
-              patch.object(script_helper, "subprocess", child_fixture)):
-            try:
-                original()
-            except NativeCompileError:
-                if "diagnostic" not in events[-1]:
-                    raise
-                return "blocked", events[-1]["diagnostic"].splitlines()[-1]
-            except AssertionError as exc:
-                return "failure", str(exc).replace(str(directory), "[case]")
-        raise AssertionError("test_exit completed: register its passing adapter in the suite selection")
+        class Child(subprocess.Popen):
+            def communicate(self, *args, **kwargs):
+                stdout, stderr = super().communicate(*args, **kwargs)
+                event.update(returncode=self.returncode, stdout_hex=stdout.hex(), stderr_hex=stderr.hex())
+                return stdout, stderr
 
-    results, failures, skips = run_in_fixtures(load_suite("test.test_sys"), {test_id: execute})
-    if failures or skips:
-        raise AssertionError((failures, skips))
-    (outcome, reason), = results[test_id]
-    for event, proc in children:
-        if proc.returncode is None:
-            raise AssertionError("upstream child did not finish")
-        event["returncode"] = proc.returncode
-    completed = sum("returncode" in event or "exception" in event for event in events)
-    return {
-        "outcome": outcome, "reason": reason,
-        "roles": roles(body="cpython", assertions="cpython",
-                       operation="imre" if completed else "unobserved", fixture="cpython"),
-        "evidence": {
-            "operation": "native sys.exit calls and unchanged subprocess snippets until the first blocker",
-            "fixture": "CPython SysModuleTest.tearDown, script_helper launcher options, environment and pipes",
-            "assertions": "original CPython method checks the observed exception, exit status and output",
-            "method_sha256": hashlib.sha256(method_bytes(source, "SysModuleTest", "test_exit")).hexdigest(),
-            "opt_level": toolchain.level, "native_operations_completed": completed, "attempts": events,
-        },
-    }
+        return Child([binary], **kwargs)
+
+    def observation():
+        completed = sum("exception" in e or e["kind"] == "original child" and "returncode" in e for e in events)
+        return {
+            "roles": roles(body="cpython", assertions="cpython",
+                           operation="imre" if any("returncode" in e for e in events) else "unobserved", fixture="cpython"),
+            "evidence": {
+                "operation": "native sys.exit calls and unchanged subprocess snippets",
+                "fixture": "CPython SysModuleTest.tearDown, script_helper launcher options, environment and pipes",
+                "assertions": "original CPython method checks the observed exception, exit status and output",
+                "method_sha256": method_sha256, "opt_level": toolchain.level,
+                "native_operations_completed": completed, "attempts": events,
+            },
+        }
+
+    child_fixture = SimpleNamespace(PIPE=subprocess.PIPE, Popen=popen, _cleanup=subprocess._cleanup)
+    with (retain_partial_observation(observation),
+          patch.object(module, "sys", SimpleNamespace(exit=exit_call)),
+          patch.object(script_helper, "subprocess", child_fixture)):
+        original()
+        if (sum("exception" in e for e in events) != 6
+                or sum(e["kind"] == "original child" and "returncode" in e for e in events) != 7):
+            raise AssertionError("incomplete original test_exit operation sequence")
+    return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
+            "fixture_execution": "CPython module/class/instance hooks", "observation": observation()}

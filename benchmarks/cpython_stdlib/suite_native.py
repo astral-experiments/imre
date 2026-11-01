@@ -3,6 +3,7 @@
 import ast
 import builtins
 from collections import defaultdict
+from contextlib import contextmanager
 import dataclasses
 import dis
 from functools import wraps
@@ -21,6 +22,16 @@ from suite_inventory import cases
 
 class NativeCompileError(RuntimeError):
     """The compiler did not produce an executable for the requested native entry."""
+
+
+@contextmanager
+def retain_partial_observation(snapshot):
+    """Keep an adapter's observed work when the upstream method raises."""
+    try:
+        yield
+    except (Exception, SystemExit) as exc:
+        exc._imre_partial_observation = snapshot()
+        raise
 
 
 def compile_blocker(exc):
@@ -268,6 +279,7 @@ class _FixtureResult(unittest.TestResult):
         self.index = 0
         self.active = None
         self.completed = {}
+        self.partial = {}
         self.entered = set()
         self.events = defaultdict(list)
         self.subtests = defaultdict(list)
@@ -285,7 +297,12 @@ class _FixtureResult(unittest.TestResult):
         @wraps(original)
         def invoke():
             self.entered.add(key)
-            self.completed[key] = execute(case, original)
+            try:
+                self.completed[key] = execute(case, original)
+            except (Exception, SystemExit) as exc:
+                if hasattr(exc, "_imre_partial_observation"):
+                    self.partial[key] = exc._imre_partial_observation
+                raise
         setattr(case, attr, invoke)
 
     def stopTest(self, case):
@@ -325,7 +342,8 @@ class _FixtureResult(unittest.TestResult):
 
     def addError(self, case, err):
         super().addError(case, err)
-        self.record(case, "error", self.errors[-1][1])
+        compile_block = isinstance(err[1], NativeCompileError) and hasattr(err[1], "_imre_partial_observation")
+        self.record(case, "blocked" if compile_block else "error", self.errors[-1][1])
 
     def addFailure(self, case, err):
         super().addFailure(case, err)
@@ -448,7 +466,7 @@ def run_evidence(suite, executions, reference, level, *, preflight=None, excepti
     for key, _, _ in result.selected:
         if key in observations:
             raise ValueError(f"both a preflight decision and an execution for {key}")
-        returned = result.completed.get(key)
+        returned = result.completed.get(key, result.partial.get(key))
         observation = returned.get("observation", returned) if isinstance(returned, dict) else None
         if observation is not None and not {"roles", "evidence"} <= observation.keys():
             raise ValueError(f"{key}: declare roles and evidence; legacy labels are not provenance")
@@ -470,7 +488,7 @@ def run_evidence(suite, executions, reference, level, *, preflight=None, excepti
         if not events and returned is None:
             raise ValueError(f"{key}: passing callback did not return execution evidence")
         # A teardown or failed subtest takes precedence over an earlier skip.
-        priority = {"error": 0, "failure": 1, "unexpected-success": 2, "expected-failure": 3, "skip": 4}
+        priority = {"error": 0, "failure": 1, "unexpected-success": 2, "expected-failure": 3, "blocked": 4, "skip": 5}
         outcome, reason = min(events, key=lambda e: priority[e[0]]) if events else ("pass", None)
         if reason is not None:
             observation["reason"] = reason

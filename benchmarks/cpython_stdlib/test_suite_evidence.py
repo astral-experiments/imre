@@ -14,14 +14,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from suite_evidence import ROLES, build_report, roles, validate_pair, validate_report
-from suite_native import NativeDefaultMethod, Toolchain, run_evidence, run_in_fixtures
+from suite_native import (NativeCompileError, NativeDefaultMethod, Toolchain, retain_partial_observation,
+                          run_evidence, run_in_fixtures)
 
 
 def reference(*ids):
     outcomes = {}
     for name in ids:
         outcomes.setdefault(name, []).append("pass")
-    return {"module": "test.example", "platform": "linux", "cpython_commit": "a" * 40,
+    return {"module": "test.example", "platform": sys.platform, "cpython_commit": "a" * 40,
             "denominator": len(ids), "reference": outcomes}
 
 
@@ -58,6 +59,68 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn("testValue", vars(case))
         self.assertEqual(report["denominator"], 2)
         self.assertEqual(report["distinct_ids"], 1)
+
+    def test_partial_observations_preserve_failures_and_fixture_errors(self):
+        class Example(unittest.TestCase):
+            def runTest(self):
+                self.assertEqual(self.value, 1)
+
+            def tearDown(self):
+                if self.bad_teardown:
+                    raise ValueError("teardown failed")
+
+        for value, compile_error, bad_teardown, outcome in (
+            (1, False, False, "pass"),
+            (0, False, False, "failure"),
+            (1, True, False, "blocked"),
+            (1, True, True, "error"),
+        ):
+            with self.subTest(outcome=outcome):
+                case = Example()
+                case.value = value
+                case.bad_teardown = bad_teardown
+                snapshot = observed(body="cpython", assertions="cpython", fixture="cpython")
+                snapshot["evidence"]["attempts"] = ["first child finished"]
+
+                def execute(case, original):
+                    with retain_partial_observation(lambda: snapshot):
+                        if compile_error:
+                            raise NativeCompileError("second child did not compile")
+                        original()
+                    return snapshot
+
+                ref = reference(case.id())
+                report = run_evidence(unittest.TestSuite([case]), {case.id(): execute}, ref, 0)
+                row, = report["records"]
+                self.assertEqual(row["outcome"], outcome)
+                self.assertEqual(row["roles"], snapshot["roles"])
+                self.assertEqual(row["evidence"]["attempts"], ["first child finished"])
+                if outcome == "failure":
+                    self.assertIn("0 != 1", row["reason"])
+                    evidence, failures, _ = run_in_fixtures(unittest.TestSuite([case]), {case.id(): execute})
+                    self.assertEqual(evidence, {})
+                    self.assertIn("0 != 1", failures[0][1])
+                if compile_error:
+                    events = row["evidence"]["events"]
+                    self.assertEqual(events[0]["outcome"], "blocked")
+                    self.assertIn("second child did not compile", events[0]["reason"])
+                if bad_teardown:
+                    self.assertIn("teardown failed", row["reason"])
+
+        def unexpected_exit(case, original):
+            with retain_partial_observation(lambda: observed(fixture="cpython")):
+                raise SystemExit(47)
+
+        def unannotated(case, original):
+            raise NativeCompileError("no partial observation")
+
+        case = Example()
+        case.bad_teardown = False
+        for execute, operation in ((unexpected_exit, "imre"), (unannotated, "unknown")):
+            report = run_evidence(unittest.TestSuite([case]), {case.id(): execute}, reference(case.id()), 0)
+            row, = report["records"]
+            self.assertEqual(row["outcome"], "error")
+            self.assertEqual(row["roles"]["operation"], operation)
 
     def test_setup_and_teardown_are_attributed_to_their_occurrences(self):
         class BadSetup(unittest.TestCase):
@@ -117,7 +180,7 @@ class ContractTests(unittest.TestCase):
         ref = reference(key)
         ref["reference"][key] = {"skipped": "pinned reference reason"}
         exc = {"kind": "upstream-skip", "reason": "pinned reference reason", "condition": "fixture unavailable",
-               "configuration": "module setup", "source": "test_example.py:2", "platform": "linux",
+               "configuration": "module setup", "source": "test_example.py:2", "platform": sys.platform,
                "fixture_variant": "custom-backend"}
         report = run_evidence(unittest.TestSuite([case]), {key: strict}, ref, 0,
                               exceptions={(key, 1, 0): exc}, fixture_variant=lambda _: "custom-backend")
@@ -165,7 +228,7 @@ class ContractTests(unittest.TestCase):
         discovered = [(key, variant), (key, variant)]
         skip = {"kind": "upstream-skip", "reason": "no signal handler", "condition": "SIGINT is ignored",
                 "configuration": "signal fixture", "source": "upstream/test.py:13",
-                "platform": "linux", "fixture_variant": variant}
+                "platform": sys.platform, "fixture_variant": variant}
         exclusion = dict(skip, kind="reviewed-exclusion", reason="private allocator hook", condition="requires hook",
                          review="review decision for this ID", revisit="issue tracking this hook")
         decisions = {(key, 2): {"outcome": "excluded", "roles": dict.fromkeys(ROLES, "unobserved"),
