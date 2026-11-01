@@ -216,6 +216,7 @@ impl Context {
             | Value::Code(_)
             | Value::Set { .. }
             | Value::Partial { .. }
+            | Value::PrimitiveLock(_)
             | Value::Native(_) => true,
             _ => false,
         }

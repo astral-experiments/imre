@@ -2093,6 +2093,10 @@ impl Context {
                     self.format_value(*variable, true, active)
                 )
             }
+            Value::PrimitiveLock(lock) => {
+                let state = if lock.locked() { "locked" } else { "unlocked" };
+                format!("<{state} _thread.lock object at {id:#x}>")
+            }
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
             Value::PartialPlaceholder => "Placeholder".to_owned(),

@@ -1,5 +1,6 @@
 from _thread import LockType
 from threading import Lock
+from weakref import ref
 
 
 class MapLock:
@@ -11,7 +12,9 @@ def current():
     print(type(lock) is Lock is LockType, isinstance(lock, Lock), Lock.__module__, Lock.__name__)
     print(lock.locked(), lock.acquire(False), lock.acquire(blocking=False), lock.acquire(timeout=0))
     print(Lock.release(lock), lock.locked())
+    assert repr(lock) == f"<unlocked _thread.lock object at {id(lock):#x}>"
     with lock as entered:
+        assert repr(lock) == f"<locked _thread.lock object at {id(lock):#x}>"
         print(entered, lock.locked(), lock.acquire(False))
     try:
         with lock:
@@ -33,6 +36,11 @@ def current():
         except (RuntimeError, ValueError, TypeError, OverflowError) as error:
             print(type(error).__name__, str(error))
     print(lock.acquire(timeout=0.001), lock.acquire(timeout=0.001), lock.release())
+
+    observed = ref(lock)
+    assert observed() is lock
+    del lock
+    assert observed() is None
 
 
 if __name__ == "__main__":
