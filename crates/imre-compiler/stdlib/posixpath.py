@@ -1,4 +1,7 @@
 """POSIX lexical operations shared by os.path and posixpath."""
+# os reads this constant while the two modules import each other.
+curdir = "."
+
 import os
 from _imre_posixpath import (
     extension_start, relative_parts as _relative_parts, realpath_loop as _realpath_loop,
@@ -9,6 +12,18 @@ from _imre_posixpath import (
 from genericpath import (
     ALLOW_MISSING, commonprefix, exists, getsize, isdir, isfile, islink, samefile, sameopenfile, samestat,
 )
+
+
+def split(p):
+    """Split a pathname.  Returns tuple "(head, tail)" where "tail" is
+    everything after the final slash.  Either part may be empty."""
+    p = os.fspath(p)
+    sep = b"/" if isinstance(p, bytes) else "/"
+    i = p.rfind(sep) + 1
+    head, tail = p[:i], p[i:]
+    if head and head != sep * len(head):
+        head = head.rstrip(sep)
+    return head, tail
 
 
 def normcase(s):
