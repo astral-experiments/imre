@@ -152,6 +152,7 @@ struct Storage {
     function_sites: HashMap<usize, Rc<FunctionSite>>,
     coroutine_targets: HashMap<usize, CoroutineTarget>,
     plain_callbacks: HashSet<Type>,
+    directly_reflected: HashSet<usize>,
     constructor_targets: HashMap<usize, usize>,
     constructor_slots: BTreeMap<usize, usize>,
     exceptions: Vec<NamedException>,
@@ -443,8 +444,14 @@ impl Types {
 }
 
 impl Types {
-    pub(crate) fn allow_plain_callbacks(&self, safe: HashSet<Type>) {
-        self.0.borrow_mut().plain_callbacks = safe;
+    pub(crate) fn set_reflected_functions(&self, safe: HashSet<Type>, direct: HashSet<usize>) {
+        let mut storage = self.0.borrow_mut();
+        storage.plain_callbacks = safe;
+        storage.directly_reflected = direct;
+    }
+    pub(crate) fn needs_function_metadata(&self, ty: Type, id: usize) -> bool {
+        let storage = self.0.borrow();
+        storage.plain_callbacks.contains(&ty) || storage.directly_reflected.contains(&id)
     }
     pub(crate) fn is_plain_callback(&self, ty: Type) -> bool {
         self.0.borrow().plain_callbacks.contains(&ty)
