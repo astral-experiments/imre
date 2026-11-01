@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comprehensions import require_result, run
-from expressions import reference
+from assignments import reference
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "floats"
 

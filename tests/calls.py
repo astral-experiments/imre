@@ -9,6 +9,7 @@ from pathlib import Path
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comprehensions import (
+    cases,
     reference,
     require_result,
     run,
@@ -104,16 +105,6 @@ ERRORS = {
 }
 
 
-def cases(project: Path) -> list[tuple[str, Path, str | None]]:
-    result = [(path.stem, path, None) for path in sorted(project.glob("*.py"))]
-    result.append(("imported", project / "imported/main.py", None))
-    for name, (source, error) in ERRORS.items():
-        path = project / "errors" / name / "main.py"
-        write_files(path.parent, {"main.py": source})
-        result.append((name, path, error))
-    return result
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -145,7 +136,7 @@ def main() -> None:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
-        for name, source, error in cases(project):
+        for name, source, error in cases(project, ERRORS):
             reference_dir = temporary / name / "reference"
             reference_dir.mkdir(parents=True)
             expected = reference(python, source, reference_dir, error)

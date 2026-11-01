@@ -1,15 +1,11 @@
 """Compare conditional expressions and concrete sequence access with CPython."""
 
-import argparse
-import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comprehensions import BOOTSTRAP, require_result, run, snapshot, write_files
+from assignments import main
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "expressions"
 
@@ -91,143 +87,13 @@ ERRORS = {
 }
 
 
-def cases(project: Path) -> list[tuple[str, Path, str | None]]:
-    result = [(path.stem, path, None) for path in sorted(project.glob("*.py"))]
-    result.append(("imported", project / "imported/main.py", None))
-    for name, (source, error) in ERRORS.items():
-        path = project / "errors" / name / "main.py"
-        write_files(path.parent, {"main.py": source})
-        result.append((name, path, error))
-    return result
-
-
-def reference(
-    python: str, source: Path, cwd: Path, error: str | None
-) -> subprocess.CompletedProcess[str]:
-    # Like exceptions.py, exercise intentional finally returns on Python 3.14+.
-    result = run(
-        [
-            python,
-            "-I",
-            "-B",
-            "-W",
-            "ignore::SyntaxWarning",
-            "-c",
-            BOOTSTRAP,
-            str(source.parent),
-            str(source),
-        ],
-        cwd,
-    )
-    require_result(result, error)
-    return result
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--compiler", required=True, type=Path)
-    parser.add_argument("--runtime", required=True, type=Path)
-    parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--clang", default="clang")
-    parser.add_argument("--target")
-    parser.add_argument("--lto-linker", type=Path)
-    parser.add_argument(
-        "--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"]
-    )
-    parser.add_argument("--sanitize", action="store_true")
-    args = parser.parse_args()
-    assert len(set(args.opt_levels)) == len(args.opt_levels), (
-        "optimization levels must be distinct"
-    )
-    compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
-    python = str(Path(args.python).resolve()) if "/" in args.python else args.python
-    clang = str(Path(args.clang).resolve()) if "/" in args.clang else args.clang
-    flags = ["--quiet"]
-    if args.target:
-        flags += ["--target", args.target]
-    if args.lto_linker is not None:
-        flags += ["--lto-linker", str(args.lto_linker.absolute())]
-    if args.sanitize:
-        flags.append("--sanitize")
-    checks = 0
-    with tempfile.TemporaryDirectory(prefix="imre-expressions-") as directory:
-        temporary = Path(directory)
-        project = temporary / "project"
-        shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
-        for name, source, error in cases(project):
-            reference_dir = temporary / name / "reference"
-            reference_dir.mkdir(parents=True)
-            expected = reference(python, source, reference_dir, error)
-            expected_files = snapshot(reference_dir)
-            for level in args.opt_levels:
-                actual_dir = temporary / name / ("O" + level)
-                actual_dir.mkdir()
-                binary = temporary / name / ("program-O" + level)
-                built = run(
-                    [
-                        compiler,
-                        "build",
-                        str(source),
-                        "--module-root",
-                        str(source.parent),
-                        "-o",
-                        str(binary),
-                        "--runtime",
-                        runtime,
-                        "--clang",
-                        clang,
-                        "--opt-level",
-                        level,
-                        *flags,
-                    ],
-                    temporary,
-                )
-                assert built.returncode == 0 and not built.stderr, (
-                    name,
-                    level,
-                    built.stdout,
-                    built.stderr,
-                )
-                actual = run([str(binary)], actual_dir)
-                require_result(actual, error)
-                assert actual.stdout == expected.stdout, (
-                    name,
-                    level,
-                    actual.stdout,
-                    expected.stdout,
-                    actual.stderr,
-                )
-                assert snapshot(actual_dir) == expected_files, (
-                    name,
-                    level,
-                    snapshot(actual_dir),
-                    expected_files,
-                )
-                checks += 1
-        rejected = {name: {"main.py": source} for name, source in REJECTED.items()}
-        rejected.update(IMPORTED_REJECTIONS)
-        for name, files in rejected.items():
-            case = temporary / "rejected" / name
-            write_files(case, files)
-            result = run(
-                [compiler, "check", str(case / "main.py"), "--module-root", str(case)],
-                temporary,
-            )
-            assert result.returncode > 0 and result.stderr, (name, result)
-            assert (
-                "panicked" not in result.stderr
-                and "AddressSanitizer" not in result.stderr
-            ), (name, result.stderr)
-            if "recursion" in name:
-                assert "recursive calls are unsupported" in result.stderr, (
-                    name,
-                    result.stderr,
-                )
-            checks += 1
-    print(
-        f"Passed {checks} expression and sequence checks ({len(rejected)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"
-    )
-
-
 if __name__ == "__main__":
-    main()
+    main(
+        fixtures=FIXTURES,
+        rejections=REJECTED,
+        imported_rejections=IMPORTED_REJECTIONS,
+        errors=ERRORS,
+        label="expression and sequence",
+        description=__doc__,
+        require_imported=True,
+    )
