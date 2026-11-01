@@ -41,6 +41,33 @@ def current():
     assert not complex(-0.0, 0) and bool(1j)
     print(repr(complex(-0.0, -0.0)), repr(-1j), repr(z))
 
+    for source in (
+        "-0", "-0j", "j", "+J", "-j", "1+j", "-.5-J", "( +1_0.5e-1-2.5E+2J )",
+        "\u2003(٢_٠+３j)\u00a0", "-1e-9999-1e-9999j", "INF-inFinityj", "-NaN+nanj",
+    ):
+        value = complex(source)
+        print(repr(value), repr(value.real), repr(value.imag))
+
+    class Text(str):
+        def __complex__(self):
+            raise AssertionError("str argument must be parsed")
+
+        def __repr__(self):
+            return "original-text"
+
+    assert complex(Text("3-4j")) == 3-4j
+    for source in (
+        "", "()", "((1))", "1 +2j", "1+ 2j", "1e+j", "1+2", "1j+2", "2jJ",
+        "1__2j", "_1", "1_.0j", "١_+2j", "1_2\x00", "1\x00_2", "∞_1", Text("_"),
+        "\udc80_", "_\udc80", "4\udc80", Text("_\udc80"),
+    ):
+        try:
+            complex(source)
+        except ValueError as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("accepted an invalid complex string")
+
     for n in (False, 1, -1, 2.25, -0.5, 9007199254740992, 1208925819614629174706176):
         key = complex(n, 0)
         assert n == key and key == n
