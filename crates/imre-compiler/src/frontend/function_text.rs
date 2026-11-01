@@ -59,13 +59,17 @@ impl Checker<'_> {
 
 /// Return the normalized value of a namespace's leading string literal.
 pub(crate) fn docstring(body: &[ast::Stmt]) -> Option<String> {
+    Some(clean_doc(docstring_literal(body)?.value.to_str()))
+}
+
+pub(crate) fn docstring_literal(body: &[ast::Stmt]) -> Option<&ast::ExprStringLiteral> {
     let ast::Stmt::Expr(stmt) = body.first()? else {
         return None;
     };
     let ast::Expr::StringLiteral(text) = &*stmt.value else {
         return None;
     };
-    Some(clean_doc(text.value.to_str()))
+    Some(text)
 }
 
 /// CPython expands tabs at eight-character stops, then removes the common

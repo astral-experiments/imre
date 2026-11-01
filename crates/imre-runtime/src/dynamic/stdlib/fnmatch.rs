@@ -47,19 +47,20 @@ pub(super) fn filter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
     let (names, pat) = arguments(args, kwargs)?;
     let pat = super::posixpath::fspath(ctx, pat)?;
     let (matches, bytes) = match ctx.heap.get(ctx.scalar_value(pat)) {
-        Value::Str(text) => (compile(text), false),
         Value::Bytes(value) => (compile(&byte_spelling(value)?), true),
-        _ => unreachable!(),
+        _ => (compile(ctx.str_value(ctx.scalar_value(pat))?), false),
     };
     let iter = ctx.iterator(names)?;
     let result = ctx.alloc(Value::List(Vec::new()));
     while let Some(name) = ctx.next_item(iter)? {
         let selected = match ctx.heap.get(ctx.scalar_value(name)) {
-            Value::Str(text) if !bytes => matches(text),
+            Value::Str(_) | Value::SurrogateStr(_) if !bytes => {
+                matches(ctx.str_value(ctx.scalar_value(name))?)
+            }
             Value::Bytes(value) | Value::ByteArray(value) if bytes => {
                 matches(&byte_spelling(value)?)
             }
-            Value::Str(_) | Value::Bytes(_) | Value::ByteArray(_) => {
+            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::ByteArray(_) => {
                 return Err(Error::new("TypeError", mixed_message(bytes)));
             }
             _ => {

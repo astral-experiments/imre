@@ -322,7 +322,7 @@ fn finish_tuple(hash: u64, length: usize) -> i64 {
     }
 }
 
-fn data_hash(bytes: &[u8]) -> i64 {
+fn data_hash<T: std::hash::Hash>(bytes: &[T]) -> i64 {
     static SEED: LazyLock<RandomState> = LazyLock::new(RandomState::new);
     if bytes.is_empty() {
         0
@@ -617,6 +617,7 @@ impl Context {
                     Self::identity_hash(key)
                 }
                 Value::Str(text) | Value::Native(text) => data_hash(text.as_bytes()),
+                Value::SurrogateStr(points) => data_hash(points),
                 Value::Bytes(bytes) => data_hash(bytes),
                 Value::None => 0xfca8_6420,
                 Value::Calendar { value, .. } => {

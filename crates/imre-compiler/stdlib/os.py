@@ -7,6 +7,13 @@ from posix import environ as _environ, fspath, putenv, unsetenv
 from types import GenericAlias
 
 
+def fsencode(filename):
+    filename = fspath(filename)
+    if isinstance(filename, str):
+        return filename.encode("utf-8", "surrogateescape")
+    return filename
+
+
 def fsdecode(filename):
     filename = fspath(filename)
     if isinstance(filename, bytes):

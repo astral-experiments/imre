@@ -33,6 +33,7 @@ mod weakref;
 mod wrapper_descriptor;
 mod zip;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -53,6 +54,8 @@ enum IteratorSlice<'a> {
     Bytes(&'a [u8]),
     ReversedBytes(&'a [u8]),
     ReversedText(&'a str),
+    Codepoints(&'a [u32]),
+    ReversedCodepoints(&'a [u32]),
 }
 
 impl IteratorSlice<'_> {
@@ -62,6 +65,7 @@ impl IteratorSlice<'_> {
             Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) | Self::ReversedBytes(bytes) => bytes.len(),
             Self::ReversedText(text) => text.chars().count(),
+            Self::Codepoints(points) | Self::ReversedCodepoints(points) => points.len(),
         }
     }
 
@@ -143,6 +147,28 @@ impl Context {
     fn text(&mut self, value: impl Into<String>) -> Id {
         self.alloc(Value::Str(value.into()))
     }
+    /// Use the ordinary UTF-8 layout whenever all Python code points are scalars.
+    fn text_codepoints(&mut self, points: Vec<u32>) -> Id {
+        if points.iter().any(|c| (0xd800..=0xdfff).contains(c)) {
+            self.alloc(Value::SurrogateStr(points))
+        } else {
+            self.text(
+                points
+                    .into_iter()
+                    .map(|c| char::from_u32(c).expect("Python code point"))
+                    .collect::<String>(),
+            )
+        }
+    }
+
+    /// Read Python code points without converting a surrogate into U+FFFD.
+    fn string_codepoints(&self, id: Id) -> Result<Cow<'_, [u32]>> {
+        match self.heap.get(self.scalar_value(id)) {
+            Value::Str(text) => Ok(Cow::Owned(text.chars().map(u32::from).collect())),
+            Value::SurrogateStr(points) => Ok(Cow::Borrowed(points)),
+            _ => Err(Error::new("TypeError", "expected str")),
+        }
+    }
     fn int(&mut self, value: i64) -> Id {
         self.alloc(Value::Int(crate::Int::from(value)))
     }
@@ -187,7 +213,7 @@ impl Context {
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
-            | ("str", Value::Str(_))
+            | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("set", Value::Set { frozen: false, .. })
@@ -225,11 +251,17 @@ impl Context {
     /// The immutable text backing an exact string or a Python subclass of str.
     fn string_storage(&self, id: Id) -> Option<Id> {
         match self.heap.get(id) {
-            Value::Str(_) => Some(id),
+            Value::Str(_) | Value::SurrogateStr(_) => Some(id),
             Value::Instance {
                 scalar: Some(value),
                 ..
-            } if matches!(self.heap.get(*value), Value::Str(_)) => Some(*value),
+            } if matches!(
+                self.heap.get(*value),
+                Value::Str(_) | Value::SurrogateStr(_)
+            ) =>
+            {
+                Some(*value)
+            }
             _ => None,
         }
     }
@@ -285,6 +317,20 @@ impl Context {
 
     /// Concatenate two string payloads, bypassing Python addition hooks.
     fn concat_strings(&mut self, left: Id, right: Id) -> Result<Id> {
+        if [left, right].iter().any(|id| {
+            matches!(
+                self.heap.get(self.scalar_value(*id)),
+                Value::SurrogateStr(_)
+            )
+        }) {
+            let mut result = self.string_codepoints(left)?.into_owned();
+            let suffix = self.string_codepoints(right)?;
+            result
+                .try_reserve_exact(suffix.len())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            result.extend_from_slice(&suffix);
+            return Ok(self.text_codepoints(result));
+        }
         let left = self.str_value(left)?;
         let right = self.str_value(right)?;
         let size = left
@@ -304,10 +350,14 @@ impl Context {
         let id = self
             .string_storage(id)
             .ok_or_else(|| Error::new("TypeError", "expected str"))?;
-        let Value::Str(value) = self.heap.get(id) else {
-            unreachable!()
-        };
-        Ok(value)
+        match self.heap.get(id) {
+            Value::Str(value) => Ok(value),
+            Value::SurrogateStr(_) => Err(Error::new(
+                "UnicodeError",
+                "operation requires Unicode scalar values",
+            )),
+            _ => unreachable!("string storage"),
+        }
     }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(self.scalar_value(id)) {
@@ -379,6 +429,7 @@ impl Context {
             }
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
+            Value::SurrogateStr(_) => (id, "str_iterator"),
             Value::Range(ref range) => {
                 return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
             }
@@ -499,6 +550,10 @@ impl Context {
             Value::List(values) | Value::Tuple(values) => {
                 IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
             }
+            Value::SurrogateStr(points) if *reverse => {
+                IteratorSlice::ReversedCodepoints(&points[..*offset])
+            }
+            Value::SurrogateStr(points) => IteratorSlice::Codepoints(&points[*offset..]),
             Value::Str(text) if *reverse => IteratorSlice::ReversedText(&text[..*offset]),
             Value::Bytes(bytes) if *reverse => IteratorSlice::ReversedBytes(&bytes[..*offset]),
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
@@ -808,6 +863,10 @@ impl Context {
             IteratorSlice::Reversed(values) => (values[values.len() - 1], 1),
             IteratorSlice::Bytes(bytes) => (self.int(i64::from(bytes[0])), 1),
             IteratorSlice::ReversedBytes(bytes) => (self.int(i64::from(bytes[bytes.len() - 1])), 1),
+            IteratorSlice::Codepoints(points) => (self.text_codepoints(vec![points[0]]), 1),
+            IteratorSlice::ReversedCodepoints(points) => {
+                (self.text_codepoints(vec![points[points.len() - 1]]), 1)
+            }
             IteratorSlice::ReversedText(text) => {
                 let ch = text.chars().next_back().expect("nonempty iterator");
                 (self.text(ch.to_string()), ch.len_utf8())
@@ -1008,6 +1067,11 @@ impl Context {
         if let Value::MappingProxy(dict) = *self.heap.get(id) {
             return self.items(dict);
         }
+        if let Some(storage) = self.string_storage(id)
+            && storage != id
+        {
+            return self.items(storage);
+        }
         if let Value::List(items) = self.heap.get(self.scalar_value(id)) {
             return copy_ids(items);
         }
@@ -1041,6 +1105,10 @@ impl Context {
                 }
                 Ok(items)
             }
+            Value::SurrogateStr(points) => Ok(points
+                .into_iter()
+                .map(|p| self.text_codepoints(vec![p]))
+                .collect()),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
@@ -1056,6 +1124,8 @@ impl Context {
                     IteratorSlice::Reversed(items) => values.extend(items.iter().rev().copied()),
                     IteratorSlice::Bytes(_)
                     | IteratorSlice::ReversedBytes(_)
+                    | IteratorSlice::Codepoints(_)
+                    | IteratorSlice::ReversedCodepoints(_)
                     | IteratorSlice::ReversedText(_) => {
                         while let Some(item) = self.next_item(id)? {
                             values.push(item);
@@ -1791,14 +1861,18 @@ impl Context {
                     };
                     self.bind(scope, name, value);
                 }
-                let pathsep = self.lookup_attr(path, "pathsep")?;
-                self.bind(scope, "pathsep", pathsep);
+                for name in ["pathsep", "devnull"] {
+                    let value = self.lookup_attr(path, name)?;
+                    self.bind(scope, name, value);
+                }
                 self.bind(scope, "path", path);
                 self.modules.insert("os.path".to_owned(), path);
             }
             "posixpath" => {
                 let pathsep = self.text(":");
                 self.bind(scope, "pathsep", pathsep);
+                let devnull = self.text("/dev/null");
+                self.bind(scope, "devnull", devnull);
             }
             "_frozen_importlib" => {
                 let external = self.module("_frozen_importlib_external")?;

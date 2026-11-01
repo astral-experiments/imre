@@ -7,7 +7,7 @@ use super::{Context, Error, Id, NONE, Result, Value};
 fn spelling(ctx: &Context, value: Id) -> bool {
     matches!(
         ctx.heap.get(ctx.scalar_value(value)),
-        Value::Str(_) | Value::Bytes(_)
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
     )
 }
 
@@ -50,6 +50,11 @@ fn normpath(ctx: &mut Context, path: Id) -> Result<Id> {
         "_path_normpath: path should be string, bytes or os.PathLike",
     )?;
     let value = ctx.heap.get(ctx.scalar_value(path));
+    if let Value::SurrogateStr(points) = value {
+        let normalized = crate::objects::posixpath::normalize(points, None)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        return Ok(ctx.text_codepoints(normalized));
+    }
     let bytes = match value {
         Value::Str(text) => text.as_bytes(),
         Value::Bytes(bytes) => bytes,
@@ -93,8 +98,13 @@ fn stat_predicate(ctx: &mut Context, path: Id, file_only: bool) -> Result<bool> 
         path,
         "stat: path should be string, bytes, os.PathLike or integer",
     )?;
+    let encoded;
     let path = match ctx.heap.get(ctx.scalar_value(value)) {
         Value::Str(text) => Path::new(text),
+        Value::SurrogateStr(_) => {
+            encoded = ctx.encode_filesystem_string(value)?;
+            Path::new(OsStr::from_bytes(&encoded))
+        }
         Value::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
         _ => unreachable!(),
     };

@@ -1,5 +1,7 @@
 //! Apply Python's lexical class-name mangling before lowering boxed modules.
 
+pub mod strings;
+
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 

@@ -22,13 +22,14 @@ fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
 }
 
 /// Terminate the validated filesystem spelling before evaluating any later Python argument.
-fn c_path(ctx: &Context, path: Id, nul_error: &str) -> Result<CString> {
-    let bytes = match ctx.heap.get(ctx.scalar_value(path)) {
-        Value::Str(text) => text.as_bytes(),
-        Value::Bytes(bytes) => bytes,
+fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
+    let encoded = match ctx.heap.get(ctx.scalar_value(path)) {
+        Value::Str(text) => CString::new(text.as_bytes()),
+        Value::Bytes(bytes) => CString::new(bytes.as_slice()),
+        Value::SurrogateStr(_) => CString::new(ctx.encode_filesystem_string(path)?),
         _ => unreachable!("fspath returns str or bytes"),
     };
-    CString::new(bytes).map_err(|_| Error::new("ValueError", nul_error))
+    encoded.map_err(|_| Error::new("ValueError", nul_error))
 }
 
 /// Direct putenv and unsetenv update libc. Only os.environ assignments also change the dictionary.

@@ -36,24 +36,36 @@ pub extern "C" fn imre_sys_default_encoding() -> *const Str {
     StrOwner::into_raw(default_encoding())
 }
 
+/// Return the encoding selected for this interpreter's filesystem calls.
+pub(crate) fn filesystem_encoding() -> Result<StrOwner, Error> {
+    NAMES.with(|names| {
+        names.filesystem.clone().ok_or_else(|| {
+            Error::new(
+                Kind::LookupError,
+                format!(
+                    "unknown encoding: {}",
+                    encoding::settings(false, None).filesystem_codeset()
+                ),
+            )
+        })
+    })
+}
+
+pub(crate) fn filesystem_errors() -> StrOwner {
+    NAMES.with(|names| names.errors.clone())
+}
+
 /// Transfer a reference to the canonical codec name. A locale outside the native
 /// registry raises LookupError even when an explicit stdio codec allowed startup.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_filesystem_encoding() -> *const Str {
-    NAMES.with(|names| match &names.filesystem {
-        Some(name) => StrOwner::into_raw(name.clone()),
-        None => Error::new(
-            Kind::LookupError,
-            format!(
-                "unknown encoding: {}",
-                encoding::settings(false, None).filesystem_codeset()
-            ),
-        )
-        .returning(std::ptr::null()),
-    })
+    match filesystem_encoding() {
+        Ok(name) => StrOwner::into_raw(name),
+        Err(error) => error.returning(std::ptr::null()),
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_filesystem_errors() -> *const Str {
-    NAMES.with(|names| StrOwner::into_raw(names.errors.clone()))
+    StrOwner::into_raw(filesystem_errors())
 }

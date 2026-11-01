@@ -11,6 +11,7 @@ mod boolean;
 mod expressions;
 mod patterns;
 mod statements;
+mod strings;
 
 const ABI: &str = "\
 declare ptr @imre_dyn_new(i32, ptr, ptr)
@@ -48,8 +49,11 @@ pub(crate) fn emit(
     for (name, path, source) in modules {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
-        crate::frontend::check_string_tokens(source, parsed.tokens())
-            .map_err(|error| format!("{}:{error}", path.display()))?;
+        let replacements = strings::literal_replacements(source, parsed.tokens());
+        if output.keep_docstrings && !replacements.is_empty() {
+            strings::check_docs(source, &parsed.syntax().body, &replacements)
+                .map_err(|error| format!("{}:{error}", path.display()))?;
+        }
         let package = if path.file_name().is_some_and(|file| file == "__init__.py") {
             name.as_str()
         } else {
@@ -61,6 +65,7 @@ pub(crate) fn emit(
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
         let location = SourceMap {
+            replacements,
             method_imports,
             string_annotations: private_names.string_annotations,
             private_names,
@@ -97,6 +102,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
     text: &'a str,

@@ -1135,7 +1135,7 @@ pub(super) fn builtin_slot(
             )));
         }
         let text = match ctx.heap.get(storage) {
-            Value::Str(_) | Value::Bytes(_) => ctx.repr(storage),
+            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) => ctx.repr(storage),
             Value::ByteArray(bytes) => ctx.bytearray_repr(object, bytes),
             Value::List(_) | Value::Tuple(_) | Value::Set { .. } => {
                 ctx.checked_container_slot_repr(object, storage)?

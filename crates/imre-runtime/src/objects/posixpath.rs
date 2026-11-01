@@ -319,27 +319,33 @@ pub unsafe extern "C" fn imre_posix_commonpath(list: *const super::Object, kind:
 /// Normalize components lexically. For relative abspath, supply the absolute cwd;
 /// for an absolute path or for normpath, pass none.
 /// The output buffer doubles as the component stack, so arbitrary bytes need no decoding.
-pub(crate) fn normalize(path: &[u8], cwd: Option<&[u8]>) -> Result<Vec<u8>, TryReserveError> {
+pub(crate) fn normalize<T: Copy + Eq + From<u8>>(
+    path: &[T],
+    cwd: Option<&[T]>,
+) -> Result<Vec<T>, TryReserveError> {
+    let slash = T::from(b'/');
+    let dot = T::from(b'.');
     let first = cwd.unwrap_or(path);
-    let root = if first.starts_with(b"//") && !first.starts_with(b"///") {
+    let root = if first.starts_with(&[slash; 2]) && !first.starts_with(&[slash; 3]) {
         2
     } else {
-        usize::from(first.starts_with(b"/"))
+        usize::from(first.starts_with(&[slash]))
     };
     let mut output = Vec::new();
     output.try_reserve(root.max(1))?;
-    output.resize(root, b'/');
+    output.resize(root, slash);
     for part in cwd
         .into_iter()
         .chain([path])
-        .flat_map(|p| p.split(|&b| b == b'/'))
+        .flat_map(|p| p.split(|&b| b == slash))
     {
         match part {
-            b"" | b"." => continue,
-            b".." => {
+            [] => continue,
+            [one] if *one == dot => continue,
+            [a, b] if *a == dot && *b == dot => {
                 let tail = &output[root..];
-                let last = tail.rsplit(|&b| b == b'/').next().unwrap_or_default();
-                if !last.is_empty() && last != b".." {
+                let last = tail.rsplit(|&b| b == slash).next().unwrap_or_default();
+                if !last.is_empty() && last != [dot; 2] {
                     let end = root + (tail.len() - last.len()).saturating_sub(1);
                     output.truncate(end);
                     continue;
@@ -353,12 +359,12 @@ pub(crate) fn normalize(path: &[u8], cwd: Option<&[u8]>) -> Result<Vec<u8>, TryR
         let separator = output.len() > root;
         output.try_reserve(part.len() + usize::from(separator))?;
         if separator {
-            output.push(b'/');
+            output.push(slash);
         }
         output.extend_from_slice(part);
     }
     if output.is_empty() {
-        output.push(b'.');
+        output.push(dot);
     }
     Ok(output)
 }

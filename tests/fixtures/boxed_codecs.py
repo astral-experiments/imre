@@ -2,6 +2,23 @@ import codecs
 
 
 def current():
+    class Text(str):
+        def encode(self, *args, **kwargs):
+            raise AssertionError("codecs.encode called str.encode")
+
+    class Data(bytes):
+        def decode(self, *args, **kwargs):
+            raise AssertionError("codecs.decode called bytes.decode")
+
+    assert codecs.encode(Text("é")) == b"\xc3\xa9"
+    assert codecs.decode(obj=Data(b"\xff"), encoding="latin1") == "ÿ"
+    for call in (lambda: codecs.decode(b"x", encoding=None), lambda: codecs.encode(42, "ascii")):
+        try:
+            call()
+        except TypeError as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("invalid codec operand accepted")
     entry = codecs.lookup("iso-8859-1")
     for data in (b"", b"GET / HTTP/1.1\r\n", b"X-Test: \xff\x00\r\n", bytes(range(256))):
         text, consumed = entry.decode(data)

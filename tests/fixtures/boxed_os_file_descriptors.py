@@ -1,5 +1,6 @@
 import os
 import posix
+import sys
 
 
 def current():
@@ -24,11 +25,18 @@ def current():
         def __fspath__(self):
             return missing
 
-    missing = b"imre-missing-file/child"
-    try:
-        os.open(Path(), os.O_RDONLY, dir_fd=None)
-    except FileNotFoundError as error:
-        assert error.filename is missing
-        print(error.errno, type(error.filename).__name__)
-    else:
-        raise AssertionError("opened a missing file")
+    raw = b"imre-missing-file/\xff"
+    assert sys.getfilesystemencoding() is sys.getfilesystemencoding()
+    errors = sys.getfilesystemencodeerrors()
+    assert errors is sys.getfilesystemencodeerrors() and errors == "surrogateescape"
+    assert raw.decode(sys.getfilesystemencoding(), errors) == os.fsdecode(raw)
+    for missing in (raw, os.fsdecode(raw)):
+        assert os.fspath(Path()) is missing
+        assert os.fsencode(Path()) == raw
+        try:
+            os.open(Path(), os.O_RDONLY, dir_fd=None)
+        except FileNotFoundError as error:
+            assert error.filename is missing
+            print(error.errno, type(error.filename).__name__)
+        else:
+            raise AssertionError("opened a missing file")

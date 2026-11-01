@@ -1028,34 +1028,26 @@ def main():
         )
         compare("-B", shadow_entry)
 
-        # Accept genuine U+FFFD, raw text, and literal backslashes on the boxed path.
+        # Keep lone surrogates distinct from U+FFFD and literal backslashes on the boxed path.
         compare(
             "-c",
             r"""import sys
 print(r"\uDCFF", "\\uDCFF", "�", "\ufffd", "\U0001f642", br"\uDCFF", b"\uDCFF")
 print(rf"\uDCFF{r'\uDCFF'}")
+print(repr("\udcff"), repr(f"{3}\U0000d800"))
+scope = {}
+exec(r'left = "\ufffd"; right = r"\udcff"', scope)
+print(repr(scope["left"]), scope["right"])
 sys.path.append("unused")""",
             extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"},
         )
-        surrogate = b"surrogate string escapes are unsupported"
-        for expression in (
-            r'"surrogates:\uDCFF"',
-            r'f"{3}\U0000d800"',
-            r'''rf"\uDCFF{'\ud800'}"''',
-            r'f"{3:\udcff}"',
-        ):
-            result = run(imre, "-c", f"import sys; sys.exit({expression})")
-            assert (result.returncode, result.stdout) == (1, b""), result
-            assert surrogate in result.stderr, result.stderr
-        (root / "surrogate_module.py").write_text(r'value = "\udfff"')
-        imported = run(
-            imre,
-            "-c",
-            "import sys, surrogate_module; sys.path.append('unused'); print(surrogate_module.value)",
-        )
-        assert (imported.returncode, imported.stdout) == (1, b""), imported
-        assert b"surrogate_module.py:1:" in imported.stderr, imported.stderr
-        assert surrogate in imported.stderr, imported.stderr
+        (root / "surrogate_module.py").write_text(r'value = f"\udfff{3}"')
+        compare("-c", "import sys, surrogate_module; sys.path.append('unused'); print(repr(surrogate_module.value))")
+        rejected = run(imre, "-c", r"""import sys
+sys.path.append("unused")
+compile(r"value = '\ud800'", "<literal>", "exec")""")
+        assert rejected.returncode == 1 and not rejected.stdout, rejected
+        assert b"NotImplementedError: runtime source: surrogate string escapes" in rejected.stderr, rejected.stderr
         assert run(imre, "-c").returncode == 2
         assert run(imre, "-I", "missing.py").returncode == 2
 
@@ -1455,6 +1447,7 @@ def report(text):
             "boxed_difflib.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
+            "boxed_string_surrogates.py",
             "boxed_string_expandtabs.py",
         ):
             if fixture == "boxed_stat.py" and sys.platform not in ("linux", "darwin"):

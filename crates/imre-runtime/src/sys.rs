@@ -11,7 +11,7 @@ pub(crate) use encoding::file_encoding;
 mod input;
 pub(super) use input::read_input_line;
 mod encoding_names;
-pub(crate) use encoding_names::default_encoding;
+pub(crate) use encoding_names::{default_encoding, filesystem_encoding, filesystem_errors};
 
 pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
     encoding::settings(isolated, utf8);
