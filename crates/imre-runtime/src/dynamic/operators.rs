@@ -2535,6 +2535,9 @@ impl Context {
                 .get_mut(i as usize)
                 .ok_or_else(|| Error::new("IndexError", "bytearray index out of range"))? = byte;
         } else if matches!(self.heap.get(obj), Value::List(_)) {
+            if let Value::Slice(parts) = *self.heap.get(key) {
+                return self.assign_list_slice(obj, parts, val);
+            }
             let i = self.list_mutation_position(obj, key)?;
             let Value::List(items) = self.heap.get_mut(obj) else {
                 unreachable!()
@@ -2706,6 +2709,68 @@ impl Context {
             _ => unreachable!("validated sequence"),
         };
         Ok(self.alloc(result))
+    }
+
+    fn assign_list_slice(&mut self, obj: Id, parts: [Id; 3], source: Id) -> Result<()> {
+        let bounds = super::slice::sequence_components(self, parts)?;
+        // Iteration can mutate the destination. Snapshot the RHS before fixing
+        // the bounds against the list's current length, including for a[:] = a.
+        let replacement = if let Value::List(items) | Value::Tuple(items) = self.heap.get(source) {
+            super::copy_ids(items)?
+        } else {
+            let iter = self.iterator(source).map_err(|err| {
+                if err.kind == "TypeError" {
+                    Error::new("TypeError", "must assign iterable to extended slice")
+                } else {
+                    err
+                }
+            })?;
+            self.heap.keep(iter);
+            let buffer = self.alloc(Value::List(Vec::new()));
+            self.heap.keep(buffer);
+            builtins::list_extend(self, buffer, iter)?;
+            let Value::List(items) = self.heap.get_mut(buffer) else {
+                unreachable!()
+            };
+            std::mem::take(items)
+        };
+        let Value::List(items) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        let [start, end, step] = super::slice::normalize(bounds, items.len() as i64);
+        let positions = slice_positions(start, end, step);
+        let count = positions.clone().count();
+        let mut removed = Vec::new();
+        if step == 1 {
+            let range = start as usize..end.max(start) as usize;
+            items
+                .try_reserve(replacement.len().saturating_sub(count))
+                .map_err(slice_memory_error)?;
+            removed
+                .try_reserve_exact(count)
+                .map_err(slice_memory_error)?;
+            removed.extend(items.splice(range, replacement));
+        } else {
+            if count != replacement.len() {
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "attempt to assign sequence of size {} to extended slice of size {count}",
+                        replacement.len()
+                    ),
+                ));
+            }
+            removed
+                .try_reserve_exact(count)
+                .map_err(slice_memory_error)?;
+            for (i, item) in positions.zip(replacement) {
+                removed.push(std::mem::replace(&mut items[i], item));
+            }
+        }
+        for item in removed {
+            self.heap.weak_edge_removed(item);
+        }
+        Ok(())
     }
 
     fn set_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {

@@ -14,8 +14,8 @@ mod print;
 mod text;
 mod translation;
 pub(super) use collections::{
-    clear_container, copy_dict, hashable, remove_dict_item, remove_dict_item_hashed, set_add,
-    set_member, sort_values, update as update_dict, update_set,
+    clear_container, copy_dict, hashable, list_extend, remove_dict_item, remove_dict_item_hashed,
+    set_add, set_member, sort_values, update as update_dict, update_set,
 };
 pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
@@ -109,6 +109,7 @@ const FUNCTIONS: &[&str] = &[
     "issubclass",
     "getattr",
     "globals",
+    "vars",
     "setattr",
     "delattr",
     "hasattr",
@@ -1060,6 +1061,36 @@ pub(super) fn call(
                 )));
             }
             Ok(ctx.module_globals(ctx.heap.current_scope()))
+        }
+        "vars" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("vars() takes no keyword arguments"));
+            }
+            match args {
+                [object] => match ctx.lookup_attr(*object, "__dict__") {
+                    Err(error) if ctx.is_attribute_error(&error) => {
+                        Err(type_error("vars() argument must have __dict__ attribute"))
+                    }
+                    result => result,
+                },
+                [] => {
+                    let scope = ctx.heap.current_scope();
+                    if let Some(locals) = ctx.scope_data(scope).exec_locals {
+                        Ok(locals)
+                    } else if ctx.scope_data(scope).parent.is_none() {
+                        Ok(ctx.module_globals(scope))
+                    } else {
+                        Err(Error::new(
+                            "NotImplementedError",
+                            "vars() requires caller locals",
+                        ))
+                    }
+                }
+                _ => Err(type_error(format!(
+                    "vars expected at most 1 argument, got {}",
+                    args.len()
+                ))),
+            }
         }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;

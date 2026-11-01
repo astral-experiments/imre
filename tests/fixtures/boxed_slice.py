@@ -26,6 +26,27 @@ def current():
     source = bytearray(b"abcd")
     source[slice(1, 3)] = b"X"
     print(bytes(source))
+    numbers = [0, 1, 2, 3]
+    numbers[:] = numbers[1:]
+    numbers[::-1] = numbers
+    assert numbers == [3, 2, 1]
+    numbers[2:0] = (4, 5)
+    assert numbers == [3, 2, 4, 5, 1]
+    try:
+        numbers[::2] = [0]
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("extended slice accepted a length mismatch")
+    assert numbers == [3, 2, 4, 5, 1]
+
+    def changing():
+        numbers.append(8)
+        yield 9
+
+    numbers[-1:] = changing()
+    assert numbers == [3, 2, 4, 5, 1, 9]
+
     rec = Recorder()
     key = rec[1:4:2]
     rec[::-1] = key
