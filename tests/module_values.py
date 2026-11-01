@@ -36,7 +36,7 @@ REJECTED = {
         "library.py": "from dataclasses import dataclass\ndef matches(item: int) -> bool:\n    match item:\n        case Later():\n            return True\n    return False\ndef relay() -> bool:\n    return matches(1)\nVALUE = relay()\n@dataclass\nclass Later:\n    value: int\n",
     },
     "entry_import_after_value": {"main.py": "VALUE = 1\nimport os\ndef last() -> None:\n    pass\n"},
-    "duplicate_binding": {"library.py": "VALUE = 1\nVALUE = 2\n"},
+    "uninitialized_rebinding": {"library.py": "VALUE: int = VALUE + 1\nVALUE = 2\n"},
     "annotation_without_initializer": {"library.py": "VALUE: int\n"},
     "direct_early_read": {"library.py": "FIRST = SECOND\nSECOND = 2\n"},
     "early_function_read": {
@@ -182,6 +182,8 @@ def main() -> None:
             assert "panicked" not in actual.stderr, (name, actual.stderr)
             if name.startswith("early_class_"):
                 assert "references a class before it is available" in actual.stderr, actual.stderr
+            if name == "uninitialized_rebinding":
+                assert "module value is not initialized on this path" in actual.stderr, actual.stderr
             if name == "metadata_entry_points":
                 assert "importlib.metadata.entry_points" in actual.stderr, actual.stderr
             checks += 1

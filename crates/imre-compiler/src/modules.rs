@@ -1372,6 +1372,8 @@ pub(crate) struct SourceModule {
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
     pub(crate) entry_globals: Vec<usize>,
+    /// First assignment of each module value that needs a rebindable cell.
+    pub(crate) rebound_values: HashSet<usize>,
     /// Mutable intrinsic exports read at the source from-import, keyed by statement.
     pub(crate) snapshots: HashMap<usize, Intrinsic>,
     /// Executable entry statements, or inactive main guards that still require checking.
@@ -1397,6 +1399,25 @@ impl SearchRoots {
 }
 
 impl SourceModule {
+    fn local_value(&self, id: ModuleId, statement: &ast::Stmt) -> Option<DefinitionId> {
+        let name = value_name(statement)?;
+        let Binding::Value(first) = *self.bindings.get(name)? else {
+            return None;
+        };
+        (first.module == id
+            && value_name(&self.parsed.syntax().body[first.statement]) == Some(name))
+        .then_some(first)
+    }
+
+    pub(crate) fn rebound_target(
+        &self,
+        id: ModuleId,
+        statement: &ast::Stmt,
+    ) -> Option<DefinitionId> {
+        self.local_value(id, statement)
+            .filter(|first| self.rebound_values.contains(&first.statement))
+    }
+
     pub(crate) fn is_namespace(&self) -> bool {
         matches!(self.search_roots, SearchRoots::Namespace(_))
     }
@@ -2332,6 +2353,8 @@ struct Loader<'a> {
     by_name: HashMap<String, ModuleId>,
     by_path: HashMap<PathBuf, ModuleId>,
     loading: HashSet<ModuleId>,
+    /// A from-import of a still-initializing module observes the value at that point.
+    partial_value_imports: HashSet<DefinitionId>,
     ordered_imports: bool,
     import_depth: usize,
     allow_imports: bool,
@@ -2374,6 +2397,7 @@ impl<'a> Loader<'a> {
             by_name: HashMap::new(),
             by_path: HashMap::new(),
             loading: HashSet::new(),
+            partial_value_imports: HashSet::new(),
             ordered_imports: false,
             import_depth: 0,
             allow_imports: true,
@@ -2441,6 +2465,7 @@ impl<'a> Loader<'a> {
             overloads: HashSet::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
+            rebound_values: HashSet::new(),
             snapshots: HashMap::new(),
             executable: Vec::new(),
         });
@@ -2832,18 +2857,21 @@ impl<'a> Loader<'a> {
                                 module_value(statement),
                                 Some(ast::Expr::Call(call)) if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
                             ));
-                    if let Some(name) = value_name(statement)
-                        && (id != 0 || entry_global)
-                    {
-                        self.bind(
-                            id,
-                            name,
-                            Binding::Value(DefinitionId {
-                                module: id,
-                                statement: index,
-                            }),
-                            statement,
-                        )?;
+                    self.scan_value_writes(id, statement)?;
+                    if let Some(name) = value_name(statement) {
+                        if (id != 0 || entry_global)
+                            && self.modules[id].rebound_target(id, statement).is_none()
+                        {
+                            self.bind(
+                                id,
+                                name,
+                                Binding::Value(DefinitionId {
+                                    module: id,
+                                    statement: index,
+                                }),
+                                statement,
+                            )?;
+                        }
                         if entry_global {
                             self.modules[id].entry_globals.push(index);
                             continue;
@@ -2866,6 +2894,36 @@ impl<'a> Loader<'a> {
         self.loading.remove(&id);
         self.initialization
             .push((id, segment..parsed.syntax().body.len()));
+        Ok(())
+    }
+
+    /// Record writes to established values, including those inside module-level control flow.
+    fn scan_value_writes(&mut self, id: ModuleId, statement: &ast::Stmt) -> Result<(), String> {
+        use ast::statement_visitor::{StatementVisitor, walk_stmt};
+
+        #[derive(Default)]
+        struct Writes<'a>(Vec<&'a ast::Stmt>);
+        impl<'a> StatementVisitor<'a> for Writes<'a> {
+            fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+                if value_name(stmt).is_some() {
+                    self.0.push(stmt);
+                } else if !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
+                    walk_stmt(self, stmt);
+                }
+            }
+        }
+        let mut writes = Writes::default();
+        writes.visit_stmt(statement);
+        let module = &mut self.modules[id];
+        for stmt in writes.0 {
+            if let Some(first) = module.local_value(id, stmt) {
+                if self.partial_value_imports.contains(&first) {
+                    return Err(module.error(stmt,
+                        "rebinding a value already imported during cyclic initialization requires a runtime namespace"));
+                }
+                module.rebound_values.insert(first.statement);
+            }
+        }
         Ok(())
     }
 
@@ -3127,6 +3185,11 @@ impl<'a> Loader<'a> {
                             alias.name.as_str()
                         ));
                     };
+                    if let Binding::Value(def) = binding
+                        && self.loading.contains(&def.module)
+                    {
+                        self.partial_value_imports.insert(def);
+                    }
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
                     self.bind(id, local.as_str(), binding, alias)?;
@@ -3720,7 +3783,7 @@ fn native_declaration(statement: &ast::Stmt) -> bool {
     }
 }
 
-/// Module values use one unconditional, fixed binding; their contents may mutate.
+/// A single named assignment can initialize or replace a module value.
 pub(crate) fn value_name(statement: &ast::Stmt) -> Option<&str> {
     let target = match statement {
         ast::Stmt::Assign(assignment) if assignment.targets.len() == 1 => &assignment.targets[0],
