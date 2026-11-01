@@ -533,6 +533,7 @@ impl Builtin {
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
+            | Self::TryDigitSums(_)
             | Self::IsNone
             | Self::MockCallList { .. }
             | Self::JsonIsInt
@@ -795,6 +796,7 @@ impl Builtin {
                 result == Type::Str
                     && matches!(args, [buffer] if types.element(buffer.ty) == Some(Type::Str))
             }
+            Self::TryDigitSums(_) => signature(&[Type::Str], Type::Int),
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)

@@ -24,20 +24,7 @@ pub(super) fn fuse(body: &mut [Statement], params: &[usize], args: &mut [Expr]) 
     let ExprKind::Builtin(Builtin::Slice, parts) = &argument.kind else {
         return;
     };
-    let [source, start, stop, step] = parts.as_slice() else {
-        return;
-    };
-    if !omitted(stop) {
-        return;
-    }
-    let start = if omitted(start) {
-        -1
-    } else if let Some(start) = negative_component(start) {
-        start
-    } else {
-        return;
-    };
-    let Some(step) = negative_component(step) else {
+    let Some((source, start, step)) = crate::ir::reverse_slice(parts) else {
         return;
     };
     let source = source.clone();
@@ -98,29 +85,6 @@ pub(super) fn fuse(body: &mut [Statement], params: &[usize], args: &mut [Expr]) 
         ),
     };
     args[0] = source;
-}
-
-fn omitted(value: &Expr) -> bool {
-    matches!(&value.kind, ExprKind::Absent(inner) if matches!(inner.kind, ExprKind::None))
-}
-
-/// Optional slice components wrap their integer value in Present.
-fn negative_component(value: &Expr) -> Option<i64> {
-    let value = match &value.kind {
-        ExprKind::Present(value) => value.as_ref(),
-        _ => return None,
-    };
-    let value = match &value.kind {
-        ExprKind::Int(value) => value.parse::<i64>().ok()?,
-        ExprKind::Negate(value) => {
-            let ExprKind::Int(value) = &value.kind else {
-                return None;
-            };
-            value.parse::<i64>().ok()?.checked_neg()?
-        }
-        _ => return None,
-    };
-    (-(1_i64 << 62)..0).contains(&value).then_some(value)
 }
 
 fn forward_condition(value: &Expr, captured: usize, cursor: usize) -> bool {

@@ -7000,6 +7000,24 @@ impl Emitter<'_, '_> {
             Builtin::StringReverseIter => {
                 self.call("imre_str_reverse_iter", Type::Iterator, &[&args[0].value])
             }
+            Builtin::TryDigitSums(tables) => {
+                // Pad each table to one full SIMD register for the runtime lookup.
+                let data = self.byte_array(
+                    tables
+                        .iter()
+                        .flat_map(|row| row.iter().copied().chain([0; 6]))
+                        .collect(),
+                );
+                let operand = self.instruction(format!(
+                    "call i64 @imre_str_try_digit_sums(ptr {}, ptr @{data})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
             Builtin::StringIntList => {
                 self.call("imre_str_int_list", Type::ListInt, &[&args[0].value])
             }
@@ -10120,6 +10138,7 @@ declare ptr @imre_formatter_field_name_split(ptr, ptr, ptr)
 declare ptr @imre_str_iter(ptr)
 declare ptr @imre_str_reverse_iter(ptr)
 declare ptr @imre_str_int_list(ptr)
+declare i64 @imre_str_try_digit_sums(ptr, ptr)
 declare void @imre_str_retain(ptr)
 declare void @imre_str_release(ptr)
 declare void @imre_print_str(ptr)

@@ -945,6 +945,7 @@ impl Analyzer {
                         _ => Interval::UNKNOWN,
                     },
                     Builtin::BytesGet => Interval::bounded(0, 255),
+                    Builtin::TryDigitSums(_) => Interval::bounded(-1, MAX_SMALL),
                     Builtin::ListGetI32 => {
                         Interval::bounded(i128::from(i32::MIN), i128::from(i32::MAX))
                     }
