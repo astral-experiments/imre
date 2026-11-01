@@ -31,13 +31,14 @@ Ordinary CPython 3.14.5 passes 27 of the 29 discovered occurrences and skips the
 | Native body, assertions, operation and fixture | 0 | 0 |
 | Native body, assertions and operation with a mixed fixture | 7 | 7 |
 | CPython body and assertions exercising native operations | 10 | 10 |
-| Blocked | 10 | 10 |
+| Blocked | 9 | 9 |
+| Native skip on a passing CPython reference | 1 | 1 |
 | Original platform skip | 2 | 2 |
 | Total | 29 | 29 |
 
 The seven compiled methods cover case sensitivity, built-in data, byte paths, URL handling, adding types, reinitialization and stability. Six use a typed native equality assertion with an executable failing control. The stability method uses bundled `unittest`. CPython supplies the module hooks, and native code runs the original class setup with hermetic tables. Ten other unchanged methods run their original assertions in CPython against a native worker, including the UTF-8 `mime.types` fixture and mutation of the list returned by reverse lookup. [Runner](run.py)
 
-Whole-suite native import reaches `from platform import win32_edition` on line 7 of the original test file. Isolating the original setup and teardown separately reaches the `global knownfiles` declaration. The ten blocked occurrences cover five CLI cases, `__all__`, lazy import inspection, the undotted-extension warning, the generic path-like fixture, and the file-reader test with a patched `open`. On Linux, `Win32MimeTypesTestCase.test_registry_accelerator` and `Win32MimeTypesTestCase.test_registry_parsing` each skip under the original “Windows only” class decorator. [Startup diagnostics](startup-linux.json), [unchanged test module](upstream/Lib/test/test_mimetypes.py)
+Whole-suite native import reaches `from platform import win32_edition` on line 7 of the original test file. Isolating the original setup and teardown separately reaches the `global knownfiles` declaration. The nine blocked occurrences cover five CLI cases, `__all__`, the undotted-extension warning, the generic path-like fixture, and the file-reader test with a patched `open`. Bundled `unittest` skips `MiscTestCase.test_lazy_import` under its original `@cpython_only` decorator with the reason “implementation detail specific to cpython”. CPython executes and passes it, so the ledger records an `unexpected-skip`. On Linux, `Win32MimeTypesTestCase.test_registry_accelerator` and `Win32MimeTypesTestCase.test_registry_parsing` each skip under the original “Windows only” class decorator. [Startup diagnostics](startup-linux.json), [unchanged test module](upstream/Lib/test/test_mimetypes.py)
 
 ## Werkzeug and Flask
 
