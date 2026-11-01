@@ -765,34 +765,6 @@ struct ChildGuard {
 }
 
 impl ChildGuard {
-    /// Reaps without blocking, including an inherited auto-reaping SIGCHLD policy.
-    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        match self.child.try_wait() {
-            Ok(Some(status)) => {
-                self.reaped = true;
-                Ok(Some(status))
-            }
-            Err(error) if error.raw_os_error() == Some(libc::ECHILD) => {
-                self.reaped = true;
-                Ok(Some(ExitStatus::from_raw(0)))
-            }
-            result => result,
-        }
-    }
-
-    /// Kills only a still-running direct child and always collects its status.
-    fn terminate(&mut self) -> io::Result<()> {
-        if self.try_wait()?.is_none() {
-            match self.child.kill() {
-                Ok(()) => {}
-                Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {}
-                Err(error) => return Err(error),
-            }
-            self.wait()?;
-        }
-        Ok(())
-    }
-
     fn wait(&mut self) -> io::Result<ExitStatus> {
         match self.child.wait() {
             Ok(status) => {
@@ -808,12 +780,6 @@ impl ChildGuard {
             Err(error) => Err(error),
         }
     }
-}
-
-/// Timeout capture stops at the deadline rather than waiting for descendant pipes.
-enum Captured {
-    Completed(ExitStatus, Vec<u8>, Vec<u8>),
-    TimedOut(Option<Vec<u8>>, Option<Vec<u8>>, Option<f64>),
 }
 
 fn poll_milliseconds(timeout: f64) -> Result<i32> {
@@ -842,136 +808,6 @@ fn poll_milliseconds(timeout: f64) -> Result<i32> {
         return Err(Error::new(Kind::OverflowError, "timeout is too large"));
     }
     Ok(milliseconds as i32)
-}
-
-/// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
-/// then kill/reap the direct child without an unbounded post-timeout pipe drain.
-fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
-    let started = Instant::now();
-    let mut child = ChildGuard {
-        child,
-        reaped: false,
-    };
-    let timeout = deadline.seconds()?;
-    let mut stdout = child.child.stdout.take();
-    let mut stderr = child.child.stderr.take();
-    let fds = [
-        stdout.as_ref().map_or(-1, AsRawFd::as_raw_fd),
-        stderr.as_ref().map_or(-1, AsRawFd::as_raw_fd),
-    ];
-    if fds == [-1, -1] {
-        // With no selector CPython simply waits, even for NaN, +inf or large
-        // finite deadlines that poll() would have rejected converting to ms.
-        return wait_timeout(&mut child, started, timeout, [Vec::new(), Vec::new()]);
-    }
-    for fd in fds.into_iter().filter(|&fd| fd >= 0) {
-        nonblocking(fd).map_err(os_error)?;
-    }
-    poll_milliseconds(timeout - started.elapsed().as_secs_f64())?;
-    let duration = if timeout > 0.0 {
-        Duration::from_secs_f64(timeout)
-    } else {
-        Duration::ZERO
-    };
-    let deadline = started + duration;
-    let mut polls = fds.map(|fd| libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    });
-    let mut outputs = [Vec::new(), Vec::new()];
-    let mut observed = [false; 2];
-    let mut remaining = fds.iter().filter(|&&fd| fd >= 0).count();
-    let mut buffer = [0_u8; 32 * 1024];
-    while remaining != 0 {
-        let now = Instant::now();
-        if now >= deadline {
-            child.terminate().map_err(os_error)?;
-            let [stdout, stderr] = outputs;
-            return Ok(Captured::TimedOut(
-                observed[0].then_some(stdout),
-                observed[1].then_some(stderr),
-                None,
-            ));
-        }
-        let milliseconds = ((deadline - now).as_secs_f64() * 1000.0).ceil() as i32;
-        // SAFETY: poll receives two writable descriptors owned by this frame.
-        if unsafe {
-            libc::poll(
-                polls.as_mut_ptr(),
-                polls.len() as libc::nfds_t,
-                milliseconds,
-            )
-        } < 0
-        {
-            let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(os_error(error));
-        }
-        // CPython checks expiry before consuming events returned by poll.
-        if Instant::now() >= deadline {
-            continue;
-        }
-        for index in 0..2 {
-            if polls[index].revents & libc::POLLNVAL != 0 {
-                return Err(os_error(io::Error::from_raw_os_error(libc::EBADF)));
-            }
-            if polls[index].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) == 0 {
-                continue;
-            }
-            let result = if index == 0 {
-                stdout.as_mut().expect("polled stdout").read(&mut buffer)
-            } else {
-                stderr.as_mut().expect("polled stderr").read(&mut buffer)
-            };
-            match result {
-                Ok(count) => {
-                    observed[index] = true;
-                    if count == 0 {
-                        polls[index].fd = -1;
-                        remaining -= 1;
-                    } else {
-                        append_output(&mut outputs[index], &buffer[..count])
-                            .map_err(capture_error)?;
-                    }
-                }
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
-                    ) => {}
-                Err(error) => return Err(os_error(error)),
-            }
-        }
-    }
-    wait_timeout(&mut child, started, timeout, outputs)
-}
-
-/// After all configured pipes close, a timeout no longer carries partial output.
-fn wait_timeout(
-    child: &mut ChildGuard,
-    started: Instant,
-    timeout: f64,
-    outputs: [Vec<u8>; 2],
-) -> Result<Captured> {
-    let wait_budget = timeout - started.elapsed().as_secs_f64();
-    let mut delay = Duration::from_millis(1);
-    loop {
-        if let Some(status) = child.try_wait().map_err(os_error)? {
-            let [stdout, stderr] = outputs;
-            return Ok(Captured::Completed(status, stdout, stderr));
-        }
-        let remaining = timeout - started.elapsed().as_secs_f64();
-        if remaining <= 0.0 {
-            child.terminate().map_err(os_error)?;
-            return Ok(Captured::TimedOut(None, None, Some(wait_budget)));
-        }
-        let sleep = Duration::try_from_secs_f64(remaining).unwrap_or(delay);
-        std::thread::sleep(delay.min(sleep));
-        delay = (delay * 2).min(Duration::from_millis(50));
-    }
 }
 
 impl Drop for ChildGuard {
@@ -1237,82 +1073,6 @@ pub extern "C" fn imre_environ_copy() -> *const Object {
     finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
-/// Runs one argv command with inherited stdin and two captured UTF-8 text streams.
-/// `env=None` inherits; an explicit dictionary replaces the environment. No shell
-/// interpretation occurs, including executable files without a valid format.
-///
-/// # Safety
-/// Root an exact list[str], nullable UTF-8 cwd, and nullable dict[str, str]. `check`
-/// is 0 or 1. `descriptor` is immutable static metadata with the original command field, an integer, and two None/str/bytes stream fields.
-/// Enter with pending clear. Success transfers one fully initialized record owner;
-/// null means pending must be checked before using the result. Inputs are borrowed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_subprocess_run(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    check: u32,
-    descriptor: *const RecordDescriptor,
-) -> *mut usize {
-    // SAFETY: this public entrypoint forwards its exact rooted input contract.
-    unsafe { run_process(args, cwd, env, check, 0x11, None, descriptor) }
-}
-
-/// Runs the same sealed text process with an optional exact float deadline.
-/// Timeout errors retain undecoded bytes; `None` uses the original capture path.
-///
-/// # Safety
-/// The ordinary run preconditions apply. `timeout` is null or points to a rooted
-/// `f64`; this call borrows it and checks pending before returning a null record.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_subprocess_run_timeout(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    check: u32,
-    timeout: *const f64,
-    descriptor: *const RecordDescriptor,
-) -> *mut usize {
-    // SAFETY: the nullable timeout and all process inputs remain rooted.
-    unsafe {
-        run_process(
-            args,
-            cwd,
-            env,
-            check,
-            0x11,
-            timeout.as_ref().copied().map(Deadline::Float),
-            descriptor,
-        )
-    }
-}
-
-/// # Safety
-/// Process inputs follow the ordinary run contract. `timeout` is a rooted
-/// integer word. The deadline retains its exact original value if it expires.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_subprocess_run_timeout_int(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    check: u32,
-    timeout: usize,
-    descriptor: *const RecordDescriptor,
-) -> *mut usize {
-    // SAFETY: the caller roots all arguments and the exact integer across this call.
-    unsafe {
-        run_process(
-            args,
-            cwd,
-            env,
-            check,
-            0x11,
-            Some(Deadline::Integer(Int::clone(&Int::borrow(timeout)))),
-            descriptor,
-        )
-    }
-}
-
 fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result<Vec<CString>> {
     let mut argv = Vec::new();
     argv.try_reserve_exact(words.len())
@@ -1340,39 +1100,6 @@ unsafe fn spawn_list(
         launch_error::spawn(&cmd, &config, streams, Default::default(), true, |_| {
             Ok(ChildAttributes::default())
         })
-    }
-}
-
-/// # Safety
-/// The caller roots an exact list of strings, Paths, or their closed union.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *const Str {
-    // SAFETY: the caller roots the exact list for the duration of this operation.
-    let run =
-        unsafe { spawn_list(args, std::ptr::null(), std::ptr::null(), 1) }.and_then(|child| {
-            let (status, stdout, _) = capture(child).map_err(capture_error)?;
-            Ok((status, StrOwner::new(decode_utf8_text(stdout)?)))
-        });
-    match run {
-        Ok((status, stdout)) if status.success() => StrOwner::into_raw(stdout),
-        Ok((status, stdout)) => {
-            raise_process(ProcessError {
-                positional_streams: false,
-                // SAFETY: the exception acquires the original rooted argv.
-                cmd: unsafe { WordKind::new(5).acquire(args as usize) },
-                returncode: returncode(status),
-                // SAFETY: each field transfers one decoded string or no owner.
-                stdout: unsafe {
-                    OwnedWord::from_owned(StrOwner::into_raw(stdout) as usize, WordKind::new(3))
-                },
-                stderr: OwnedWord {
-                    word: 0,
-                    kind: WordKind::new(0),
-                },
-            });
-            std::ptr::null()
-        }
-        Err(error) => error.returning(std::ptr::null()),
     }
 }
 
@@ -1530,73 +1257,6 @@ fn completed_stream(data: Vec<u8>, kind: WordKind) -> Result<OwnedWord> {
     Ok(unsafe { OwnedWord::from_owned(word, kind) })
 }
 
-/// Shares launch validation and successful records without changing no-timeout IO.
-unsafe fn run_process(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    check: u32,
-    streams: u32,
-    timeout: Option<Deadline>,
-    descriptor: *const RecordDescriptor,
-) -> *mut usize {
-    // SAFETY: the caller roots the exact argv, directory and environment.
-    let captured = unsafe { spawn_list(args, cwd, env, streams) }.and_then(|child| {
-        if let Some(timeout) = &timeout {
-            capture_timeout(child, timeout)
-        } else {
-            capture(child)
-                .map(|(status, stdout, stderr)| Captured::Completed(status, stdout, stderr))
-                .map_err(capture_error)
-        }
-    });
-    let (status, stdout, stderr) = match captured {
-        Ok(Captured::Completed(status, stdout, stderr)) => (status, stdout, stderr),
-        Ok(Captured::TimedOut(stdout, stderr, wait_budget)) => {
-            raise_timeout(TimeoutError {
-                // SAFETY: the original argv stays rooted across launch and capture.
-                cmd: unsafe { WordKind::new(5).acquire(args as usize) },
-                timeout: timeout.expect("only a deadline produces a timeout"),
-                wait_budget,
-                stdout: stdout.map(crate::BytesOwner::new),
-                stderr: stderr.map(crate::BytesOwner::new),
-            });
-            return std::ptr::null_mut();
-        }
-        Err(error) => return error.returning(std::ptr::null_mut()),
-    };
-    let result: Result<_> = (|| {
-        let returncode = returncode(status);
-        // SAFETY: the compiler’s four-field descriptor outlives this run.
-        let kinds = unsafe { [*(*descriptor).kinds.add(2), *(*descriptor).kinds.add(3)] };
-        // Python decodes stdout before stderr, even when check=True would fail.
-        Ok((
-            returncode,
-            completed_stream(stdout, WordKind::new(kinds[0]))?,
-            completed_stream(stderr, WordKind::new(kinds[1]))?,
-        ))
-    })();
-    let (returncode, stdout, stderr) = match result {
-        Ok(result) => result,
-        Err(error) => return error.returning(std::ptr::null_mut()),
-    };
-    // SAFETY: the caller retains the original list through this operation. Keeping
-    // that exact owner preserves CompletedProcess.args and CalledProcessError.cmd.
-    let args = unsafe { WordKind::new(5).acquire(args as usize) };
-    if check != 0 && returncode != 0 {
-        raise_process(ProcessError {
-            positional_streams: false,
-            cmd: args,
-            returncode,
-            stdout,
-            stderr,
-        });
-        return std::ptr::null_mut();
-    }
-    // SAFETY: the call site's descriptor matches the prepared arguments and streams.
-    unsafe { completed_record(descriptor, args, returncode, stdout, stderr) }
-}
-
 /// Transfer the exact original command and completed streams to an owned result.
 /// The caller guarantees that all four field owners match the static descriptor.
 unsafe fn completed_record(
@@ -1721,7 +1381,7 @@ mod tests {
         }
     }
 
-    fn args(values: &[&str]) -> crate::ObjectOwner {
+    pub(super) fn args(values: &[&str]) -> crate::ObjectOwner {
         // SAFETY: new transfers one fresh exact list[str] owner.
         let result = unsafe { crate::ObjectOwner::from_raw(imre_seq_new(3)) };
         for value in values {
@@ -1885,6 +1545,7 @@ mod tests {
         cwd: Option<&str>,
         env: Option<&crate::ObjectOwner>,
         check: bool,
+        timeout: Option<f64>,
     ) -> std::result::Result<Completed, crate::ObjectOwner> {
         const KINDS: [u32; 4] = [5, 2, 3, 3];
         let descriptor = Box::new(RecordDescriptor {
@@ -1893,16 +1554,25 @@ mod tests {
             semantics: std::ptr::null(),
         });
         let cwd = cwd.map(Str::new);
+        let config = popen::LaunchConfig::basic(
+            crate::ObjectOwner::as_ptr(args).cast(),
+            5,
+            cwd.as_ref().map_or(std::ptr::null(), |cwd| cwd),
+            env.map_or(std::ptr::null(), crate::ObjectOwner::as_ptr),
+            0x11 | (1 << 16), // capture both streams as text
+            Int::small(-1).unwrap().0,
+            true,
+        );
+        let deadline = timeout
+            .as_ref()
+            .map_or(0, |value| std::ptr::from_ref(value).addr());
         // SAFETY: the inputs remain rooted and the descriptor is retained with
         // every returned record; pending errors transfer into an independent Rc.
         unsafe {
-            let payload = imre_subprocess_run(
-                crate::ObjectOwner::as_ptr(args),
-                cwd.as_ref().map_or(std::ptr::null(), |cwd| cwd),
-                env.map_or(std::ptr::null(), crate::ObjectOwner::as_ptr),
-                u32::from(check),
-                &*descriptor,
-            );
+            let payload =
+                popen::imre_run_config(&config, 7, deadline, 0, 0, 0, check, &*descriptor)
+                    .cast_mut()
+                    .cast::<usize>();
             if payload.is_null() {
                 assert_eq!(imre_error_pending(), 1);
                 Err(crate::ObjectOwner::from_raw(imre_error_take()))
@@ -1921,7 +1591,7 @@ mod tests {
         cwd: Option<&str>,
         env: Option<&crate::ObjectOwner>,
     ) -> Completed {
-        match run(args, cwd, env, false) {
+        match run(args, cwd, env, false, None) {
             Ok(result) => result,
             Err(_) => panic!("controlled child unexpectedly failed to run"),
         }
@@ -1933,7 +1603,7 @@ mod tests {
         env: Option<&crate::ObjectOwner>,
         check: bool,
     ) -> crate::ObjectOwner {
-        match run(args, cwd, env, check) {
+        match run(args, cwd, env, check, None) {
             Ok(_) => panic!("controlled child unexpectedly succeeded"),
             Err(error) => error,
         }
@@ -1953,28 +1623,9 @@ mod tests {
 
     /// Exercises the public deadline ABI and transfers the resulting pending owner.
     fn timeout_failure(args: &crate::ObjectOwner, timeout: f64) -> crate::ObjectOwner {
-        const KINDS: [u32; 4] = [5, 2, 3, 3];
-        let descriptor = RecordDescriptor {
-            length: KINDS.len(),
-            kinds: KINDS.as_ptr(),
-            semantics: std::ptr::null(),
-        };
-        // SAFETY: exact rooted inputs and static field kinds survive the call.
-        unsafe {
-            let result = imre_subprocess_run_timeout(
-                crate::ObjectOwner::as_ptr(args),
-                std::ptr::null(),
-                std::ptr::null(),
-                1,
-                &timeout,
-                &descriptor,
-            );
-            if !result.is_null() {
-                super::super::records::imre_record_release(result);
-                panic!("controlled timeout unexpectedly succeeded");
-            }
-            assert_eq!(imre_error_pending(), 1);
-            crate::ObjectOwner::from_raw(imre_error_take())
+        match run(args, None, None, true, Some(timeout)) {
+            Err(error) => error,
+            Ok(_) => panic!("controlled timeout unexpectedly succeeded"),
         }
     }
 
@@ -2059,33 +1710,6 @@ mod tests {
             timeout_bytes(&error, 2).unwrap().as_slice(),
             b"parent finished"
         );
-    }
-
-    #[test]
-    fn deadline_capture_drains_both_full_pipes_before_expiry() {
-        let mut child = Command::new("python3")
-            .args([
-                "-c",
-                "import os,time\nos.write(1,b'!')\nfor _ in range(4):\n os.write(1,b'O'*65536)\n os.write(2,b'E'*65536)\ntime.sleep(10)",
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        // Start the capture deadline after interpreter startup, before draining either pipe.
-        let mut ready = [0];
-        let stdout = child.stdout.as_mut().unwrap();
-        stdout.read_exact(&mut ready).unwrap();
-        assert_eq!(ready, [b'!']);
-        let Ok(Captured::TimedOut(Some(stdout), Some(stderr), None)) =
-            capture_timeout(child, &Deadline::Float(1.0))
-        else {
-            panic!("expected a timeout with both output streams");
-        };
-        assert_eq!(stdout.len(), 262_144);
-        assert_eq!(stderr.len(), 262_144);
-        assert!(stdout.iter().all(|byte| *byte == b'O'));
-        assert!(stderr.iter().all(|byte| *byte == b'E'));
     }
 
     #[test]

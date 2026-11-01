@@ -14,6 +14,8 @@ mod selector;
 
 pub(super) use active::cleanup;
 pub(in crate::objects) use active::retain_live_owner;
+#[cfg(test)]
+pub(super) use communicate::imre_run_config;
 use control::{ChildControl, ReturnCode};
 use std::sync::Arc;
 
