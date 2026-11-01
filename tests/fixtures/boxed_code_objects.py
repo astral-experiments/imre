@@ -30,6 +30,21 @@ def factory():
 
 
 def current():
+    from types import GeneratorType, coroutine
+
+    def values():
+        yield 1
+
+    before = values()
+    original = values.__code__
+    assert coroutine(values) is values
+    after = values()
+    assert type(after) is GeneratorType
+    assert before.gi_code is original and after.gi_code is values.__code__
+    assert after.gi_code.co_flags == original.co_flags | 0x100
+    assert coroutine(values).__code__ is after.gi_code
+    assert next(before) == next(after) == 1
+
     saved = view.__code__
     method = Views().get
     print(view.__code__ is saved, method.__code__ is Views.get.__code__)

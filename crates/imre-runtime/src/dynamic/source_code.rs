@@ -793,6 +793,7 @@ impl Context {
             body: Body::Source(program),
             module_definition: true,
             coroutine: false,
+            flags: None,
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
             freevars: Vec::new(),
