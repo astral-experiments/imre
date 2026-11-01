@@ -1,14 +1,15 @@
+from importlib import import_module
 import types
 import typing
 
 
 def current():
-    from typing import Callable, Final, Generic, TypeVar
+    from typing import Callable, ClassVar, Final, Generic, TypeVar
 
     from typing import LiteralString, Never, NoReturn, Self, TypeAlias
 
     class Model:
-        pass
+        count: typing.ClassVar[int]
 
     Alias: TypeAlias = Model
     assert Alias is Model
@@ -41,6 +42,20 @@ def current():
         assert left is not right
         assert left.__args__[0] is first
         assert right.__args__[0] is second
+    assert ClassVar is typing.ClassVar and ClassVar is import_module("typing").ClassVar
+    marker = ClassVar[int]
+    assert marker is ClassVar[int] and Model.__annotations__["count"] is marker
+    assert repr(marker) == "typing.ClassVar[int]"
+    assert typing.get_origin(marker) is ClassVar and typing.get_args(marker) == (int,)
+    try:
+        ClassVar[int, str]
+    except TypeError as error:
+        assert str(error) == "typing.ClassVar accepts only single type. Got (<class 'int'>, <class 'str'>)."
+    else:
+        raise AssertionError("ClassVar accepted two arguments")
+    assert typing.get_origin(ClassVar[Final[int]]) is ClassVar
+    assert typing.get_args(ClassVar[Final[int]]) == (Final[int],)
+    assert repr(Final[ClassVar[int]]) == "typing.Final[typing.ClassVar[int]]"
     assert Final[int] is Final[int]
     assert Container[int] is Container[int]
 
