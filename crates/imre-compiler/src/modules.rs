@@ -1501,6 +1501,9 @@ impl IntrinsicModule {
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }
+            (Self::GenericPath | Self::PosixPath, "getsize") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.getsize")
+            }
             (Self::GenericPath | Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),

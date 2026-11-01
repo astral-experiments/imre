@@ -24,6 +24,11 @@ def islink(path):
 
 
 # From CPython 3.14.5, Lib/genericpath.py. See stdlib/docstrings/LICENSE.
+def getsize(filename):
+    """Return the size of a file, reported by os.stat()."""
+    return os.stat(filename).st_size
+
+
 def commonprefix(m):
     "Given a list of pathnames, returns the longest common leading component"
     if not m: return ''

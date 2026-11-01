@@ -1956,6 +1956,13 @@ impl Context {
                             "(...)",
                             Part::Sequence(storage, 0),
                         ),
+                        Value::StatMember(field) => {
+                            append_rendered_text(
+                                &mut output,
+                                &format!("<member '{field}' of 'os.stat_result' objects>"),
+                            )?;
+                            continue;
+                        }
                         Value::TupleGetterDoc => {
                             append_rendered_text(&mut output, super::namedtuple::DOC_REPR)?;
                             continue;
