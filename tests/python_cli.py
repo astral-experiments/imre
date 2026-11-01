@@ -1391,6 +1391,7 @@ def report(text):
             "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
+            "boxed_metaclass_init.py",
             "boxed_super.py",
             "boxed_property_setter.py",
             "boxed_staticmethod.py",

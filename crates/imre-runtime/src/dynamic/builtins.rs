@@ -970,15 +970,12 @@ pub(super) fn call(
             Ok(ctx.instance(class, None))
         }
         "type" => {
+            if args.len() == 3 {
+                let meta = ctx.builtin("type");
+                return ctx.construct_type(meta, args, kwargs);
+            }
             let [object] = args else {
-                return Err(if args.len() == 3 {
-                    Error::new(
-                        "NotImplementedError",
-                        "dynamic class construction with type() is unsupported",
-                    )
-                } else {
-                    type_error("type() takes 1 or 3 arguments")
-                });
+                return Err(type_error("type() takes 1 or 3 arguments"));
             };
             if !kwargs.is_empty() {
                 return Err(type_error("type() takes no keyword arguments"));

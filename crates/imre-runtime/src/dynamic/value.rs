@@ -524,6 +524,7 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
+    pub metaclass: Option<Id>,
     pub bases: Id,
     pub mro: Id,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
@@ -958,6 +959,7 @@ impl Value {
                 }
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
+                    visit.extend(class.metaclass);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
                     visit.extend(class.dictionary);

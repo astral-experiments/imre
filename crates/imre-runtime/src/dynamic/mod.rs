@@ -13,6 +13,7 @@ mod function_fields;
 mod importlib;
 mod iterators;
 mod mapping_abc;
+mod metaclass;
 mod module_type;
 mod namedtuple;
 mod operators;

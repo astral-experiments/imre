@@ -848,6 +848,7 @@ impl Context {
     /// Return the actual class independently of an instance's Python-level __class__ attribute.
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
+            Value::Class { .. } if let Some(meta) = self.custom_metaclass(obj) => Ok(meta),
             Value::Union(_) => Ok(super::union::class(self)),
             Value::TextFile(_) => {
                 self.module("io")?;
@@ -898,6 +899,9 @@ impl Context {
         }
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
+        }
+        if let Some(meta) = self.custom_metaclass(value) {
+            return self.subclass(meta, class);
         }
         if let Some(actual) = self
             .builtin_type_name(value)
@@ -3357,6 +3361,9 @@ impl Context {
                 ancestors,
                 ..
             } => {
+                if self.has_base(callable, "type") {
+                    return self.construct_type(callable, &args, &kwargs);
+                }
                 let (mut args, mut kwargs) = (args, kwargs);
                 if let Some(&decimal) = self.classes.get("decimal.Decimal")
                     && (callable == decimal
@@ -3762,8 +3769,10 @@ impl Context {
     }
 
     pub(super) fn class(&mut self, name: Id, bases: Id, body: Id) -> Result<Id> {
+        let name_id = name;
         let name = self.str_value(name)?.to_owned();
         let (original, bases) = super::typing::resolve_bases(self, bases)?;
+        let meta = self.select_metaclass(None, &bases)?;
         let Value::Function {
             scope: parent,
             code,
@@ -3838,9 +3847,44 @@ impl Context {
             );
         }
         super::typing::class_parameters(self, scope, original, &bases)?;
-        let class = self.allocate_class(name.clone(), scope, bases)?;
+        let init_args = meta.map(|_| {
+            let bases = self.alloc(Value::Tuple(bases.clone()));
+            let names = self.scope_data(scope).names.clone();
+            let items = names
+                .into_iter()
+                .map(|(key, val)| (self.text(key), val))
+                .collect();
+            [name_id, bases, self.dict(items)]
+        });
+        let class = self.finish_class(&name, scope, bases, meta)?;
+        self.classes.insert(name, class);
+        if let Some(kind) = enum_kind {
+            let scalar = kind.scalar_base().map(|base| self.builtin(base));
+            self.populate_enum(class, scalar)?;
+        }
+        if let (Some(meta), Some(args)) = (meta, init_args) {
+            self.run_metaclass_init(meta, class, args)?;
+        }
+        Ok(class)
+    }
+
+    /// Complete a type whether its namespace came from a class body or a metaclass call.
+    pub(super) fn finish_class(
+        &mut self,
+        name: &str,
+        scope: Id,
+        bases: Vec<Id>,
+        meta: Option<Id>,
+    ) -> Result<Id> {
+        let class = self.allocate_class(name.to_owned(), scope, bases)?;
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.class_namespace.as_mut().unwrap().metaclass = meta;
+        if let Some(cell) = frame.class_cell {
+            *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
+        }
         self.install_weakref_descriptor(class, scope);
-        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -3880,12 +3924,7 @@ impl Context {
                 self.call(set_name, vec![value, class, name], Vec::new())?;
             }
         }
-        self.init_abstract_class(class, &name, scope)?;
-        self.classes.insert(name, class);
-        if let Some(kind) = enum_kind {
-            let scalar = kind.scalar_base().map(|base| self.builtin(base));
-            self.populate_enum(class, scalar)?;
-        }
+        self.init_abstract_class(class, name, scope)?;
         Ok(class)
     }
 }
