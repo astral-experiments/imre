@@ -431,6 +431,7 @@ impl Context {
                 FormatKind::Markup => "formatteriterator",
                 FormatKind::Field => "fieldnameiterator",
             },
+            Value::Cached { .. } => "_lru_cache_wrapper",
             Value::Partial { .. } => "partial",
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::StaticMethod { .. } => "staticmethod",
@@ -832,6 +833,9 @@ pub(super) enum Value {
     CacheParameters,
     Cached {
         function: Id,
+        unbounded: bool,
+        hits: i64,
+        misses: i64,
         dictionary: Id,
         entries: Vec<CachedCall>,
         table: Id,
@@ -1199,6 +1203,7 @@ impl Value {
                 entries,
                 table,
                 marker,
+                ..
             } => {
                 visit.extend([*function, *dictionary, *table, *marker]);
                 visit.extend(entries.iter().map(|call| call.key));

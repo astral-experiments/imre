@@ -606,7 +606,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
-        | ("functools", "lru_cache" | "partial" | "update_wrapper")
+        | ("functools", "lru_cache" | "_unbounded_cache" | "partial" | "update_wrapper")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
@@ -1499,6 +1499,7 @@ pub(super) fn call(
         "separators",
     ];
     let (max_args, keywords): (usize, &[&str]) = match name {
+        "functools.lru_cache" => (1, &["maxsize"]),
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
@@ -1537,7 +1538,9 @@ pub(super) fn call(
         | "collections.defaultdict.copy"
         | "collections.defaultdict.__copy__"
         | "collections.defaultdict.__reduce__"
-        | "functools.lru_cache"
+        | "functools._lru_cache_wrapper.cache_clear"
+        | "functools._lru_cache_wrapper.cache_info"
+        | "functools._unbounded_cache"
         | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
@@ -1778,7 +1781,11 @@ pub(super) fn call(
         }
         "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools.lru_cache" => {
-            if args.is_empty() && kwargs.is_empty() {
+            if option(args, 0, kwargs, "maxsize")? == Some(NONE) {
+                let module = ctx.module("functools")?;
+                let decorating_function = ctx.lookup_attr(module, "_unbounded_lru_cache")?;
+                ctx.call(decorating_function, Vec::new(), Vec::new())?
+            } else if args.is_empty() && kwargs.is_empty() {
                 ctx.alloc(Value::Native("functools._cached".into()))
             } else if args.len() == 1 && ctx.callable(args[0]) && kwargs.is_empty() {
                 functools::default_cache(ctx, args[0])?
@@ -1795,6 +1802,19 @@ pub(super) fn call(
             let size = ctx.int(super::value::CACHE_CAPACITY as i64);
             let typed = ctx.text("typed");
             ctx.dict(vec![(maxsize, size), (typed, FALSE)])
+        }
+        "functools._unbounded_cache" => {
+            let function = argument(args, 0)?;
+            if !ctx.callable(function) {
+                return Err(Error::new(
+                    "TypeError",
+                    "the first argument must be callable",
+                ));
+            }
+            ctx.new_cache(function, true)
+        }
+        "functools._lru_cache_wrapper.cache_info" | "functools._lru_cache_wrapper.cache_clear" => {
+            functools::cache_method(ctx, name, argument(args, 0)?)?
         }
         "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;

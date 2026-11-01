@@ -291,6 +291,10 @@ impl Context {
 
     /// Construct a cache with an independently traced dictionary and keyword marker.
     pub(super) fn cached_function(&mut self, function: Id) -> Id {
+        self.new_cache(function, false)
+    }
+
+    pub(super) fn new_cache(&mut self, function: Id, unbounded: bool) -> Id {
         let mark = self.heap.temporary_mark();
         self.heap.keep(function);
         let table = self.dict(Vec::new());
@@ -301,6 +305,9 @@ impl Context {
         self.heap.keep(dictionary);
         let result = self.alloc(Value::Cached {
             function,
+            unbounded,
+            hits: 0,
+            misses: 0,
             dictionary,
             entries: Vec::new(),
             table,
@@ -817,6 +824,7 @@ impl Context {
             Value::Weak(wr) => wr.kind.class(),
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
+            Value::Cached { .. } => "functools._lru_cache_wrapper",
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
             Value::SequenceIterator { .. } => "iterator",
@@ -883,6 +891,7 @@ impl Context {
                             | "odict_values"
                             | "mappingproxy"
                             | "functools._PlaceholderType"
+                            | "functools._lru_cache_wrapper"
                             | "operator.attrgetter"
                             | super::namedtuple::GETTER
                             | "operator.itemgetter"
@@ -1046,6 +1055,7 @@ impl Context {
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
+            | ("functools._lru_cache_wrapper", Value::Cached { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
@@ -1491,6 +1501,14 @@ impl Context {
                 if let Some(value) = self.dictionary_field(Some(dictionary), name)? {
                     return Ok(value);
                 }
+                if matches!(name, "cache_clear" | "cache_info") {
+                    let callable = self.builtin(&format!("functools._lru_cache_wrapper.{name}"));
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: false,
+                    }));
+                }
             }
             Value::ClassMethod(callable) if matches!(name, "__func__" | "__wrapped__") => {
                 return Ok(callable);
@@ -1724,6 +1742,7 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | "functools._lru_cache_wrapper"
                         | super::namedtuple::GETTER
                         | super::deque::CLASS
                         | super::deque::ITERATOR
@@ -2466,10 +2485,13 @@ impl Context {
         }
         self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
-            Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
             Value::Cached { dictionary, .. } => {
+                if name == "__dict__" {
+                    return Err(Error::new("TypeError", "cannot delete __dict__"));
+                }
                 self.update_dictionary_field(obj, dictionary, name, None)
             }
+            Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -3534,6 +3556,7 @@ impl Context {
                 function,
                 table,
                 marker,
+                unbounded,
                 ..
             } => {
                 let mark = self.heap.temporary_mark();
@@ -3542,7 +3565,10 @@ impl Context {
                     self.heap.keep(table);
                     let fast = args.len() == 1
                         && kwargs.is_empty()
-                        && matches!(self.heap.get(args[0]), Value::Int(_) | Value::Str(_));
+                        && matches!(
+                            self.heap.get(args[0]),
+                            Value::Int(_) | Value::Str(_) | Value::SurrogateStr(_)
+                        );
                     let mut parts = args.clone();
                     if !kwargs.is_empty() {
                         parts.push(marker);
@@ -3565,17 +3591,29 @@ impl Context {
                     let hash = self.dictionary_hash(key)?;
                     if let Some(index) = self.find_dictionary_key(table, key, Some(hash))?.1 {
                         let (resident, value) = self.dict_entries(table).unwrap()[index];
-                        let Value::Cached { entries, .. } = self.heap.get_mut(callable) else {
+                        let Value::Cached { entries, hits, .. } = self.heap.get_mut(callable)
+                        else {
                             unreachable!()
                         };
-                        if let Some(i) = entries.iter().position(|call| call.key == resident) {
+                        *hits += 1;
+                        if !unbounded
+                            && let Some(i) = entries.iter().position(|call| call.key == resident)
+                        {
                             let hit = entries.remove(i);
                             entries.push(hit);
                         }
                         return Ok(value);
                     }
-                    let result = self.call(function, args.clone(), kwargs.clone())?;
+                    let Value::Cached { misses, .. } = self.heap.get_mut(callable) else {
+                        unreachable!()
+                    };
+                    *misses += 1;
+                    let result = self.call(function, args, kwargs)?;
                     self.heap.keep(result);
+                    if unbounded {
+                        self.set_cache_key(table, key, result, hash)?;
+                        return Ok(result);
+                    }
                     if self
                         .find_dictionary_key(table, key, Some(hash))?
                         .1
