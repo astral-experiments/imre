@@ -53,6 +53,10 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
         Value::Class { .. } | Value::Native(_) => object,
+        Value::NamedTuple {
+            class: Some(crate::dynamic::stdlib::os::stat::CLASS),
+            ..
+        } => ctx.builtin(crate::dynamic::stdlib::os::stat::CLASS),
         Value::Instance {
             class,
             fields,
@@ -175,6 +179,9 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             } else {
                 names.extend(["__dict__".to_owned(), "__weakref__".to_owned()]);
             }
+        }
+        Value::Native(name) if name == crate::dynamic::stdlib::os::stat::CLASS => {
+            names.extend(crate::dynamic::stdlib::os::stat::attribute_names().map(str::to_owned));
         }
         Value::Native(name) => return Err(missing_namespace(name)),
         _ => return Err(missing_namespace(ctx.type_name(class))),

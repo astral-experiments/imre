@@ -310,6 +310,33 @@ impl Codec {
         })
     }
 
+    /// Decode a POSIX filename with the startup codec and Python's surrogateescape policy.
+    pub(crate) fn decode_filesystem(self, data: &[u8]) -> Result<Vec<u32>> {
+        let mut points = Vec::new();
+        points
+            .try_reserve_exact(data.len())
+            .map_err(|_| Error::allocation())?;
+        if matches!(self, Self::Utf8 { .. }) {
+            points.extend(super::interpreter_stdlib::fsdecode(data));
+            return Ok(points);
+        }
+        for (index, &byte) in data.iter().enumerate() {
+            let ch = match self {
+                Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
+                Self::Latin1 => Some(char::from(byte)),
+                Self::CodePage(page) => page.decode.decode(byte),
+                Self::Utf8 { .. } => unreachable!(),
+            };
+            points.push(match ch {
+                Some(ch) => u32::from(ch),
+                None if !byte.is_ascii() => 0xdc00 + u32::from(byte),
+                // The surrogateescape handler cannot consume an unmapped ASCII byte.
+                None => return Err(charmap_decode_error(data, index)),
+            });
+        }
+        Ok(points)
+    }
+
     pub(crate) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
         let capacity = if matches!(self, Self::Latin1) {
             data.len()
@@ -333,20 +360,8 @@ impl Codec {
                             .map_err(|_| Error::allocation())?;
                         text.push(ch);
                     } else {
-                        decoding_error(&mut text, errors, &[byte], || match owned_input(data) {
-                            Ok(bytes) => {
-                                let reason = "character maps to <undefined>";
-                                Error::unicode_decode(
-                                    "charmap",
-                                    bytes,
-                                    index..index + 1,
-                                    reason,
-                                    format!(
-                                        "'charmap' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"
-                                    ),
-                                )
-                            }
-                            Err(error) => error,
+                        decoding_error(&mut text, errors, &[byte], || {
+                            charmap_decode_error(data, index)
                         })?;
                     }
                 }
@@ -384,6 +399,24 @@ impl Codec {
         }
     }
 
+    pub(crate) fn encode_byte(self, ch: char) -> Option<u8> {
+        match self {
+            Self::Ascii => ch.is_ascii().then_some(ch as u8),
+            Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
+            Self::CodePage(page) => page.encode.get(&ch).copied(),
+            Self::Utf8 { .. } => unreachable!("UTF-8 is a multibyte encoding"),
+        }
+    }
+
+    pub(crate) fn single_byte_error(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Ascii => ("ascii", "ordinal not in range(128)"),
+            Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
+            Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
+            Self::Utf8 { .. } => unreachable!("UTF-8 is a multibyte encoding"),
+        }
+    }
+
     pub(crate) fn encode<'a>(
         self,
         text: &'a str,
@@ -401,22 +434,14 @@ impl Codec {
                 out.extend_from_slice(text.as_bytes());
                 return Ok(Cow::Owned(out));
             }
-            Self::Ascii => ("ascii", "ordinal not in range(128)"),
-            Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
-            Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
-        };
-        let encoded = |ch: char| match self {
-            Self::Ascii => ch.is_ascii().then_some(ch as u8),
-            Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
-            Self::CodePage(page) => page.encode.get(&ch).copied(),
-            Self::Utf8 { .. } => unreachable!(),
+            _ => self.single_byte_error(),
         };
         let mut out = Vec::new();
         out.try_reserve_exact(text.len())
             .map_err(|_| Error::allocation())?;
         let mut chars = text.chars().enumerate().peekable();
         while let Some((start, ch)) = chars.next() {
-            if let Some(byte) = encoded(ch) {
+            if let Some(byte) = self.encode_byte(ch) {
                 out.try_reserve(1).map_err(|_| Error::allocation())?;
                 out.push(byte);
                 continue;
@@ -432,7 +457,8 @@ impl Codec {
                 ),
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
-                    while let Some((i, _)) = chars.next_if(|(_, c)| encoded(*c).is_none()) {
+                    while let Some((i, _)) = chars.next_if(|(_, c)| self.encode_byte(*c).is_none())
+                    {
                         end = i;
                     }
                     return Err(encoding_error(
@@ -449,7 +475,7 @@ impl Codec {
             out.try_reserve(replacement.len())
                 .map_err(|_| Error::allocation())?;
             for c in replacement.chars() {
-                let Some(byte) = encoded(c) else {
+                let Some(byte) = self.encode_byte(c) else {
                     return Err(encoding_error(
                         codec,
                         reason,
@@ -565,6 +591,22 @@ pub(crate) fn unknown_handler(name: &str) -> Error {
     // CPython includes at most 400 UTF-8 bytes, ending before any partial character.
     let name = &name[..name.floor_char_boundary(400)];
     option_error(Kind::LookupError, "unknown error handler name '", name, "'")
+}
+
+fn charmap_decode_error(data: &[u8], index: usize) -> Error {
+    let bytes = match owned_input(data) {
+        Ok(bytes) => bytes,
+        Err(error) => return error,
+    };
+    let reason = "character maps to <undefined>";
+    let byte = data[index];
+    Error::unicode_decode(
+        "charmap",
+        bytes,
+        index..index + 1,
+        reason,
+        format!("'charmap' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
+    )
 }
 
 pub(crate) fn decoding_error(

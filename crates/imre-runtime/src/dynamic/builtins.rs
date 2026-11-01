@@ -391,7 +391,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             iter.kind
         }
         Value::Slice(_) if super::slice::METHODS.contains(&attr) => "slice",
-        Value::TupleGetterDoc if super::namedtuple::GETTER_METHODS.contains(&attr) => {
+        Value::TupleGetterDoc | Value::StatMember(_)
+            if super::namedtuple::GETTER_METHODS.contains(&attr) =>
+        {
             "member_descriptor"
         }
         Value::TupleGetter { .. } if super::namedtuple::GETTER_METHODS.contains(&attr) => {

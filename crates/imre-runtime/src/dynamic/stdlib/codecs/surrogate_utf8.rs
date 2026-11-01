@@ -1,5 +1,6 @@
-//! UTF-8 encoding for Python strings containing non-scalar code points.
+//! Native encoding for Python strings containing non-scalar code points.
 use super::{Context, Error, Id, Result, Value};
+use crate::objects::Codec;
 
 impl Context {
     pub(in crate::dynamic) fn encode_filesystem_string(&mut self, id: Id) -> Result<Vec<u8>> {
@@ -11,6 +12,84 @@ impl Context {
             )?);
         }
         self.encode_utf8_codepoints(id, false, "surrogateescape")
+    }
+
+    /// Encode an OS argument using the codec selected at interpreter startup.
+    pub(in crate::dynamic) fn encode_os_path(&mut self, id: Id) -> Result<Vec<u8>> {
+        let codec = Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        match codec {
+            Codec::Utf8 { signature: false } => return self.encode_filesystem_string(id),
+            Codec::Utf8 { signature: true } => {
+                return self.encode_utf8_codepoints(id, true, "surrogateescape");
+            }
+            _ => {}
+        }
+        let points = self.string_codepoints(id)?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(points.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let encode = |point| char::from_u32(point).and_then(|ch| codec.encode_byte(ch));
+        for (start, &point) in points.iter().enumerate() {
+            if let Some(byte) = encode(point) {
+                bytes.push(byte);
+            } else if (0xdc80..=0xdcff).contains(&point) {
+                bytes.push(point as u8);
+            } else {
+                let end = start
+                    + points[start..]
+                        .iter()
+                        .take_while(|&&p| encode(p).is_none())
+                        .count();
+                // A charmap passes the whole unmapped run to the error handler.
+                // ASCII and Latin-1 first consume its leading escaped bytes.
+                let start = if matches!(codec, Codec::CodePage(_)) {
+                    start
+                        - points[..start]
+                            .iter()
+                            .rev()
+                            .take_while(|&&p| (0xdc80..=0xdcff).contains(&p))
+                            .count()
+                } else {
+                    start
+                };
+                let (name, reason) = codec.single_byte_error();
+                let first = points[start];
+                return Err(self.string_encoding_error(id, name, reason, first, start..end));
+            }
+        }
+        Ok(bytes)
+    }
+
+    fn string_encoding_error(
+        &mut self,
+        id: Id,
+        codec: &str,
+        reason: &str,
+        point: u32,
+        range: std::ops::Range<usize>,
+    ) -> Error {
+        let start = range.start;
+        let part = if range.len() == 1 {
+            let escape = match point {
+                0..=0xff => format!("\\x{point:02x}"),
+                0x100..=0xffff => format!("\\u{point:04x}"),
+                _ => format!("\\U{point:08x}"),
+            };
+            format!("character '{escape}' in position {start}")
+        } else {
+            format!("characters in position {start}-{}", range.end - 1)
+        };
+        let mut error = Error::new(
+            "UnicodeEncodeError",
+            format!("'{codec}' codec can't encode {part}: {reason}"),
+        );
+        let encoding = self.text(codec);
+        let reason = self.text(reason);
+        let start = self.alloc(Value::Int(crate::Int::from_usize(start)));
+        let end = self.alloc(Value::Int(crate::Int::from_usize(range.end)));
+        error.args = Some(self.alloc(Value::Tuple(vec![encoding, id, start, end, reason])));
+        error
     }
 
     pub(in crate::dynamic) fn encode_utf8_codepoints(
@@ -49,23 +128,13 @@ impl Context {
                         .iter()
                         .take_while(|&&p| (0xd800..=0xdfff).contains(&p))
                         .count();
-                    let end = index + count;
-                    let part = if count == 1 {
-                        format!("character '\\u{point:04x}' in position {index}")
-                    } else {
-                        format!("characters in position {index}-{}", end - 1)
-                    };
-                    let mut error = Error::new(
-                        "UnicodeEncodeError",
-                        format!("'utf-8' codec can't encode {part}: surrogates not allowed"),
-                    );
-                    let encoding = self.text("utf-8");
-                    let reason = self.text("surrogates not allowed");
-                    let start = self.alloc(Value::Int(crate::Int::from_usize(index)));
-                    let end = self.alloc(Value::Int(crate::Int::from_usize(end)));
-                    error.args =
-                        Some(self.alloc(Value::Tuple(vec![encoding, id, start, end, reason])));
-                    return Err(error);
+                    return Err(self.string_encoding_error(
+                        id,
+                        "utf-8",
+                        "surrogates not allowed",
+                        point,
+                        index..index + count,
+                    ));
                 }
                 _ => return Err(crate::objects::unknown_handler(errors).into()),
             }

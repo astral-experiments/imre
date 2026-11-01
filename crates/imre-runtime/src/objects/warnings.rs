@@ -101,8 +101,8 @@ impl Rule {
 
 #[derive(Eq, Hash, PartialEq)]
 enum Scope {
-    Line(&'static str, isize),
-    Module(&'static str),
+    Line(String, isize),
+    Module(String),
     Process,
 }
 
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn imre_warning_simplefilter(action: *const Str, category:
 /// its line number to Py_ssize_t, even when the category would not match.
 fn filtered(
     category: u32,
-    module: &'static str,
+    module: &str,
     line: isize,
     describe: impl Fn() -> String,
 ) -> Result<Option<(Action, String)>, ()> {
@@ -284,8 +284,8 @@ fn filtered(
     }
     let message = message.unwrap_or_else(describe);
     let scope = match action {
-        Action::Default => Some(Scope::Line(module, line)),
-        Action::Module => Some(Scope::Module(module)),
+        Action::Default => Some(Scope::Line(module.to_owned(), line)),
+        Action::Module => Some(Scope::Module(module.to_owned())),
         Action::Once => Some(Scope::Process),
         _ => None,
     };
@@ -327,7 +327,7 @@ pub(super) fn pass_fds_override() -> crate::Result<()> {
 
 /// Emit a checked RuntimeWarning from an internal standard-library frame.
 pub(crate) fn runtime_warning(
-    module: &'static str,
+    module: &str,
     filename: &str,
     line: isize,
     message: &str,

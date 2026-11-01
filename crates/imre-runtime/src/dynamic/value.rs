@@ -409,7 +409,7 @@ impl Context {
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::TupleGetter { .. } => "_tuplegetter",
-            Value::TupleGetterDoc => "member_descriptor",
+            Value::TupleGetterDoc | Value::StatMember(_) => "member_descriptor",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
             Value::Cell(_) => "cell",
@@ -792,6 +792,7 @@ pub(super) enum Value {
     },
     /// The writable document member of the native tuple descriptor type.
     TupleGetterDoc,
+    StatMember(&'static str),
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -1252,6 +1253,7 @@ impl Value {
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TupleGetterDoc
+            | Self::StatMember(_)
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)

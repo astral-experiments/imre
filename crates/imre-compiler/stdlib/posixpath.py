@@ -1,7 +1,7 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 import os
 from _imre_posixpath import extension_start
-from genericpath import commonprefix, exists, isfile, islink
+from genericpath import commonprefix, exists, getsize, isfile, islink
 
 
 def normcase(s):
