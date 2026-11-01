@@ -35,6 +35,7 @@ mod copying;
 mod csv;
 mod deferred_diff;
 mod deque;
+mod digit_sums;
 pub(crate) use deque::Ring as DequeRing;
 mod difflib;
 mod errno;

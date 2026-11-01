@@ -643,6 +643,45 @@ impl Expr {
     }
 }
 
+/// A reverse slice with a literal negative start and stride and no lower endpoint.
+pub(crate) fn reverse_slice(parts: &[Expr]) -> Option<(&Expr, i64, i64)> {
+    let [source, start, stop, step] = parts else {
+        return None;
+    };
+    if !omitted(stop) {
+        return None;
+    }
+    let start = if omitted(start) {
+        -1
+    } else {
+        negative_component(start)?
+    };
+    Some((source, start, negative_component(step)?))
+}
+
+fn omitted(value: &Expr) -> bool {
+    matches!(&value.kind, ExprKind::Absent(inner) if matches!(inner.kind, ExprKind::None))
+}
+
+/// Optional slice components wrap their integer value in Present.
+fn negative_component(value: &Expr) -> Option<i64> {
+    let value = match &value.kind {
+        ExprKind::Present(value) => value.as_ref(),
+        _ => return None,
+    };
+    let value = match &value.kind {
+        ExprKind::Int(value) => value.parse::<i64>().ok()?,
+        ExprKind::Negate(value) => {
+            let ExprKind::Int(value) = &value.kind else {
+                return None;
+            };
+            value.parse::<i64>().ok()?.checked_neg()?
+        }
+        _ => return None,
+    };
+    (-(1_i64 << 62)..0).contains(&value).then_some(value)
+}
+
 /// Values are evaluated and rooted in source order. `order` is a permutation of
 /// their indices that supplies the native call's parameter order without
 /// reevaluation. Methods include their receiver first; constructors omit the
@@ -1186,6 +1225,8 @@ pub(crate) enum Builtin {
     /// Eagerly converts immutable string code points into an integer list,
     /// preserving `list(map(int, text))` errors without character objects.
     StringIntList,
+    /// Two nonnegative 31-bit digit subtotals in one immediate, or -1 for fallback.
+    TryDigitSums([[u8; 10]; 2]),
     Bytes,
     BytesGet,
     BytesIter,
@@ -2533,7 +2574,7 @@ pub(crate) fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Exp
 /// Visits the immediate expressions and suites of one statement.
 pub(crate) enum ChildMut<'a> {
     Expression(&'a mut Expr),
-    Suite(&'a mut [Statement]),
+    Suite(&'a mut Vec<Statement>),
 }
 
 pub(crate) fn statement_children_mut(

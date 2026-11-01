@@ -584,7 +584,7 @@ fn list_length(value: &Expr) -> Option<usize> {
     }
 }
 
-fn literal(value: &Expr) -> Option<i64> {
+pub(super) fn literal(value: &Expr) -> Option<i64> {
     let value = match &value.kind {
         ExprKind::Int(value) => value.parse().ok()?,
         ExprKind::Negate(value) => literal(value)?.checked_neg()?,
@@ -595,7 +595,7 @@ fn literal(value: &Expr) -> Option<i64> {
         .then_some(value)
 }
 
-fn integer(value: i64) -> Expr {
+pub(super) fn integer(value: i64) -> Expr {
     Expr {
         ty: Type::Int,
         kind: ExprKind::Int(value.to_string()),
