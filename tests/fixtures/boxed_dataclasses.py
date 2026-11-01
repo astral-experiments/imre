@@ -18,7 +18,83 @@ class Key:
     value: str = field(compare=False, repr=False, default="unused")
 
 
+def replacement():
+    from dataclasses import replace
+
+    @dataclass(frozen=True)
+    class Model:
+        name: str
+        items: list = field(default_factory=list)
+        cache: list = field(default_factory=list, init=False)
+
+    model = Model("old")
+    model.cache.append(1)
+    changed = replace(model, name="new")
+    assert model.name == "old" and changed.name == "new"
+    assert changed.items is model.items
+    assert changed.cache == [] and model.cache == [1]
+    assert model.__replace__(name="new") == changed
+    try:
+        replace(model, cache=[])
+    except TypeError as exc:
+        assert str(exc) == "field cache is declared with init=False, it cannot be specified with replace()"
+    else:
+        raise AssertionError("replaced an init=False field")
+
+    @dataclass
+    class Custom:
+        name: str
+
+        def __replace__(self, **changes):
+            return "custom"
+
+    assert Custom("old").__replace__() == "custom"
+    assert replace(Custom("old"), name="new").name == "new"
+
+    @dataclass
+    class Product:
+        quantity: int
+        factor: InitVar[int]
+
+        def __post_init__(self, factor):
+            self.quantity *= factor
+
+    source = Product(2, 3)
+    assert replace(source, factor=2).quantity == 12
+    try:
+        replace(source)
+    except TypeError as exc:
+        assert str(exc) == "InitVar 'factor' must be specified with replace()"
+    else:
+        raise AssertionError("accepted a missing InitVar")
+
+
 def current():
+    @dataclass
+    class Base:
+        count: int
+        seed: InitVar[int]
+
+    @dataclass(order=True)
+    class Model(Base):
+        bonus: InitVar[int] = field(kw_only=True, default=1)
+
+        def __post_init__(self, seed, bonus):
+            self.count += seed + bonus
+
+    first = Model(2, 3, bonus=4)
+    assert first.__dict__ == {"count": 9} and first == Model(4, 4)
+    assert first < Model(5, 4) and asdict(first) == {"count": 9}
+    assert repr(first).endswith("Model(count=9)") and Model.__match_args__ == ("count", "seed")
+    try:
+        @dataclass
+        class Invalid:
+            value: InitVar[int] = field(default_factory=int)
+    except TypeError as exc:
+        assert str(exc) == "field value cannot have a default factory"
+    else:
+        raise AssertionError("InitVar accepted a default factory")
+
     class Clearing(dict):
         def __eq__(self, other):
             self.left.clear()
@@ -38,6 +114,9 @@ def current():
     backing["code"] = 9
     assert view != {"code": 7} and view["code"] == 9
     assert InitVar[int].type is int
+    assert repr(InitVar[int]) == "dataclasses.InitVar[int]"
+    assert repr(InitVar[list[int]]) == "dataclasses.InitVar[list[int]]"
+    assert repr(InitVar[int | str]) == "dataclasses.InitVar[int | str]"
     a = Entry("root")
     b = Entry(name="root")
     assert a == b and not (a != b) and a.label() == "ROOT"
@@ -68,4 +147,23 @@ def current():
         del key.part
     except FrozenInstanceError as exc:
         print(str(exc))
+
+    @dataclass(order=True)
+    class Item:
+        value: int
+
+    left, right = Item(1), Item(2)
+
+    def stop(self):
+        raise StopIteration("reading value")
+
+    Item.value = property(stop)
+    try:
+        _ = left < right
+    except StopIteration as exc:
+        assert str(exc) == "reading value"
+    else:
+        raise AssertionError("comparison swallowed the field lookup error")
+
+    replacement()
     print("boxed dataclasses")

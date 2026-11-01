@@ -132,7 +132,7 @@ IMPORTED_REJECTIONS = {
         "main.py": "from dataclasses import dataclass\n",
         "dataclasses.py": "def dataclass(value: int) -> int:\n    return value\n",
     },
-    "unsupported_import": {"main.py": "from dataclasses import replace\n"},
+    "unknown_export": {"main.py": "from dataclasses import unknown_export\n"},
 }
 
 ERRORS = {
