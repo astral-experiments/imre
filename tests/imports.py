@@ -236,6 +236,17 @@ ACCEPTED = {
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
     },
+    "boxed_unittest_package": {
+        "main.py": (
+            "from importlib import import_module\nimport sys\nimport unittest\n"
+            "from unittest import TestCase, mock\n"
+            "assert sys.path and mock is import_module('unittest.mock')\n"
+            "mock.Mock().assert_not_called()\n"
+            "print(unittest.__name__, unittest.__package__, hasattr(unittest, '__path__'))\n"
+            "print(import_module('unittest') is unittest, TestCase is unittest.TestCase)\n"
+            "TestCase().assertTrue(True)\n"
+        ),
+    },
     "frozen_import_override": {
         "main.py": (
             "import _imp\nfrom _imp import _override_frozen_modules_for_tests as override\n"

@@ -134,6 +134,7 @@ pub(crate) enum Kind {
     ProcessLookupError = 58,
     GeneratorExit = 59,
     StopAsyncIteration = 60,
+    KeyboardInterrupt = 61,
     TimeoutError = 51,
     // Warning exception identities use a separate block from module errors and filter categories.
     UnidiffParseError = 52,
@@ -216,6 +217,7 @@ impl Kind {
             58 => Self::ProcessLookupError,
             59 => Self::GeneratorExit,
             60 => Self::StopAsyncIteration,
+            61 => Self::KeyboardInterrupt,
             51 => Self::TimeoutError,
             52 => Self::UnidiffParseError,
             53 => Self::ReferenceError,
@@ -298,6 +300,7 @@ impl Kind {
             Self::ProcessLookupError => "ProcessLookupError",
             Self::GeneratorExit => "GeneratorExit",
             Self::StopAsyncIteration => "StopAsyncIteration",
+            Self::KeyboardInterrupt => "KeyboardInterrupt",
             Self::TimeoutError => "TimeoutError",
             Self::Warning => "Warning",
             Self::RuntimeWarning => "RuntimeWarning",
@@ -317,7 +320,11 @@ impl Kind {
             Self::SyntaxError => matches!(self, Self::SyntaxError | Self::IndentationError),
             Self::Exception => !matches!(
                 self,
-                Self::BaseException | Self::SystemExit | Self::GeneratorExit | Self::CancelledError
+                Self::BaseException
+                    | Self::SystemExit
+                    | Self::GeneratorExit
+                    | Self::KeyboardInterrupt
+                    | Self::CancelledError
             ),
             Self::ArithmeticError => matches!(
                 self,

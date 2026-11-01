@@ -113,6 +113,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_collections_abc.py",
             include_str!("../stdlib/_collections_abc.py"),
         )),
+        "unittest.mock" => Some((
+            "unittest/mock.py",
+            include_str!("../stdlib/unittest/mock.py"),
+        )),
         // CPython 3.14.5 Lib/weakref.py and Lib/_weakrefset.py.
         "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
         "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
@@ -3658,10 +3662,6 @@ impl<'a> Loader<'a> {
             "unittest" => Some((
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
-            )),
-            "unittest.mock" => Some((
-                "unittest/mock.py",
-                include_str!("../stdlib/unittest/mock.py"),
             )),
             _ => bundled_runtime_source(name),
         };

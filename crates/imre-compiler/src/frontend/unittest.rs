@@ -116,6 +116,16 @@ impl Checker<'_> {
         &mut self,
         value: &ast::Expr,
     ) -> Result<Option<Expr>, String> {
+        self.unittest_failure_class(value, |_, qualified| {
+            unpacking::string(format!("<class '{qualified}'>"))
+        })
+    }
+
+    pub(super) fn unittest_failure_class(
+        &mut self,
+        value: &ast::Expr,
+        use_class: impl Fn(u32, String) -> Expr,
+    ) -> Result<Option<Expr>, String> {
         let Some(attr) = value.as_attribute_expr() else {
             return Ok(None);
         };
@@ -136,7 +146,7 @@ impl Checker<'_> {
         }
         let receiver = self.expr(&attr.value)?;
         self.dispatch_record(class, receiver, value, |checker, concrete, _| {
-            let (_, _, qualified) = checker
+            let (kind, _, qualified) = checker
                 .unittest_category(value, Some((name.id.as_str(), concrete)))
                 .ok_or_else(|| {
                     error(
@@ -145,7 +155,7 @@ impl Checker<'_> {
                         "cannot identify the case's failureException",
                     )
                 })?;
-            Ok(unpacking::string(format!("<class '{qualified}'>")))
+            Ok(use_class(kind, qualified))
         })
         .map(Some)
     }

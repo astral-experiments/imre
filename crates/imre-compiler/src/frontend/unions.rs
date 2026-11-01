@@ -469,6 +469,25 @@ impl Checker<'_> {
             return Ok(self.weak_proxy_instance(value, callable));
         }
         let value = Self::weak_target(value);
+        if classes
+            .as_attribute_expr()
+            .is_some_and(|a| a.attr.as_str() == "failureException")
+            && matches!(value.ty, Type::Exception | Type::NamedException(_))
+        {
+            // Evaluate the candidate before the case, which may select an
+            // overridden failure class through a base-typed reference.
+            let mut scope = calls::ArgumentScope::default();
+            let held = scope.hold(self, value.clone());
+            if let Some(test) = self.unittest_failure_class(classes, |kind, _| Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::IsInstance(vec![InstanceType::Exception(kind)]),
+                    vec![held.clone()],
+                ),
+            })? {
+                return Ok(scope.finish(test));
+            }
+        }
         let classes = match self.instance_types(classes) {
             Ok(classes) => classes,
             Err(diagnostic) => {
