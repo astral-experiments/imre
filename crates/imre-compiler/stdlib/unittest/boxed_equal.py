@@ -125,3 +125,19 @@ def assertCountEqual(self, first, second, msg=None):
 
 
 TestCase.assertCountEqual = assertCountEqual
+
+
+def assertIn(self, member, container, msg=None):
+    if member not in container:
+        standardMsg = '%s not found in %s' % (_safe_repr(member), _safe_repr(container))
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
+def assertNotIn(self, member, container, msg=None):
+    if member in container:
+        standardMsg = '%s unexpectedly found in %s' % (_safe_repr(member), _safe_repr(container))
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
+TestCase.assertIn = assertIn
+TestCase.assertNotIn = assertNotIn
