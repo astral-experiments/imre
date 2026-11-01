@@ -366,9 +366,9 @@ fn unsplit<const N: usize>(ctx: &mut Context, components: Id) -> Result<Id> {
         false
     };
     let fields = text.map(|id| ctx.str_value(id).expect("coerced URL component"));
-    let out = match fields.as_slice() {
-        &[s, n, p, q, f] => urlsplit::join_fields([s, n, p, q, f], registered)?,
-        &[s, n, p, params, q, f] => {
+    let out = match *fields.as_slice() {
+        [s, n, p, q, f] => urlsplit::join_fields([s, n, p, q, f], registered)?,
+        [s, n, p, params, q, f] => {
             urlsplit::join_parse_fields([s, n, p, params, q, f], registered)?
         }
         _ => unreachable!("URL result arity"),
