@@ -1243,11 +1243,7 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
             ("loaded_module", [name], []) => {
-                return Ok(ctx
-                    .modules
-                    .get(ctx.str_value(*name)?)
-                    .copied()
-                    .unwrap_or(NONE));
+                return Ok(ctx.registered_module(*name)?.unwrap_or(NONE));
             }
             ("members", [class], []) => {
                 if let Value::Class { scope, .. } = *ctx.heap.get(*class) {

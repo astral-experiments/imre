@@ -318,11 +318,7 @@ impl Checker<'_> {
         }
         if unit.bindings.contains_key("setUpModule") || unit.bindings.contains_key("tearDownModule")
         {
-            return Err(error(
-                self.source,
-                call,
-                "native unittest module fixtures are unsupported",
-            ));
+            return Err(self.object_runtime_export("unittest module fixtures", call));
         }
         let hook = match unit.bindings.get("load_tests") {
             Some(Binding::Definition(def)) => Some((

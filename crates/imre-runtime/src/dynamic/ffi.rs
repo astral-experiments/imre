@@ -597,7 +597,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         zip_directories: HashMap::new(),
         codec_entries: Default::default(),
         frozen_override: 0,
-        modules: HashMap::new(),
+        modules: NONE,
         classes: HashMap::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
@@ -608,6 +608,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         pending: None,
         slot_depth: 0,
     };
+    ctx.modules = ctx.dict(Vec::new());
     // SAFETY: ABI main supplies argc pointers, valid to the end of the call.
     let args = unsafe { slice::from_raw_parts(argv, argc as usize) }
         .iter()
@@ -1321,9 +1322,8 @@ impl Context {
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
         (
             &mut self.heap,
-            self.modules
+            self.classes
                 .values()
-                .chain(self.classes.values())
                 .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
@@ -1337,6 +1337,7 @@ impl Context {
                 .chain([
                     self.argv,
                     self.sys_path,
+                    self.modules,
                     self.default_encoding,
                     self.token_missing,
                 ]),

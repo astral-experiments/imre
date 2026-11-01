@@ -1133,6 +1133,12 @@ impl Checker<'_> {
         {
             return Ok(suite);
         }
+        if attribute.attr.as_str() == "debug"
+            && !self.classes.methods[class].contains_key("debug")
+            && self.unittest_subclass(class, "_SuiteMember")
+        {
+            return Err(self.object_runtime_export("unittest debug fixtures", call));
+        }
         if attribute.attr.as_str() == "_declaredCaseMethods"
             && let Some(object) = &receiver
             && self.graph.modules[self.module].is_bundled("unittest")

@@ -95,7 +95,7 @@ pub(super) fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
     let mut flattened = Vec::new();
     for &input in inputs {
         if matches!(ctx.heap.get(input), Value::Instance { .. })
-            && let Some(&typing) = ctx.modules.get("typing")
+            && let Some(typing) = ctx.dict_named_item(ctx.modules, "typing")
             && let Value::Module { scope, .. } = *ctx.heap.get(typing)
             && let Some(check) = ctx.scope_name(scope, "_type_check")
         {
