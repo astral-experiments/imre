@@ -1380,19 +1380,62 @@ impl Context {
         if builtins::method_name(self.heap.get(base), name).is_some() {
             return self.builtin_attribute(obj, name);
         }
-        let suffix = if name == "__exit__" {
-            "' object does not support the context manager protocol (missed __exit__ method)"
+        let mut kind = self
+            .builtin_type_name(obj)
+            .unwrap_or_else(|| self.type_name(obj));
+        let mut module = None;
+        if let Some(class) = self.heap.get(obj).instance_class()
+            && let Value::Class { scope, .. } = self.heap.get(class)
+        {
+            let scope = self.scope_data(*scope);
+            if let Some(qualified) = scope.names.get("__qualname__") {
+                kind = self.str_value(*qualified).unwrap_or(kind);
+            }
+            module = match scope.names.get("__module__") {
+                Some(id) => self.str_value(*id).ok(),
+                None => Some(scope.module.as_str()),
+            }
+            .filter(|name| !matches!(*name, "builtins" | "__main__"));
+        }
+        // CPython checks descriptor slots without binding the other protocol's methods.
+        let supports_async = ["__aenter__", "__aexit__"].iter().all(|name| {
+            self.slot(obj, name).is_some_and(|slot| {
+                matches!(
+                    self.builtin_type_name(slot),
+                    Some(
+                        "classmethod"
+                            | "method"
+                            | "method_descriptor"
+                            | "wrapper_descriptor"
+                            | "super"
+                    )
+                ) || self.native_data_descriptor(slot)
+                    || self.slot(slot, "__get__").is_some()
+                    || builtins::method_name(self.heap.get(slot), "__get__").is_some()
+            })
+        });
+        let suggestion = if supports_async {
+            " but it supports the asynchronous context manager protocol. Did you mean to use 'async with'?"
         } else {
-            "' object does not support the context manager protocol"
+            ""
         };
-        let kind = self.type_name(obj);
+        let parts = [
+            "'",
+            module.unwrap_or(""),
+            if module.is_some() { "." } else { "" },
+            kind,
+            "' object does not support the context manager protocol (missed ",
+            name,
+            " method)",
+            suggestion,
+        ];
         let mut message = String::new();
         message
-            .try_reserve_exact(1 + kind.len() + suffix.len())
+            .try_reserve_exact(parts.iter().map(|s| s.len()).sum())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        message.push('\'');
-        message.push_str(kind);
-        message.push_str(suffix);
+        for part in parts {
+            message.push_str(part);
+        }
         Err(Error::new_static("TypeError", message))
     }
 
