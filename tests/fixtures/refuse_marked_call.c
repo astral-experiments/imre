@@ -16,7 +16,7 @@ static int deny(size_t size) {
     if (!active) return 0;
     unsigned decision = ++count == target || persistent;
     active = 0;
-    dprintf(2, "call_label_allocation %u %zu %u\n", count, size, decision);
+    dprintf(2, "call_allocation %u %zu %u\n", count, size, decision);
     active = 1;
     if (decision) {
         refused = 1;
@@ -26,10 +26,15 @@ static int deny(size_t size) {
 }
 void *__wrap_malloc(size_t size) { return deny(size) ? NULL : __real_malloc(size); }
 void *__wrap_realloc(void *ptr, size_t size) { return deny(size) ? NULL : __real_realloc(ptr, size); }
-void *__wrap_calloc(size_t count, size_t size) { if (count && size > SIZE_MAX / count) return __real_calloc(count, size); return deny(count * size) ? NULL : __real_calloc(count, size); }
+void *__wrap_calloc(size_t count, size_t size) {
+    if (count && size > SIZE_MAX / count) {
+        return __real_calloc(count, size);
+    }
+    return deny(count * size) ? NULL : __real_calloc(count, size);
+}
 
 uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t len) {
-    static const char marker[] = "arm callable label refusal";
+    static const char marker[] = "arm call allocation refusal";
     uint64_t result = __real_imre_dyn_lit(ctx, kind, data, len);
     if (kind == 1 && len == sizeof(marker) - 1 && !memcmp(data, marker, len)) armed = 1;
     return result;
@@ -38,13 +43,13 @@ uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, siz
 uint64_t __wrap_imre_dyn_call_at(void *ctx, uint64_t callable, uint64_t args, uint64_t kwargs, size_t mark, const uint32_t (*span)[4]) {
     if (!armed) return __real_imre_dyn_call_at(ctx, callable, args, kwargs, mark, span);
     armed = 0;
-    const char *setting = getenv("CALL_LABEL_REFUSE_NTH");
+    const char *setting = getenv("IMRE_TEST_CALL_REFUSE_NTH");
     target = setting ? strtoul(setting, NULL, 10) : 0;
-    persistent = getenv("CALL_LABEL_REFUSE_ALL") != NULL;
+    persistent = getenv("IMRE_TEST_CALL_REFUSE_ALL") != NULL;
     count = refused = 0;
     active = 1;
     uint64_t result = __real_imre_dyn_call_at(ctx, callable, args, kwargs, mark, span);
     active = 0;
-    dprintf(2, "call_label_summary %u %u\n", count, refused);
+    dprintf(2, "call_summary %u %u\n", count, refused);
     return result;
 }

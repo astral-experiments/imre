@@ -34,7 +34,7 @@ mapping = {"kept": 41}
 targets = [owner.touch, Counter.touch, child.touch, values.pop, "retained".upper, mapping.copy]
 shape = int(sys.argv[1])
 target = targets[shape]
-marker = "arm bound method argument refusal"
+marker = "arm call allocation refusal"
 kind = "ok"
 first = None
 try:
