@@ -84,6 +84,7 @@ exception_kinds!(
     ReferenceError,
     SystemExit,
     GeneratorExit,
+    KeyboardInterrupt,
     StopIteration,
     StopAsyncIteration,
     Warning,
@@ -181,7 +182,7 @@ pub(super) fn exception_initializer(kind: &str) -> &'static str {
 pub(super) fn exception_new_owner(name: &str) -> &str {
     match name {
         "KeyError" => "LookupError",
-        "SystemExit" | "GeneratorExit" => "BaseException",
+        "SystemExit" | "GeneratorExit" | "KeyboardInterrupt" => "BaseException",
         "NameError"
         | "UnboundLocalError"
         | "AttributeError"

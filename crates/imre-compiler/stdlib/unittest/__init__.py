@@ -4,10 +4,11 @@
 import difflib
 import re
 from datetime import date, timedelta
-from fnmatch import fnmatchcase
+import fnmatch
 from io import StringIO
 from types import ModuleType
-from typing import Callable, ClassVar
+import typing
+from typing import Callable
 import sys
 import time
 
@@ -151,22 +152,28 @@ class _SuiteMember:
 
 
 class TestCase(_SuiteMember):
-    _runner: _SubTestState | None
     _subtest_params: dict[str, object]
-    failureException: ClassVar[type[Exception]] = AssertionError
+    failureException: typing.ClassVar[type[Exception]] = AssertionError
     _testMethodName: str
     longMessage: bool
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self, methodName: str = "runTest") -> None:
-        self._runner = None
         self._subtest_params = {}
         self._testMethodName = methodName
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
         _validateCaseMethod(self, methodName)
+
+    @property
+    def _runner(self) -> TestResult | None:
+        for index in range(len(_activeResults) - 1, -1, -1):
+            case, result = _activeResults[index]
+            if self is case:
+                return result
+        return None
 
     def _declaredCaseMethods(self) -> tuple[list[str], list[str]]:
         raise RuntimeError("native unittest case requires its class metadata")
@@ -518,6 +525,17 @@ class _AssertRaisesContext:
         return caught
 
 
+class _SubTest(TestCase):
+    _subtest_id: str
+
+    def __init__(self, parent_id: str, description: str) -> None:
+        super().__init__()
+        self._subtest_id = parent_id + " " + description
+
+    def id(self) -> str:
+        return self._subtest_id
+
+
 class _SubTestContext:
     case: TestCase
     has_message: bool
@@ -559,10 +577,7 @@ class _SubTestContext:
 
     def _handle(self, exc: BaseException) -> bool:
         runner = self.case._runner
-        if runner is None or isinstance(exc, _SubTestStop):
-            return False
-        # Exceptions outside the supported unittest result categories propagate.
-        if not isinstance(exc, Exception) and not isinstance(exc, SystemExit):
+        if runner is None or isinstance(exc, (_SubTestStop, KeyboardInterrupt)):
             return False
         parts: list[str] = []
         if self.has_message:
@@ -573,52 +588,11 @@ class _SubTestContext:
                 items.append(key + "=" + repr(self.params[key]))
             parts.append("(" + ", ".join(items) + ")")
         description = " ".join(parts) or "(<subtest>)"
-        runner._subtest_result(self.case, description, exc)
+        case = self.case
+        runner._subtest_result(case, description, exc, isinstance(exc, case.failureException))
         if runner.failfast:
             raise _SubTestStop()
         return True
-
-
-class _SubTestState:
-    # TestResult owns cases in its result lists. Keep just this phase's events
-    # on the case so no strong reference points back to the result.
-    name: str
-    failfast: bool
-    verbosity: int
-    name_pending: bool
-    stream: _WritelnDecorator
-    events: list[tuple[str, str, str]]
-
-    def __init__(self, name: str, failfast: bool, verbosity: int, stream: _WritelnDecorator) -> None:
-        self.stream = stream
-        self.name = name
-        self.failfast = failfast
-        self.verbosity = verbosity
-        self.name_pending = True
-        self.events = []
-
-    def _subtest_result(self, case: TestCase, description: str, exc: BaseException) -> None:
-        parent = self.name.split("\n", 1)
-        name = parent[0] + " " + description
-        if len(parent) == 2:
-            name += "\n" + parent[1]
-        if isinstance(exc, SkipTest):
-            detail = str(exc)
-            short, status = "s", "skipped " + repr(detail)
-        else:
-            detail = "AssertionError: " + str(exc) if isinstance(exc, AssertionError) else str(exc)
-            if isinstance(exc, case.failureException):
-                short, status = "F", "FAIL"
-            else:
-                short, status = "E", "ERROR"
-        self.events.append((short, name, detail))
-        if self.verbosity == 1:
-            self.stream.write(short)
-        elif self.verbosity == 2:
-            if self.name_pending:
-                self.stream.writeln()
-            self.stream.writeln("  " + name + " ... " + status)
-            self.name_pending = False
 
 
 class TestResult:
@@ -674,11 +648,24 @@ class TestResult:
     def _startCase(self, name: str) -> None:
         pass
 
-    def _subtestState(self, name: str) -> _SubTestState:
-        return _SubTestState(name, self.failfast, 0, _WritelnDecorator())
-
-    def _subtestReported(self, short: str, name: str) -> None:
+    def _markSubTest(self, description: str, short: str, long: str) -> None:
         pass
+
+    def _subtest_result(self, case: TestCase, description: str, exc: BaseException, failure: bool) -> None:
+        subtest: TestCase = _SubTest(case.id(), description)
+        if isinstance(exc, SkipTest):
+            self.addSkip(subtest, str(exc))
+            self._markSubTest(description, "s", "skipped " + repr(str(exc)))
+        else:
+            detail = "AssertionError: " + str(exc) if isinstance(exc, AssertionError) else str(exc)
+            if failure:
+                self.failures.append((subtest, detail))
+                self._markSubTest(description, "F", "FAIL")
+            else:
+                self.errors.append((subtest, detail))
+                self._markSubTest(description, "E", "ERROR")
+            if self.failfast:
+                self.stop()
 
     def _recordException(self, case: TestCase, exc: Exception, detail: str) -> None:
         if isinstance(exc, case.failureException):
@@ -692,22 +679,7 @@ class TestResult:
 
     def _phase(self, action: Callable[[], None], case: TestCase) -> bool:
         try:
-            try:
-                action()
-            finally:
-                state = case._runner
-                if state is not None and state.events:
-                    for short, subtest_name, detail in state.events:
-                        if short == "s":
-                            self.addSkip(case, detail)
-                        elif short == "F":
-                            self.failures.append((case, detail))
-                        else:
-                            self.errors.append((case, detail))
-                        if self.failfast and short != "s":
-                            self.stop()
-                        self._subtestReported(short, subtest_name)
-                    state.events.clear()
+            action()
         except _SubTestStop:
             return False
         except SkipTest as exc:
@@ -725,28 +697,40 @@ class TestResult:
             return False
         return True
 
+    def _runCleanups(self, case: TestCase) -> bool:
+        return True
+
     def _run(self, case: TestCase, name: str, setup: Callable[[], None],
              body: Callable[[], None], teardown: Callable[[], None]) -> None:
         if self.shouldStop:
             return
+        self._runCase(case, name, setup, body, teardown)
+
+    def _runCase(self, case: TestCase, name: str, setup: Callable[[], None],
+             body: Callable[[], None], teardown: Callable[[], None]) -> None:
         self.startTest(case)
         self._startCase(name)
         before = len(self.failures) + len(self.errors) + len(self.skipped)
-        case._runner = self._subtestState(name)
+        _activeResults.append((case, self))
         try:
-            if self._phase(setup, case) and before == len(self.failures) + len(self.errors) + len(self.skipped):
+            passed = self._phase(setup, case)
+            if passed and before == len(self.failures) + len(self.errors) + len(self.skipped):
                 passed = self._phase(body, case)
-                cleaned = self._phase(teardown, case)
-                if passed and cleaned and before == len(self.failures) + len(self.errors) + len(self.skipped):
-                    self.addSuccess(case)
-                    self._mark(".", "ok")
+                if not self._phase(teardown, case):
+                    passed = False
+            if self._runCleanups(case) and passed and before == len(self.failures) + len(self.errors) + len(self.skipped):
+                self.addSuccess(case)
+                self._mark(".", "ok")
         finally:
-            case._runner = None
+            _activeResults.pop()
             self.stopTest(case)
 
     def _skip(self, case: TestCase, name: str, reason: str) -> None:
         if self.shouldStop:
             return
+        self._skipCase(case, name, reason)
+
+    def _skipCase(self, case: TestCase, name: str, reason: str) -> None:
         self.startTest(case)
         self._startCase(name)
         try:
@@ -764,6 +748,11 @@ class TestResult:
     def _runRegistered(self, case: TestCase, name: str) -> None:
         # Lowered to native calls on the case's concrete record.
         raise RuntimeError("native unittest case requires method dispatch")
+
+
+# Storing a result in a native case would close an ownership cycle through
+# the result's retained failed/skipped cases. Scope the binding to _run.
+_activeResults: list[tuple[TestCase, TestResult]] = []
 
 
 class _SuiteEntry:
@@ -886,7 +875,7 @@ class TestLoader:
                     selected.append(name)
                 else:
                     for pattern in patterns:
-                        if fnmatchcase(owner + "." + name, pattern):
+                        if fnmatch.fnmatchcase(owner + "." + name, pattern):
                             selected.append(name)
                             break
         return selected
@@ -947,33 +936,40 @@ class TextTestResult(TestResult):
         self.started = time.time()
         super().__init__()
 
-    def _subtestState(self, name: str) -> _SubTestState:
-        return _SubTestState(self.current_name, self.failfast, self.verbose, self.stream)
-
-    def _subtestReported(self, short: str, name: str) -> None:
-        self._recordProblemName(short, name)
-        self.name_pending = False
-
     def _startCase(self, name: str) -> None:
         self.current_name = name if self.descriptions else name.split("\n", 1)[0]
         if self.verbose == 2:
             self.name_pending = True
             self.stream.write(self.current_name + " ... ")
 
-    def _recordProblemName(self, short: str, name: str) -> None:
-        if short == "F":
-            self._failureNames.append(name)
-        elif short == "E":
-            self._errorNames.append(name)
-
     def _mark(self, short: str, long: str) -> None:
-        self._recordProblemName(short, self.current_name)
+        if short == "F":
+            self._failureNames.append(self.current_name)
+        elif short == "E":
+            self._errorNames.append(self.current_name)
         if self.verbose == 1:
             self.stream.write(short)
         elif self.verbose == 2:
             if not self.name_pending:
                 self.stream.write(self.current_name + " ... ")
             self.stream.writeln(long)
+            self.name_pending = False
+
+    def _markSubTest(self, description: str, short: str, long: str) -> None:
+        parent = self.current_name.split("\n", 1)
+        name = parent[0] + " " + description
+        if len(parent) == 2:
+            name += "\n" + parent[1]
+        if short == "F":
+            self._failureNames.append(name)
+        elif short == "E":
+            self._errorNames.append(name)
+        if self.verbose == 1:
+            self.stream.write(short)
+        elif self.verbose == 2:
+            if self.name_pending:
+                self.stream.writeln()
+            self.stream.writeln("  " + name + " ... " + long)
             self.name_pending = False
 
     def _reportProblems(self, label: str, names: list[str], problems: list[tuple[TestCase, str]]) -> None:
@@ -999,12 +995,13 @@ class TextTestResult(TestResult):
             parts.append("errors=" + str(len(self.errors)))
         if self.skipped:
             parts.append("skipped=" + str(len(self.skipped)))
-        message = "FAILED" if self.failures or self.errors else "OK"
+        if self.unexpectedSuccesses:
+            parts.append("unexpected successes=" + str(len(self.unexpectedSuccesses)))
+        message = "FAILED"
+        if self.wasSuccessful():
+            message = "NO TESTS RAN" if not self.testsRun and not self.skipped else "OK"
         if parts:
             message += " (" + ", ".join(parts) + ")"
-        if not self.testsRun:
-            self.stream.writeln("NO TESTS RAN")
-            return
         self.stream.writeln(message)
 
 
@@ -1058,10 +1055,10 @@ class _MainRunner(TextTestResult):
 
     def _finish(self) -> None:
         self._report()
-        if not self.testsRun:
-            sys.exit(5)
         if not self.wasSuccessful():
             sys.exit(1)
+        if not self.testsRun and not self.skipped:
+            sys.exit(5)
         sys.exit(0)
 
 

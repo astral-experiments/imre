@@ -3201,7 +3201,7 @@ impl Context {
     }
 
     /// Return the original storage of an exact list or a list subclass.
-    fn list_storage(&self, obj: Id) -> Option<Id> {
+    pub(super) fn list_storage(&self, obj: Id) -> Option<Id> {
         let storage = self.scalar_value(obj);
         matches!(self.heap.get(storage), Value::List(_)).then_some(storage)
     }

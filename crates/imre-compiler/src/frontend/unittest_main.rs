@@ -102,7 +102,24 @@ impl Checker<'_> {
         })
     }
 
+    /// Class fixtures share state across nested suites and use the live class
+    /// object, including when a case is constructed for direct registration.
+    pub(super) fn check_unittest_class_fixtures(
+        &self,
+        call: &ast::ExprCall,
+        id: usize,
+    ) -> Result<(), String> {
+        if self.unittest_case(id) {
+            let attributes = self.fixed_class_attributes(id);
+            if attributes.contains_key("setUpClass") || attributes.contains_key("tearDownClass") {
+                return Err(self.object_runtime_export("unittest class fixtures", call));
+            }
+        }
+        Ok(())
+    }
+
     fn validate_unittest_case(&self, call: &ast::ExprCall, id: usize) -> Result<(), String> {
+        self.check_unittest_class_fixtures(call, id)?;
         let class = &self.classes.declarations.definitions[id];
         let base = class
             .bases

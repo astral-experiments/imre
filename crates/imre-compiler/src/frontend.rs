@@ -500,6 +500,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "BufferError" => return Some(54),
         "GeneratorExit" => return Some(59),
         "StopAsyncIteration" => return Some(60),
+        "KeyboardInterrupt" => return Some(61),
         "SyntaxError" => return Some(55),
         "IndentationError" => return Some(56),
         "BlockingIOError" => return Some(44),

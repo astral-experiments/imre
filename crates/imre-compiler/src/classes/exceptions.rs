@@ -80,7 +80,7 @@ pub(super) fn inherited_descriptor(name: &str, mro: &[u32]) -> bool {
 fn builtin_mro(kind: u32) -> Vec<u32> {
     let parent = match kind {
         0 => return vec![0],
-        1 | 32 => 0,
+        1 | 32 | 59 | 61 => 0,
         3 | 4 => 2,
         6 | 7 => 5,
         17 => 8,

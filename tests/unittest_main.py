@@ -101,49 +101,42 @@ def compare(a, source, work, *, upstream=False):
 
 
 def check_inherited_class_fixture(a, work):
-    (work / "fixture_base.py").write_text(
-        "from unittest import TestCase\n"
-        "class Base(TestCase):\n"
-        "    @classmethod\n"
-        "    def setUpClass(cls):\n"
-        "        raise RuntimeError('inherited setup failed')\n"
-        "class Concrete(Base):\n"
-        "    def test_body(self):\n"
-        "        print('body after failed setup')\n"
-    )
     (work / "fixture_alias.py").write_text("from fixture_base import Concrete as Alias\n")
     entry = work / "inherited_fixture.py"
-    profile = work / "no_exclusions.json"
-    profile.write_text("{}")
-    for registration in (
-        "suite = unittest.defaultTestLoader.loadTestsFromModule(fixture_alias)",
-        "suite = unittest.TestSuite()\nsuite.addTest(fixture_alias.Alias('test_body'))",
-    ):
-        entry.write_text(
-            "import unittest\nimport sys\nimport fixture_alias\n" + registration + "\n"
-            "if not unittest.TextTestRunner().run(suite).wasSuccessful():\n    sys.exit(1)\n"
+    for hook in ("setUpClass", "tearDownClass"):
+        (work / "fixture_base.py").write_text(
+            "from unittest import TestCase\n"
+            "class Base(TestCase):\n"
+            "    @classmethod\n"
+            f"    def {hook}(cls):\n"
+            f"        raise RuntimeError('inherited {hook} failed')\n"
+            "class Concrete(Base):\n"
+            "    def test_body(self):\n"
+            "        print('ran body')\n"
         )
-        reference = invoke([a.python, "-E", "-B", entry])
-        if reference.returncode != 1 or "inherited setup failed" not in reference.stderr:
-            raise AssertionError(reference)
-        for level in a.opt_levels:
-            for flags in ([], ["--reachable-only"]):
-                native = invoke([
-                    a.compiler, "run", entry, "--no-cache", "--opt-level", str(level),
-                    "--runtime", a.runtime, "--clang", a.clang, *flags,
-                ])
-                if not native.returncode or "body after failed setup" in native.stdout:
-                    raise AssertionError((registration, level, flags, native))
-                diagnostic = native.stderr
-                if "ModuleNotFoundError" in diagnostic:
-                    # The object runtime cannot import unittest. Check why the
-                    # static compiler declined the same source, without pruning
-                    # any source branch in the entry profile.
-                    diagnostic = invoke([
-                        a.compiler, "check", entry, "--entry-profile", profile, *flags,
-                    ]).stderr
-                if not any(reason in diagnostic for reason in ("custom result hooks", "inherited setup failed")):
-                    raise AssertionError((registration, level, flags, diagnostic))
+        for registration in (
+            "suite = unittest.defaultTestLoader.loadTestsFromModule(fixture_alias)",
+            "suite = unittest.TestSuite()\nsuite.addTest(fixture_alias.Alias('test_body'))",
+        ):
+            entry.write_text(
+                "import unittest\nimport sys\nimport fixture_alias\n" + registration + "\n"
+                "if not unittest.TextTestRunner().run(suite).wasSuccessful():\n    sys.exit(1)\n"
+            )
+            reference = invoke([a.python, "-E", "-B", entry])
+            reason = f"RuntimeError: inherited {hook} failed"
+            expected_body = "" if hook == "setUpClass" else "ran body\n"
+            if reference.returncode != 1 or reference.stdout != expected_body or reason not in reference.stderr:
+                raise AssertionError(reference)
+            for level in a.opt_levels:
+                for flags in ([], ["--reachable-only"]):
+                    native = invoke([
+                        a.compiler, "run", entry, "--no-cache", "--opt-level", str(level),
+                        "--runtime", a.runtime, "--clang", a.clang, *flags,
+                    ])
+                    if (native.returncode != reference.returncode or native.stdout != expected_body
+                            or reason not in native.stderr
+                            or report(native.stderr, True) != report(reference.stderr, True)):
+                        raise AssertionError((registration, hook, level, flags, native))
 
 
 def main():
