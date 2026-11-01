@@ -100,13 +100,17 @@ impl Checker<'_> {
     }
 
     pub(super) fn unittest_case(&self, class: usize) -> bool {
+        self.unittest_subclass(class, "TestCase")
+    }
+
+    pub(super) fn unittest_subclass(&self, class: usize, base: &str) -> bool {
         let classes = &self.classes.declarations.definitions;
         std::iter::once(&class)
             .chain(&classes[class].bases)
             .any(|&index| {
                 let record = &classes[index];
                 let module = &self.graph.modules[record.definition.module];
-                record.name == "TestCase" && module.bundled && module.name == "unittest"
+                record.name == base && module.is_bundled("unittest")
             })
     }
 

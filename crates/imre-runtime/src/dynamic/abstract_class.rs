@@ -8,7 +8,9 @@ use super::value::{Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value}
 impl Context {
     /// Look up a value in an already loaded module without invoking its attribute hooks.
     pub(super) fn module_value(&self, module: &str, name: &str) -> Option<Id> {
-        let Value::Module { scope, .. } = self.heap.get(*self.modules.get(module)?) else {
+        let Value::Module { scope, .. } =
+            self.heap.get(self.dict_named_item(self.modules, module)?)
+        else {
             return None;
         };
         self.scope_name(*scope, name)

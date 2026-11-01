@@ -113,7 +113,7 @@ pub(super) fn change_environment(
         ));
     }
     // posix.putenv can run before os is imported. Preserve the initial dictionary first.
-    let posix = ctx.modules["posix"];
+    let posix = ctx.module("posix")?;
     ctx.lookup_attr(posix, "environ")?;
     let key = environment_argument(ctx, args[0])?;
     let status = if set {

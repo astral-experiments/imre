@@ -24,6 +24,7 @@ struct Imports {
     uses_import_builtin: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
+    unittest_names: HashSet<String>,
     pkgutil_names: HashSet<String>,
     get_data_names: HashSet<String>,
     machinery_names: HashSet<String>,
@@ -109,6 +110,7 @@ impl Imports {
                     | "site"
                     | "importlib.machinery"
                     | "traceback"
+                    | "unittest.case"
             )
         {
             self.runtime_imports = true;
@@ -119,7 +121,14 @@ impl Imports {
 fn boxed_sys_export(name: &str) -> bool {
     matches!(
         name,
-        "path" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+        "path" | "modules" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+    )
+}
+
+fn boxed_unittest_cleanup(name: &str) -> bool {
+    matches!(
+        name,
+        "case" | "addModuleCleanup" | "doModuleCleanups" | "enterModuleContext"
     )
 }
 
@@ -181,6 +190,7 @@ impl<'a> Visitor<'a> for Imports {
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
+                        "unittest" => self.unittest_names.insert(bound.to_string()),
                         "pkgutil" => self.pkgutil_names.insert(bound.to_string()),
                         "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
                         "importlib.machinery" => self.machinery_names.insert(bound.to_string()),
@@ -194,6 +204,9 @@ impl<'a> Visitor<'a> for Imports {
                 self.add(imp.level, name);
                 for a in &imp.names {
                     let suffix = a.name.as_str();
+                    if imp.level == 0 && name == "unittest" && boxed_unittest_cleanup(suffix) {
+                        self.runtime_imports = true;
+                    }
                     if imp.level == 0 && name == "pkgutil" && suffix == "get_data" {
                         self.get_data_names
                             .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
@@ -269,9 +282,11 @@ impl<'a> Visitor<'a> for Imports {
             self.typed_machinery_receivers.insert(receiver.to_string());
         }
         if let Expr::Attribute(attr) = e
-            && boxed_operator(attr.attr.as_str())
             && let Expr::Name(module) = &*attr.value
-            && self.operator_names.contains(module.id.as_str())
+            && ((boxed_operator(attr.attr.as_str())
+                && self.operator_names.contains(module.id.as_str()))
+                || (boxed_unittest_cleanup(attr.attr.as_str())
+                    && self.unittest_names.contains(module.id.as_str())))
         {
             self.runtime_imports = true;
         }
@@ -360,6 +375,7 @@ pub(crate) fn compile(
             "operator",
             "struct",
             "traceback",
+            "unittest",
             "SystemExit",
             "__import__",
         ]
