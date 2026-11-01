@@ -1,12 +1,7 @@
-"""Dataclasses for native runtime-loaded Python classes.
-
-Field construction, parameter metadata and the field queries follow CPython 3.14.5
-Lib/dataclasses.py (PSF-2.0). Class methods are compiled closures on the original class.
-"""
-from _imre_dataclasses import loaded_module as _loaded_module, members as _members, metadata as _metadata
+from _imre_dataclasses import load_global as _load_global, loaded_module as _loaded_module, members as _members, metadata as _metadata
 from types import GenericAlias
 
-__all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "asdict", "astuple",
+__all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "asdict", "astuple", "replace",
            "MISSING", "KW_ONLY", "InitVar", "FrozenInstanceError"]
 
 _FIELDS = "__dataclass_fields__"
@@ -14,13 +9,6 @@ _FIELDS = "__dataclass_fields__"
 
 class FrozenInstanceError(AttributeError):
     pass
-
-
-class _MISSING_TYPE:
-    pass
-
-
-MISSING = _MISSING_TYPE()
 
 
 class _KW_ONLY_TYPE:
@@ -33,6 +21,13 @@ KW_ONLY = _KW_ONLY_TYPE()
 class InitVar:
     def __init__(self, type):
         self.type = type
+
+    def __repr__(self):
+        if isinstance(self.type, type):
+            type_name = self.type.__name__
+        else:
+            type_name = repr(self.type)
+        return f'dataclasses.InitVar[{type_name}]'
 
     @classmethod
     def __class_getitem__(cls, type):
@@ -48,6 +43,7 @@ class _FIELD_BASE:
 
 
 _FIELD = _FIELD_BASE('_FIELD')
+_FIELD_INITVAR = _FIELD_BASE('_FIELD_INITVAR')
 _EMPTY_METADATA = _metadata({})
 
 
@@ -241,6 +237,9 @@ def _missing(names, qualname, kind):
 def _initializer(cls, data, positional, qualname, frozen):
     required = [f for f in positional if f.default is MISSING and f.default_factory is MISSING]
     has_post_init = hasattr(cls, '__post_init__')
+    initvars = [f for f in data.values() if f._field_type is _FIELD_INITVAR]
+    # An init=False InitVar has no parameter; CPython loads its name in the generated initializer's globals.
+    module = _loaded_module(cls.__module__) if any(not f.init for f in initvars) else None
     def __init__(self, /, *args, **kwargs):
         values = {}
         for f, value in zip(positional, args):
@@ -266,6 +265,8 @@ def _initializer(cls, data, positional, qualname, frozen):
         _missing([f.name for f in required if f.name not in values], qualname, 'positional')
         _missing([f.name for f in data.values() if f.kw_only and f.init and f.name not in values and f.default is MISSING and f.default_factory is MISSING], qualname, 'keyword-only')
         for f in data.values():
+            if f._field_type is _FIELD_INITVAR:
+                continue
             if f.name in values:
                 value = values[f.name]
             elif f.default_factory is not MISSING:
@@ -279,7 +280,8 @@ def _initializer(cls, data, positional, qualname, frozen):
             else:
                 setattr(self, f.name, value)
         if has_post_init:
-            self.__post_init__()
+            self.__post_init__(*[values.get(f.name, f.default) if f.init else _load_global(module, f.name)
+                                 for f in initvars])
     return __init__
 
 
@@ -334,20 +336,25 @@ def _decorate(cls, params):
                 raise TypeError(f'{name!r} is KW_ONLY, but KW_ONLY has already been specified')
             seen_kw_only = kw_only = True
             continue
-        if marker is not None:
+        if marker == 'ClassVar':
             raise NotImplementedError(f'boxed dataclass {marker} fields')
         default = getattr(cls, name, MISSING)
         f = default if isinstance(default, Field) else field(default=default)
+        if marker == 'InitVar':
+            if f.default_factory is not MISSING:
+                raise TypeError(f'field {name} cannot have a default factory')
+            f._field_type = _FIELD_INITVAR
+        else:
+            if isinstance(f.default, (list, dict, set, bytearray)) or getattr(type(f.default), '__hash__', MISSING) is None:
+                raise ValueError(f"mutable default {type(f.default)!r} for field {name} is not allowed: use default_factory")
+            f._field_type = _FIELD
         if isinstance(default, Field):
             if f.default is MISSING:
                 delattr(cls, name)
             else:
                 setattr(cls, name, f.default)
-        if isinstance(f.default, (list, dict, set, bytearray)) or getattr(type(f.default), '__hash__', MISSING) is None:
-            raise ValueError(f"mutable default {type(f.default)!r} for field {name} is not allowed: use default_factory")
         f.name = name
         f.type = annotation
-        f._field_type = _FIELD
         if f.kw_only is MISSING:
             f.kw_only = kw_only
         data[name] = f
@@ -372,12 +379,15 @@ def _decorate(cls, params):
             elif last_default is not None:
                 raise TypeError(f'non-default argument {f.name!r} follows default argument {last_default!r}')
         install('__init__', _initializer(cls, data, positional, cls.__qualname__ + '.__init__', params.frozen))
+    if '__replace__' not in own:
+        cls.__replace__ = _replace
     if params.match_args and '__match_args__' not in own:
         cls.__match_args__ = tuple(f.name for f in positional)
+    real_fields = [f for f in data.values() if f._field_type is _FIELD]
     if params.repr:
         @_recursive_repr
         def __repr__(self):
-            parts = [f.name + '=' + repr(getattr(self, f.name)) for f in data.values() if f.repr]
+            parts = [f.name + '=' + repr(getattr(self, f.name)) for f in real_fields if f.repr]
             return type(self).__qualname__ + '(' + ', '.join(parts) + ')'
         install('__repr__', __repr__)
     if params.eq:
@@ -386,20 +396,20 @@ def _decorate(cls, params):
                 return True
             if type(self) is not type(other):
                 return NotImplemented
-            for f in data.values():
+            for f in real_fields:
                 if f.compare and not (getattr(self, f.name) == getattr(other, f.name)):
                     return False
             return True
         install('__eq__', __eq__)
 
     if params.order:
-        names = tuple(f.name for f in data.values() if f.compare)
+        names = tuple(f.name for f in real_fields if f.compare)
 
         def ordering(op):
             def compare(self, other):
                 if other.__class__ is self.__class__:
-                    left = tuple(getattr(self, name) for name in names)
-                    right = tuple(getattr(other, name) for name in names)
+                    left = [getattr(self, name) for name in names]
+                    right = [getattr(other, name) for name in names]
                     return op(left, right)
                 return NotImplemented
             return compare
@@ -420,20 +430,21 @@ def _decorate(cls, params):
                     hash_fields = hash
                 except NameError:
                     raise NotImplementedError('boxed dataclass hashing requires the hash builtin') from None
-                return hash_fields(tuple(getattr(self, f.name) for f in data.values() if (f.compare if f.hash is None else f.hash)))
+                return hash_fields(tuple(getattr(self, f.name) for f in real_fields if (f.compare if f.hash is None else f.hash)))
             install('__hash__', __hash__)
         elif params.eq:
             cls.__hash__ = None
     if params.frozen:
+        field_names = tuple(f.name for f in real_fields)
         for name in ('__setattr__', '__delattr__'):
             if name in own:
                 raise TypeError(f'Cannot overwrite attribute {name} in class {cls.__name__}')
         def __setattr__(self, name, value):
-            if type(self) is cls or name in data:
+            if type(self) is cls or name in field_names:
                 raise FrozenInstanceError(f'cannot assign to field {name!r}')
             super(cls, self).__setattr__(name, value)
         def __delattr__(self, name):
-            if type(self) is cls or name in data:
+            if type(self) is cls or name in field_names:
                 raise FrozenInstanceError(f'cannot delete field {name!r}')
             super(cls, self).__delattr__(name)
         install('__setattr__', __setattr__)
@@ -483,3 +494,56 @@ def astuple(obj, *, tuple_factory=tuple):
     if not hasattr(type(obj), '__dataclass_fields__'):
         raise TypeError('astuple() should be called on dataclass instances')
     return _convert(obj, tuple_factory, False)
+
+
+def replace(obj, /, **changes):
+    """Return a new object replacing specified fields with new values.
+
+    This is especially useful for frozen classes.  Example usage::
+
+      @dataclass(frozen=True)
+      class C:
+          x: int
+          y: int
+
+      c = C(1, 2)
+      c1 = replace(c, x=3)
+      assert c1.x == 3 and c1.y == 2
+    """
+    if not hasattr(type(obj), _FIELDS):
+        raise TypeError("replace() should be called on dataclass instances")
+    return _replace(obj, **changes)
+
+
+def _replace(self, /, **changes):
+    # We're going to mutate 'changes', but that's okay because it's a
+    # new dict, even if called with 'replace(self, **my_changes)'.
+
+    # It's an error to have init=False fields in 'changes'.
+    # If a field is not in 'changes', read its value from the provided 'self'.
+
+    for f in getattr(self, _FIELDS).values():
+        # Only consider normal fields or InitVars.
+        if f._field_type is not _FIELD and f._field_type is not _FIELD_INITVAR:
+            continue
+
+        if not f.init:
+            # Error if this field is specified in changes.
+            if f.name in changes:
+                raise TypeError(f'field {f.name} is declared with '
+                                f'init=False, it cannot be specified with '
+                                f'replace()')
+            continue
+
+        if f.name not in changes:
+            if f._field_type is _FIELD_INITVAR and f.default is MISSING:
+                raise TypeError(f"InitVar {f.name!r} "
+                                f'must be specified with replace()')
+            changes[f.name] = getattr(self, f.name)
+
+    # Create the new object, which calls __init__() and
+    # __post_init__() (if defined), using all of the init fields we've
+    # added and/or left in 'changes'.  If there are values supplied in
+    # changes that aren't fields, this will correctly raise a
+    # TypeError.
+    return self.__class__(**changes)

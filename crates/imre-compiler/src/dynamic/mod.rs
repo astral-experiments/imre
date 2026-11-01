@@ -496,7 +496,11 @@ pub(crate) fn compile(
                 let bundled = if prefix == "dataclasses" {
                     Some((
                         "dataclasses.py",
-                        include_str!("../../stdlib/dataclasses.py"),
+                        concat!(
+                            include_str!("../../stdlib/dataclasses_missing.py"),
+                            "\n",
+                            include_str!("../../stdlib/dataclasses.py"),
+                        ),
                     ))
                 } else {
                     import_module::boxed_source(&prefix)
