@@ -97,10 +97,7 @@ impl Checker<'_> {
             Some(receiver.clone()),
         )?;
         args.order.push(args.values.len());
-        args.values.push(Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(name == "assertIn"),
-        });
+        args.values.push(Expr::boolean(name == "assertIn"));
         self.calls.insert(signature.id);
         Ok(Some(Expr {
             ty: Type::None,

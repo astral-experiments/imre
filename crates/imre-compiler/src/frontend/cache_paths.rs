@@ -12,18 +12,6 @@ pub(super) fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
 fn text(s: &str) -> Expr {
     unpacking::string(s)
 }
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-fn boolean(b: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(b),
-    }
-}
 fn choose(test: Expr, yes: Expr, no: Expr) -> Expr {
     Expr {
         ty: yes.ty,
@@ -57,7 +45,7 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::IsNone, vec![value]),
             }
         } else {
-            boolean(value.ty == Type::None)
+            Expr::boolean(value.ty == Type::None)
         }
     }
 
@@ -174,7 +162,7 @@ impl Checker<'_> {
                 } else {
                     ParameterKind::PositionalOrKeyword
                 },
-                default: (i != 0).then(none),
+                default: (i != 0).then(Expr::none),
                 sign_only: false,
             })
             .collect();
@@ -212,7 +200,7 @@ impl Checker<'_> {
                 ),
             );
             let truth = self.truth_value(debug);
-            let chosen = choose(debug_absent.clone(), boolean(false), truth);
+            let chosen = choose(debug_absent.clone(), Expr::boolean(false), truth);
             let active = roots.hold(self, chosen);
             Some((debug_absent, choose(active, text(""), text("1"))))
         };

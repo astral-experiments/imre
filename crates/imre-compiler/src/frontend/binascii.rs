@@ -12,13 +12,6 @@ fn param(name: &str, ty: Type, kind: ParameterKind, default: Option<Expr>) -> Pa
     }
 }
 
-fn boolean(value: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(value),
-    }
-}
-
 fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
     Expr {
         ty: Type::Bytes,
@@ -143,7 +136,7 @@ impl Checker<'_> {
                 if decode { "strict_mode" } else { "newline" },
                 Type::Bool,
                 ParameterKind::KeywordOnly,
-                Some(boolean(!decode)),
+                Some(Expr::boolean(!decode)),
             ),
         ];
         let args =
@@ -172,18 +165,15 @@ impl Checker<'_> {
         let kind = ParameterKind::PositionalOrKeyword;
         let mut params = vec![
             param("s", Type::Bytes, kind, None),
-            param(
-                "altchars",
-                Type::None,
-                kind,
-                Some(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
-            ),
+            param("altchars", Type::None, kind, Some(Expr::none())),
         ];
         if decode {
-            params.push(param("validate", Type::Bool, kind, Some(boolean(false))));
+            params.push(param(
+                "validate",
+                Type::Bool,
+                kind,
+                Some(Expr::boolean(false)),
+            ));
         }
         let args =
             self.arguments_with(call, &params, None, |c, _, arg| c.evaluated_argument(arg))?;
@@ -197,7 +187,7 @@ impl Checker<'_> {
         let data = if decode {
             input
         } else {
-            bytes_op(Builtin::BinasciiEncode, vec![input, boolean(false)])
+            bytes_op(Builtin::BinasciiEncode, vec![input, Expr::boolean(false)])
         };
         let alphabet = values[args.order[1]].clone();
         let data = if alphabet.ty == Type::None {
@@ -332,7 +322,7 @@ impl Checker<'_> {
         };
         Ok(bytes_op(
             Builtin::Base64Translate,
-            vec![data, alphabet, boolean(decode)],
+            vec![data, alphabet, Expr::boolean(decode)],
         ))
     }
 }

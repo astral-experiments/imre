@@ -744,10 +744,7 @@ impl Checker<'_> {
         }
         if falls && self.types.payload(signature.returns).is_some() {
             body.push(Statement::Return(helper.coerce(
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
+                Expr::none(),
                 signature.returns,
                 definition,
             )?));

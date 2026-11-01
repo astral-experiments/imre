@@ -569,10 +569,7 @@ impl Checker<'_> {
         let mut clear = Vec::new();
         let (size, typed) = if let Some(policy) = declaration {
             body.extend(receiver.map(Statement::Expr));
-            let typed = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(policy.typed),
-            };
+            let typed = Expr::boolean(policy.typed);
             (
                 self.document_coerce(cache_size(policy.capacity), documents::ANY, call)?,
                 self.document_coerce(typed, documents::ANY, call)?,
@@ -628,10 +625,7 @@ impl Checker<'_> {
 
 fn cache_size(capacity: i64) -> Expr {
     if capacity < 0 {
-        Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        }
+        Expr::none()
     } else {
         pipelines::integer(capacity)
     }

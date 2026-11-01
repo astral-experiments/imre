@@ -1,13 +1,6 @@
 //! Bind form queries and redirect references to their concrete native layouts.
 use super::*;
 
-fn boolean(value: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(value),
-    }
-}
-
 fn text_or_bytes(ty: Type) -> bool {
     matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes)
 }
@@ -17,7 +10,7 @@ impl Checker<'_> {
         let params = [
             slot("base", None),
             slot("url", None),
-            slot("allow_fragments", Some(boolean(true))),
+            slot("allow_fragments", Some(Expr::boolean(true))),
         ];
         let mut args =
             self.arguments_with(call, &params, None, |checker, _, node| checker.expr(node))?;
@@ -44,14 +37,11 @@ impl Checker<'_> {
     }
 
     pub(in crate::frontend) fn parse_qsl(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         let params = [
             slot("qs", None),
-            slot("keep_blank_values", Some(boolean(false))),
-            slot("strict_parsing", Some(boolean(false))),
+            slot("keep_blank_values", Some(Expr::boolean(false))),
+            slot("strict_parsing", Some(Expr::boolean(false))),
             slot("encoding", Some(unpacking::string("utf-8"))),
             slot("errors", Some(unpacking::string("replace"))),
             slot("max_num_fields", Some(none)),

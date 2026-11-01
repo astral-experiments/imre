@@ -83,10 +83,7 @@ impl Checker<'_> {
             ]
         };
         let empty = || unpacking::string("");
-        let no = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(false),
-        };
+        let no = Expr::boolean(false);
         let params = fields
             .iter()
             .map(|&name| {

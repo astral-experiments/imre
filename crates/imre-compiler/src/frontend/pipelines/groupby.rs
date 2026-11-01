@@ -149,15 +149,17 @@ impl Checker<'_> {
             handlers: vec![ir::ExceptHandler {
                 kinds: vec![exception_kind("StopIteration").unwrap()],
                 name: None,
-                body: vec![Statement::Assign(ready, boolean(false))],
+                body: vec![Statement::Assign(ready, Expr::boolean(false))],
             }],
             orelse: Vec::new(),
             finalbody: Vec::new(),
         }];
-        input.acquire.push(Statement::Assign(ready, boolean(false)));
         input
             .acquire
-            .push(Statement::Assign(have_group, boolean(false)));
+            .push(Statement::Assign(ready, Expr::boolean(false)));
+        input
+            .acquire
+            .push(Statement::Assign(have_group, Expr::boolean(false)));
         let boundary = Expr {
             ty: Type::Bool,
             kind: ExprKind::Boolean(
@@ -185,7 +187,7 @@ impl Checker<'_> {
         ));
         input.next = vec![Statement::If(
             not(self.local(ready)),
-            vec![Statement::While(boolean(true), seek, Vec::new())],
+            vec![Statement::While(Expr::boolean(true), seek, Vec::new())],
             Vec::new(),
         )];
         input.value = next_key;
@@ -211,7 +213,7 @@ impl Checker<'_> {
                 body.push(Statement::Assign(grouper, checker.local(callback)));
             }
             body.extend([
-                Statement::Assign(have_group, boolean(true)),
+                Statement::Assign(have_group, Expr::boolean(true)),
                 Statement::Assign(group_key, checker.local(key)),
                 Statement::Assign(
                     accumulating,
@@ -220,7 +222,7 @@ impl Checker<'_> {
                         kind: ExprKind::List(Vec::new()),
                     },
                 ),
-                Statement::While(boolean(true), drain, Vec::new()),
+                Statement::While(Expr::boolean(true), drain, Vec::new()),
                 // If a pull raises, the old materialized list is still visible.
                 Statement::Move(output, accumulating),
             ]);

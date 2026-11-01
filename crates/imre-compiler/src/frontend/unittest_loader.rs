@@ -351,10 +351,7 @@ impl Checker<'_> {
             clear.push(slot);
             self.local(slot)
         } else {
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }
+            Expr::none()
         };
         body.push(Statement::Assign(
             suite,

@@ -232,10 +232,7 @@ impl Checker<'_> {
                 ty: Type::None,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Expr(key)],
-                    value: Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    }),
+                    value: Box::new(Expr::none()),
                     clear: vec![],
                 },
             };
@@ -281,10 +278,7 @@ impl Checker<'_> {
             return Ok(scope.finish(compared));
         }
         let then = self.cmp_key_pairs(right, values, &ops[1..], site)?;
-        let no = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(false),
-        };
+        let no = Expr::boolean(false);
         Ok(scope.finish(Expr {
             ty: Type::Bool,
             kind: ExprKind::Conditional(Box::new(compared), Box::new(then), Box::new(no)),
@@ -322,14 +316,7 @@ impl Checker<'_> {
             );
             return Ok(Expr {
                 ty: Type::None,
-                kind: ExprKind::Conditional(
-                    Box::new(test),
-                    Box::new(fail),
-                    Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    }),
-                ),
+                kind: ExprKind::Conditional(Box::new(test), Box::new(fail), Box::new(Expr::none())),
             });
         };
         if params != [element, element] || !matches!(returns, Type::Bool | Type::Int | Type::Float)

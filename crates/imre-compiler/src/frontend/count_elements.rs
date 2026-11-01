@@ -3,13 +3,6 @@
 use super::*;
 use crate::modules::IntrinsicModule;
 
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-
 fn raise(kind: &str, message: String, mut arguments: Vec<Expr>) -> Expr {
     arguments.push(Expr {
         ty: Type::Exception,
@@ -203,7 +196,7 @@ impl Checker<'_> {
             ty: Type::None,
             kind: ExprKind::Scope {
                 body,
-                value: Box::new(none()),
+                value: Box::new(Expr::none()),
                 clear: vec![],
             },
         }))

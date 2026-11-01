@@ -164,14 +164,7 @@ impl Checker<'_> {
                 let extra_ty = self.types.optional(element);
                 let extra = |n| -> Result<Expr, String> {
                     let present = self.coerce(item(n), extra_ty, arg)?;
-                    let absent = self.coerce(
-                        Expr {
-                            ty: Type::None,
-                            kind: ExprKind::None,
-                        },
-                        extra_ty,
-                        arg,
-                    )?;
+                    let absent = self.coerce(Expr::none(), extra_ty, arg)?;
                     let test =
                         pipelines::compare(Compare::Greater, count.clone(), pipelines::integer(n));
                     Ok(Expr {
@@ -255,10 +248,7 @@ impl Checker<'_> {
         if fields.len() == 9 {
             return Ok(scope.finish(result));
         }
-        let empty = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let empty = Expr::none();
         let zone = self.coerce(fields[9].clone(), attrs[0], arg)?;
         let offset = self.coerce(fields.get(10).cloned().unwrap_or(empty), attrs[1], arg)?;
         let result = scope.hold(self, result);

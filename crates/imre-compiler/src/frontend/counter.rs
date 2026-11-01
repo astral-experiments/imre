@@ -153,10 +153,7 @@ impl Checker<'_> {
             }
             limit
         } else {
-            values.push(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            });
+            values.push(Expr::none());
             values.len() - 1
         };
         let (key, count) = self.types.mapping(ty).unwrap();
@@ -451,10 +448,7 @@ impl Checker<'_> {
         let value = if constructor {
             self.local(target)
         } else {
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }
+            Expr::none()
         };
         Ok(Expr {
             ty: value.ty,

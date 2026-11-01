@@ -76,10 +76,7 @@ impl Checker<'_> {
                 )
             })?;
         let report = match call.arguments.keywords.as_ref() {
-            [] => Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(false),
-            },
+            [] => Expr::boolean(false),
             [keyword] if keyword.arg.as_deref() == Some("return_exceptions") => {
                 self.expr_expected(&keyword.value, Type::Bool)?
             }
@@ -323,10 +320,7 @@ impl Checker<'_> {
         let mut entered = Vec::new();
         if let Some(target) = &item.optional_vars {
             let value = if ty == Type::Semaphore {
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }
+                Expr::none()
             } else {
                 self.local(slot)
             };

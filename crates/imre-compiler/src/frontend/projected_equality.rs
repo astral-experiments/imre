@@ -317,10 +317,7 @@ impl Checker<'_> {
         if let Some(result) = answers.different_lengths {
             branches.push(Statement::If(
                 pipelines::compare(Compare::NotEqual, length(&a.list), length(&b.list)),
-                vec![Statement::Return(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(result),
-                })],
+                vec![Statement::Return(Expr::boolean(result))],
                 vec![],
             ));
         }
@@ -411,10 +408,7 @@ impl Checker<'_> {
             Statement::If(both_one, vec![Statement::Return(value)], vec![]),
             Statement::If(
                 both_empty,
-                vec![Statement::Return(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(answers.empty),
-                })],
+                vec![Statement::Return(Expr::boolean(answers.empty))],
                 vec![],
             ),
         ]);

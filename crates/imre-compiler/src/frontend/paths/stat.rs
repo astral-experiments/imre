@@ -68,7 +68,7 @@ impl Checker<'_> {
                 self.truth_value(value)
             }
         } else {
-            boolean(!lstat)
+            Expr::boolean(!lstat)
         };
         Ok(scope.finish(operation(
             PathOperation::Stat { lstat },

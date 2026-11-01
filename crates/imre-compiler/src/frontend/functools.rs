@@ -279,13 +279,7 @@ impl Checker<'_> {
             None
         } else {
             let slot = self.hidden(Type::Bool);
-            body.push(Statement::Assign(
-                slot,
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                },
-            ));
+            body.push(Statement::Assign(slot, Expr::boolean(true)));
             clear.push(slot);
             Some(slot)
         };
@@ -326,13 +320,7 @@ impl Checker<'_> {
                         checker.local(slot),
                         vec![
                             Statement::Assign(result, item),
-                            Statement::Assign(
-                                slot,
-                                Expr {
-                                    ty: Type::Bool,
-                                    kind: ExprKind::Bool(false),
-                                },
-                            ),
+                            Statement::Assign(slot, Expr::boolean(false)),
                         ],
                         vec![step],
                     )

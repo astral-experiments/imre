@@ -93,13 +93,7 @@ impl Checker<'_> {
         let slot = self.hidden(manager.ty);
         let mut protected = Vec::new();
         if let Some(target) = &item.optional_vars {
-            protected.push(self.assign(
-                target,
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
-            )?);
+            protected.push(self.assign(target, Expr::none())?);
         }
         let (body, falls) = self.with_items(rest, suite)?;
         protected.extend(body);

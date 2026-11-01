@@ -11,23 +11,6 @@ fn operation(operation: ProcessOperation, ty: Type, args: Vec<Expr>) -> Expr {
     }
 }
 
-fn boolean(value: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(value),
-    }
-}
-
-fn absent(ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Absent(Box::new(Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        })),
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LaunchApi {
     Popen,
@@ -520,8 +503,8 @@ impl Checker<'_> {
                     )?);
                 }
             }
-            let mut cwd = absent(self.types.optional(Type::Str));
-            let mut env = absent(self.types.optional(self.types.dict(Type::Str, Type::Str)));
+            let mut cwd = Expr::absent(self.types.optional(Type::Str));
+            let mut env = Expr::absent(self.types.optional(self.types.dict(Type::Str, Type::Str)));
             let mut pipes = [0, 0];
             for keyword in &call.arguments.keywords {
                 match keyword.arg.as_deref() {
@@ -665,7 +648,7 @@ impl Checker<'_> {
         }
         let check = match check {
             Some(value) => self.expr_expected(value, Type::Bool)?,
-            None => boolean(false),
+            None => Expr::boolean(false),
         };
         Ok(operation(
             ProcessOperation::RunToStderr,
@@ -688,7 +671,7 @@ impl Checker<'_> {
                     kind: ExprKind::Int("1".into()),
                 }),
             ),
-            ("path", path, Some(absent(path))),
+            ("path", path, Some(Expr::absent(path))),
         ]
         .map(|(name, ty, default)| Parameter {
             name: name.into(),
@@ -910,7 +893,7 @@ impl Checker<'_> {
             } else {
                 ParameterKind::KeywordOnly
             },
-            default: (name != "cmd").then(|| absent(text)),
+            default: (name != "cmd").then(|| Expr::absent(text)),
             sign_only: false,
         });
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
@@ -987,16 +970,16 @@ impl Checker<'_> {
         let mut params = [
             ("args", self.types.list(Type::Str), None),
             ("bufsize", Type::Int, Some(default_bufsize())),
-            ("cwd", directory, Some(absent(directory))),
-            ("env", environment, Some(absent(environment))),
-            ("stdin", Type::Bool, Some(boolean(false))),
-            ("stdout", Type::Bool, Some(boolean(false))),
-            ("stderr", Type::Bool, Some(boolean(false))),
-            ("text", Type::Bool, Some(boolean(false))),
-            ("encoding", Type::Bool, Some(boolean(false))),
-            ("close_fds", Type::Bool, Some(boolean(true))),
-            ("executable", directory, Some(absent(directory))),
-            ("shell", Type::Bool, Some(boolean(false))),
+            ("cwd", directory, Some(Expr::absent(directory))),
+            ("env", environment, Some(Expr::absent(environment))),
+            ("stdin", Type::Bool, Some(Expr::boolean(false))),
+            ("stdout", Type::Bool, Some(Expr::boolean(false))),
+            ("stderr", Type::Bool, Some(Expr::boolean(false))),
+            ("text", Type::Bool, Some(Expr::boolean(false))),
+            ("encoding", Type::Bool, Some(Expr::boolean(false))),
+            ("close_fds", Type::Bool, Some(Expr::boolean(true))),
+            ("executable", directory, Some(Expr::absent(directory))),
+            ("shell", Type::Bool, Some(Expr::boolean(false))),
         ]
         .into_iter()
         .enumerate()
@@ -1017,7 +1000,7 @@ impl Checker<'_> {
             params.push(Parameter {
                 name: "timeout".into(),
                 ty: deadline,
-                default: Some(absent(deadline)),
+                default: Some(Expr::absent(deadline)),
                 sign_only: false,
                 kind: ParameterKind::KeywordOnly,
             });
@@ -1027,11 +1010,11 @@ impl Checker<'_> {
                 .types
                 .optional(if capture.text { Type::Str } else { Type::Bytes });
             for (name, ty, default) in [
-                ("input", input, absent(input)),
-                ("check", Type::Bool, boolean(false)),
-                ("capture_output", Type::Bool, boolean(false)),
-                ("universal_newlines", Type::Bool, boolean(false)),
-                ("errors", Type::Bool, boolean(false)),
+                ("input", input, Expr::absent(input)),
+                ("check", Type::Bool, Expr::boolean(false)),
+                ("capture_output", Type::Bool, Expr::boolean(false)),
+                ("universal_newlines", Type::Bool, Expr::boolean(false)),
+                ("errors", Type::Bool, Expr::boolean(false)),
             ] {
                 params.push(Parameter {
                     name: name.into(),
@@ -1057,7 +1040,7 @@ impl Checker<'_> {
             for (name, ty, default) in [
                 ("process_group", Type::Int, default_bufsize()),
                 ("umask", Type::Int, default_bufsize()),
-                ("start_new_session", Type::Bool, boolean(false)),
+                ("start_new_session", Type::Bool, Expr::boolean(false)),
             ] {
                 params.push(Parameter {
                     name: name.into(),
@@ -1160,11 +1143,11 @@ impl Checker<'_> {
                             "process redirection requires a file, a literal descriptor, or file.fileno()"))
                     }
                 }
-                4..=8 => Ok(boolean(false)), // effect-free literals checked by stream_plan
+                4..=8 => Ok(Expr::boolean(false)), // effect-free literals checked by stream_plan
                 11 => checker.condition(arg),
                 14 if api == LaunchApi::Run => checker.expr_expected(arg, Type::Bool),
                 14 => checker.expr(arg), // evaluated before reporting a forbidden check keyword
-                15..=17 => Ok(boolean(false)), // literals validated by stream_plan
+                15..=17 => Ok(Expr::boolean(false)), // literals validated by stream_plan
                 12 => checker.deadline_value(arg),
                 _ => checker.expr_expected(arg, params[index].ty),
             }
@@ -1293,7 +1276,7 @@ impl Checker<'_> {
                     name: name.into(),
                     ty,
                     kind: ParameterKind::PositionalOrKeyword,
-                    default: Some(absent(ty)),
+                    default: Some(Expr::absent(ty)),
                     sign_only: false,
                 });
                 let values =
@@ -1319,7 +1302,7 @@ impl Checker<'_> {
                     name: "timeout".into(),
                     ty: timeout,
                     kind: ParameterKind::PositionalOrKeyword,
-                    default: Some(absent(timeout)),
+                    default: Some(Expr::absent(timeout)),
                     sign_only: false,
                 };
                 let values =
@@ -1430,7 +1413,7 @@ impl Checker<'_> {
                         ty: expected,
                         kind: ExprKind::Conditional(
                             Box::new(test),
-                            Box::new(absent(expected)),
+                            Box::new(Expr::absent(expected)),
                             Box::new(self.coerce(text, expected, expression)?),
                         ),
                     }),
@@ -1457,7 +1440,7 @@ impl Checker<'_> {
                 name: "default".to_owned(),
                 ty: optional,
                 kind: ParameterKind::PositionalOrKeyword,
-                default: Some(absent(optional)),
+                default: Some(Expr::absent(optional)),
                 sign_only: false,
             },
         ];

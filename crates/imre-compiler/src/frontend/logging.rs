@@ -23,16 +23,6 @@ fn text(value: &str) -> Expr {
     }
 }
 
-fn absent(ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Absent(Box::new(Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        })),
-    }
-}
-
 fn parameter(name: &str, ty: Type, kind: ParameterKind, default: Expr) -> Parameter {
     Parameter {
         name: name.to_owned(),
@@ -207,25 +197,19 @@ impl Checker<'_> {
                 "defaults",
                 Type::None,
                 ParameterKind::PositionalOrKeyword,
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
+                Expr::none(),
             ),
             parameter(
                 "disable_existing_loggers",
                 Type::Bool,
                 ParameterKind::PositionalOrKeyword,
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                },
+                Expr::boolean(true),
             ),
             parameter(
                 "encoding",
                 self.types.optional(Type::Str),
                 ParameterKind::PositionalOrKeyword,
-                absent(self.types.optional(Type::Str)),
+                Expr::absent(self.types.optional(Type::Str)),
             ),
         ];
         let args = self.arguments(call, &parameters, None)?;
@@ -308,7 +292,7 @@ impl Checker<'_> {
         operation(
             Log::Get,
             Type::Logger,
-            vec![absent(self.types.optional(Type::Str))],
+            vec![Expr::absent(self.types.optional(Type::Str))],
         )
     }
 
@@ -318,7 +302,7 @@ impl Checker<'_> {
             "name",
             name,
             ParameterKind::PositionalOrKeyword,
-            absent(name),
+            Expr::absent(name),
         )];
         let args = self.arguments(call, &params, None)?;
         Ok(self.ordered_builtin(Builtin::Logging(Log::Get), Type::Logger, args))
@@ -392,21 +376,17 @@ impl Checker<'_> {
             .expect("optional filename");
         let default_errors = self.coerce(text("backslashreplace"), string, call)?;
         let kw = ParameterKind::KeywordOnly;
-        let boolean = |n| Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(n),
-        };
         let mut params = vec![
-            parameter("level", level, kw, absent(level)),
-            parameter("format", string, kw, absent(string)),
-            parameter("datefmt", string, kw, absent(string)),
-            parameter("force", Type::Bool, kw, boolean(false)),
-            parameter("stream", output, kw, absent(output)),
+            parameter("level", level, kw, Expr::absent(level)),
+            parameter("format", string, kw, Expr::absent(string)),
+            parameter("datefmt", string, kw, Expr::absent(string)),
+            parameter("force", Type::Bool, kw, Expr::boolean(false)),
+            parameter("stream", output, kw, Expr::absent(output)),
             parameter("style", Type::Str, kw, text("%")),
-            parameter("handlers", handlers, kw, absent(handlers)),
-            parameter("filename", filename, kw, absent(filename)),
+            parameter("handlers", handlers, kw, Expr::absent(handlers)),
+            parameter("filename", filename, kw, Expr::absent(filename)),
             parameter("filemode", Type::Str, kw, text("a")),
-            parameter("encoding", string, kw, absent(string)),
+            parameter("encoding", string, kw, Expr::absent(string)),
             parameter("errors", string, kw, default_errors),
         ];
         let known = params.len();
@@ -481,10 +461,10 @@ impl Checker<'_> {
         if name {
             args.order.push(args.order[0]);
             args.order[0] = extra;
-            args.values.push(absent(level));
+            args.values.push(Expr::absent(level));
         } else {
             args.order.push(extra);
-            args.values.push(absent(string));
+            args.values.push(Expr::absent(string));
         }
         let supplied = |s| {
             call.arguments
@@ -498,7 +478,7 @@ impl Checker<'_> {
             supplied("filename"),
         ] {
             args.order.push(args.values.len());
-            args.values.push(boolean(flag));
+            args.values.push(Expr::boolean(flag));
         }
         // Whether these options conflict depends on the live root. The native
         // binder has already checked the type of every argument expression.
@@ -859,17 +839,14 @@ impl Checker<'_> {
                 ir::CallArgs::positional(vec![logger.clone(), level.clone()]),
                 call,
             )?;
-            let has_extra = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool(extra.is_some()),
-            };
+            let has_extra = Expr::boolean(extra.is_some());
             let context = self.types.optional(self.types.dict(Type::Str, Type::Str));
             let processed = self.logging_source_call(
                 "_adapter_process",
                 ir::CallArgs::positional(vec![
                     logger,
                     original,
-                    extra.unwrap_or_else(|| absent(context)),
+                    extra.unwrap_or_else(|| Expr::absent(context)),
                     has_extra,
                 ]),
                 call,
@@ -931,10 +908,6 @@ impl Checker<'_> {
             ty: Type::Int,
             kind: ExprKind::Int(line.to_string()),
         };
-        let none = || Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
         let caller = caller_name(
             &self.graph.modules[self.module].parsed.syntax().body,
             call.range(),
@@ -949,9 +922,9 @@ impl Checker<'_> {
                 lineno,
                 original,
                 arguments,
-                none(),
+                Expr::none(),
                 text(caller),
-                none(),
+                Expr::none(),
             ],
         );
         let record = if let Some(extra) = extra {
@@ -1026,13 +999,6 @@ fn caller_name(body: &[ast::Stmt], call: TextRange) -> &str {
 fn when_enabled(enabled: Expr, event: Expr) -> Expr {
     Expr {
         ty: Type::None,
-        kind: ExprKind::Conditional(
-            Box::new(enabled),
-            Box::new(event),
-            Box::new(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }),
-        ),
+        kind: ExprKind::Conditional(Box::new(enabled), Box::new(event), Box::new(Expr::none())),
     }
 }

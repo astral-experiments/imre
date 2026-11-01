@@ -86,16 +86,16 @@ impl Checker<'_> {
         };
         let mut prepared = self.prepare_container(call, false, node, false)?;
         if let Some(list) = eager {
-            evaluate.insert(0, Statement::Assign(list.selected, boolean(false)));
+            evaluate.insert(0, Statement::Assign(list.selected, Expr::boolean(false)));
             prepared.eager_list = Some((node.range(), list));
         }
         let started = self.hidden(Type::Bool);
         let mut initialize = std::mem::replace(&mut prepared.evaluate, evaluate);
         initialize.extend(std::mem::replace(
             &mut prepared.acquire,
-            vec![Statement::Assign(started, boolean(false))],
+            vec![Statement::Assign(started, Expr::boolean(false))],
         ));
-        initialize.push(Statement::Assign(started, boolean(true)));
+        initialize.push(Statement::Assign(started, Expr::boolean(true)));
         prepared.next.insert(
             0,
             Statement::If(not(self.local(started)), initialize, Vec::new()),
@@ -144,10 +144,7 @@ impl Checker<'_> {
                     ty: Type::None,
                     kind: ExprKind::Scope {
                         body,
-                        value: Box::new(Expr {
-                            ty: Type::None,
-                            kind: ExprKind::None,
-                        }),
+                        value: Box::new(Expr::none()),
                         clear,
                     },
                 }));
@@ -173,7 +170,7 @@ impl Checker<'_> {
                     EagerList { value, selected }
                 });
                 evaluate.push(Statement::Assign(list.value, call));
-                evaluate.push(Statement::Assign(list.selected, boolean(true)));
+                evaluate.push(Statement::Assign(list.selected, Expr::boolean(true)));
                 self.local(list.value)
             }
         }
@@ -206,13 +203,6 @@ pub(super) fn integer(value: i64) -> Expr {
     Expr {
         ty: Type::Int,
         kind: ExprKind::Int(value.to_string()),
-    }
-}
-
-fn boolean(value: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(value),
     }
 }
 
@@ -625,7 +615,7 @@ impl Checker<'_> {
         let value = self.hidden(item.ty);
         let ready = self.hidden(Type::Bool);
         let exhaust = vec![
-            Statement::Assign(ready, boolean(false)),
+            Statement::Assign(ready, Expr::boolean(false)),
             Statement::Clear(stop),
             Statement::Clear(value),
         ];
@@ -648,7 +638,7 @@ impl Checker<'_> {
         Ok(Prepared {
             evaluate: vec![
                 Statement::Assign(stop, sentinel),
-                Statement::Assign(ready, boolean(true)),
+                Statement::Assign(ready, Expr::boolean(true)),
             ],
             acquire: Vec::new(),
             next: vec![Statement::If(self.local(ready), vec![pull], Vec::new())],
@@ -689,11 +679,11 @@ impl Checker<'_> {
         let acquired = self.hidden(Type::Bool);
         let mut evaluate = vec![
             Statement::Assign(active, integer(0)),
-            Statement::Assign(acquired, boolean(false)),
+            Statement::Assign(acquired, Expr::boolean(false)),
         ];
         let mut next = vec![
             Statement::Clear(value),
-            Statement::Assign(ready, boolean(false)),
+            Statement::Assign(ready, Expr::boolean(false)),
         ];
         let mut clear = vec![value, ready, active, acquired];
         let mut writes = HashSet::new();
@@ -703,7 +693,7 @@ impl Checker<'_> {
             writes.extend(input.writes);
             input
                 .acquire
-                .push(Statement::Assign(acquired, boolean(true)));
+                .push(Statement::Assign(acquired, Expr::boolean(true)));
             let mut pull = vec![Statement::If(
                 not(self.local(acquired)),
                 input.acquire,
@@ -716,7 +706,7 @@ impl Checker<'_> {
                 vec![
                     Statement::Assign(value, self.local(input.value)),
                     Statement::Clear(input.value),
-                    Statement::Assign(ready, boolean(true)),
+                    Statement::Assign(ready, Expr::boolean(true)),
                 ]
             };
             pull.push(Statement::If(
@@ -724,7 +714,7 @@ impl Checker<'_> {
                 yielded,
                 vec![
                     Statement::Assign(active, integer(index as i64 + 1)),
-                    Statement::Assign(acquired, boolean(false)),
+                    Statement::Assign(acquired, Expr::boolean(false)),
                 ],
             ));
             next.push(Statement::If(
@@ -860,7 +850,7 @@ impl Checker<'_> {
                     },
                 )],
                 vec![
-                    Statement::Assign(done, boolean(true)),
+                    Statement::Assign(done, Expr::boolean(true)),
                     Statement::Clear(iterator),
                 ],
             ),
@@ -869,12 +859,12 @@ impl Checker<'_> {
         Prepared {
             evaluate: vec![
                 Statement::Assign(iterator, expression),
-                Statement::Assign(done, boolean(false)),
+                Statement::Assign(done, Expr::boolean(false)),
             ],
             acquire: Vec::new(),
             next: vec![
                 Statement::Clear(value),
-                Statement::Assign(ready, boolean(false)),
+                Statement::Assign(ready, Expr::boolean(false)),
                 Statement::If(not(self.local(done)), pull, Vec::new()),
             ],
             value,
@@ -1094,7 +1084,7 @@ impl Checker<'_> {
                 Box::new(compare(Compare::Greater, start.clone(), stop.clone())),
             ),
         };
-        let mut acquire = vec![Statement::Assign(done, boolean(false))];
+        let mut acquire = vec![Statement::Assign(done, Expr::boolean(false))];
         if reverse {
             let sign = Expr {
                 ty: Type::Int,
@@ -1161,7 +1151,7 @@ impl Checker<'_> {
         };
         let next = vec![
             Statement::Clear(value),
-            Statement::Assign(ready, boolean(false)),
+            Statement::Assign(ready, Expr::boolean(false)),
             Statement::If(
                 not(self.local(done)),
                 vec![Statement::If(
@@ -1172,9 +1162,9 @@ impl Checker<'_> {
                             cursor,
                             binary(Binary::Add, self.local(cursor), self.local(stride)),
                         ),
-                        Statement::Assign(ready, boolean(true)),
+                        Statement::Assign(ready, Expr::boolean(true)),
                     ],
-                    vec![Statement::Assign(done, boolean(true))],
+                    vec![Statement::Assign(done, Expr::boolean(true))],
                 )],
                 Vec::new(),
             ),
@@ -1266,7 +1256,7 @@ impl Checker<'_> {
                 acquire: Vec::new(),
                 next: vec![
                     Statement::Clear(value),
-                    Statement::Assign(ready, boolean(false)),
+                    Statement::Assign(ready, Expr::boolean(false)),
                 ],
                 value,
                 ready,
@@ -1314,7 +1304,7 @@ impl Checker<'_> {
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
         let evaluate = vec![Statement::Assign(source, iterable)];
-        let mut acquire = vec![Statement::Assign(done, boolean(false))];
+        let mut acquire = vec![Statement::Assign(done, Expr::boolean(false))];
         let mut clear = vec![source, value, ready, done];
         let mut pull = Vec::new();
         let indexed = self.types.element(ty).is_some()
@@ -1426,10 +1416,10 @@ impl Checker<'_> {
                             integer(1),
                         ),
                     ),
-                    Statement::Assign(ready, boolean(true)),
+                    Statement::Assign(ready, Expr::boolean(true)),
                 ],
                 vec![
-                    Statement::Assign(done, boolean(true)),
+                    Statement::Assign(done, Expr::boolean(true)),
                     Statement::Clear(source),
                 ],
             ));
@@ -1495,7 +1485,7 @@ impl Checker<'_> {
             pull.push(Statement::If(
                 not(self.local(ready)),
                 vec![
-                    Statement::Assign(done, boolean(true)),
+                    Statement::Assign(done, Expr::boolean(true)),
                     Statement::Clear(iterator),
                 ],
                 Vec::new(),
@@ -1503,7 +1493,7 @@ impl Checker<'_> {
         }
         let next = vec![
             Statement::Clear(value),
-            Statement::Assign(ready, boolean(false)),
+            Statement::Assign(ready, Expr::boolean(false)),
             Statement::If(not(self.local(done)), pull, Vec::new()),
         ];
         Ok(Prepared {
@@ -1641,7 +1631,7 @@ impl Checker<'_> {
         }
         let strict_expression = match call.arguments.keywords.first() {
             Some(keyword) => self.condition(&keyword.value)?,
-            None => boolean(false),
+            None => Expr::boolean(false),
         };
         let strict = self.hidden(Type::Bool);
         let ready = self.hidden(Type::Bool);
@@ -1668,8 +1658,8 @@ impl Checker<'_> {
             evaluate.append(&mut input.acquire);
         }
         let cache = self.iterator_tuple_cache(ty, &mut evaluate, &mut clear);
-        evaluate.push(Statement::Assign(done, boolean(inputs.is_empty())));
-        let mut success = vec![Statement::Assign(ready, boolean(true))];
+        evaluate.push(Statement::Assign(done, Expr::boolean(inputs.is_empty())));
+        let mut success = vec![Statement::Assign(ready, Expr::boolean(true))];
         if cache.is_none() {
             success.insert(
                 0,
@@ -1687,7 +1677,7 @@ impl Checker<'_> {
         success.extend(inputs.iter().map(|input| Statement::Clear(input.value)));
         for index in (0..inputs.len()).rev() {
             let mut exhausted = vec![
-                Statement::Assign(done, boolean(true)),
+                Statement::Assign(done, Expr::boolean(true)),
                 Statement::Clear(value),
             ];
             let strict_checks = if index == 0 {
@@ -1756,7 +1746,7 @@ impl Checker<'_> {
         }
         let next = vec![
             Statement::Clear(value),
-            Statement::Assign(ready, boolean(false)),
+            Statement::Assign(ready, Expr::boolean(false)),
             Statement::If(not(self.local(done)), success, Vec::new()),
         ];
         Ok(Prepared {
@@ -1965,14 +1955,14 @@ impl Checker<'_> {
         let mut evaluate = std::mem::take(&mut inputs[0].evaluate);
         evaluate.extend([
             Statement::Assign(depth, integer(0)),
-            Statement::Assign(done, boolean(false)),
+            Statement::Assign(done, Expr::boolean(false)),
         ]);
         let mut cases = Vec::new();
         for index in (0..inputs.len()).rev() {
             let mut accepted = if index + 1 == inputs.len() {
                 vec![
                     Statement::Assign(value, yielded.clone()),
-                    Statement::Assign(ready, boolean(true)),
+                    Statement::Assign(ready, Expr::boolean(true)),
                 ]
             } else {
                 let mut initialize = inputs[index + 1].evaluate.clone();
@@ -1999,7 +1989,7 @@ impl Checker<'_> {
                 .map(Statement::Clear)
                 .collect::<Vec<_>>();
             exhausted.push(if index == 0 {
-                Statement::Assign(done, boolean(true))
+                Statement::Assign(done, Expr::boolean(true))
             } else {
                 Statement::Assign(depth, integer((index - 1) as i64))
             });
@@ -2026,7 +2016,7 @@ impl Checker<'_> {
         ));
         let next = vec![
             Statement::Clear(value),
-            Statement::Assign(ready, boolean(false)),
+            Statement::Assign(ready, Expr::boolean(false)),
             Statement::If(not(self.local(done)), vec![resume], Vec::new()),
         ];
         Ok(Prepared {
@@ -2181,7 +2171,7 @@ impl Checker<'_> {
                 self.types,
                 vec![Statement::If(
                     self.test_truth(operation, call)?,
-                    vec![Statement::Assign(ready, boolean(true))],
+                    vec![Statement::Assign(ready, Expr::boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
                 vec![Statement::Clear(input.value), Statement::Break],
@@ -2193,7 +2183,7 @@ impl Checker<'_> {
             ));
             input.next = vec![
                 Statement::Clear(input.value),
-                Statement::Assign(ready, boolean(false)),
+                Statement::Assign(ready, Expr::boolean(false)),
                 Statement::While(not(self.local(ready)), step, Vec::new()),
             ];
             input.ready = ready;
@@ -2229,7 +2219,7 @@ impl Checker<'_> {
             let mut mapped = catch_stop_iteration(
                 self.types,
                 vec![Statement::Assign(value, operation)],
-                vec![Statement::Assign(ready, boolean(false))],
+                vec![Statement::Assign(ready, Expr::boolean(false))],
             );
             mapped.push(Statement::Clear(input.value));
             input
@@ -2398,7 +2388,7 @@ impl Checker<'_> {
         input.evaluate.extend(before_iteration);
         input
             .evaluate
-            .push(Statement::While(boolean(true), body, orelse));
+            .push(Statement::While(Expr::boolean(true), body, orelse));
         Ok((
             vec![Statement::Scope {
                 body: input.evaluate,
@@ -2469,7 +2459,7 @@ impl Checker<'_> {
         let input = self.expansion_input(source, Some(Type::Int))?;
         let best = self.hidden(Type::Int);
         let empty = self.hidden(Type::Bool);
-        let mut body = vec![Statement::Assign(empty, boolean(true))];
+        let mut body = vec![Statement::Assign(empty, Expr::boolean(true))];
         body.extend(self.expand_items(input, call, |checker, item| {
             checker.expect(Type::Int, item.ty, call)?;
             let better = Expr {
@@ -2486,7 +2476,7 @@ impl Checker<'_> {
                 better,
                 vec![
                     Statement::Assign(best, item),
-                    Statement::Assign(empty, boolean(false)),
+                    Statement::Assign(empty, Expr::boolean(false)),
                 ],
                 Vec::new(),
             )])
@@ -2525,7 +2515,7 @@ impl Checker<'_> {
         let source = &call.arguments.args[0];
         let input = self.expansion_input(source, None)?;
         let result = self.hidden(Type::Bool);
-        let mut body = vec![Statement::Assign(result, boolean(all))];
+        let mut body = vec![Statement::Assign(result, Expr::boolean(all))];
         let mut clear = vec![result];
         if let Iteration::Container {
             iterable,
@@ -2561,7 +2551,10 @@ impl Checker<'_> {
                 let deciding = if all { not(value) } else { value };
                 Ok(vec![Statement::If(
                     deciding,
-                    vec![Statement::Assign(result, boolean(!all)), Statement::Break],
+                    vec![
+                        Statement::Assign(result, Expr::boolean(!all)),
+                        Statement::Break,
+                    ],
                     Vec::new(),
                 )])
             })?);
