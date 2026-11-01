@@ -115,12 +115,28 @@ def run_method(tool, case, work, typed=False):
                 or support_import_blocker(process, entry, src)):
             return dict(outcome="blocked", roles=UNOBSERVED, reason=diagnostic(process.stderr, work),
                         evidence=dict(stage="native startup"))
-        raise AssertionError((case.id(), process.stdout, process.stderr))
+        raise AssertionError((case.id(), process.returncode, process.stdout, process.stderr))
     if typed:
         negative = subprocess.run([exe, "force-failure"], capture_output=True, text=True, timeout=10)
         assert negative.returncode and "MIME result mismatch" in negative.stderr, case.id()
     else:
-        assert case._testMethodName in process.stderr and " ... ok" in process.stderr and "Ran 1 test" in process.stderr, process.stderr
+        cls, method = original_nodes(case)
+        guard = next((d for d in method.decorator_list if isinstance(d, ast.Name) and d.id == "cpython_only"), None)
+        label = f"{method.name} (__main__.{cls.name}.{method.name})"
+        if short := case.shortDescription():
+            label += "\n" + short
+        reason = "implementation detail specific to cpython"
+        status = f"skipped {reason!r}" if guard else "ok"
+        summary = "OK (skipped=1)" if guard else "OK"
+        transcript = (re.escape(f"{label} ... {status}\n\n" + "-" * 70)
+                      + r"\nRan 1 test in [0-9]+\.[0-9]{3}s\n\n" + re.escape(summary + "\n"))
+        assert not process.stdout and re.fullmatch(transcript, process.stderr), (
+            case.id(), process.returncode, process.stdout, process.stderr)
+        if guard:
+            return dict(outcome="skip", reason=reason, roles={**UNOBSERVED, "fixture": "mixed"},
+                        evidence=dict(method_sha256=digest, condition=ast.unparse(guard),
+                                      source=f"Lib/test/test_mimetypes.py:{guard.lineno}",
+                                      fixture="CPython module hooks and native hermetic setup before the decorated method"))
     return dict(outcome="pass", roles=roles(body="imre", assertions="imre", operation="imre", fixture="mixed"),
                 evidence=dict(method_sha256=digest, operation="bundled mimetypes under the unchanged native method", assertions="typed native equality with failing control" if typed else "bundled unittest",
                               fixture="original CPython hooks with native hermetic tables and class setup"))
@@ -240,7 +256,7 @@ def main():
                         except NativeCompileError as exc:
                             result = dict(outcome="blocked", roles=UNOBSERVED, reason=diagnostic(exc, staged / "Lib"),
                                           evidence=dict(stage="original method"))
-                        if result["outcome"] == "pass":
+                        if result["outcome"] != "blocked":
                             break
                         failures.append(result["reason"])
                     else:
@@ -253,7 +269,7 @@ def main():
                 callbacks[case.id()] = execute
             observed, errors, unexpected = run_in_fixtures(suite, callbacks)
             if errors or unexpected:
-                raise AssertionError([(case, text.splitlines()[-1][:500]) for case, text in errors] + unexpected)
+                raise AssertionError("\n".join(f"{case}\n{message}" for case, message in errors + unexpected))
             outcomes = {k: observed[k[0]][k[1] - 1] for k in ids if k[0] in observed}
             order = [(case.id(), type(case).__name__) for case in discovered]
             data = build_report(reference, level, order, outcomes, exceptions=skips)
