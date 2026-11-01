@@ -114,7 +114,7 @@ mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::{FileState, errno_error, open_file};
+pub(crate) use files::{FileState, errno_error, open_file, open_raw_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
