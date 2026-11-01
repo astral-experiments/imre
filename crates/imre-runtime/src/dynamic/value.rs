@@ -378,6 +378,11 @@ impl Context {
                 constructor: None, ..
             } => "module",
             Value::Instance { class, .. }
+                if self.classes.get(super::namespace::CLASS) == Some(class) =>
+            {
+                super::namespace::CLASS
+            }
+            Value::Instance { class, .. }
             | Value::Module {
                 constructor: Some(class),
                 ..
