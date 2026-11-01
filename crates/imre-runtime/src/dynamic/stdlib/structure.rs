@@ -3,7 +3,10 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
-use super::{Context, Error, Id, Result, Value, system::StructFormat};
+use super::{
+    Context, Error, Id, Result, Value,
+    system::{StructFormat, UnpackedField},
+};
 use crate::objects::Codec;
 
 fn format_error(message: impl Into<String>) -> Error {
@@ -70,12 +73,18 @@ pub(super) fn parse(ctx: &Context, format: Id) -> Result<(&str, StructFormat)> {
     Ok((format, StructFormat::parse(format).map_err(format_error)?))
 }
 
-pub(super) fn unsigned_tuple(ctx: &mut Context, values: Vec<u64>) -> Id {
-    let items = values
+pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Result<Id> {
+    let fields = layout
+        .unpack(ctx.bytes_like(buffer)?)
+        .map_err(format_error)?;
+    let items = fields
         .into_iter()
-        .map(|v| ctx.alloc(Value::Int(crate::Int::new(v.into()))))
+        .map(|field| match field {
+            UnpackedField::Integer(word) => ctx.alloc(Value::Int(crate::Int::new(word.into()))),
+            UnpackedField::Bytes(bytes) => ctx.alloc(Value::Bytes(bytes)),
+        })
         .collect();
-    ctx.alloc(Value::Tuple(items))
+    Ok(ctx.alloc(Value::Tuple(items)))
 }
 
 pub(super) fn method(
@@ -94,6 +103,7 @@ pub(super) fn method(
             format!("Struct.{name}() takes no keyword arguments"),
         ));
     }
+    let layout = Rc::clone(layout);
     if name == "unpack" {
         let [id] = args else {
             return Err(Error::new(
@@ -104,40 +114,56 @@ pub(super) fn method(
                 ),
             ));
         };
-        let values = layout.unpack(ctx.bytes_like(*id)?).map_err(format_error)?;
-        return Ok(unsigned_tuple(ctx, values));
+        return unpack(ctx, &layout, *id);
     }
-    let count = layout.item_count();
+    pack(ctx, &layout, args)
+}
+
+pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Result<Id> {
+    let count = layout.item_count;
     if args.len() != count {
         return Err(format_error(format!(
             "pack expected {count} items for packing (got {})",
             args.len()
         )));
     }
-    let layout = Rc::clone(layout);
     let mut output = super::super::builtins::zeroed_bytes(layout.size as i64)?;
-    let mut args = args.iter();
-    layout.write_words(&mut output, |code, width| {
-        let id = *args.next().expect("validated struct argument count");
-        let value = ctx
-            .index_value(id)?
-            .ok_or_else(|| format_error("required argument is not an integer"))?;
-        let number = value.big().to_u64();
-        let max = u64::MAX >> ((8 - width) * 8);
-        if let Some(n) = number.filter(|&n| n <= max) {
-            return Ok(n);
+    for ((code, range), &id) in layout.items().zip(args) {
+        let target = &mut output[range];
+        if code == b's' {
+            let (Value::Bytes(bytes) | Value::ByteArray(bytes)) =
+                ctx.heap.get(ctx.scalar_value(id))
+            else {
+                return Err(format_error("argument for 's' must be a bytes object"));
+            };
+            let length = target.len().min(bytes.len());
+            target[..length].copy_from_slice(&bytes[..length]);
+        } else {
+            let word = integer_field(ctx, id, code, target.len())?;
+            layout.write_integer(target, word);
         }
-        if code == b'P' {
-            return value
-                .to_i64()
-                .and_then(|v| isize::try_from(v).ok())
-                .map(|v| v as usize as u64)
-                .ok_or_else(|| format_error("int too large to convert"));
-        }
-        Err(format_error(format!(
-            "'{}' format requires 0 <= number <= {max}",
-            char::from(code)
-        )))
-    })?;
+    }
     Ok(ctx.alloc(Value::Bytes(output)))
+}
+
+fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u64> {
+    let value = ctx
+        .index_value(id)?
+        .ok_or_else(|| format_error("required argument is not an integer"))?;
+    let number = value.big().to_u64();
+    let max = u64::MAX >> ((8 - width) * 8);
+    if let Some(n) = number.filter(|&n| n <= max) {
+        return Ok(n);
+    }
+    if code == b'P' {
+        return value
+            .to_i64()
+            .and_then(|v| isize::try_from(v).ok())
+            .map(|v| v as usize as u64)
+            .ok_or_else(|| format_error("int too large to convert"));
+    }
+    Err(format_error(format!(
+        "'{}' format requires 0 <= number <= {max}",
+        char::from(code)
+    )))
 }
