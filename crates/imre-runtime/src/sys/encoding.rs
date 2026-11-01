@@ -165,6 +165,7 @@ fn locale_codeset(name: impl AsRef<OsStr>) -> Option<String> {
         let ptr = unsafe { libc::nl_langinfo(libc::CODESET) };
         (!ptr.is_null())
             .then(|| {
+                // SAFETY: the non-null codeset name is valid for this active locale.
                 unsafe { CStr::from_ptr(ptr) }
                     .to_str()
                     .ok()

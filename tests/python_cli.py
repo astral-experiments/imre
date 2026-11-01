@@ -961,6 +961,12 @@ def main():
                 expected.stderr,
             )
 
+        hash_args = ["", b"", "latin1é", b"latin1\xe9", "Āfoo", "😀abc", bytes(range(32))]
+        hash_calls = "\n".join(f"print(hash({value!r}))" for value in hash_args)
+        for seed in ("0", "1", "4294967295"):
+            for prefix in ("", 'import sys; sys.path.append("unused")\n'):
+                compare("-B", "-c", prefix + hash_calls, extra={"PYTHONHASHSEED": seed})
+
         compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
@@ -1330,6 +1336,7 @@ def report(text):
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
             "boxed_sys_intern.py",
+            "boxed_sys_hash_info.py",
             "boxed_bytes_add.py",
             "boxed_binary_iterators.py",
             "boxed_array.py",

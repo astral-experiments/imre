@@ -3,18 +3,6 @@
 use super::*;
 use crate::objects::records::descriptor;
 
-/// Hashes are process-local. Python gives the empty string a zero hash and
-/// reserves -1 for its error sentinel.
-fn text_hash(text: &str) -> usize {
-    if text.is_empty() {
-        return 0;
-    }
-    match HASHER.hash_one(text) as isize {
-        -1 => (-2_isize) as usize,
-        h => h as usize,
-    }
-}
-
 fn integer(hash: usize) -> usize {
     let hash = hash as isize as i64;
     Int::small(hash)
@@ -33,7 +21,15 @@ fn try_integer(hash: usize) -> Result<usize, Error> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_string_hash(value: *const Str) -> usize {
     // SAFETY: the caller keeps the string alive for the complete read.
-    integer(text_hash(unsafe { &*value }))
+    integer(crate::python_hash::text(unsafe { &*value }) as usize)
+}
+
+/// # Safety
+/// The caller roots one immutable native bytes object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_hash(value: *const Bytes) -> usize {
+    // SAFETY: the caller keeps the bytes alive for the complete read.
+    integer(crate::python_hash::bytes(unsafe { &*value }) as usize)
 }
 
 /// # Safety
@@ -85,7 +81,7 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
             }?;
         }
         // SAFETY: only this single-threaded record runtime reads or writes the private word.
-        unsafe { cache.write(text_hash(&text).wrapping_add(1)) };
+        unsafe { cache.write((crate::python_hash::text(&text) as usize).wrapping_add(1)) };
     } else {
         // SAFETY: the static descriptor or null outlives the rooted record.
         let semantics = unsafe { layout.semantics.as_ref() };

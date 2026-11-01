@@ -1,8 +1,6 @@
 //! Hash and equality callbacks used by boxed dictionary lookups.
 
-use std::hash::{BuildHasher, RandomState};
 use std::ops::ControlFlow;
-use std::sync::LazyLock;
 
 use num_traits::ToPrimitive;
 use smallvec::SmallVec;
@@ -13,7 +11,7 @@ use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 
 const EMPTY: usize = usize::MAX;
 const DUMMY: usize = usize::MAX - 1;
-const MODULUS: i64 = (1 << 61) - 1;
+use crate::python_hash::{IMAG, INF, MODULUS};
 
 /// A pending operation in the left-to-right hash of a boxed key.
 enum HashFrame {
@@ -288,9 +286,9 @@ fn float_hash(value: f64, identity: Id) -> i64 {
         return if value.is_nan() {
             identity as i64
         } else if value.is_sign_negative() {
-            -314159
+            -INF
         } else {
-            314159
+            INF
         };
     }
     let bits = value.to_bits();
@@ -319,15 +317,6 @@ fn finish_tuple(hash: u64, length: usize) -> i64 {
         1_546_275_796
     } else {
         hash as i64
-    }
-}
-
-fn data_hash<T: std::hash::Hash>(bytes: &[T]) -> i64 {
-    static SEED: LazyLock<RandomState> = LazyLock::new(RandomState::new);
-    if bytes.is_empty() {
-        0
-    } else {
-        SEED.hash_one(bytes) as i64
     }
 }
 
@@ -449,7 +438,7 @@ impl Context {
 
     /// Hash the stable arena handle without calling any Python special methods.
     pub(in super::super) fn identity_hash(key: Id) -> i64 {
-        normalized(data_hash(&key.to_ne_bytes()))
+        normalized(crate::python_hash::bytes(&key.to_ne_bytes()))
     }
 
     pub(in super::super) fn dictionary_hash(&mut self, mut key: Id) -> Result<i64> {
@@ -464,7 +453,9 @@ impl Context {
             };
             while let Some(parent) = parents.last_mut() {
                 match parent {
-                    HashFrame::Xor(id) => hash = normalized(hash ^ data_hash(&id.to_ne_bytes())),
+                    HashFrame::Xor(id) => {
+                        hash = normalized(hash ^ crate::python_hash::bytes(&id.to_ne_bytes()))
+                    }
                     HashFrame::Sequence {
                         tuple,
                         len,
@@ -607,7 +598,7 @@ impl Context {
                 Value::Bool(b) => i64::from(*b),
                 Value::Float(f) => float_hash(*f, key),
                 Value::Complex(z) => normalized(float_hash(z.real, key))
-                    .wrapping_add(1_000_003_i64.wrapping_mul(normalized(float_hash(z.imag, key)))),
+                    .wrapping_add(IMAG.wrapping_mul(normalized(float_hash(z.imag, key)))),
                 Value::Native(_)
                     if matches!(
                         self.builtin_type_name(key),
@@ -616,9 +607,11 @@ impl Context {
                 {
                     Self::identity_hash(key)
                 }
-                Value::Str(text) | Value::Native(text) => data_hash(text.as_bytes()),
-                Value::SurrogateStr(points) => data_hash(points),
-                Value::Bytes(bytes) => data_hash(bytes),
+                Value::Str(text) | Value::Native(text) => crate::python_hash::text(text),
+                Value::SurrogateStr(points) => {
+                    crate::python_hash::codepoints(points.iter().copied())
+                }
+                Value::Bytes(bytes) => crate::python_hash::bytes(bytes),
                 Value::None => 0xfca8_6420,
                 Value::Calendar { value, .. } => {
                     if let Some((d, s, u)) = value.hash_delta_parts() {
@@ -643,7 +636,7 @@ impl Context {
                             (microsecond >> 8) as u8,
                             microsecond as u8,
                         ];
-                        data_hash(if value.class() == "date" {
+                        crate::python_hash::bytes(if value.class() == "date" {
                             &bytes[..4]
                         } else {
                             &bytes
@@ -689,7 +682,7 @@ impl Context {
         }
         let hash = self.dictionary_hash(key).ok()?;
         for &name in names {
-            if normalized(data_hash(name.as_bytes())) == hash {
+            if normalized(crate::python_hash::text(name)) == hash {
                 let stored = self.text(name);
                 if self.dictionary_equal(stored, key).ok()? {
                     return Some(name);

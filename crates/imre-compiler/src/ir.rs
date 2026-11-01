@@ -1382,6 +1382,7 @@ pub(crate) enum Builtin {
     /// A fresh partial with the same call interface, owning its original target.
     EmptyPartial,
     HashStr,
+    HashBytes,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.
     JsonGet {
