@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.1.5
+
+Released on 2026-11-01.
+
+- Speed up Luhn checksums by computing both alternating sums in one pass over
+  the input. The 16-, 256-, and 4,096-digit checksum benchmarks ran 4.0× to
+  5.1× faster. ([#3088](https://github.com/astral-experiments/imre/pull/3088))
+- Load Python plugins created after the application was compiled with
+  `importlib.machinery.SourceFileLoader`. On Unix, `os.fsdecode()` and
+  `os.fsencode()` now round-trip filenames containing invalid UTF-8 bytes.
+  ([#3051](https://github.com/astral-experiments/imre/pull/3051),
+  [#3057](https://github.com/astral-experiments/imre/pull/3057))
+- Use `itertools.product()`, `permutations()`, `combinations()`, and
+  `combinations_with_replacement()` without materializing the result set.
+  `collections.UserDict`, `UserList`, and `UserString` are also available.
+  ([#3048](https://github.com/astral-experiments/imre/pull/3048),
+  [#3084](https://github.com/astral-experiments/imre/pull/3084))
+- Read and write CSV in runtime-loaded modules, including through
+  `csv.DictReader`, `csv.DictWriter`, and registered dialects. Create private
+  temporary files and directories, including binary `NamedTemporaryFile` objects.
+  ([#3096](https://github.com/astral-experiments/imre/pull/3096),
+  [#3065](https://github.com/astral-experiments/imre/pull/3065),
+  [#3076](https://github.com/astral-experiments/imre/pull/3076))
+- Collect unreachable cycles with `gc.collect()` in the boxed runtime. If a
+  Python finalizer makes an object reachable again, its descendants survive.
+  ([#3092](https://github.com/astral-experiments/imre/pull/3092))
+- Run all 68 `textwrap` and 24 `fnmatch` tests from CPython 3.14.5 natively on
+  Linux at both `-O0` and `-O3`.
+  ([#3047](https://github.com/astral-experiments/imre/pull/3047),
+  [#3075](https://github.com/astral-experiments/imre/pull/3075))
+
+[Full history for 0.1.5](https://github.com/astral-experiments/imre/compare/0.1.4...0.1.5)
+
 ## 0.1.4
 
 Released on 2026-10-29.
