@@ -3,7 +3,7 @@ import typing
 
 
 def current():
-    from typing import Callable, Final, Generic, TypeVar
+    from typing import Callable, ClassVar, Final, Generic, TypeVar
 
     parameter = TypeVar("parameter")
 
@@ -19,6 +19,9 @@ def current():
         assert left is not right
         assert left.__args__[0] is first
         assert right.__args__[0] is second
+    assert typing.get_origin(ClassVar[Final[int]]) is ClassVar
+    assert typing.get_args(ClassVar[Final[int]]) == (Final[int],)
+    assert repr(Final[ClassVar[int]]) == "typing.Final[typing.ClassVar[int]]"
     assert Final[int] is Final[int]
     assert Container[int] is Container[int]
 
