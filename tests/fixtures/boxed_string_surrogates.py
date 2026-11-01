@@ -1,0 +1,84 @@
+import _imp
+import codecs
+import os
+
+
+class Text(str):
+    pass
+
+
+class EchoSpec:
+    def __format__(self, spec):
+        return spec
+
+
+def current():
+    low = "\udcff"
+    high = "\U0000d800"
+    replacement = "\ufffd"
+    assert type(low) is str and low.__class__ is str
+    assert type(os.fsdecode(b"\xff")) is str
+    subtype = Text(low)
+    assert _imp.is_frozen(low) is False and _imp.is_frozen(subtype) is False
+    assert type(subtype) is Text and isinstance(subtype, str)
+    assert str(subtype) == low and type(str(subtype)) is str
+    assert os.fsdecode(subtype) is subtype and os.fsencode(subtype) == b"\xff"
+    assert replacement == "�"
+    assert [ord(c) for c in "\uecff\udcff\N{REPLACEMENT CHARACTER}"] == [0xecff, 0xdcff, 0xfffd]
+    assert low != replacement and low != r"\udcff"
+    assert r"\udcff" == "\\udcff"
+    assert [ord(char) for char in low + high + replacement] == [0xdcff, 0xd800, 0xfffd]
+    assert "é" + low + "中" == "é\udcff中"
+    text = "é" + high + low
+    assert text[1] == chr(0xd800)
+    assert text[::-1] == low + high + "é"
+    assert list(reversed(text)) == [low, high, "é"]
+    assert sorted([replacement, low, high, "🙂"]) == [high, low, replacement, "🙂"]
+    values = {low: "path", replacement: "decoded"}
+    assert values[chr(0xdcff)] == "path" and high not in values
+    assert ascii("é'\udcff") == r'''"\xe9'\udcff"'''
+    assert repr("\ud800" "\udfff") == r"'\ud800\udfff'"
+    assert len("\ud800" "\udfff") == 2
+    assert r"\udcff" "\udcff" == "\\udcff" + low
+    assert f"{os.devnull}\udfff" == os.devnull + "\udfff"
+    assert f"{{\udcff}}{3}{{\ufffd\ud800}}" == "{" + low + "}3{" + replacement + high + "}"
+    assert f"{EchoSpec():\udcff}" == low
+    assert f"{low!r}" == repr(low) and f"{text!a}" == ascii(text)
+    assert rf"\uDCFF{'\ud800'}" == r"\uDCFF" + high
+
+    for raw in (b"ascii", b"\x80", b"\xff\xc3\xa9\xfe", b"\xe4\xb8\xad\xe2\x82", b"\xed\xa0\x80"):
+        escaped = raw.decode("utf-8", "surrogateescape")
+        assert os.fsdecode(raw) == escaped
+        assert os.fsdecode(escaped) is escaped
+        assert os.fsencode(escaped) == raw
+        assert escaped.encode("utf-8", "surrogateescape") == raw
+        assert codecs.encode(obj=escaped, encoding="UTF8", errors="surrogateescape") == raw
+        assert codecs.decode(raw, "UTF8", "surrogateescape") == escaped
+        assert bytes(escaped, "utf-8", "surrogateescape") == raw
+        assert bytearray(escaped, "utf-8", "surrogateescape") == bytearray(raw)
+        assert codecs.lookup("utf-8").decode(raw, "surrogateescape") == (escaped, len(raw))
+
+    assert b"\xff".decode("utf-8", "surrogateescape") == low
+    assert b"\xff".decode("utf-8", "replace") == replacement
+    assert replacement.encode() == b"\xef\xbf\xbd"
+    for text, errors in (("é" + low + high + "a", "strict"),
+                         ("é" + high, "surrogateescape"), ("\udc7f", "surrogateescape")):
+        try:
+            text.encode("utf-8", errors)
+        except UnicodeEncodeError as exc:
+            assert exc.object is text
+            print(exc.encoding, exc.start, exc.end, exc.reason)
+        else:
+            raise AssertionError("unencodable surrogate accepted")
+
+    raw = b"\xed\xa0\x80x\xed\xb3\xbf"
+    assert codecs.encode(high + "x" + low, "utf-8", "surrogatepass") == raw
+    assert codecs.decode(raw, "utf-8", "surrogatepass") == high + "x" + low
+    for invalid in (b"\xed\xa0", b"\xed\xa0X", raw + b"\xff"):
+        try:
+            codecs.decode(invalid, "utf-8", "surrogatepass")
+        except UnicodeDecodeError as exc:
+            assert exc.object == invalid
+            print(exc.start, exc.end, exc.reason)
+        else:
+            raise AssertionError("malformed input accepted")

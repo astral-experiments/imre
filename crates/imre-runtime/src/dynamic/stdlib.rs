@@ -518,7 +518,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
         (
             "sys",
-            "exit" | "exc_info" | "exception" | "intern" | "_is_interned" | "getdefaultencoding",
+            "exit"
+            | "exc_info"
+            | "exception"
+            | "intern"
+            | "_is_interned"
+            | "getdefaultencoding"
+            | "getfilesystemencoding"
+            | "getfilesystemencodeerrors",
         )
         | (
             "sysconfig",
@@ -542,7 +549,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
         | ("random", "random")
-        | ("codecs", "lookup" | "register_error" | "lookup_error")
+        | ("codecs", "encode" | "decode" | "lookup" | "register_error" | "lookup_error")
         | ("marshal", "loads")
         | ("pickle", "dumps")
         | (
@@ -806,26 +813,35 @@ pub(super) fn call(
                 format!("can't intern {}", ctx.type_name(*value)),
             ));
         }
+        ctx.str_value(storage)?;
         let (heap, roots) = ctx.heap_and_roots();
         return Ok(heap.intern(*value, roots));
     }
-    if name == "sys.getdefaultencoding" {
+    if matches!(
+        name,
+        "sys.getdefaultencoding" | "sys.getfilesystemencoding" | "sys.getfilesystemencodeerrors"
+    ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "sys.getdefaultencoding() takes no keyword arguments",
+                format!("{name}() takes no keyword arguments"),
             ));
         }
         if !args.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!(
-                    "sys.getdefaultencoding() takes no arguments ({} given)",
-                    args.len()
-                ),
+                format!("{name}() takes no arguments ({} given)", args.len()),
             ));
         }
-        return Ok(ctx.default_encoding);
+        return Ok(match name {
+            "sys.getfilesystemencoding" => ctx
+                .heap
+                .code_name(crate::sys::filesystem_encoding()?.as_str()),
+            "sys.getfilesystemencodeerrors" => {
+                ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
+            }
+            _ => ctx.default_encoding,
+        });
     }
     if name == "random.random" {
         if !kwargs.is_empty() {
@@ -1183,6 +1199,7 @@ pub(super) fn call(
     }
     if let Some(function) = name.strip_prefix("codecs.") {
         return match function {
+            "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
             "register_error" | "lookup_error" => {
                 codecs::error_registry(ctx, function, args, kwargs)

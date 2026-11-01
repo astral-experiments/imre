@@ -765,6 +765,7 @@ impl Context {
             | Value::Complex(_)
             | Value::Int(_)
             | Value::Str(_)
+            | Value::SurrogateStr(_)
             | Value::Bytes(_)
             | Value::List(_)
             | Value::Dict(_)
@@ -998,7 +999,7 @@ impl Context {
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("complex", Value::Complex(_))
-            | ("str", Value::Str(_))
+            | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
             | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
@@ -1841,7 +1842,7 @@ impl Context {
                 if name == "args" {
                     return Ok(self.exception_argument_tuple(obj, error.clone()));
                 }
-                if error.kind == "UnicodeDecodeError"
+                if matches!(&*error.kind, "UnicodeDecodeError" | "UnicodeEncodeError")
                     && let Some([encoding, object, start, end, reason]) =
                         self.exception_arguments(error)
                 {
@@ -2214,7 +2215,7 @@ impl Context {
         if name == "__new__" {
             match self.heap.get(base) {
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
-                Value::Str(_) => return Ok(self.builtin("str.__new__")),
+                Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 _ => {}
             }
         }
@@ -3828,7 +3829,7 @@ impl Context {
                 | ("int", Value::Int(_))
                 | ("float", Value::Float(_))
                 | ("bytes", Value::Bytes(_))
-                | ("str", Value::Str(_))
+                | ("str", Value::Str(_) | Value::SurrogateStr(_))
                 | ("bool", Value::Bool(_))
         ) {
             Ok(())

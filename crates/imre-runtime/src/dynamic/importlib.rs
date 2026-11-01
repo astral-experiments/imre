@@ -61,6 +61,13 @@ impl Context {
             ));
         };
         if method == "is_frozen" {
+            // Frozen module names contain only scalar values.
+            if matches!(
+                self.heap.get(self.scalar_value(*arg)),
+                Value::SurrogateStr(_)
+            ) {
+                return Ok(FALSE);
+            }
             let name = self.str_value(*arg)?;
             return Ok(if self.is_frozen(name) { TRUE } else { FALSE });
         }

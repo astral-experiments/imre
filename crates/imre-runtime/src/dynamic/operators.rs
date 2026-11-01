@@ -12,6 +12,34 @@ enum RepeatMode {
     Wrapper,
 }
 
+/// Quote one Python string, applying the ordinary repr rules to scalar values
+/// and spelling each surrogate independently (including adjacent pairs).
+pub(super) fn surrogate_repr(points: &[u32]) -> String {
+    use std::fmt::Write;
+    let quote = if points.contains(&u32::from('\'')) && !points.contains(&u32::from('"')) {
+        '"'
+    } else {
+        '\''
+    };
+    let mut result = String::from(quote);
+    for &point in points {
+        match char::from_u32(point) {
+            None => write!(result, "\\u{point:04x}").unwrap(),
+            Some(ch) if ch == quote => {
+                result.push('\\');
+                result.push(ch);
+            }
+            Some(ch @ ('\'' | '"')) => result.push(ch),
+            Some(ch) => {
+                let quoted = crate::objects::exceptions::string_repr(ch.encode_utf8(&mut [0; 4]));
+                result.push_str(&quoted[1..quoted.len() - 1]);
+            }
+        }
+    }
+    result.push(quote);
+    result
+}
+
 fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
@@ -287,6 +315,7 @@ impl Context {
             return Ok(match self.heap.get(self.scalar_value(id)) {
                 Value::List(items) | Value::Tuple(items) => Some(items.len()),
                 Value::Str(text) => Some(text.chars().count()),
+                Value::SurrogateStr(points) => Some(points.len()),
                 Value::Bytes(data) | Value::ByteArray(data) => Some(data.len()),
                 _ => None,
             });
@@ -330,6 +359,7 @@ impl Context {
             }
             Value::Deque(ring) => !ring.items.is_empty(),
             Value::Str(s) => !s.is_empty(),
+            Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
@@ -673,6 +703,7 @@ impl Context {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
             }
             (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::SurrogateStr(a), Value::SurrogateStr(b)) => a == b,
             (Value::Bytes(a) | Value::ByteArray(a), Value::Bytes(b) | Value::ByteArray(b)) => {
                 a == b
             }
@@ -899,6 +930,13 @@ impl Context {
                 Ok(int_float(b, *f)?.map(Ordering::reverse))
             }
             (Value::Str(x), Value::Str(y)) => Ok(Some(x.cmp(y))),
+            (Value::SurrogateStr(x), Value::SurrogateStr(y)) => Ok(Some(x.cmp(y))),
+            (Value::Str(x), Value::SurrogateStr(y)) => {
+                Ok(Some(x.chars().map(u32::from).cmp(y.iter().copied())))
+            }
+            (Value::SurrogateStr(x), Value::Str(y)) => {
+                Ok(Some(x.iter().copied().cmp(y.chars().map(u32::from))))
+            }
             (Value::Bytes(x) | Value::ByteArray(x), Value::Bytes(y) | Value::ByteArray(y)) => {
                 Ok(Some(x.cmp(y)))
             }
@@ -1155,7 +1193,7 @@ impl Context {
             let hook = self.bind_attribute(slot, id, class)?;
             self.call(hook, Vec::new(), Vec::new())?
         };
-        if self.str_value(result).is_err() {
+        if self.string_storage(result).is_none() {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -1231,6 +1269,13 @@ impl Context {
                 && let Value::Str(text) = self.heap.get(message)
             {
                 append_rendered_text(output, text)?;
+                close_parens(output, closing)?;
+                break;
+            } else if error.kind == "UnicodeEncodeError"
+                && error.args.is_some()
+                && !error.message.is_empty()
+            {
+                append_rendered_text(output, &error.message)?;
                 close_parens(output, closing)?;
                 break;
             } else if let Some(state) = &error.decode {
@@ -1591,10 +1636,7 @@ impl Context {
                     if let Some(text) = element_repr(&mut ctx, id, false, &mut work, &active)? {
                         append_rendered_text(&mut output, &text)?;
                     } else if let Some(storage) = ctx.string_storage(id) {
-                        let Value::Str(message) = ctx.heap.get(storage) else {
-                            unreachable!()
-                        };
-                        append_rendered_text(&mut output, message)?;
+                        append_rendered_text(&mut output, ctx.str_value(storage)?)?;
                     } else {
                         push_frame(&mut work, Part::Value(id, false))?;
                     }
@@ -1618,6 +1660,19 @@ impl Context {
                         continue;
                     }
                     let (storage, with_factory) = native_storage.unwrap_or((id, true));
+                    if checked
+                        && !repr
+                        && matches!(
+                            ctx.heap.get(ctx.scalar_value(storage)),
+                            Value::SurrogateStr(_)
+                        )
+                    {
+                        // This renderer returns scalar UTF-8, so it cannot emit the code points verbatim.
+                        return Err(Error::new(
+                            "UnicodeError",
+                            "operation requires Unicode scalar values",
+                        ));
+                    }
                     match ctx.heap.get(storage) {
                         Value::Union(union) => {
                             type_words += 24;
@@ -2142,6 +2197,7 @@ impl Context {
                     .join(", ");
                 format!("{class}({fields})")
             }
+            Value::SurrogateStr(points) => surrogate_repr(points),
             Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
             Value::Instance {
@@ -2352,7 +2408,7 @@ impl Context {
             Value::List(_) => "list",
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => "tuple",
-            Value::Str(_) => "string",
+            Value::Str(_) | Value::SurrogateStr(_) => "string",
             Value::Bytes(_) => "byte",
             Value::ByteArray(_) => "bytearray",
             Value::Range(_) => "range",
@@ -2423,6 +2479,10 @@ impl Context {
                     .namedtuple_fields(*class)
                     .expect("validated named tuple");
                 fields[&names[position(names.len())?]]
+            }
+            Value::SurrogateStr(points) => {
+                let point = points[position(points.len())?];
+                self.text_codepoints(vec![point])
             }
             Value::Str(s) => {
                 let c = s.chars().nth(position(s.chars().count())?).unwrap();
@@ -2573,7 +2633,28 @@ impl Context {
             return Ok(range.index_of(&self.as_int(item)?).is_some());
         }
         let scalar = self.scalar_value(container);
+        if let Value::SurrogateStr(hay) = self.heap.get(scalar) {
+            let needle = self.string_codepoints(item).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "'in <string>' requires string as left operand, not {:.100}",
+                        self.type_name(item)
+                    ),
+                )
+            })?;
+            return Ok(needle.is_empty()
+                || hay
+                    .windows(needle.len())
+                    .any(|part| part == needle.as_ref()));
+        }
         if let Value::Str(hay) = self.heap.get(scalar) {
+            if matches!(
+                self.heap.get(self.scalar_value(item)),
+                Value::SurrogateStr(_)
+            ) {
+                return Ok(false);
+            }
             let needle = self.str_value(item).map_err(|_| {
                 Error::new(
                     "TypeError",
@@ -2644,6 +2725,7 @@ impl Context {
         if !matches!(
             self.heap.get(obj),
             Value::Str(_)
+                | Value::SurrogateStr(_)
                 | Value::Bytes(_)
                 | Value::ByteArray(_)
                 | Value::List(_)
@@ -2659,6 +2741,7 @@ impl Context {
         let bounds = super::slice::sequence_components(self, parts)?;
         let len = match self.heap.get(obj) {
             Value::Str(text) => text.chars().count(),
+            Value::SurrogateStr(points) => points.len(),
             Value::Bytes(data) | Value::ByteArray(data) => data.len(),
             Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                 items.len()
@@ -2678,6 +2761,9 @@ impl Context {
         let count = (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize;
         let positions = slice_positions(start, end, step);
         let result = match self.heap.get(obj) {
+            Value::SurrogateStr(points) => {
+                return Ok(self.text_codepoints(sliced_values(points, positions, count)?));
+            }
             Value::Str(text) => {
                 let stride = usize::try_from(step.unsigned_abs()).unwrap_or(usize::MAX);
                 let value = if step > 0 {
@@ -2776,6 +2862,7 @@ impl Context {
             Value::List(_)
                 | Value::Tuple(_)
                 | Value::Str(_)
+                | Value::SurrogateStr(_)
                 | Value::Bytes(_)
                 | Value::ByteArray(_)
         )
@@ -2864,7 +2951,8 @@ impl Context {
                 let repeated = repeat_values(data, n)?;
                 self.alloc(Value::ByteArray(repeated))
             }
-            Value::Str(_) if n == 1 => storage,
+            Value::Str(_) | Value::SurrogateStr(_) if n == 1 => storage,
+            Value::SurrogateStr(points) => self.text_codepoints(repeat_values(points, n)?),
             Value::Str(text) => self.text(crate::objects::repeat_str(text, &count)?.into_string()),
             _ => unreachable!("sequence repetition payload"),
         })

@@ -11,6 +11,7 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
+use super::super::stdlib::codecs::encode_text;
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
@@ -18,42 +19,13 @@ use crate::objects::{python_whitespace, split_parts, translate, visit_line_field
 mod bytes_fields;
 mod maketrans;
 
-fn decode(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<String> {
+fn decode(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<Id> {
     let encoding = encoding
         .map(|id| ctx.str_value(id))
         .transpose()?
         .unwrap_or("utf-8");
     let codec = crate::objects::Codec::lookup(encoding)?;
-    if matches!(codec, crate::objects::Codec::Utf8 { signature: false })
-        && errors.is_some_and(|id| {
-            ctx.str_value(id)
-                .is_ok_and(|value| value == "surrogateescape")
-        })
-    {
-        return crate::objects::interpreter_stdlib::fsdecode(ctx.bytes_like(ctx.scalar_value(id))?)
-            .map(char::from_u32)
-            .collect::<Option<String>>()
-            .ok_or_else(|| {
-                Error::new(
-                    "UnicodeError",
-                    "surrogate-escaped filenames are not representable as Imre strings",
-                )
-            });
-    }
     super::super::stdlib::codecs::decode_bytes(ctx, codec, ctx.scalar_value(id), errors)
-}
-
-fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {
-    let text = ctx.str_value(id)?;
-    let encoding = encoding_id
-        .map(|id| ctx.str_value(id))
-        .transpose()?
-        .unwrap_or("utf-8");
-    let errors = errors
-        .map(|id| ctx.str_value(id))
-        .transpose()?
-        .unwrap_or("strict");
-    Ok(crate::objects::Codec::encode_str(text, encoding, errors)?)
 }
 
 pub(super) fn construct(
@@ -67,6 +39,11 @@ pub(super) fn construct(
             positional(name, kwargs)?;
             arity(name, args, 0, 1)?;
             Ok(boolean(ctx.optional_truth(args.first().copied(), false)?))
+        }
+        "ascii" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            format_conversion(ctx, args[0], 'a')
         }
         "repr" => {
             positional(name, kwargs)?;
@@ -128,15 +105,14 @@ pub(super) fn construct(
                 return Ok(ctx.text(""));
             };
             if encoding.is_some() || errors.is_some() {
-                let decoded = decode(ctx, value, encoding, errors)?;
-                return Ok(ctx.text(decoded));
+                return decode(ctx, value, encoding, errors);
             }
             let target = ctx.weak_proxy_target(value)?;
             if target != value {
                 ctx.heap.keep(target);
             }
             let value = target;
-            if matches!(ctx.heap.get(value), Value::Str(_)) {
+            if matches!(ctx.heap.get(value), Value::Str(_) | Value::SurrogateStr(_)) {
                 return Ok(value);
             }
             let string_hook = ctx.bound_slot(value, "__str__")?;
@@ -194,6 +170,10 @@ pub(super) fn construct(
                     return super::call(ctx, "str", &[message], &[]);
                 }
             }
+            if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(value)) {
+                // str(subclass) returns an exact str, distinct from the subclass's payload.
+                return Ok(ctx.text_codepoints(points.clone()));
+            }
             if let Some(text) = ctx.single_exception_str(value)? {
                 return Ok(text);
             }
@@ -204,11 +184,11 @@ pub(super) fn construct(
             let [value, encoding_id, errors] =
                 bind(name, args, kwargs, ["source", "encoding", "errors"])?;
             let bytes = match value.map(|id| ctx.heap.get(id)) {
-                Some(Value::Str(_)) => {
+                Some(_) if value.is_some_and(|id| ctx.string_storage(id).is_some()) => {
                     if encoding_id.is_none() {
                         return Err(type_error("string argument without an encoding"));
                     }
-                    encode(ctx, value.unwrap(), encoding_id, errors)?
+                    encode_text(ctx, value.unwrap(), encoding_id, errors)?
                 }
                 _ if encoding_id.is_some() || errors.is_some() => {
                     return Err(type_error("encoding without a string argument"));
@@ -443,6 +423,9 @@ pub(in super::super) fn format_conversion(ctx: &mut Context, value: Id, conv: ch
         'r' => super::call(ctx, "repr", &[value], &[])?,
         'a' => {
             let repr = super::call(ctx, "repr", &[value], &[])?;
+            if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(repr)) {
+                return Ok(ctx.text(ascii_codepoints(points.iter().copied())));
+            }
             let text = ctx.str_value(repr)?;
             if text.is_ascii() {
                 repr
@@ -569,11 +552,15 @@ fn format_string(
 }
 
 fn ascii(s: &str) -> String {
+    ascii_codepoints(s.chars().map(u32::from))
+}
+
+fn ascii_codepoints(points: impl Iterator<Item = u32>) -> String {
     use std::fmt::Write;
     let mut out = String::new();
-    for ch in s.chars() {
-        match ch as u32 {
-            0..=0x7f => out.push(ch),
+    for point in points {
+        match point {
+            n @ 0..=0x7f => out.push(n as u8 as char),
             n @ 0x80..=0xff => write!(out, "\\x{n:02x}").unwrap(),
             n @ 0x100..=0xffff => write!(out, "\\u{n:04x}").unwrap(),
             n => write!(out, "\\U{n:08x}").unwrap(),
@@ -1055,7 +1042,7 @@ pub(super) fn method(
     } else {
         receiver
     };
-    if owner == "str" && ctx.str_value(receiver).is_err() {
+    if owner == "str" && ctx.string_storage(receiver).is_none() {
         return Err(type_error(format!(
             "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
             ctx.type_name(receiver)
@@ -1064,10 +1051,9 @@ pub(super) fn method(
     if name == "decode" || name == "encode" {
         let [encoding, errors] = bind(name, args, kwargs, ["encoding", "errors"])?;
         return if name == "decode" {
-            let s = decode(ctx, receiver, encoding, errors)?;
-            Ok(ctx.text(s))
+            decode(ctx, receiver, encoding, errors)
         } else {
-            let b = encode(ctx, receiver, encoding, errors)?;
+            let b = encode_text(ctx, receiver, encoding, errors)?;
             Ok(ctx.alloc(Value::Bytes(b)))
         };
     }
@@ -1281,6 +1267,25 @@ pub(super) fn method(
             return ctx
                 .string_storage(*item)
                 .ok_or_else(|| type_error("expected str"));
+        }
+        let surrogate = |id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_));
+        if surrogate(receiver) || values.iter().copied().any(surrogate) {
+            let sep = ctx.string_codepoints(receiver)?;
+            let mut output = Vec::new();
+            for (index, &item) in values.iter().enumerate() {
+                let points = ctx.string_codepoints(item)?;
+                if index != 0 {
+                    output
+                        .try_reserve(sep.len())
+                        .map_err(|_| crate::Error::memory_error())?;
+                    output.extend_from_slice(&sep);
+                }
+                output
+                    .try_reserve(points.len())
+                    .map_err(|_| crate::Error::memory_error())?;
+                output.extend_from_slice(&points);
+            }
+            return Ok(ctx.text_codepoints(output));
         }
         let sep = ctx.str_value(receiver)?;
         let mut length = sep

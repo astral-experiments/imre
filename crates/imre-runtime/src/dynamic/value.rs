@@ -292,7 +292,7 @@ impl Context {
             Value::Float(_) => "float",
             Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
-            Value::Str(_) => "str",
+            Value::Str(_) | Value::SurrogateStr(_) => "str",
             Value::Map { .. } => "map",
             Value::Filter { .. } => "filter",
             Value::Poll(_) => "select.poll",
@@ -596,6 +596,8 @@ pub(super) enum Value {
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
     Str(String),
+    /// Python code points for text containing at least one surrogate.
+    SurrogateStr(Vec<u32>),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
     CodecInfo {
@@ -1103,6 +1105,7 @@ impl Value {
             | Self::Float(_)
             | Self::Complex(_)
             | Self::Str(_)
+            | Self::SurrogateStr(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)
             | Self::CodecDecoder(_)

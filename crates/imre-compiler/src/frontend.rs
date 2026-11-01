@@ -140,7 +140,7 @@ pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
 pub(crate) use comprehensions::target_names;
-pub(crate) use function_text::docstring;
+pub(crate) use function_text::{docstring, docstring_literal};
 use module_values::{Initialization, ModuleValues};
 
 #[derive(Clone)]
@@ -2293,33 +2293,6 @@ pub(crate) fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Resu
     Ok(())
 }
 
-/// Checks literal source ranges before boxed lowering consumes Ruff's decoded strings.
-/// A field expression and each adjacent string have their own tokens and prefixes.
-pub(crate) fn check_string_tokens(source: &str, tokens: &ast::token::Tokens) -> Result<(), String> {
-    use ast::StringFlags;
-    use ast::token::TokenKind;
-
-    for token in tokens {
-        if !matches!(token.kind(), TokenKind::String | TokenKind::FStringMiddle) {
-            continue;
-        }
-        let flags = token.unwrap_string_flags();
-        if flags.is_raw_string() || flags.is_byte_string() {
-            continue;
-        }
-        let range = if token.kind() == TokenKind::String {
-            TextRange::new(
-                token.start() + flags.opener_len(),
-                token.end() - flags.closer_len(),
-            )
-        } else {
-            token.range()
-        };
-        check_string_escapes(range, source)?;
-    }
-    Ok(())
-}
-
 /// Checks each adjacent literal with its own raw prefix and content range.
 fn check_string_literal(value: &ast::StringLiteral, source: &str) -> Result<(), String> {
     if matches!(
@@ -2334,31 +2307,12 @@ fn check_string_literal(value: &ast::StringLiteral, source: &str) -> Result<(), 
 
 /// Scans only literal bytes; f-string field expressions have independent prefixes.
 fn check_string_escapes(range: TextRange, source: &str) -> Result<(), String> {
-    let bytes = &source.as_bytes()[usize::from(range.start())..usize::from(range.end())];
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] != b'\\' {
-            i += 1;
-            continue;
-        }
-        let width = match bytes[i + 1] {
-            b'u' => 4,
-            b'U' => 8,
-            _ => 0,
-        };
-        if width != 0
-            && let Some(hex) = bytes.get(i + 2..i + 2 + width)
-            && let Ok(hex) = std::str::from_utf8(hex)
-            && let Ok(codepoint) = u32::from_str_radix(hex, 16)
-            && (0xd800..=0xdfff).contains(&codepoint)
-        {
-            return Err(error(
-                source,
-                &range,
-                "surrogate string escapes are unsupported; strings must be valid UTF-8",
-            ));
-        }
-        i += 2 + width;
+    if imre_ast::strings::replacements(&source[range]).any(|point| point != 0xfffd) {
+        return Err(error(
+            source,
+            &range,
+            "surrogate string escapes are unsupported; strings must be valid UTF-8",
+        ));
     }
     Ok(())
 }

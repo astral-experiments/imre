@@ -121,6 +121,7 @@ const FUNCTIONS: &[&str] = &[
     "sum",
     "__import__",
     "repr",
+    "ascii",
     "format",
     "compile",
     "exec",
@@ -346,7 +347,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
-        Value::Str(_) if STR_METHODS.contains(&attr) => "str",
+        Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
@@ -1126,9 +1127,21 @@ pub(super) fn call(
             };
             if name == "chr" {
                 let code = ctx.index_integer(*value)?;
+                if let Some(point @ 0xd800..=0xdfff) = code.as_small() {
+                    return Ok(ctx.text_codepoints(vec![point as u32]));
+                }
                 return Ok(ctx.text(crate::objects::chr_scalar(&code)?.to_string()));
             }
-            let code = match ctx.heap.get(*value) {
+            let code = match ctx.heap.get(ctx.scalar_value(*value)) {
+                Value::SurrogateStr(points) => match points.as_slice() {
+                    [point] => *point,
+                    _ => {
+                        return Err(type_error(format!(
+                            "ord() expected a character, but string of length {} found",
+                            points.len()
+                        )));
+                    }
+                },
                 Value::Bytes(b) | Value::ByteArray(b) => crate::objects::ord_byte(b)?,
                 _ => {
                     let text = ctx.str_value(*value).map_err(|_| {
@@ -1197,6 +1210,7 @@ pub(super) fn call(
                 Value::List(items) => Some((items.len(), "list_reverseiterator")),
                 Value::Tuple(items) => Some((items.len(), "reversed")),
                 Value::Str(text) => Some((text.len(), "reversed")),
+                Value::SurrogateStr(points) => Some((points.len(), "reversed")),
                 Value::Bytes(bytes) => Some((bytes.len(), "reversed")),
                 _ => None,
             };
@@ -1231,7 +1245,11 @@ pub(super) fn call(
                 && (ctx.slot(object, "__getitem__").is_some()
                     || matches!(
                         ctx.heap.get(ctx.scalar_value(object)),
-                        Value::Str(_) | Value::Bytes(_) | Value::List(_) | Value::Tuple(_)
+                        Value::Str(_)
+                            | Value::SurrogateStr(_)
+                            | Value::Bytes(_)
+                            | Value::List(_)
+                            | Value::Tuple(_)
                     ))
             {
                 let remaining = ctx.reverse_sequence_len(object)?;
@@ -1280,6 +1298,7 @@ pub(super) fn call(
                 }
                 Value::Deque(ring) => ring.items.len(),
                 Value::Str(v) => v.chars().count(),
+                Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
@@ -1339,7 +1358,7 @@ pub(super) fn call(
         "dict" | "list" | "tuple" | "set" | "frozenset" => {
             collections::construct(ctx, name, args, kwargs)
         }
-        "int" | "bool" | "str" | "bytes" | "bytearray" | "repr" => {
+        "int" | "bool" | "str" | "bytes" | "bytearray" | "repr" | "ascii" => {
             text::construct(ctx, name, args, kwargs)
         }
         "format" => {

@@ -22,7 +22,7 @@ impl Function<'_, '_> {
                     self.lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat())
                 }
             },
-            ast::Expr::StringLiteral(v) => self.text(&v.value.to_string()),
+            ast::Expr::StringLiteral(v) => self.literal_text(v.value.to_str(), v.value.iter()),
             ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),
             ast::Expr::Name(v) => self.lookup(v.id.as_str()),
             ast::Expr::Attribute(v) => {
@@ -128,7 +128,7 @@ impl Function<'_, '_> {
                     match part {
                         ast::FStringPartRef::Literal(lit) => {
                             if !lit.value.is_empty() {
-                                parts.push(self.text(&lit.value));
+                                parts.push(self.literal_text(&lit.value, std::iter::once(lit)));
                             }
                         }
                         ast::FStringPartRef::FString(s) => {
@@ -380,7 +380,7 @@ impl Function<'_, '_> {
         for element in elements {
             let value = match element {
                 ast::InterpolatedStringElement::Literal(lit) if lit.value.is_empty() => continue,
-                ast::InterpolatedStringElement::Literal(lit) => self.text(&lit.value),
+                ast::InterpolatedStringElement::Literal(lit) => self.format_literal(lit),
                 ast::InterpolatedStringElement::Interpolation(field) => {
                     if let Some(debug) = &field.debug_text {
                         parts.push(self.text(debug.as_str()));

@@ -414,6 +414,7 @@ pub(super) fn parse_source(
     match mode {
         "exec" => {
             let body = ruff_python_parser::parse_module(source).map_err(syntax)?;
+            crate::dynamic::source_code::check_runtime_strings(source, body.tokens())?;
             parser.function_starts = body
                 .tokens()
                 .iter()
@@ -438,6 +439,7 @@ pub(super) fn parse_source(
                     syntax(err)
                 }
             })?;
+            crate::dynamic::source_code::check_runtime_strings(source, expr.tokens())?;
             let body = parser.expr(*expr.into_syntax().body)?;
             Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
         }

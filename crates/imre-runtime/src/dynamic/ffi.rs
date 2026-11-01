@@ -609,7 +609,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
     let paths = paths.into_iter().map(|p| ctx.text(p)).collect();
     ctx.sys_path = ctx.alloc(Value::List(paths));
-    ctx.default_encoding = ctx.text(crate::sys::default_encoding().as_str());
+    ctx.default_encoding = ctx.heap.code_name(crate::sys::default_encoding().as_str());
     let current = ctx.alloc(Value::Context(Default::default()));
     ctx.contexts.push(current);
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
@@ -741,6 +741,32 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
                     Ok(NONE)
                 });
             return finish(ctx, id);
+        }
+        // The compiler packs non-scalar string literals as little-endian code points.
+        7 => {
+            let chunks = data.chunks_exact(4);
+            if !chunks.remainder().is_empty() {
+                return finish(
+                    ctx,
+                    Err(Error::new("SystemError", "invalid code point literal")),
+                );
+            }
+            let mut points = Vec::new();
+            if points.try_reserve_exact(chunks.len()).is_err() {
+                return finish(ctx, Err(crate::Error::memory_error().into()));
+            }
+            for chunk in chunks {
+                let point = u32::from_le_bytes(chunk.try_into().unwrap());
+                if point > 0x10ffff {
+                    return finish(
+                        ctx,
+                        Err(Error::new("SystemError", "invalid Python code point")),
+                    );
+                }
+                points.push(point);
+            }
+            let id = ctx.text_codepoints(points);
+            return finish(ctx, Ok(id));
         }
         2 => {
             let mut bytes = Vec::new();

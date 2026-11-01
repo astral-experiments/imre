@@ -172,6 +172,21 @@ impl<'a> CompiledStrings<'a, '_> {
     }
 }
 
+/// Runtime source constants still have scalar-string storage. Check their
+/// original escapes before using Ruff's replacement characters as cache keys.
+pub(super) fn check_runtime_strings(source: &str, tokens: &ast::token::Tokens) -> Result<()> {
+    for token in tokens {
+        if let Some(range) = imre_ast::strings::cooked_content(token)
+            && imre_ast::strings::replacements(&source[range]).any(|p| p != 0xfffd)
+        {
+            return Err(unsupported(
+                "surrogate string escapes in runtime-compiled source",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Collect source line offsets before constructing code or AST nodes.
 pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Result<Vec<usize>> {
     let mut starts = Vec::new();
@@ -628,14 +643,11 @@ impl Context {
 
     pub(super) fn syntax_suffix(&self, filename: Id, line: Id) -> Result<String> {
         use std::fmt::Write;
-        let filename = self.string_storage(filename).map(|id| {
-            let Value::Str(path) = self.heap.get(id) else {
-                unreachable!()
-            };
-            path.rsplit(std::path::MAIN_SEPARATOR)
-                .next()
-                .unwrap_or(path)
-        });
+        let filename = self
+            .string_storage(filename)
+            .map(|id| self.str_value(id))
+            .transpose()?
+            .and_then(|path| path.rsplit(std::path::MAIN_SEPARATOR).next());
         let line = if let Value::Int(number) = self.heap.get(line) {
             Some(if std::mem::size_of::<libc::c_long>() == 4 {
                 number
@@ -694,6 +706,7 @@ impl Context {
         let filename = filename_text;
         let parsed = ruff_python_parser::parse_module(&source)
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
+        check_runtime_strings(&source, parsed.tokens())?;
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
@@ -1137,6 +1150,7 @@ impl Context {
         };
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
+        check_runtime_strings(source, parsed.tokens())?;
         let mut syntax = parsed.into_syntax();
         let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
