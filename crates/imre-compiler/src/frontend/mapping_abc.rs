@@ -217,14 +217,13 @@ impl Checker<'_> {
             )
         } else {
             let result = self.hidden(Type::Bool);
-            let flag = |value| Expr::boolean(value);
             (
                 result,
                 vec![
                     Statement::Expr(lookup),
-                    Statement::Assign(result, flag(true)),
+                    Statement::Assign(result, Expr::boolean(true)),
                 ],
-                flag(false),
+                Expr::boolean(false),
             )
         };
         let attempt = Statement::Try {

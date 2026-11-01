@@ -82,13 +82,12 @@ impl Checker<'_> {
             ty: params[i],
             kind: ExprKind::Local(i),
         };
-        let flag = |v| Expr::boolean(v);
         let none = Expr::none();
         let (op, result, args) = match (op, params.as_slice()) {
             (Intrinsic::Move, [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Move(self.shutil_tree_issue()),
                 self.move_result(*dst),
-                vec![local(0), local(1), flag(true)],
+                vec![local(0), local(1), Expr::boolean(true)],
             ),
             (Intrinsic::DestInSrc, [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::DestInSrc,
@@ -98,7 +97,7 @@ impl Checker<'_> {
             (Intrinsic::Copy(op), [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Copy(op),
                 self.copy_result(op, *dst),
-                vec![local(0), local(1), flag(true)],
+                vec![local(0), local(1), Expr::boolean(true)],
             ),
             (Intrinsic::RmTree, [src] | [src, Type::Bool])
                 if matches!(*src, Type::Str | Type::Bytes) || src.is_path() =>
@@ -111,7 +110,7 @@ impl Checker<'_> {
                         if params.len() == 2 {
                             local(1)
                         } else {
-                            flag(false)
+                            Expr::boolean(false)
                         },
                         none.clone(),
                         none.clone(),
@@ -308,16 +307,19 @@ impl Checker<'_> {
 
     pub(super) fn shutil_copytree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        let boolean = |v| Expr::boolean(v);
         let none = Expr::none();
         let params = [
             ("src", Type::Str, None),
             ("dst", Type::Str, None),
-            ("symlinks", Type::Bool, Some(boolean(false))),
+            ("symlinks", Type::Bool, Some(Expr::boolean(false))),
             ("ignore", Type::None, Some(none)),
-            ("copy_function", Type::Bool, Some(boolean(true))),
-            ("ignore_dangling_symlinks", Type::Bool, Some(boolean(false))),
-            ("dirs_exist_ok", Type::Bool, Some(boolean(false))),
+            ("copy_function", Type::Bool, Some(Expr::boolean(true))),
+            (
+                "ignore_dangling_symlinks",
+                Type::Bool,
+                Some(Expr::boolean(false)),
+            ),
+            ("dirs_exist_ok", Type::Bool, Some(Expr::boolean(false))),
         ]
         .map(|(name, ty, default)| Parameter {
             name: name.into(),

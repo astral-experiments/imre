@@ -381,16 +381,18 @@ impl Checker<'_> {
                 entries: vec![(unpacking::string("object"), target.clone())],
             },
         };
-        let none = || Expr::none();
         let metadata = if let Some(text) = text {
-            let doc = text.doc.as_deref().map_or_else(none, unpacking::string);
+            let doc = text
+                .doc
+                .as_deref()
+                .map_or_else(Expr::none, unpacking::string);
             let doc = self.coerce(doc, self.types.optional(Type::Str), node)?;
             Expr {
                 ty: self.types.payload(layout.metadata).unwrap(),
                 kind: ExprKind::Tuple(vec![unpacking::string(&text.name), doc]),
             }
         } else {
-            none()
+            Expr::none()
         };
         let metadata = self.coerce(metadata, layout.metadata, node)?;
         let frame = Expr {

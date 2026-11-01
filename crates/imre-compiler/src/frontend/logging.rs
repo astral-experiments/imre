@@ -376,12 +376,11 @@ impl Checker<'_> {
             .expect("optional filename");
         let default_errors = self.coerce(text("backslashreplace"), string, call)?;
         let kw = ParameterKind::KeywordOnly;
-        let boolean = |n| Expr::boolean(n);
         let mut params = vec![
             parameter("level", level, kw, Expr::absent(level)),
             parameter("format", string, kw, Expr::absent(string)),
             parameter("datefmt", string, kw, Expr::absent(string)),
-            parameter("force", Type::Bool, kw, boolean(false)),
+            parameter("force", Type::Bool, kw, Expr::boolean(false)),
             parameter("stream", output, kw, Expr::absent(output)),
             parameter("style", Type::Str, kw, text("%")),
             parameter("handlers", handlers, kw, Expr::absent(handlers)),
@@ -479,7 +478,7 @@ impl Checker<'_> {
             supplied("filename"),
         ] {
             args.order.push(args.values.len());
-            args.values.push(boolean(flag));
+            args.values.push(Expr::boolean(flag));
         }
         // Whether these options conflict depends on the live root. The native
         // binder has already checked the type of every argument expression.
@@ -909,7 +908,6 @@ impl Checker<'_> {
             ty: Type::Int,
             kind: ExprKind::Int(line.to_string()),
         };
-        let none = || Expr::none();
         let caller = caller_name(
             &self.graph.modules[self.module].parsed.syntax().body,
             call.range(),
@@ -924,9 +922,9 @@ impl Checker<'_> {
                 lineno,
                 original,
                 arguments,
-                none(),
+                Expr::none(),
                 text(caller),
-                none(),
+                Expr::none(),
             ],
         );
         let record = if let Some(extra) = extra {

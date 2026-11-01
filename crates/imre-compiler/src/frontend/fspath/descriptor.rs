@@ -93,18 +93,17 @@ impl Checker<'_> {
         let failed = self.hidden(Type::Bool);
         let missing = self.fspath_type_error(receiver, None, syscall);
         let result = self.invoke_path_value(call, self.local(slot), Some(&missing), Type::Str)?;
-        let flag = |value| Expr::boolean(value);
         Ok(scope.finish(Expr {
             ty: result.ty,
             kind: ExprKind::Scope {
                 body: vec![
-                    Statement::Assign(failed, flag(false)),
+                    Statement::Assign(failed, Expr::boolean(false)),
                     Statement::Try {
                         body: vec![Statement::Assign(slot, getter)],
                         handlers: vec![ir::ExceptHandler {
                             kinds: vec![],
                             name: None,
-                            body: vec![Statement::Assign(failed, flag(true))],
+                            body: vec![Statement::Assign(failed, Expr::boolean(true))],
                         }],
                         orelse: vec![],
                         finalbody: vec![],
