@@ -1,0 +1,98 @@
+//! Process-wide Python hashing for bytes and the native-width storage of Unicode strings.
+
+use std::ffi::CString;
+use std::hash::Hasher;
+use std::os::unix::ffi::OsStrExt;
+use std::sync::OnceLock;
+
+use siphasher::sip::SipHasher13;
+
+pub(crate) const ALGORITHM: &str = "siphash13";
+pub(crate) const HASH_BITS: u32 = u64::BITS;
+pub(crate) const SEED_BITS: u32 = 128;
+pub(crate) const CUTOFF: u32 = 0;
+pub(crate) const MODULUS: i64 = (1_i64 << 61) - 1;
+pub(crate) const INF: i64 = 314_159;
+pub(crate) const IMAG: i64 = 1_000_003;
+
+static HASHER: OnceLock<SipHasher13> = OnceLock::new();
+
+/// Capture PYTHONHASHSEED before user code can change the environment.
+pub(crate) fn initialize(isolated: bool) -> &'static SipHasher13 {
+    HASHER.get_or_init(|| {
+        let mut key = [0; 16];
+        let seed = (!isolated).then(|| std::env::var_os("PYTHONHASHSEED")).flatten();
+        match seed.as_deref().map(OsStrExt::as_bytes) {
+            None | Some(b"" | b"random") => {
+                if getrandom::fill(&mut key).is_err() {
+                    eprintln!("Fatal Python error: failed to get random numbers to initialize Python\nPython runtime state: preinitialized\n");
+                    std::process::exit(1);
+                }
+            }
+            Some(bytes) => {
+                let text = CString::new(bytes).expect("environment values contain no NUL");
+                let mut end = std::ptr::null_mut();
+                // SAFETY: text is NUL-terminated. strtoul sets end inside text or at its terminator.
+                let (seed, consumed) = unsafe {
+                    let seed = libc::strtoul(text.as_ptr(), &mut end, 10);
+                    (seed, *end == 0)
+                };
+                if !consumed || seed > u32::MAX.into() {
+                    eprintln!("Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n");
+                    std::process::exit(1);
+                }
+                if seed != 0 {
+                    let mut state = seed as u32;
+                    // CPython expands an explicit seed with this 32-bit LCG.
+                    for byte in &mut key {
+                        state = state.wrapping_mul(214013).wrapping_add(2531011);
+                        *byte = (state >> 16) as u8;
+                    }
+                }
+            }
+        }
+        SipHasher13::new_with_key(&key)
+    })
+}
+
+fn normalized(hash: u64) -> i64 {
+    if hash == u64::MAX { -2 } else { hash as i64 }
+}
+
+pub(crate) fn bytes(data: &[u8]) -> i64 {
+    if data.is_empty() {
+        0
+    } else {
+        normalized(initialize(false).hash(data))
+    }
+}
+
+pub(crate) fn text(text: &str) -> i64 {
+    if text.is_ascii() {
+        bytes(text.as_bytes())
+    } else {
+        codepoints(text.chars().map(u32::from))
+    }
+}
+
+/// CPython hashes the buffer of 1-, 2- or 4-byte code units selected for the entire string.
+pub(crate) fn codepoints(points: impl Iterator<Item = u32> + Clone) -> i64 {
+    let Some(max) = points.clone().max() else {
+        return 0;
+    };
+    let mut hash = *initialize(false);
+    if max <= u8::MAX.into() {
+        for point in points {
+            hash.write(&[point as u8]);
+        }
+    } else if max <= u16::MAX.into() {
+        for point in points {
+            hash.write(&(point as u16).to_ne_bytes());
+        }
+    } else {
+        for point in points {
+            hash.write(&point.to_ne_bytes());
+        }
+    }
+    normalized(hash.finish())
+}

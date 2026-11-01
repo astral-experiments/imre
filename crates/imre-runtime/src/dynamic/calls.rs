@@ -724,6 +724,9 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
+            if child == stdlib::hash_info::TYPE && parent == "tuple" {
+                return true;
+            }
             if parent == "object" {
                 return self.builtin_type_name(class) == Some("type");
             }
@@ -936,9 +939,9 @@ impl Context {
                 ..
             } => Ok(*class),
             Value::NamedTuple {
-                class: Some("time.struct_time"),
+                class: Some(class @ ("time.struct_time" | stdlib::hash_info::TYPE)),
                 ..
-            } => Ok(self.builtin("time.struct_time")),
+            } => Ok(self.builtin(class)),
             Value::NamedTuple {
                 class:
                     Some(
@@ -1070,12 +1073,12 @@ impl Context {
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (
-                "time.struct_time",
+                name,
                 Value::NamedTuple {
-                    class: Some("time.struct_time"),
+                    class: Some(class @ ("time.struct_time" | stdlib::hash_info::TYPE)),
                     ..
                 },
-            ) => true,
+            ) if name == *class => true,
             (class, Value::Calendar { value, .. }) => {
                 class.strip_prefix("datetime.").is_some_and(|c| {
                     c == value.class() || (c == "date" && value.class() == "datetime")
@@ -1912,6 +1915,11 @@ impl Context {
                 let method = self.builtin("float.__getformat__");
                 return Ok(self.bind_native_classmethod(method, obj));
             }
+            Value::Native(ref class) if class == stdlib::hash_info::TYPE => {
+                if let Some(value) = stdlib::hash_info::type_attribute(self, name, true) {
+                    return Ok(value);
+                }
+            }
             Value::Native(ref class)
                 if name == "fromkeys"
                     && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
@@ -2233,8 +2241,10 @@ impl Context {
                 if let Some((_, value)) = extras.iter().find(|(key, _)| *key == name) {
                     return Ok(*value);
                 }
-                if class == Some("time.struct_time") && name == "__class__" {
-                    return Ok(self.builtin("time.struct_time"));
+                if let Some(owner @ ("time.struct_time" | stdlib::hash_info::TYPE)) = class
+                    && name == "__class__"
+                {
+                    return Ok(self.builtin(owner));
                 }
                 if matches!(
                     class,
@@ -2242,6 +2252,10 @@ impl Context {
                 ) && let Some(property) = stdlib::urllib::property(self, values[1], name)?
                 {
                     return Ok(property);
+                } else if class == Some(stdlib::hash_info::TYPE)
+                    && let Some(value) = stdlib::hash_info::type_attribute(self, name, false)
+                {
+                    return Ok(value);
                 }
             }
             _ => {}
@@ -3326,6 +3340,9 @@ impl Context {
             }
             Value::Native(name) if name == "method_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "method_descriptor", &args, &kwargs)
+            }
+            Value::Native(name) if name == stdlib::hash_info::TYPE => {
+                stdlib::hash_info::construct(self, &args, &kwargs)
             }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {

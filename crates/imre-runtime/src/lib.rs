@@ -47,6 +47,7 @@ mod integer_power;
 mod integer_text;
 mod nominal_classes;
 mod objects;
+mod python_hash;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod run_start;
 
@@ -579,6 +580,7 @@ pub extern "C" fn imre_stdio_command_init(isolated: u32, utf8: u32) {
 }
 
 fn prepare_stdio(isolated: bool, utf8: Option<bool>) {
+    python_hash::initialize(isolated);
     initialize_io();
     sys::initialize_encoding(isolated, utf8);
     LazyLock::force(&STDIO_SETTINGS);

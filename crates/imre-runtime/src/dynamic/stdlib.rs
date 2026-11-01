@@ -19,6 +19,7 @@ mod files;
 mod fnmatch;
 mod formatters;
 mod functools;
+pub(super) mod hash_info;
 mod hashlib;
 mod hmac;
 mod inspect;
@@ -473,6 +474,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             full_version(ctx)?,
             compiler_version(ctx)
         )),
+        ("sys", "hash_info") => hash_info::current(ctx),
         ("sys", "version_info") => version_info(ctx, &full_version(ctx)?)?,
         ("sys", "implementation") => {
             let name = ctx.text("imre");

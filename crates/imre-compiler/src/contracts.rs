@@ -546,6 +546,7 @@ impl Builtin {
             | Self::CallableContext
             | Self::ModuleCache(_)
             | Self::HashStr
+            | Self::HashBytes
             | Self::SequenceGetInBounds
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum

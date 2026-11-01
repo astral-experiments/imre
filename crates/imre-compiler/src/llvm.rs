@@ -4928,6 +4928,7 @@ impl Emitter<'_, '_> {
                 })
             }
             Builtin::HashStr => self.call("imre_string_hash", returns, &[&args[0].value]),
+            Builtin::HashBytes => self.call("imre_bytes_hash", returns, &[&args[0].value]),
             Builtin::HashRecord => Value {
                 ty: Type::Int,
                 operand: self.checked_instruction(format!(
@@ -9138,6 +9139,7 @@ declare void @imre_cache_clear(ptr, i32, i32)
 declare ptr @imre_module_cache(i64, i32, i32)
 declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
+declare i64 @imre_bytes_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
 declare ptr @imre_subprocess_shell_output(ptr, i32, i64, i64, ptr)
