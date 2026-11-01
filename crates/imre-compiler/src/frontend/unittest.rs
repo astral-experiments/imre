@@ -534,10 +534,7 @@ impl Checker<'_> {
         };
         let Expected { kinds, label, .. } = expected.flatten().unwrap_or_default();
         let optional = self.types.optional(Type::Str);
-        let absent = || Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let absent = || Expr::none();
         let msg = if let Some(slot) = msg_slot
             && error.is_none()
         {
@@ -988,10 +985,7 @@ impl Checker<'_> {
             kind: ExprKind::Scope {
                 body,
                 clear,
-                value: Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                }),
+                value: Box::new(Expr::none()),
             },
         })
     }
@@ -1008,10 +1002,7 @@ impl Checker<'_> {
     ) -> Result<(Vec<Statement>, bool), String> {
         let root = self.hidden(manager.ty);
         let exceptional = self.hidden(Type::Bool);
-        let flag = |value| Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(value),
-        };
+        let flag = |value| Expr::boolean(value);
         let mut enter = vec![
             Statement::Assign(root, manager),
             Statement::Assign(exceptional, flag(false)),

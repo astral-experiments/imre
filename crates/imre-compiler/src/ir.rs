@@ -628,6 +628,28 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    pub(crate) fn none() -> Self {
+        Self {
+            ty: Type::None,
+            kind: ExprKind::None,
+        }
+    }
+
+    pub(crate) fn boolean(value: bool) -> Self {
+        Self {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(value),
+        }
+    }
+
+    /// Construct an absent optional from a literal None.
+    pub(crate) fn absent(ty: Type) -> Self {
+        Self {
+            ty,
+            kind: ExprKind::Absent(Box::new(Self::none())),
+        }
+    }
+
     /// Arguments of an explicit right split with a single split and final-field access.
     pub(crate) fn last_rsplit_args(&self, index: &Self) -> Option<&[Expr]> {
         let ExprKind::Builtin(Builtin::Text(TextOperation::Split(true)), args) = &self.kind else {

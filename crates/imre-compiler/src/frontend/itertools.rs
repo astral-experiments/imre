@@ -154,10 +154,7 @@ impl Checker<'_> {
             values.push(repeat);
             ir::CallArgs::positional(values)
         } else {
-            let none = Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            };
+            let none = Expr::none();
             let params = [
                 ("iterable", None),
                 ("r", (op == Permutations).then_some(none)),
@@ -362,10 +359,7 @@ impl Checker<'_> {
                             }
                         }
                     }
-                    None => Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    },
+                    None => Expr::none(),
                 };
                 args.push(value);
             }

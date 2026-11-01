@@ -58,10 +58,7 @@ impl Checker<'_> {
 
     fn readiness_timeout(&mut self, arg: Option<&ast::Expr>) -> Result<Expr, String> {
         let Some(arg) = arg else {
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            });
+            return Ok(Expr::none());
         };
         let value = self.expr(arg)?;
         if !matches!(

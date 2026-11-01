@@ -61,10 +61,7 @@ impl Checker<'_> {
             name: name.into(),
             ty: Type::Int,
             kind: ParameterKind::PositionalOrKeyword,
-            default: (name == "mod").then_some(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }),
+            default: (name == "mod").then_some(Expr::none()),
             sign_only: false,
         });
         let mut args = self.arguments_with(call, &params, None, |checker, _, argument| {

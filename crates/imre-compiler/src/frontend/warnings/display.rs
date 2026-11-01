@@ -13,10 +13,7 @@ impl Checker<'_> {
         } else {
             &["message", "category", "filename", "lineno", "line"]
         };
-        let none = || Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = || Expr::none();
         let params = fields
             .iter()
             .map(|&name| Parameter {

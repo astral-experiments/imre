@@ -44,14 +44,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::DefaultFactoryEnabled, vec![receiver]),
         };
         let list = self.coerce(annotations::builtin_type("list").unwrap(), ty, attr)?;
-        let absent = self.coerce(
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            },
-            ty,
-            attr,
-        )?;
+        let absent = self.coerce(Expr::none(), ty, attr)?;
         Ok(Expr {
             ty,
             kind: ExprKind::Conditional(Box::new(enabled), Box::new(list), Box::new(absent)),

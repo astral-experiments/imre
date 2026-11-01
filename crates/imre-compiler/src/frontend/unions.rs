@@ -50,10 +50,7 @@ impl Checker<'_> {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
                 },
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
+                Expr::none(),
                 Expr {
                     ty: payload,
                     kind: ExprKind::Unwrap(Box::new(self.local(slot))),

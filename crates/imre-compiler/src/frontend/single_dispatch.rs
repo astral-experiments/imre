@@ -104,14 +104,7 @@ fn with_class(
         };
         return Some(conditional(
             builtin(Builtin::IsNone, Type::Bool, vec![value]),
-            with_class(
-                types,
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
-                make,
-            )?,
+            with_class(types, Expr::none(), make)?,
             with_class(types, present, make)?,
         ));
     }
@@ -140,10 +133,7 @@ fn with_class(
 /// Keep the supplied object and its concrete formatting descriptor, even for an unread argument.
 fn callback_frame(types: &Types, classes: &ClassInfo, value: Expr) -> Option<Expr> {
     with_class(types, value, &|name, value| {
-        let printable = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(dataclass_values::can_format(value.ty, types, classes)),
-        };
+        let printable = Expr::boolean(dataclass_values::can_format(value.ty, types, classes));
         let positional = Expr {
             ty: types.tuple(vec![value.ty]),
             kind: ExprKind::Tuple(vec![value]),
@@ -391,10 +381,7 @@ impl Checker<'_> {
                 entries: vec![(unpacking::string("object"), target.clone())],
             },
         };
-        let none = || Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = || Expr::none();
         let metadata = if let Some(text) = text {
             let doc = text.doc.as_deref().map_or_else(none, unpacking::string);
             let doc = self.coerce(doc, self.types.optional(Type::Str), node)?;

@@ -164,10 +164,7 @@ impl Checker<'_> {
             }
             self.coerce(value, optional, limit)?
         } else {
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }
+            Expr::none()
         };
         let Some(source) = source else {
             return Ok(initialize(
@@ -236,10 +233,7 @@ impl Checker<'_> {
                 Some(self.local(target)),
                 bound,
             )));
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }
+            Expr::none()
         } else {
             input
                 .evaluate
@@ -341,10 +335,7 @@ impl Checker<'_> {
         let value = if name == "__iadd__" {
             self.local(target)
         } else {
-            Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }
+            Expr::none()
         };
         Ok(Expr {
             ty: value.ty,

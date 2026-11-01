@@ -97,10 +97,7 @@ impl Checker<'_> {
         // Bytes do not take an encoding or an error handler.
         for _ in 0..2 {
             args.order.push(args.values.len());
-            args.values.push(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            });
+            args.values.push(Expr::none());
         }
         Ok(self.ordered_builtin(Builtin::Text(TextOperation::UrlQuote), Type::Str, args))
     }
@@ -112,10 +109,7 @@ impl Checker<'_> {
         op: Intrinsic,
     ) -> Result<Expr, String> {
         let quote = op != Intrinsic::Unquote;
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         let mut params = vec![slot("string", None)];
         if quote {
             let safe = if op == Intrinsic::Quote { "/" } else { "" };
@@ -174,13 +168,7 @@ impl Checker<'_> {
         let params = [
             slot("url", None),
             slot("scheme", Some(unpacking::string(""))),
-            slot(
-                "allow_fragments",
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                }),
-            ),
+            slot("allow_fragments", Some(Expr::boolean(true))),
         ];
         let mut args =
             self.arguments_with(call, &params, None, |checker, _, node| checker.expr(node))?;

@@ -253,16 +253,7 @@ impl Checker<'_> {
         };
         check_string(key, self.source)?;
         let (empty_list, values) = match rest {
-            [] => (
-                false,
-                vec![
-                    receiver,
-                    Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    },
-                ],
-            ),
+            [] => (false, vec![receiver, Expr::none()]),
             [ast::Expr::List(list)] if list.elts.is_empty() => (true, vec![receiver]),
             [default] => {
                 let default = self.expr(default)?;
@@ -564,26 +555,11 @@ impl Checker<'_> {
             None
         };
         let optional_int = self.types.optional(Type::Int);
-        let mut indent = Expr {
-            ty: optional_int,
-            kind: ExprKind::Absent(Box::new(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            })),
-        };
-        let mut ensure_ascii = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(true),
-        };
+        let mut indent = Expr::absent(optional_int);
+        let mut ensure_ascii = Expr::boolean(true);
         let mut allow_nan = ensure_ascii.clone();
-        let mut sort_keys = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(false),
-        };
-        let mut separators = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let mut sort_keys = Expr::boolean(false);
+        let mut separators = Expr::none();
         for keyword in &call.arguments.keywords {
             let name = keyword.arg.as_ref().unwrap().as_str();
             let value = if name == "separators" {

@@ -125,10 +125,7 @@ impl Checker<'_> {
             ast::CmpOp::IsNot
         };
         let mismatch = if let [Some(a), Some(b)] = class_operands {
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Bool((a == b) == negated),
-            }
+            Expr::boolean((a == b) == negated)
         } else if left.ty == Type::None {
             Self::identity_is_none(right.clone(), op)
         } else if right.ty == Type::None {
@@ -136,10 +133,7 @@ impl Checker<'_> {
         } else {
             self.identity_values(left.clone(), right.clone(), op, call)?
         };
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         // Each formatter may catch a Python exception. Finish both before
         // borrowing the case or either string as arguments to the failure call.
         let mut diagnostic = calls::ArgumentScope::default();

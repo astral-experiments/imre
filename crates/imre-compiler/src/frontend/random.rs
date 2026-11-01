@@ -8,12 +8,6 @@ fn integer(n: usize) -> Expr {
         kind: ExprKind::Int(n.to_string()),
     }
 }
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
 fn random(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -25,12 +19,12 @@ impl Checker<'_> {
     pub(super) fn random_call(&mut self, op: Op, call: &ast::ExprCall) -> Result<Expr, String> {
         let specs = match op {
             Op::Float => vec![],
-            Op::Seed => vec![("a", Some(none()))],
+            Op::Seed => vec![("a", Some(Expr::none()))],
             Op::Bits => vec![("k", None)],
             Op::Randint => vec![("a", None), ("b", None)],
             Op::Randrange => vec![
                 ("start", None),
-                ("stop", Some(none())),
+                ("stop", Some(Expr::none())),
                 ("step", Some(integer(1))),
             ],
             _ => unreachable!(),

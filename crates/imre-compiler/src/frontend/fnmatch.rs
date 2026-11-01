@@ -37,10 +37,7 @@ impl Checker<'_> {
         let mut args = self.arguments_with(call, &params, None, |checker, i, source| {
             if i == 0 && matches!(op, FnmatchOperation::Filter { .. }) {
                 input = Some(checker.fnmatch_input(source)?);
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                });
+                return Ok(Expr::none());
             }
             let value = checker.expr(source)?;
             if matches!(

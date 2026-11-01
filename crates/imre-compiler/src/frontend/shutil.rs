@@ -82,14 +82,8 @@ impl Checker<'_> {
             ty: params[i],
             kind: ExprKind::Local(i),
         };
-        let flag = |v| Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(v),
-        };
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let flag = |v| Expr::boolean(v);
+        let none = Expr::none();
         let (op, result, args) = match (op, params.as_slice()) {
             (Intrinsic::Move, [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Move(self.shutil_tree_issue()),
@@ -234,10 +228,7 @@ impl Checker<'_> {
                 return Ok(value);
             }
         };
-        Ok(Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(stat),
-        })
+        Ok(Expr::boolean(stat))
     }
 
     fn shutil_tree_issue(&self) -> Type {
@@ -265,14 +256,7 @@ impl Checker<'_> {
         let params = [
             ("src", Type::Str, None),
             ("dst", Type::Str, None),
-            (
-                "copy_function",
-                Type::Bool,
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                }),
-            ),
+            ("copy_function", Type::Bool, Some(Expr::boolean(true))),
         ]
         .map(|(name, ty, default)| Parameter {
             name: name.into(),
@@ -324,14 +308,8 @@ impl Checker<'_> {
 
     pub(super) fn shutil_copytree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        let boolean = |v| Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(v),
-        };
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let boolean = |v| Expr::boolean(v);
+        let none = Expr::none();
         let params = [
             ("src", Type::Str, None),
             ("dst", Type::Str, None),
@@ -404,20 +382,10 @@ impl Checker<'_> {
 
     pub(super) fn shutil_rmtree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        let none = Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        };
+        let none = Expr::none();
         let params = [
             ("path", Type::Str, None),
-            (
-                "ignore_errors",
-                Type::Bool,
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(false),
-                }),
-            ),
+            ("ignore_errors", Type::Bool, Some(Expr::boolean(false))),
             ("onerror", Type::None, Some(none.clone())),
             ("onexc", Type::None, Some(none.clone())),
             ("dir_fd", Type::Int, Some(none)),
@@ -479,10 +447,7 @@ impl Checker<'_> {
                 "follow_symlinks",
                 Type::Bool,
                 ParameterKind::KeywordOnly,
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                }),
+                Some(Expr::boolean(true)),
             ),
         ]
         .map(|(name, ty, kind, default)| Parameter {

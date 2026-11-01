@@ -93,10 +93,7 @@ impl Checker<'_> {
         let failed = self.hidden(Type::Bool);
         let missing = self.fspath_type_error(receiver, None, syscall);
         let result = self.invoke_path_value(call, self.local(slot), Some(&missing), Type::Str)?;
-        let flag = |value| Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Bool(value),
-        };
+        let flag = |value| Expr::boolean(value);
         Ok(scope.finish(Expr {
             ty: result.ty,
             kind: ExprKind::Scope {

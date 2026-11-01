@@ -115,10 +115,7 @@ impl Checker<'_> {
                 return Ok(vec![self.formatter_set(
                     receiver,
                     attribute,
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(utc),
-                    },
+                    Expr::boolean(utc),
                 )?]);
             }
         }
@@ -954,10 +951,7 @@ impl Checker<'_> {
             ty: self.types.optional(Type::Int),
             kind: match value {
                 Some(value) => ExprKind::Present(Box::new(integer(value))),
-                None => ExprKind::Absent(Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                })),
+                None => ExprKind::Absent(Box::new(Expr::none())),
             },
         };
         let slice = builtin(

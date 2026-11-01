@@ -17,36 +17,16 @@ fn param(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
         sign_only: false,
     }
 }
-fn none() -> Expr {
-    Expr {
-        ty: Type::None,
-        kind: ExprKind::None,
-    }
-}
-fn absent(ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Absent(Box::new(none())),
-    }
-}
-
 impl Checker<'_> {
     pub(super) fn log_formatter(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let string = self.types.optional(Type::Str);
-        let mut defaults = param("defaults", Type::None, Some(none()));
+        let mut defaults = param("defaults", Type::None, Some(Expr::none()));
         defaults.kind = ParameterKind::KeywordOnly;
         let params = [
-            param("fmt", string, Some(absent(string))),
-            param("datefmt", string, Some(absent(string))),
+            param("fmt", string, Some(Expr::absent(string))),
+            param("datefmt", string, Some(Expr::absent(string))),
             param("style", Type::Str, Some(unpacking::string("%"))),
-            param(
-                "validate",
-                Type::Bool,
-                Some(Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(true),
-                }),
-            ),
+            param("validate", Type::Bool, Some(Expr::boolean(true))),
             defaults,
         ];
         let args = self.arguments_with(call, &params, None, |this, i, arg| {
@@ -132,7 +112,7 @@ impl Checker<'_> {
                 (
                     Op::Time,
                     Type::Str,
-                    vec![rec, param("datefmt", s, Some(absent(s)))],
+                    vec![rec, param("datefmt", s, Some(Expr::absent(s)))],
                 )
             }
             "formatStack" => {

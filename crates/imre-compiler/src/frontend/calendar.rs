@@ -16,21 +16,6 @@ fn par(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
         sign_only: false,
     }
 }
-fn absent(ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Absent(Box::new(Expr {
-            ty: Type::None,
-            kind: ExprKind::None,
-        })),
-    }
-}
-fn boolean(v: bool) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Bool(v),
-    }
-}
 /// Calendar values and optional calendar values use the same handle or zero for None.
 pub(super) fn equality(types: &Types, values: &mut Vec<Expr>, ops: &[ast::CmpOp]) -> Option<Expr> {
     let ([left, right], [cmp @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)]) = (values.as_slice(), ops)
@@ -117,7 +102,7 @@ impl Checker<'_> {
             "min" | "max" => Some(op(
                 Op::ZoneLimit,
                 Type::Calendar(C::Zone),
-                vec![boolean(a.attr.as_str() == "max")],
+                vec![Expr::boolean(a.attr.as_str() == "max")],
             )),
             _ => None,
         }
@@ -172,7 +157,7 @@ impl Checker<'_> {
                     int("minute", true),
                     int("second", true),
                     int("microsecond", true),
-                    par("tzinfo", optzone, Some(absent(optzone))),
+                    par("tzinfo", optzone, Some(Expr::absent(optzone))),
                     fold,
                 ];
                 let args = self.arguments_with(call, &pars, None, |c, i, e| {
@@ -187,7 +172,7 @@ impl Checker<'_> {
                 let optname = self.types.optional(Type::Str);
                 let pars = [
                     par("offset", Type::Calendar(C::Delta), None),
-                    par("name", optname, Some(absent(optname))),
+                    par("name", optname, Some(Expr::absent(optname))),
                 ];
                 let args = self.arguments_with(call, &pars, None, |c, i, e| {
                     if i == 1 {
@@ -213,7 +198,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let dt = Type::Calendar(C::DateTime);
-        let flag = |name| par(name, Type::Bool, Some(boolean(false)));
+        let flag = |name| par(name, Type::Bool, Some(Expr::boolean(false)));
         let (op, ty, args) = match which {
             Intrinsic::EmailParseDate => (
                 Op::EmailParseDate,
@@ -227,14 +212,7 @@ impl Checker<'_> {
             ),
             Intrinsic::EmailFormatDate => {
                 let params = [
-                    par(
-                        "timeval",
-                        Type::None,
-                        Some(Expr {
-                            ty: Type::None,
-                            kind: ExprKind::None,
-                        }),
-                    ),
+                    par("timeval", Type::None, Some(Expr::none())),
                     flag("localtime"),
                     flag("usegmt"),
                 ];
@@ -276,7 +254,7 @@ impl Checker<'_> {
         let pars = [
             par("date", Type::Calendar(C::Date), None),
             par("time", Type::ClockTime, None),
-            par("tzinfo", tz, Some(absent(tz))),
+            par("tzinfo", tz, Some(Expr::absent(tz))),
         ];
         let args = self.arguments(call, &pars, None)?;
         Ok(self.ordered_builtin(
@@ -345,7 +323,7 @@ impl Checker<'_> {
             ]
             .map(|name| {
                 let ty = if name == "tzinfo" { zone } else { integer };
-                par(name, ty, Some(absent(ty)))
+                par(name, ty, Some(Expr::absent(ty)))
             });
             params[8].kind = ParameterKind::KeywordOnly;
             let mut timezone_supplied = false;
