@@ -66,13 +66,13 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 17 fully native passes, 11 native bodies with host
-fixtures, 12 host-driven native operations (48 calls), 23 compile blockers,
-6 fixture blockers, 1,019 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At O0 and O3, 20 original tests pass entirely on Imre. Eleven native bodies use
+host fixtures, and 12 host-driven tests make 48 native calls. The ledger records
+22 compiler blockers, 6 fixture blockers, 1,017 reference-only cases and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
 The [native loader example](NATIVE_LOADER.md) exercises the same original
-constructor and ten original method-discovery callers with native fixtures: six pass and five have recorded blockers.
+constructor and ten original method-discovery callers with native fixtures. Seven now pass, and four have recorded blockers.
 
 The [patch.dict audit](PATCH_DICT.md) records the original fixtures and compiler
 results for all 18 methods that call `patch.dict` directly.
