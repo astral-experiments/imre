@@ -402,12 +402,12 @@ impl Session {
     }
 
     /// A function-local module alias can be shadowed independently of the package binding.
-    pub(crate) fn is_metadata_module(&self, module: usize, expression: &Expr) -> bool {
+    pub(crate) fn is_stdlib_module(&self, module: usize, expression: &Expr, name: &str) -> bool {
         use ty_python_semantic::types::Type as Ty;
         self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(expression.inferred_type(&model), Some(Ty::ModuleLiteral(m))
-            if m.module(&self.db).name(&self.db).as_str() == "importlib.metadata")
+            if m.module(&self.db).name(&self.db).as_str() == name)
     }
 
     /// Only the stdlib function can add a literal dependency, even if a local shares its spelling.

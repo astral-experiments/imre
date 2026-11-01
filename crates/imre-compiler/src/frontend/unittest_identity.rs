@@ -58,6 +58,22 @@ impl Checker<'_> {
                 )
             })?;
         let params = &failure.params[1..];
+        let both_classes = call
+            .arguments
+            .args
+            .iter()
+            .take(2)
+            .chain(
+                call.arguments
+                    .keywords
+                    .iter()
+                    .filter(|kw| matches!(kw.arg.as_deref(), Some("expr1" | "expr2")))
+                    .map(|kw| &kw.value),
+            )
+            .filter(|arg| self.class_reference(arg).is_some())
+            .count()
+            == 2;
+        let mut class_operands = [None; 2];
         let args = self.arguments_with(
             call,
             params,
@@ -65,6 +81,16 @@ impl Checker<'_> {
             |checker, index, arg| {
                 if index == 2 {
                     checker.direct_argument(arg, params[index].ty, false)
+                } else if both_classes && let Some(class) = checker.class_reference(arg) {
+                    // Like an ordinary "is" expression, fixed class bindings have a
+                    // nominal identity. No first-class class object is required.
+                    class_operands[index] = Some(class);
+                    let decl = &checker.classes.declarations.definitions[class];
+                    Ok(unpacking::string(format!(
+                        "<class '{}.{}'>",
+                        checker.runtime_module_name(decl.definition.module),
+                        decl.name
+                    )))
                 } else {
                     // These fresh empty literals only expose their identity and repr.
                     match arg {
@@ -98,7 +124,12 @@ impl Checker<'_> {
         } else {
             ast::CmpOp::IsNot
         };
-        let mismatch = if left.ty == Type::None {
+        let mismatch = if let [Some(a), Some(b)] = class_operands {
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool((a == b) == negated),
+            }
+        } else if left.ty == Type::None {
             Self::identity_is_none(right.clone(), op)
         } else if right.ty == Type::None {
             Self::identity_is_none(left.clone(), op)
@@ -112,10 +143,16 @@ impl Checker<'_> {
         // Each formatter may catch a Python exception. Finish both before
         // borrowing the case or either string as arguments to the failure call.
         let mut diagnostic = calls::ArgumentScope::default();
-        let repr = self.unittest_identity_repr(left, call)?;
+        let repr = if class_operands[0].is_some() {
+            left
+        } else {
+            self.unittest_identity_repr(left, call)?
+        };
         let first_repr = diagnostic.hold(self, repr);
         let second_repr = if negated {
             none.clone()
+        } else if class_operands[1].is_some() {
+            right
         } else {
             self.unittest_identity_repr(right, call)?
         };

@@ -2227,7 +2227,9 @@ impl SourceGraph {
     ) -> Option<Binding> {
         let attr = expression.as_attribute_expr()?;
         if expression.start() < import.initialized
-            || !self.session.is_metadata_module(module, &attr.value)
+            || !self
+                .session
+                .is_stdlib_module(module, &attr.value, "importlib.metadata")
         {
             return None;
         }

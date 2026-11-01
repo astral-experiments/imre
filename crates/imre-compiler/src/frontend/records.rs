@@ -1124,6 +1124,29 @@ impl Checker<'_> {
                 "special methods cannot be called directly",
             ));
         }
+        if matches!(
+            attribute.attr.as_str(),
+            "loadTestsFromModule" | "loadTestsFromTestCase"
+        ) && let Some(object) = &receiver
+            && let Some(suite) =
+                self.unittest_load_suite(call, attribute.attr.as_str(), class, object)?
+        {
+            return Ok(suite);
+        }
+        if attribute.attr.as_str() == "_declaredCaseMethods"
+            && let Some(object) = &receiver
+            && self.graph.modules[self.module].is_bundled("unittest")
+            && self.unittest_case(class)
+            && call.arguments.is_empty()
+        {
+            return self.unittest_declared_methods(class, object.clone(), call);
+        }
+        if attribute.attr.as_str() == "_runRegistered"
+            && let Some(object) = &receiver
+            && let Some(value) = self.unittest_run_registered(call, class, object)?
+        {
+            return Ok(value);
+        }
         if attribute.attr.as_str() == "getTestCaseNames"
             && let Some(object) = &receiver
             && let Some(names) = self.unittest_loader_names(call, class, object)?

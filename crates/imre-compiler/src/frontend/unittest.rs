@@ -10,6 +10,45 @@ struct Expected {
 }
 
 impl Checker<'_> {
+    /// Check a method name against the original class, including methods that
+    /// reachable compilation pruned. Arbitrary descriptors require Python lookup.
+    pub(super) fn unittest_declared_methods(
+        &mut self,
+        base: usize,
+        receiver: Expr,
+        at: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        self.dispatch_record(base, receiver, at, |checker, class, _| {
+            let attributes = checker.fixed_class_attributes(class);
+            let list = checker.types.list(Type::Str);
+            let mut methods = Vec::new();
+            let mut descriptors = Vec::new();
+            for (name, kind) in attributes {
+                if kind == Some(true) {
+                    methods.push(unpacking::string(name));
+                } else {
+                    descriptors.push(unpacking::string(name));
+                }
+            }
+            for field in &checker.classes.declarations.definitions[class].fields {
+                descriptors.push(unpacking::string(field.name.as_str()));
+            }
+            Ok(Expr {
+                ty: checker.types.tuple(vec![list, list]),
+                kind: ExprKind::Tuple(vec![
+                    Expr {
+                        ty: list,
+                        kind: ExprKind::List(methods),
+                    },
+                    Expr {
+                        ty: list,
+                        kind: ExprKind::List(descriptors),
+                    },
+                ]),
+            })
+        })
+    }
+
     /// Read the concrete case's class metadata even when a fixture receives a base-typed case.
     pub(super) fn testcase_class_text(
         &mut self,
@@ -109,6 +148,48 @@ impl Checker<'_> {
             Ok(unpacking::string(format!("<class '{qualified}'>")))
         })
         .map(Some)
+    }
+
+    /// The concrete TestCase selects the category used by the result, including
+    /// when the runner holds the case through its base type.
+    pub(super) fn unittest_failure_isinstance(
+        &mut self,
+        value: &Expr,
+        classes: &ast::Expr,
+    ) -> Result<Option<Expr>, String> {
+        let Some(attr) = classes.as_attribute_expr() else {
+            return Ok(None);
+        };
+        let Some(name) = attr.value.as_name_expr() else {
+            return Ok(None);
+        };
+        let Some(&slot) = self.names.get(name.id.as_str()) else {
+            return Ok(None);
+        };
+        let Type::Class(base) = self.read_local(slot).ty else {
+            return Ok(None);
+        };
+        if attr.attr.as_str() != "failureException" || !self.unittest_case(base) {
+            return Ok(None);
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let value = scope.hold(self, value.clone());
+        let receiver = self.expr(&attr.value)?;
+        let test = self.dispatch_record(base, receiver, classes, |checker, concrete, _| {
+            let (kind, _, _) = checker
+                .unittest_category(classes, Some((name.id.as_str(), concrete)))
+                .ok_or_else(|| {
+                    error(checker.source, classes, "unknown TestCase failureException")
+                })?;
+            Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::IsInstance(vec![ir::InstanceType::Exception(kind)]),
+                    vec![value.clone()],
+                ),
+            })
+        })?;
+        Ok(Some(scope.finish(test)))
     }
 
     /// An ordinary except clause has a fixed category only when every concrete

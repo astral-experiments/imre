@@ -72,12 +72,28 @@ pub(super) fn equality(left: &Expr, right: &Expr, op: ast::CmpOp) -> Option<Expr
     ))
 }
 
+// The public descriptors on CPython's builtin int. The flag records whether
+// getattr(int, name) is callable, including the from_bytes class method.
+pub(super) const INT_ATTRIBUTES: &[(&str, bool)] = &[
+    ("as_integer_ratio", true),
+    ("bit_count", true),
+    ("bit_length", true),
+    ("conjugate", true),
+    ("denominator", false),
+    ("from_bytes", true),
+    ("imag", false),
+    ("is_integer", true),
+    ("numerator", false),
+    ("real", false),
+    ("to_bytes", true),
+];
+
 // Builtin types have immutable dictionaries. Keep the existing public names
 // apart from absent attributes so an unsupported descriptor never becomes a default.
 fn builtin_plain_name(ty: Type, name: &str) -> bool {
     let names = match ty {
         Type::Int | Type::Bool => {
-            "as_integer_ratio bit_count bit_length conjugate denominator from_bytes imag is_integer numerator real to_bytes"
+            return INT_ATTRIBUTES.iter().any(|&(attr, _)| attr == name);
         }
         Type::Str | Type::StrLiteral(_) => concat!(
             "capitalize casefold center count encode endswith expandtabs find format format_map index ",

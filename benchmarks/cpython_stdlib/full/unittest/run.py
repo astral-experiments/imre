@@ -31,6 +31,10 @@ def loader_methods():
                and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
                        and call.func.attr == "getTestCaseNames" for call in ast.walk(m))}
     methods["test___init__"] = "unittest.TestLoader construction and its errors list"
+    methods["test_suiteClass__default_value"] = "unittest.TestLoader.suiteClass class identity"
+    methods["test_loadTestsFromTestCase__TestSuite_subclass"] = (
+        "unittest.TestLoader.loadTestsFromTestCase rejects a TestSuite subclass"
+    )
     return methods
 
 
@@ -38,7 +42,6 @@ DEFAULT_LOADER_METHODS = loader_methods()
 # These methods still run on CPython. Keep the native attempt in each report;
 # a different compiler failure must fail the gate.
 LOADER_BLOCKERS = {
-    "test_getTestCaseNames__not_a_TestCase": "5:23: Imre: local class base requires supported native class metadata",
     "test_getTestCaseNames__testNamePatterns__attribute_access_regression":
         "6:13: Imre: local class body requires plain methods without defaults or inert class attributes",
     "test_partial_functions": "12:17: Imre: name is not a local value; globals and first-class functions are unsupported",
@@ -56,7 +59,9 @@ ASSERTIONS = {
 # These CPython passes still fail at native compilation. Keep their first
 # precise source diagnostic in the report; a different failure stops the gate.
 EQUALITY_BLOCKERS = {
-    "testAssertMultiLineEqualTruncates": (1016, "6:34: Imre: too many positional arguments"),
+    "testAssertMultiLineEqualTruncates": (
+        1017, "7:9: Imre: local functions require annotated parameters and return types"
+    ),
     "testAssertEqual_diffThreshold": (1036, "14:9: Imre: unknown class method"),
     "testAssertEqual_shorten": (1067, "9:9: Imre: unknown class method"),
 }

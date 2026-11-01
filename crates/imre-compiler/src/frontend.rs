@@ -1227,6 +1227,7 @@ fn lower_body(
         .parameters
         .vararg
         .as_deref()
+        .filter(|p| p.annotation().is_some())
         .map(|p| p.name.to_string());
     checker.consuming_lists = consuming_lists::find(&definition.body);
     checker.joined_lines = joined_lines::find(&definition.body);
@@ -1563,20 +1564,19 @@ fn signature(
         });
     }
     if let Some(pack) = function.parameters.vararg.as_deref() {
-        let annotation = pack.annotation().ok_or_else(|| {
-            error(
-                source,
-                pack,
-                "a variadic positional parameter requires an exact element annotation",
-            )
-        })?;
-        let element = annotation_in_class(annotation, graph, module, classes, types, owner)?;
-        sequences::check_pack_reads(function, pack.name.as_str(), graph, module, source)?;
-        let ty = types.list(element);
-        parameter_types.push(Some(ty));
+        // Annotated packs use homogeneous storage. Without an annotation a direct
+        // call can instead determine the exact (possibly heterogeneous) tuple.
+        let ty = if let Some(annotation) = pack.annotation() {
+            let element = annotation_in_class(annotation, graph, module, classes, types, owner)?;
+            sequences::check_pack_reads(function, pack.name.as_str(), graph, module, source)?;
+            Some(types.list(element))
+        } else {
+            None
+        };
+        parameter_types.push(ty);
         params.push(Parameter {
             name: pack.name.to_string(),
-            ty,
+            ty: ty.unwrap_or(Type::None),
             kind: ParameterKind::Variadic,
             default: None,
             sign_only: false,
@@ -8159,7 +8159,7 @@ impl<'a> Checker<'a> {
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
         if let Some(local) = self.local_class(&call.func)?
-            && let Some(base) = local.abstract_base
+            && let Some(base) = local.base
             && !local.abstract_methods.is_empty()
         {
             let message = mapping_abc::abstract_message(&local.name, &local.abstract_methods);
@@ -9330,7 +9330,7 @@ impl<'a> Checker<'a> {
                 && self.graph.is_abstract_context_manager(parent)
                 && let Some(local) = self.local_class(child)?
             {
-                let nominal = local.abstract_base.is_some_and(|base| {
+                let nominal = local.base.is_some_and(|base| {
                     let classes = &self.classes.declarations;
                     classes.subclass(self.graph, base, classes.ids[&parent])
                 });

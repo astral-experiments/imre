@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,8 +35,10 @@ def report(stderr, failed_fixture):
 
 def compare(a, source, work, *, upstream=False):
     flags = [["-v"]] if upstream else [[], ["-v"], ["-q"], ["-f"]]
+    if source.stem in {"module_loader", "text_runner"}:
+        flags = [[]]
     refs = [(opt, invoke([a.python, "-E", "-B", source, *opt])) for opt in flags]
-    failed = not upstream and source.stem in {"lifecycle", "setup_fields", "identity"}
+    failed = not upstream and source.stem in {"lifecycle", "setup_fields", "identity", "module_loader", "text_runner"}
     if upstream and any(
         ref.returncode or not re.search(r"^Ran [1-9]\d* tests? in ", ref.stderr, re.M)
         for _, ref in refs
@@ -97,6 +100,52 @@ def compare(a, source, work, *, upstream=False):
     return checks
 
 
+def check_inherited_class_fixture(a, work):
+    (work / "fixture_base.py").write_text(
+        "from unittest import TestCase\n"
+        "class Base(TestCase):\n"
+        "    @classmethod\n"
+        "    def setUpClass(cls):\n"
+        "        raise RuntimeError('inherited setup failed')\n"
+        "class Concrete(Base):\n"
+        "    def test_body(self):\n"
+        "        print('body after failed setup')\n"
+    )
+    (work / "fixture_alias.py").write_text("from fixture_base import Concrete as Alias\n")
+    entry = work / "inherited_fixture.py"
+    profile = work / "no_exclusions.json"
+    profile.write_text("{}")
+    for registration in (
+        "suite = unittest.defaultTestLoader.loadTestsFromModule(fixture_alias)",
+        "suite = unittest.TestSuite()\nsuite.addTest(fixture_alias.Alias('test_body'))",
+    ):
+        entry.write_text(
+            "import unittest\nimport sys\nimport fixture_alias\n" + registration + "\n"
+            "if not unittest.TextTestRunner().run(suite).wasSuccessful():\n    sys.exit(1)\n"
+        )
+        reference = invoke([a.python, "-E", "-B", entry])
+        if reference.returncode != 1 or "inherited setup failed" not in reference.stderr:
+            raise AssertionError(reference)
+        for level in a.opt_levels:
+            for flags in ([], ["--reachable-only"]):
+                native = invoke([
+                    a.compiler, "run", entry, "--no-cache", "--opt-level", str(level),
+                    "--runtime", a.runtime, "--clang", a.clang, *flags,
+                ])
+                if not native.returncode or "body after failed setup" in native.stdout:
+                    raise AssertionError((registration, level, flags, native))
+                diagnostic = native.stderr
+                if "ModuleNotFoundError" in diagnostic:
+                    # The object runtime cannot import unittest. Check why the
+                    # static compiler declined the same source, without pruning
+                    # any source branch in the entry profile.
+                    diagnostic = invoke([
+                        a.compiler, "check", entry, "--entry-profile", profile, *flags,
+                    ]).stderr
+                if not any(reason in diagnostic for reason in ("custom result hooks", "inherited setup failed")):
+                    raise AssertionError((registration, level, flags, diagnostic))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("compiler", "runtime"):
@@ -142,14 +191,33 @@ def main():
         sources = [source]
     else:
         sources = [
-            FIXTURES / name for name in ("discover.py", "lifecycle.py", "setup_fields.py", "identity.py", "assert_identity.py", "empty.py")
+            FIXTURES / name
+            for name in (
+                "discover.py", "lifecycle.py", "setup_fields.py", "identity.py",
+                "assert_identity.py", "empty.py", "module_loader.py", "main_hook.py",
+                "class_skips.py", "text_runner.py",
+            )
         ]
     with tempfile.TemporaryDirectory() as td:
         checks = sum(
             compare(a, source, Path(td), upstream=a.upstream_source is not None)
             for source in sources
         )
-        if not a.upstream_source:
+        if a.upstream_source:
+            # Exercise the same intact module through the public loader and runner.
+            # Keep its import name stable so verbose output checks the original IDs.
+            shutil.copyfile(source, Path(td) / source.name)
+            entry = Path(td) / "import_suite.py"
+            entry.write_text(
+                f"import {source.stem} as target\n"
+                "import sys\nimport unittest\n"
+                "suite = unittest.defaultTestLoader.loadTestsFromModule(target)\n"
+                "result = unittest.TextTestRunner(verbosity=2).run(suite)\n"
+                "if not result.wasSuccessful():\n    sys.exit(1)\n"
+            )
+            checks += compare(a, entry, Path(td), upstream=True)
+        else:
+            check_inherited_class_fixture(a, Path(td))
             # A custom loader or lifecycle override must never turn into a
             # passing run that silently omitted its behavior.
             for definition, message in (

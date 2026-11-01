@@ -178,7 +178,52 @@ impl<'a> Visitor<'a> for References<'_> {
             && self.found.definitions.insert(id)
             && self.graph.is_unittest_main(id)
         {
-            self.found.root_unittest(self.graph, id.module);
+            self.found.root_unittest_main(self.graph, id.module);
+        }
+        if let ast::Expr::Call(call) = expr
+            && let Some(method) = call.func.as_attribute_expr()
+            && matches!(
+                method.attr.as_str(),
+                "loadTestsFromModule" | "loadTestsFromTestCase"
+            )
+            && let Some(unit) = self
+                .graph
+                .modules
+                .iter()
+                .find(|m| m.bundled && m.name == "unittest")
+            && let Some(Binding::Definition(base)) = unit.bindings.get("TestCase")
+        {
+            self.found.attributes.extend(
+                [
+                    "_getTestCaseNames",
+                    "_getModuleCaseNames",
+                    "_missingMethod",
+                    "_addCase",
+                    "addTest",
+                    "_run",
+                ]
+                .into_iter()
+                .map(str::to_owned),
+            );
+            if let Some(Binding::Definition(suite)) = unit.bindings.get("TestSuite") {
+                self.found.definitions.insert(*suite);
+            }
+            let argument = call.arguments.args.first().or_else(|| {
+                call.arguments
+                    .keywords
+                    .iter()
+                    .find(|kw| matches!(kw.arg.as_deref(), Some("module" | "testCaseClass")))
+                    .map(|kw| &kw.value)
+            });
+            let target = argument.and_then(|arg| self.graph.resolve(self.module, arg));
+            if method.attr.as_str() == "loadTestsFromTestCase" {
+                if let Some(Binding::Definition(id)) = target {
+                    self.found.root_unittest_class(self.graph, *base, id);
+                }
+            } else if let Some(Binding::Module(target)) = target {
+                self.found.root_unittest_classes(self.graph, *base, target);
+                self.found.root_unittest_hook(self.graph, unit, target);
+            }
         }
         // Literal text has its exact builtin class, even if a source class defines
         // the same method name. The call visitor still follows its arguments and
@@ -190,6 +235,12 @@ impl<'a> Visitor<'a> for References<'_> {
             )
         {
             let name = attr.attr.to_string();
+            if name == "_runRegistered" {
+                for method in ["_missingMethod", "_unsupportedCase", "_run", "_skip"] {
+                    self.found.instance_attributes.insert(method.into());
+                    self.found.attributes.insert(method.into());
+                }
+            }
             if name == "getTestCaseNames" {
                 self.found.attributes.insert("_getTestCaseNames".into());
             }
@@ -324,42 +375,87 @@ impl<'a> Visitor<'a> for References<'_> {
 impl Reachable {
     /// Default unittest discovery observes all TestCase class bindings in the entry module,
     /// including imported aliases; their test methods have no source call sites.
-    fn root_unittest(&mut self, graph: &SourceGraph, module: ModuleId) {
+    fn root_unittest_main(&mut self, graph: &SourceGraph, module: ModuleId) {
         let unit = &graph.modules[module].bindings;
         let (Some(Binding::Definition(base)), Some(Binding::Definition(runner))) =
             (unit.get("TestCase"), unit.get("_MainRunner"))
         else {
             return;
         };
+        for method in ["_run", "_skip"] {
+            self.attributes.insert(method.into());
+            self.instance_attributes.insert(method.into());
+        }
         self.definitions.insert(*runner);
         self.unittest_classes.insert(*runner);
-        for value in graph.modules[graph.entry].bindings.values() {
+        if let Some(Binding::Value(loader)) = unit.get("defaultTestLoader") {
+            self.value_reads.insert(*loader);
+        }
+        if let Some(Binding::Definition(suite)) = unit.get("TestSuite") {
+            self.definitions.insert(*suite);
+        }
+        for name in [
+            "_runSuite",
+            "_getTestCaseNames",
+            "_getModuleCaseNames",
+            "_addCase",
+            "addTest",
+        ] {
+            self.attributes.insert(name.into());
+        }
+        self.root_unittest_hook(graph, &graph.modules[module], graph.entry);
+
+        self.root_unittest_classes(graph, *base, graph.entry);
+    }
+
+    fn root_unittest_hook(
+        &mut self,
+        graph: &SourceGraph,
+        unit: &super::SourceModule,
+        target: ModuleId,
+    ) {
+        if let Some(Binding::Definition(hook)) = graph.modules[target].bindings.get("load_tests") {
+            self.definitions.insert(*hook);
+            if let Some(Binding::Definition(handler)) = unit.bindings.get("_failedModuleTests") {
+                self.definitions.insert(*handler);
+            }
+            if let Some(Binding::Definition(case)) = unit.bindings.get("_FailedTest") {
+                self.definitions.insert(*case);
+                self.unittest_classes.insert(*case);
+            }
+        }
+    }
+
+    fn root_unittest_classes(&mut self, graph: &SourceGraph, base: DefinitionId, target: ModuleId) {
+        for value in graph.modules[target].bindings.values() {
             let Binding::Definition(id) = *value else {
                 continue;
             };
-            let mut pending = vec![id];
-            let mut chain = HashSet::new();
-            while let Some(def) = pending.pop() {
-                if !chain.insert(def) {
-                    continue;
-                }
-                if let ast::Stmt::ClassDef(c) =
-                    &graph.modules[def.module].parsed.syntax().body[def.statement]
-                    && let Some(args) = &c.arguments
-                {
-                    for arg in &args.args {
-                        if let Some(Binding::Definition(parent)) =
-                            graph.resolve_type(def.module, arg)
-                        {
-                            pending.push(parent);
-                        }
+            self.root_unittest_class(graph, base, id);
+        }
+    }
+
+    fn root_unittest_class(&mut self, graph: &SourceGraph, base: DefinitionId, id: DefinitionId) {
+        let mut pending = vec![id];
+        let mut chain = HashSet::new();
+        while let Some(def) = pending.pop() {
+            if !chain.insert(def) {
+                continue;
+            }
+            if let ast::Stmt::ClassDef(c) =
+                &graph.modules[def.module].parsed.syntax().body[def.statement]
+                && let Some(args) = &c.arguments
+            {
+                for arg in &args.args {
+                    if let Some(Binding::Definition(parent)) = graph.resolve_type(def.module, arg) {
+                        pending.push(parent);
                     }
                 }
             }
-            if id != *base && chain.contains(base) {
-                self.definitions.extend(chain.iter().copied());
-                self.unittest_classes.extend(chain);
-            }
+        }
+        if id != base && chain.contains(&base) {
+            self.definitions.extend(chain.iter().copied());
+            self.unittest_classes.extend(chain);
         }
     }
 
@@ -401,6 +497,12 @@ impl Reachable {
                 }
             }
         }
+        let case_base = graph
+            .modules
+            .iter()
+            .find(|m| m.is_bundled("unittest"))
+            .and_then(|m| m.bindings.get("TestCase"));
+        let mut inspected_cases = HashSet::new();
         let mut expanded = HashSet::new();
         loop {
             let before = (
@@ -435,6 +537,15 @@ impl Reachable {
             for id in found.definitions.iter().copied().collect::<Vec<_>>() {
                 let source = &graph.modules[id.module];
                 let node = &source.parsed.syntax().body[id.statement];
+                // Explicitly constructed cases have no loader call to mark their
+                // callbacks. A reachable suite run must also retain these methods.
+                if found.attributes.contains("_runRegistered")
+                    && node.is_class_def_stmt()
+                    && let Some(Binding::Definition(base)) = case_base
+                    && inspected_cases.insert(id)
+                {
+                    found.root_unittest_class(graph, *base, id);
+                }
                 let mut refs = References {
                     graph,
                     module: id.module,
@@ -862,8 +973,36 @@ fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef
                 }
             }),
             ast::Stmt::FunctionDef(f) => definition_effect(graph, module, f),
+            ast::Stmt::If(branch) => !inert_platform_methods(graph, module, branch),
             _ => true,
         })
+}
+
+/// An unused class can choose methods using sys.platform without running either
+/// method body. Keep the class whenever the guard or a definition can run user code.
+fn inert_platform_methods(graph: &SourceGraph, module: ModuleId, branch: &ast::StmtIf) -> bool {
+    let ast::Expr::Compare(test) = branch.test.as_ref() else {
+        return false;
+    };
+    let [ast::Expr::Attribute(attr), ast::Expr::StringLiteral(_)] = test.operands.as_ref() else {
+        return false;
+    };
+    let methods_only = |body: &[ast::Stmt]| {
+        body.iter().all(|stmt| {
+        matches!(stmt, ast::Stmt::FunctionDef(f) if f.decorator_list.is_empty() && !definition_effect(graph, module, f))
+    })
+    };
+    matches!(test.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+        && attr.attr.as_str() == "platform"
+        && matches!(attr.value.as_ref(), ast::Expr::Name(_))
+        && graph.resolve(module, &test.operands[0])
+            == Some(Binding::Intrinsic(Intrinsic::SysPlatform))
+        && graph.session.is_stdlib_module(module, &attr.value, "sys")
+        && methods_only(&branch.body)
+        && branch
+            .elif_else_clauses
+            .iter()
+            .all(|clause| clause.test.is_none() && methods_only(&clause.body))
 }
 
 /// Rich exception display overrides are reachable through base-class catches.
@@ -943,6 +1082,25 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    #[test]
+    fn unused_platform_methods_have_no_definition_time_effects() {
+        let source = r#"import sys
+class Unused:
+    if sys.platform == "win32":
+        def method(self):
+            return globals()
+    else:
+        def method(self):
+            pass
+print(42)
+"#;
+        reachable(source).unwrap();
+        // Reading an attribute on a shadowed name or evaluating a default
+        // may raise while defining the class, even when it is never used.
+        assert!(reachable(&source.replace("    if", "    sys = 1\n    if")).is_err());
+        assert!(reachable(&source.replace("method(self)", "method(self, x=globals())")).is_err());
     }
 
     #[test]
