@@ -473,9 +473,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
         ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
-        ("binascii", "Error" | "Incomplete" | "a2b_base64" | "b2a_base64") => {
-            ctx.builtin(&format!("binascii.{name}"))
-        }
+        (
+            "binascii",
+            "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
+        ) => ctx.builtin(&format!("binascii.{name}")),
         ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {

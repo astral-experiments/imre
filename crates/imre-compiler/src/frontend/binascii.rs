@@ -80,7 +80,7 @@ impl Checker<'_> {
         }
     }
 
-    fn base64_buffer(
+    fn codec_buffer(
         &self,
         input: Expr,
         decode: bool,
@@ -115,6 +115,23 @@ impl Checker<'_> {
         Ok(calls::type_error(Type::Bytes, vec![input], message))
     }
 
+    pub(super) fn binascii_unhexlify(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        if let ([value], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            let input = self.evaluated_argument(value)?;
+            let data = self.codec_buffer(input, true, false, call)?;
+            return Ok(bytes_op(Builtin::BinasciiUnhexlify, vec![data]));
+        }
+        self.one_positional_error(call, name, "hexstr", Type::Bytes)
+    }
+
     pub(super) fn binascii_base64(
         &mut self,
         call: &ast::ExprCall,
@@ -137,7 +154,7 @@ impl Checker<'_> {
             .into_iter()
             .map(|v| scope.hold(self, v))
             .collect();
-        let input = self.base64_buffer(values[args.order[0]].clone(), decode, false, call)?;
+        let input = self.codec_buffer(values[args.order[0]].clone(), decode, false, call)?;
         let flag = self.truth_value(values[args.order[1]].clone());
         let op = if decode {
             Builtin::BinasciiDecode
@@ -176,7 +193,7 @@ impl Checker<'_> {
             .into_iter()
             .map(|v| scope.hold(self, v))
             .collect();
-        let input = self.base64_buffer(values[args.order[0]].clone(), decode, true, call)?;
+        let input = self.codec_buffer(values[args.order[0]].clone(), decode, true, call)?;
         let data = if decode {
             input
         } else {
@@ -270,7 +287,7 @@ impl Checker<'_> {
         at: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let alphabet = if decode {
-            self.base64_buffer(alphabet, true, true, at)?
+            self.codec_buffer(alphabet, true, true, at)?
         } else {
             match alphabet.ty {
                 Type::Bytes => alphabet,

@@ -920,7 +920,11 @@ impl Context {
                     || builtins::constructor_owner(name).is_some()
                     || matches!(
                         name.as_str(),
-                        "binascii.a2b_base64" | "binascii.b2a_base64" | "zlib.adler32"
+                        "binascii.a2b_base64"
+                            | "binascii.b2a_base64"
+                            | "binascii.a2b_hex"
+                            | "binascii.unhexlify"
+                            | "zlib.adler32"
                     )
                     || name.starts_with("posix.")
                     || name.starts_with("_weakref.")
@@ -2032,6 +2036,19 @@ impl Context {
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
                 return Ok(old.unwrap_or(self.token_missing));
+            }
+            Value::Native(ref builtin)
+                if matches!(builtin.as_str(), "binascii.a2b_hex" | "binascii.unhexlify") =>
+            {
+                match name {
+                    "__name__" | "__qualname__" => {
+                        return Ok(self.text(builtin.rsplit('.').next().unwrap().to_owned()));
+                    }
+                    "__module__" => return Ok(self.text("binascii")),
+                    "__self__" => return self.module("binascii"),
+                    "__text_signature__" => return Ok(self.text("($module, hexstr, /)")),
+                    _ => {}
+                }
             }
             Value::Native(ref builtin)
                 if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>

@@ -1241,6 +1241,7 @@ pub(crate) enum Builtin {
     Adler32,
     BinasciiDecode,
     BinasciiEncode,
+    BinasciiUnhexlify,
     CodecLookup,
     CodecName,
     StrEncodeOptions,
