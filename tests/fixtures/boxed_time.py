@@ -3,6 +3,24 @@ import time
 
 
 def current():
+    from select import select
+    from time import monotonic, perf_counter
+
+    first = monotonic()
+    assert type(first) is float and time.monotonic is monotonic
+    second = perf_counter()
+    assert first <= second <= monotonic()
+    select([], [], [], 0.02)
+    assert time.perf_counter() - second >= 0.01
+    for clock in (monotonic, perf_counter):
+        for args, kwargs in (((1,), {}), ((), {"x": 1})):
+            try:
+                clock(*args, **kwargs)
+            except TypeError as error:
+                print(str(error))
+            else:
+                raise AssertionError("clock accepted arguments")
+
     now = time.time()
     assert now > 0 and "." in str(now)
     assert len(time.gmtime(now)) == len(time.localtime(now)) == 9
