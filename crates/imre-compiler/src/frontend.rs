@@ -2614,6 +2614,12 @@ impl<'a> Checker<'a> {
         attribute: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<(Expr, usize, Type), String> {
+        if attribute.attr.as_str() == "difference_update"
+            && (self.types.set_element(receiver.ty).is_some()
+                || self.unshadowed_builtin(&attribute.value, "set"))
+        {
+            return Err(self.object_builtin_error("set.difference_update", attribute));
+        }
         if let Type::Class(class) = receiver.ty
             && self.native_mock(class)
             && self.module
@@ -8282,6 +8288,13 @@ impl<'a> Checker<'a> {
             return Err(self.object_builtin_error("fromhex", call));
         }
         if receiver.is_none()
+            && let ast::Expr::Attribute(method) = call.func.as_ref()
+            && method.attr.as_str() == "difference_update"
+            && self.unshadowed_builtin(&method.value, "set")
+        {
+            return Err(self.object_builtin_error("set.difference_update", call));
+        }
+        if receiver.is_none()
             && let Some(result) = self.fromkeys_call(call, None)?
         {
             return Ok(result);
@@ -9977,6 +9990,9 @@ impl<'a> Checker<'a> {
                 let builtin = match attribute.attr.as_str() {
                     "add" if call.arguments.args.len() == 1 => Builtin::SetAdd,
                     "discard" if call.arguments.args.len() == 1 => Builtin::SetDiscard,
+                    "difference_update" => {
+                        return Err(self.object_builtin_error("set.difference_update", call));
+                    }
                     _ => {
                         return Err(error(
                             self.source,

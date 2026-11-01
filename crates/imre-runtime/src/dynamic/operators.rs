@@ -3124,6 +3124,39 @@ impl Context {
         Ok(())
     }
 
+    /// Subtract each source member in turn, preserving prior removals if iteration raises.
+    pub(super) fn set_difference_update(&mut self, target: Id, source: Id) -> Result<()> {
+        let storage = self.scalar_value(source);
+        let source = if let Value::Set { entries, .. } = self.heap.get(storage) {
+            if storage == target {
+                let Value::Set { entries, .. } = self.heap.get_mut(target) else {
+                    unreachable!()
+                };
+                for (key, _) in entries.clear() {
+                    self.heap.weak_edge_removed(key);
+                }
+                return Ok(());
+            }
+            if entries.len() >> 3 > self.stored_entries(target).len() {
+                self.set_algebra("&", target, storage, false)?
+            } else {
+                storage
+            }
+        } else {
+            source
+        };
+        self.visit_set_operand(source, |ctx, key, hash| {
+            if let Some(index) = ctx.find_dictionary_key(target, key, hash)?.1 {
+                let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
+                    unreachable!()
+                };
+                let (removed, _) = entries.remove(index)?;
+                ctx.heap.weak_edge_removed(removed);
+            }
+            Ok(())
+        })
+    }
+
     /// Compute set difference or intersection, including reflected dictionary-view operands.
     fn set_algebra(&mut self, op: &str, left: Id, right: Id, inplace: bool) -> Result<Id> {
         let sets = matches!(
@@ -3156,16 +3189,7 @@ impl Context {
             } else if result != left {
                 builtins::update_set(self, result, left)?;
             }
-            self.visit_set_operand(right, |ctx, key, hash| {
-                if let Some(index) = ctx.find_dictionary_key(result, key, hash)?.1 {
-                    let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
-                        unreachable!()
-                    };
-                    let (removed, _) = entries.remove(index)?;
-                    ctx.heap.weak_edge_removed(removed);
-                }
-                Ok(())
-            })?;
+            self.set_difference_update(result, right)?;
             return Ok(result);
         }
         let (container, source) = if sets {
