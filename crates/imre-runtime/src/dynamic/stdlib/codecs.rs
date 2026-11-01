@@ -275,7 +275,9 @@ pub(in crate::dynamic) fn encode_text(
             "encoding non-scalar strings with this codec is unsupported",
         ));
     };
-    ctx.encode_utf8_codepoints(id, signature, &errors.to_owned())
+    // Encoding can allocate a Python exception, so release the borrow of the heap.
+    let errors = errors.to_owned();
+    ctx.encode_utf8_codepoints(id, signature, &errors)
 }
 
 /// codecs.encode/decode use the registered codec directly, bypassing methods on the input.
