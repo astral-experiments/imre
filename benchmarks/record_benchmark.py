@@ -18,6 +18,7 @@ if sys.flags.optimize:
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 REFERENCE = HERE / "reference/record_pipeline"
+reference_sources = runpy.run_path(str(REFERENCE.parent / "build_reference.py"))["reference_sources"]
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 targets = SimpleNamespace(**runpy.run_path(str(HERE / "telemetry_benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "record_validate.py")))
@@ -90,12 +91,12 @@ def source_paths(args):
         paths["helper:" + name] = HERE / name
     paths.update({"example:" + str(path.relative_to(validator.PACKAGE)): path
                   for path in validator.PACKAGE.rglob("*.py")})
-    reference_paths = [REFERENCE / name for name in ("Cargo.toml", "Cargo.lock", "build.py", "src/main.rs")]
-    paths.update({"rust_source:" + str(path.relative_to(REFERENCE)): path for path in reference_paths})
+    rust_sources = reference_sources(REFERENCE)
+    paths.update({"rust_source:" + name: path for name, path in rust_sources.items()})
     rust_record = json.loads(paths["rust_build_record"].read_text())
     assert rust_record["input_guards_passed"]
     assert rust_record["binary_sha256"] == shared.sha256(paths["rust"])
-    assert rust_record["sources"] == {str(path.relative_to(REFERENCE)): shared.sha256(path) for path in reference_paths}
+    assert rust_record["sources"] == {name: shared.sha256(path) for name, path in rust_sources.items()}
     assert rust_record["thinlto"] == bool(args.lto_linker)
     assert rust_record["environment"]["CARGO_PROFILE_RELEASE_OPT_LEVEL"] == "3"
     assert rust_record["environment"]["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"] == "16"
