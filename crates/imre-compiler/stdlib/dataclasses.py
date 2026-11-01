@@ -238,6 +238,7 @@ def _missing(names, qualname, kind):
 def _initializer(cls, data, positional, qualname, frozen):
     required = [f for f in positional if f.default is MISSING and f.default_factory is MISSING]
     has_post_init = hasattr(cls, '__post_init__')
+    receiver = '__dataclass_self__' if 'self' in cls.__dataclass_fields__ else 'self'
     initvars = [f for f in data.values() if f._field_type is _FIELD_INITVAR]
     # An init=False InitVar has no parameter; CPython loads its name in the generated initializer's globals.
     module = _loaded_module(cls.__module__) if any(not f.init for f in initvars) else None
@@ -246,7 +247,7 @@ def _initializer(cls, data, positional, qualname, frozen):
         for f, value in zip(positional, args):
             values[f.name] = value
         for name, value in kwargs.items():
-            if name in values or (name == 'self' and 'self' not in data):
+            if name in values or name == receiver:
                 raise TypeError(f"{qualname}() got multiple values for argument {name!r}")
             if name not in data or not data[name].init:
                 raise TypeError(f"{qualname}() got an unexpected keyword argument {name!r}")
@@ -283,6 +284,13 @@ def _initializer(cls, data, positional, qualname, frozen):
         if has_post_init:
             self.__post_init__(*[values.get(f.name, f.default) if f.init else _load_global(module, f.name)
                                  for f in initvars])
+
+    if receiver != 'self':
+        if receiver in data and data[receiver].init:
+            raise SyntaxError("duplicate argument '__dataclass_self__' in function definition")
+        def init_with_self_field(__dataclass_self__, /, *args, **kwargs):
+            __init__(__dataclass_self__, *args, **kwargs)
+        return init_with_self_field
     return __init__
 
 
