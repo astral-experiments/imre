@@ -1,6 +1,6 @@
 # Concrete-layout comparisons
 
-The [recorded comparison and profiles](results/2026-10-18-concrete-layouts.md)
+The [recorded comparison and profiles](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/results/2026-10-18-concrete-layouts.md)
 publish the final measurements, raw samples, build provenance, and validation.
 
 `layout_benchmark.py` compares three unchanged applications independently:
