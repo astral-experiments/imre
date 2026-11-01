@@ -567,12 +567,6 @@ pub extern "C" fn imre_stdio_init() {
     prepare_stdio(false, None);
 }
 
-/// Ignore Python environment settings for an isolated command without changing os.environ.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_isolated_init() {
-    prepare_stdio(true, None);
-}
-
 /// Initialize streams with the effective flags of a native Python command.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_stdio_command_init(isolated: u32, utf8: u32) {
