@@ -13,6 +13,7 @@ pub(in crate::dynamic) const METHODS: &[&str] = &[
     "read",
     "readline",
     "readable",
+    "readinto",
     "writable",
     "seekable",
     "isatty",
@@ -288,16 +289,23 @@ pub(super) fn method(
     let args = &args[1..];
     let arity = match name {
         "read" => 0..=1,
-        "write" => 1..=1,
+        "write" | "readinto" => 1..=1,
         "seek" => 1..=2,
         "__exit__" => 3..=3,
         _ => 0..=0,
     };
     if !arity.contains(&args.len()) || !kwargs.is_empty() {
-        return Err(Error::new(
-            "TypeError",
-            format!("unsupported arguments to BufferedRandom.{name}"),
-        ));
+        let count = args.len();
+        let message = match name {
+            "readinto" if !kwargs.is_empty() => {
+                format!("BufferedRandom.{name}() takes no keyword arguments")
+            }
+            "readinto" => {
+                format!("BufferedRandom.readinto() takes exactly one argument ({count} given)")
+            }
+            _ => format!("unsupported arguments to BufferedRandom.{name}"),
+        };
+        return Err(Error::new("TypeError", message));
     }
     match name {
         "read" => {
@@ -307,6 +315,27 @@ pub(super) fn method(
             };
             let bytes = owner.borrow_mut().read_size(&size)?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
+        }
+        "readinto" => {
+            let target = args[0];
+            let storage = ctx.scalar_value(target);
+            let Value::ByteArray(bytes) = ctx.heap.get_mut(storage) else {
+                let kind = if target == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(target)
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!("readinto() argument must be read-write bytes-like object, not {kind}"),
+                ));
+            };
+            let mut file = owner.borrow_mut();
+            if file.closed() {
+                return Err(Error::new("ValueError", "readinto of closed file"));
+            }
+            let count = file.read_into(bytes)?;
+            Ok(ctx.int(count as i64))
         }
         "readline" => {
             let bytes = owner.borrow_mut().read_line_bytes()?;
