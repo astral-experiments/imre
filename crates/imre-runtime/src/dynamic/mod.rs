@@ -1571,16 +1571,12 @@ impl Context {
                 break;
             }
         }
-        if name == "Ellipsis" {
-            return Ok(value::ELLIPSIS);
-        }
-        if name == "NotImplemented" {
-            return Ok(value::NOT_IMPLEMENTED);
-        }
-        if builtins::is_builtin(name) {
-            return Ok(self.builtin(name));
-        }
-        Err(self.missing_binding(origin, scope, name))
+        let builtins = self.default_source_builtins()?;
+        let key = self.heap.code_name(name);
+        let (_, index) = self.find_dictionary_key(builtins, key, None)?;
+        index
+            .map(|index| self.stored_entries(builtins)[index].1)
+            .ok_or_else(|| self.missing_binding(origin, scope, name))
     }
     /// Resolve the factory in the mapping payload of an exact or derived defaultdict.
     fn defaultdict_factory(&self, object: Id) -> Option<Id> {
@@ -1936,6 +1932,16 @@ impl Context {
             self.text(name.rsplit_once('.').map_or("", |(pkg, _)| pkg))
         };
         self.bind(scope, "__package__", package);
+        if name == "builtins" {
+            self.install_builtins(scope);
+        } else if source.is_some() {
+            let builtins = if name == "__main__" {
+                self.module("builtins")?
+            } else {
+                self.default_source_builtins()?
+            };
+            self.bind(scope, "__builtins__", builtins);
+        }
         let origin = source.as_ref().and_then(|(path, _)| {
             if locations.contains(path) {
                 self.bind(scope, "__file__", NONE);

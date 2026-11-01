@@ -1281,26 +1281,35 @@ impl Context {
         }))
     }
 
-    fn default_source_builtins(&mut self) -> Result<Id> {
+    /// Populate the public module with the same native objects used by compiled calls.
+    pub(super) fn install_builtins(&mut self, scope: Id) {
+        for (name, value) in [
+            ("None", NONE),
+            ("False", value::FALSE),
+            ("True", value::TRUE),
+            ("__debug__", value::TRUE),
+            ("Ellipsis", value::ELLIPSIS),
+            ("NotImplemented", value::NOT_IMPLEMENTED),
+        ] {
+            self.bind(scope, name, value);
+        }
+        for name in builtins::names() {
+            let value = self.builtin(name);
+            self.bind(scope, name, value);
+        }
+        let dict = self.module_globals(scope);
+        // Reimporting an evicted module leaves existing frames' builtins intact.
+        self.source_builtins.get_or_insert(dict);
+    }
+
+    pub(super) fn default_source_builtins(&mut self) -> Result<Id> {
         if let Some(dict) = self.source_builtins {
             return Ok(dict);
         }
-        let name = self.text("__name__");
-        let module = self.text("builtins");
-        let ellipsis = self.text("Ellipsis");
-        let not_implemented = self.text("NotImplemented");
-        let dict = self.dict(vec![
-            (name, module),
-            (ellipsis, value::ELLIPSIS),
-            (not_implemented, value::NOT_IMPLEMENTED),
-        ]);
-        for name in builtins::names() {
-            let k = self.text(name);
-            let v = self.builtin(name);
-            self.put_item(dict, k, v)?;
-        }
-        self.source_builtins = Some(dict);
-        Ok(dict)
+        self.module("builtins")?;
+        Ok(self
+            .source_builtins
+            .expect("initialized builtins dictionary"))
     }
 
     pub(super) fn exec_source(
