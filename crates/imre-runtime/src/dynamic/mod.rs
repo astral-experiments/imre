@@ -1887,6 +1887,12 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
+            "_opcode" => {
+                // Imre emits native code and has no adaptive bytecode interpreter.
+                let disabled = self.int(0);
+                self.bind(scope, "ENABLE_SPECIALIZATION", disabled);
+                self.bind(scope, "ENABLE_SPECIALIZATION_FT", disabled);
+            }
             "_frozen_importlib" => {
                 let external = self.module("_frozen_importlib_external")?;
                 self.bind(scope, "_bootstrap_external", external);

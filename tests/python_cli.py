@@ -1090,6 +1090,10 @@ print(found.value)
 """,
         )
 
+        opcode = run(imre, "-B", "-c", 'op = __import__("".join(("_", "opcode")))\n'
+                     'print(op.ENABLE_SPECIALIZATION, op.ENABLE_SPECIALIZATION_FT)')
+        assert (opcode.returncode, opcode.stdout, opcode.stderr) == (0, b"0 0\n", b""), opcode
+
         diagnostic = run(imre, "-c", "print(__file__)")
         assert diagnostic.returncode != 0 and b"<string>" in diagnostic.stderr, (
             diagnostic.stderr
