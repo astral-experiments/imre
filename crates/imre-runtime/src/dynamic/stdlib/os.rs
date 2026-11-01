@@ -18,7 +18,7 @@ pub(in crate::dynamic) fn install_capabilities(
             "supports_dir_fd",
             &["lstat", "open", "rmdir", "stat", "unlink"][..],
         ),
-        ("supports_fd", &["stat"][..]),
+        ("supports_fd", &["listdir", "stat"][..]),
         ("supports_follow_symlinks", &["stat"][..]),
         ("supports_effective_ids", &[][..]),
     ] {
@@ -67,13 +67,132 @@ fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
 }
 
 /// Terminate the validated filesystem spelling before evaluating any later Python argument.
-fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
+pub(super) fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
     let encoded = match ctx.heap.get(ctx.scalar_value(path)) {
         Value::Bytes(bytes) => CString::new(bytes.as_slice()),
         Value::Str(_) | Value::SurrogateStr(_) => CString::new(ctx.encode_os_path(path)?),
         _ => unreachable!("fspath returns str or bytes"),
     };
     encoded.map_err(|_| Error::new("ValueError", nul_error))
+}
+
+/// Read directory entries in filesystem order, preserving the caller's bytes or text spelling.
+pub(super) fn listdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    use std::os::fd::{AsFd, FromRawFd, OwnedFd};
+
+    use rustix::fs::{Dir, Mode, OFlags, SeekFrom};
+
+    let count = args.len() + kwargs.len();
+    if count > 1 {
+        let keyword = if args.is_empty() { "keyword " } else { "" };
+        return Err(Error::new(
+            "TypeError",
+            format!("listdir() takes at most 1 {keyword}argument ({count} given)"),
+        ));
+    }
+    if let Some((key, _)) = kwargs.first()
+        && key != "path"
+    {
+        return Err(Error::new(
+            "TypeError",
+            format!("listdir() got an unexpected keyword argument '{key}'"),
+        ));
+    }
+    let input = super::option(args, 0, kwargs, "path")?.unwrap_or(NONE);
+    let spelling = matches!(
+        ctx.heap.get(ctx.scalar_value(input)),
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+    );
+    let fd = if input == NONE || spelling {
+        None
+    } else if let Some(index) = ctx.index_value(input)? {
+        if matches!(ctx.heap.get(input), Value::Bool(_)) {
+            crate::objects::runtime_warning(
+                "os",
+                "<imre stdlib>/os.py",
+                1,
+                "bool is used as a file descriptor",
+            )?;
+        }
+        Some(native::directory_fd_number(&index)?)
+    } else {
+        None
+    };
+
+    let filename;
+    let bytes;
+    let supplied_fd = fd.is_some_and(|fd| fd != -1);
+    let handle = if let Some(fd) = fd.filter(|&fd| fd != -1) {
+        filename = input;
+        bytes = false;
+        // SAFETY: fcntl checks arbitrary Python descriptor numbers before returning an owned fd.
+        let copy = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+        if copy < 0 {
+            return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
+        }
+        // SAFETY: a successful F_DUPFD_CLOEXEC created a fresh descriptor.
+        unsafe { OwnedFd::from_raw_fd(copy) }
+    } else {
+        let pathname = if input == NONE || fd == Some(-1) {
+            filename = NONE;
+            bytes = false;
+            CString::from(c".")
+        } else {
+            filename = posixpath::path_arg(
+                ctx,
+                input,
+                "listdir: path should be string, bytes, os.PathLike, integer or None",
+            )?;
+            bytes = matches!(ctx.heap.get(ctx.scalar_value(filename)), Value::Bytes(_));
+            c_path(ctx, filename, "listdir: embedded null character in path")?
+        };
+        rustix::fs::open(
+            &*pathname,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .map_err(|e| directory_error(ctx, e, filename))?
+    };
+    // Keep the stream's fd open until the final rewind. A regular file's offset must not move.
+    if supplied_fd {
+        let stat = rustix::fs::fstat(&handle).map_err(|e| directory_error(ctx, e, filename))?;
+        if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::Directory {
+            return Err(directory_error(ctx, rustix::io::Errno::NOTDIR, filename));
+        }
+    }
+    let mut dir = Dir::new(handle).map_err(|e| directory_error(ctx, e, filename))?;
+    let mut names = Vec::new();
+    let read = (|| {
+        for entry in dir.by_ref() {
+            let entry = entry.map_err(|e| directory_error(ctx, e, filename))?;
+            let name = entry.file_name().to_bytes();
+            if name != b"." && name != b".." {
+                names.push(if bytes {
+                    ctx.alloc(Value::Bytes(name.to_vec()))
+                } else {
+                    ctx.text_codepoints(
+                        crate::objects::interpreter_stdlib::fsdecode(name).collect(),
+                    )
+                });
+            }
+        }
+        Ok(ctx.alloc(Value::List(names)))
+    })();
+    if supplied_fd && let Ok(fd) = dir.fd() {
+        let _ = rustix::fs::seek(fd.as_fd(), SeekFrom::Start(0));
+    }
+    read
+}
+
+/// Attach the filesystem-protocol spelling to errors arising after path conversion.
+fn directory_error(ctx: &mut Context, errno: rustix::io::Errno, filename: Id) -> Error {
+    let error = crate::objects::errno_error(errno.into()).into();
+    if filename == NONE {
+        error
+    } else {
+        ctx.with_errno_filename(error, filename)
+            .unwrap_or_else(|error| error)
+    }
 }
 
 /// SourceFileLoader obtains size and mtime in one following stat or fstat.

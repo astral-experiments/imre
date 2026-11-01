@@ -217,10 +217,12 @@ impl Transformer for Mangler<'_> {
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
             ast::Expr::Name(name) => self.remember(name.start(), &mut name.id),
-            ast::Expr::Attribute(attr) => self.rename(&mut attr.attr.id),
+            ast::Expr::Attribute(attr) => self.definition(&mut attr.attr),
             _ => {}
         }
-        transformer::walk_expr(self, expr);
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            transformer::walk_expr(self, expr)
+        });
     }
 
     fn visit_annotation(&self, expression: &mut ast::Expr) {

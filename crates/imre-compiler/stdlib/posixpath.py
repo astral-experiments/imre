@@ -1,11 +1,25 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 import os
-from _imre_posixpath import extension_start
-from genericpath import commonprefix, exists, getsize, isfile, islink
+from _imre_posixpath import (
+    extension_start, relative_parts as _relative_parts, realpath_loop as _realpath_loop,
+    realpath_parent as _realpath_parent, realpath_parts as _realpath_parts,
+    realpath_kind as _realpath_kind, realpath_readlink as _realpath_readlink,
+    realpath_notdir as _realpath_notdir,
+)
+from genericpath import ALLOW_MISSING, commonprefix, exists, getsize, isdir, isfile, islink
 
 
 def normcase(s):
     return os.fspath(s)
+
+
+def isabs(s):
+    """Test whether a path is absolute."""
+    s = os.fspath(s)
+    if type(s) is str:
+        # A filesystem string can contain surrogate-escaped bytes.
+        return s[:1] == "/"
+    return s.startswith(b"/" if isinstance(s, bytes) else "/")
 
 
 def splitdrive(p):
@@ -41,3 +55,94 @@ def splitext(p):
                 return p[:cut], p[cut:]
             start += 1
     return p, p[:0]
+
+
+def _relpath_absolute(path):
+    if not isabs(path):
+        use_bytes = isinstance(path, bytes)
+        cwd = os.getcwdb() if use_bytes else os.getcwd()
+        sep = b"/" if use_bytes else "/"
+        # The second startswith is the one performed by join(cwd, path).
+        if not isabs(path):
+            path = cwd + path if cwd[-1:] == sep else cwd + (sep + path)
+    return os.path.normpath(path)
+
+
+def relpath(path, start=None):
+    """Return a relative version of a path."""
+    path = os.fspath(path)
+    if not path:
+        raise ValueError("no path specified")
+    use_bytes = isinstance(path, bytes)
+    if start is None:
+        start = b"." if use_bytes else "."
+    else:
+        start = os.fspath(start)
+    start = _relpath_absolute(start)
+    if isinstance(start, bytes) != use_bytes:
+        raise TypeError("Can't mix strings and bytes in path components")
+    return _relative_parts(_relpath_absolute(path), start)
+
+
+# Component traversal and symlink cache follow CPython 3.14.5 Lib/posixpath.py.
+def realpath(filename, *, strict=False):
+    """Return the canonical path, eliminating symbolic links."""
+    filename = os.fspath(filename)
+    if isinstance(filename, bytes):
+        sep, curdir, pardir = b'/', b'.', b'..'
+        getcwd = os.getcwdb
+    else:
+        sep, curdir, pardir = '/', '.', '..'
+        getcwd = os.getcwd
+    if strict is ALLOW_MISSING:
+        ignored_error = FileNotFoundError
+        strict = True
+    elif strict:
+        ignored_error = ()
+    else:
+        ignored_error = OSError
+    rest = _realpath_parts(filename)[::-1] if type(filename) in (str, bytes) else filename.split(sep)[::-1]
+    remaining = len(rest)
+    path = sep if isabs(filename) else getcwd()
+    seen = {}
+    while remaining:
+        name = rest.pop()
+        if name is None:
+            seen[rest.pop()] = path
+            continue
+        remaining -= 1
+        if not name or name == curdir:
+            continue
+        if name == pardir:
+            path = _realpath_parent(path)
+            continue
+        newpath = path + name if path == sep else path + sep + name
+        try:
+            kind = _realpath_kind(newpath)
+            if kind != "link":
+                if strict and remaining and kind != "dir":
+                    _realpath_notdir(newpath)
+                path = newpath
+                continue
+            if newpath in seen:
+                cached = seen[newpath]
+                if cached is not None:
+                    path = cached
+                    continue
+                if strict:
+                    _realpath_loop(newpath)
+                path = newpath
+                continue
+            target = _realpath_readlink(newpath)
+        except ignored_error:
+            path = newpath
+            continue
+        if isabs(target):
+            path = sep
+        seen[newpath] = None
+        rest.append(newpath)
+        rest.append(None)
+        parts = _realpath_parts(target)
+        rest.extend(parts[::-1])
+        remaining += len(parts)
+    return path

@@ -262,7 +262,7 @@ impl Context {
         &mut self,
         fullname: &str,
         original: &str,
-        filesystem: bool,
+        for_resource: bool,
     ) -> Result<Id> {
         let key = self.text(fullname);
         if let Some(module) = self.registered_module(key)? {
@@ -282,7 +282,7 @@ impl Context {
                                 Value::Module { origin: None, .. }
                             )) =>
                 {
-                    if filesystem {
+                    if for_resource {
                         return Ok(NONE);
                     }
                     Err(Error::new(
@@ -303,7 +303,7 @@ impl Context {
         let (child, search, top_level) =
             if let Some((parent_name, child)) = fullname.rsplit_once('.') {
                 let parent = self
-                    .find_module(parent_name, filesystem)?
+                    .find_module(parent_name, true)?
                     .ok_or_else(|| Self::missing_module(parent_name))?;
                 let path = match self.lookup_attr(parent, "__path__") {
                     Err(cause) if self.is_attribute_error(&cause) => {
@@ -328,7 +328,7 @@ impl Context {
                 (fullname, self.sys_path, true)
             };
         if stdlib::is_module(fullname) || self.is_frozen(fullname) {
-            if filesystem {
+            if for_resource {
                 return Ok(NONE);
             }
             return Err(Error::new(
@@ -337,19 +337,13 @@ impl Context {
             ));
         }
         let mut locations = Vec::new();
-        let Some((path, body)) = self.source_on_path(
-            fullname,
-            child,
-            search,
-            top_level,
-            filesystem,
-            &mut locations,
-        )?
+        let Some((path, body)) =
+            self.source_on_path(fullname, child, search, top_level, true, &mut locations)?
         else {
             return Ok(NONE);
         };
         if locations.contains(&path) {
-            if filesystem {
+            if for_resource {
                 return Ok(NONE);
             }
             return Err(Error::new(

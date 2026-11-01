@@ -333,6 +333,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "rfind",
     "rsplit",
     "rstrip",
+    "startswith",
     "translate",
 ];
 
@@ -402,6 +403,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
+        Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
@@ -912,6 +914,25 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "generator" if method == "send" => {
+                let [generator, value] = args else {
+                    return Err(type_error("generator.send() takes exactly one argument"));
+                };
+                if !kwargs.is_empty() {
+                    return Err(type_error("generator.send() takes no keyword arguments"));
+                }
+                ctx.generator_send(*generator, *value)
+            }
+            "generator" if method == "throw" => {
+                positional(name, kwargs)?;
+                arity(name, args, 2, 4)?;
+                ctx.generator_throw(args[0], &args[1..])
+            }
+            "generator" if method == "close" => {
+                positional(name, kwargs)?;
+                arity(name, args, 1, 1)?;
+                ctx.generator_close(args[0])
+            }
             "object" | "int" | "float" | "str" if method == "__format__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 2)?;

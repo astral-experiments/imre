@@ -71,6 +71,25 @@ def current():
         raise AssertionError("missing file unexpectedly had a size")
     assert os.path.exists is posixpath.exists is genericpath.exists
     assert os.path.isfile is posixpath.isfile is genericpath.isfile
+    assert os.listdir is posix.listdir
+    module_dir = os.path.dirname(__file__) or "."
+    module_file = os.path.basename(__file__)
+    assert os.path.realpath(__file__, strict=True) == os.path.realpath(__file__)
+    assert os.path.realpath(os.fsencode(__file__), strict=os.path.ALLOW_MISSING) == os.fsencode(os.path.realpath(__file__))
+    assert module_file in os.listdir(Path(module_dir))
+    assert os.fsencode(module_file) in os.listdir(Path(os.fsencode(module_dir)))
+    assert os.path.isabs(Path(b"/test"))
+    assert os.path.relpath(Path("/a/./b"), start="/a/c") == "../b"
+    assert os.path.relpath(Path(b"/a/\xff"), start=b"/a") == b"\xff"
+    try:
+        os.listdir(__file__)
+    except NotADirectoryError as error:
+        assert error.filename == __file__
+    else:
+        raise AssertionError("listing a file must fail")
+    assert os.path.isdir is posixpath.isdir is genericpath.isdir
+    assert os.path.isdir(Path(b".")) and not os.path.isdir(Path("missing\0dir"))
+    assert not os.path.isdir(-1)
     assert genericpath.exists.__module__ == "genericpath"
     assert os.path.exists(Path(b".")) and not os.path.exists(b"imre\0missing")
     assert not os.path.exists(-1)

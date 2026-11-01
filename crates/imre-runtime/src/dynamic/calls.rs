@@ -591,6 +591,7 @@ impl Context {
                     matches!(
                         name.as_str(),
                         "ast.AST.__init__"
+                            | "bytes.startswith"
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
@@ -1666,6 +1667,11 @@ impl Context {
                     }
                     _ => {}
                 }
+            }
+            Value::Native(ref class)
+                if class == "generator" && matches!(name, "send" | "throw" | "close") =>
+            {
+                return Ok(self.builtin(&format!("generator.{name}")));
             }
             Value::Native(ref class) if class == "staticmethod" && name == "__get__" => {
                 return Ok(self.builtin("staticmethod.__get__"));
@@ -3629,6 +3635,7 @@ impl Context {
                         Some(
                             "str"
                                 | "enumerate"
+                                | "generator"
                                 | "dict"
                                 | "list"
                                 | "map"

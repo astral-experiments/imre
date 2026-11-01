@@ -46,6 +46,7 @@ impl Context {
             code,
             scope,
             iterators: Vec::new(),
+            protected: Vec::new(),
             running: false,
             offset: Some(0),
         }))
@@ -89,7 +90,10 @@ impl Context {
             unreachable!()
         };
         *running = false;
-        if !matches!(result, Ok(Some(_))) {
+        if matches!(result, Ok(Some(_))) {
+            // Native comprehension code keeps its own loop cursor in the scope.
+            *offset = Some(1);
+        } else {
             *offset = None;
             *owner = FrameOwner::Module(NONE);
         }

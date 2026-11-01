@@ -760,6 +760,7 @@ pub(super) enum Value {
         code: Id,
         scope: Id,
         iterators: Vec<Id>,
+        protected: Vec<super::source_code::FinallyBlock>,
         offset: Option<usize>,
         running: bool,
     },
@@ -1132,10 +1133,16 @@ impl Value {
                 code,
                 scope,
                 iterators,
+                protected,
                 ..
             } => {
                 visit.extend([*code, *scope, owner.root()]);
                 visit.extend(iterators);
+                visit.extend(
+                    protected
+                        .iter()
+                        .filter_map(super::source_code::FinallyBlock::root),
+                );
             }
             Self::Class {
                 scope, ancestors, ..
@@ -2333,6 +2340,13 @@ impl Heap {
         }
     }
 
+    /// Running generators have a live frame. Rearm cleanup only if they suspend again.
+    pub(super) fn disarm_generator_finalizer(&mut self, id: Id) {
+        if self.slots[id as usize].finalization == Finalization::Pending {
+            self.take_finalizer(id, false);
+        }
+    }
+
     pub(super) fn has_ordinary_finalizers(&self) -> bool {
         !self.ordinary_finalizers.is_empty()
     }
@@ -2359,7 +2373,7 @@ impl Heap {
         let index = self
             .ordinary_finalizers
             .iter()
-            .position(|&owner| owner == id)
+            .rposition(|&owner| owner == id)
             .unwrap();
         self.ordinary_finalizers.swap_remove(index);
         self.slots[id as usize].finalization = if found {
@@ -2453,6 +2467,11 @@ impl Heap {
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+    }
+
+    /// A discarded owner or the allocation threshold has requested a sweep.
+    pub(super) fn collection_requested(&self) -> bool {
+        self.collect_next_statement || self.cycles_due()
     }
 
     /// Collect when a discarded owner or the heap threshold requests a sweep.

@@ -1085,7 +1085,7 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "find" | "rfind" | "count") | ("bytes", "rfind")
+        ("str", "find" | "rfind" | "count") | ("bytes", "rfind" | "startswith")
     ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
@@ -1127,18 +1127,7 @@ pub(super) fn method(
         let start = bound(args.get(1))?;
         let end = bound(args.get(2))?;
         if owner == "bytes" {
-            let needle = if let Some(index) = ctx.index_value(needle)? {
-                vec![
-                    index
-                        .to_i64()
-                        .and_then(|n| u8::try_from(n).ok())
-                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?,
-                ]
-            } else {
-                ctx.bytes_like(needle)?.to_vec()
-            };
-            let value = ctx.bytes_like(receiver)?;
-            let len = value.len() as i64;
+            let len = ctx.bytes_like(receiver)?.len() as i64;
             let index = |n: &crate::Int| {
                 let n = n.to_i64().unwrap_or(if n.big().is_negative() {
                     i64::MIN
@@ -1153,6 +1142,38 @@ pub(super) fn method(
             };
             let start = start.as_ref().map_or(0, index) as usize;
             let end = end.as_ref().map_or(len, index).min(len) as usize;
+            if name == "startswith" {
+                let tuple = ctx.tuple_items(needle)?;
+                let candidates = tuple.as_deref().unwrap_or(&args[..1]);
+                let value = ctx.bytes_like(receiver)?.get(start..end);
+                for &candidate in candidates {
+                    let prefix = ctx.bytes_like(candidate).map_err(|error| {
+                        if tuple.is_some() {
+                            error
+                        } else {
+                            type_error(format!(
+                                "startswith first arg must be bytes or a tuple of bytes, not {}",
+                                ctx.type_name(candidate)
+                            ))
+                        }
+                    })?;
+                    if value.is_some_and(|slice| slice.starts_with(prefix)) {
+                        return Ok(TRUE);
+                    }
+                }
+                return Ok(FALSE);
+            }
+            let needle = if let Some(index) = ctx.index_value(needle)? {
+                vec![
+                    index
+                        .to_i64()
+                        .and_then(|n| u8::try_from(n).ok())
+                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?,
+                ]
+            } else {
+                ctx.bytes_like(needle)?.to_vec()
+            };
+            let value = ctx.bytes_like(receiver)?;
             let offset = value
                 .get(start..end)
                 .and_then(|v| memchr::memmem::rfind(v, &needle));
