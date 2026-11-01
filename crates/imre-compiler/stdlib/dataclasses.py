@@ -43,6 +43,7 @@ class _FIELD_BASE:
 
 
 _FIELD = _FIELD_BASE('_FIELD')
+_FIELD_CLASSVAR = _FIELD_BASE('_FIELD_CLASSVAR')
 _FIELD_INITVAR = _FIELD_BASE('_FIELD_INITVAR')
 _EMPTY_METADATA = _metadata({})
 
@@ -287,28 +288,30 @@ def _initializer(cls, data, positional, qualname, frozen):
 
 def _annotation_marker(cls, annotation):
     # Like CPython's _is_type, resolve string markers in the defining module.
+    owner = None
     if isinstance(annotation, str):
-        name = annotation.partition('[')[0].strip()
+        import re
+        match = re.match(r'^(?:\s*(\w+)\s*\.)?\s*(\w+)', annotation)
         module = _loaded_module(cls.__module__)
-        if module is None:
+        if module is None or match is None:
             return None
-        owner, dot, attr = name.partition('.')
-        if dot:
-            owner = getattr(module, owner.strip(), None)
+        qualifier, name = match.groups()
+        if qualifier is not None:
+            owner = getattr(module, qualifier, None)
             if owner is None:
                 return None
-            if owner is _loaded_module('typing') and attr.strip() == 'ClassVar':
-                return 'ClassVar'
-            annotation = getattr(owner, attr.strip(), None)
-        else:
-            annotation = getattr(module, name, None)
-    if annotation is KW_ONLY:
-        return 'KW_ONLY'
-    if annotation is InitVar or isinstance(annotation, InitVar):
-        return 'InitVar'
+            module = owner
+        annotation = getattr(module, name, None)
+    if owner is None or owner is _loaded_module('dataclasses'):
+        if annotation is KW_ONLY:
+            return 'KW_ONLY'
+        if annotation is InitVar or isinstance(annotation, InitVar):
+            return 'InitVar'
     typing = _loaded_module('typing')
+    if owner is not None and owner is not typing:
+        return None
     classvar = getattr(typing, 'ClassVar', MISSING)
-    if classvar is not MISSING and (annotation is classvar or getattr(annotation, '__origin__', None) is classvar):
+    if classvar is not MISSING and (annotation is classvar or typing.get_origin(annotation) is classvar):
         return 'ClassVar'
     return None
 
@@ -336,18 +339,21 @@ def _decorate(cls, params):
                 raise TypeError(f'{name!r} is KW_ONLY, but KW_ONLY has already been specified')
             seen_kw_only = kw_only = True
             continue
-        if marker == 'ClassVar':
-            raise NotImplementedError(f'boxed dataclass {marker} fields')
         default = getattr(cls, name, MISSING)
         f = default if isinstance(default, Field) else field(default=default)
-        if marker == 'InitVar':
+        if marker in ('ClassVar', 'InitVar'):
             if f.default_factory is not MISSING:
                 raise TypeError(f'field {name} cannot have a default factory')
-            f._field_type = _FIELD_INITVAR
+            f._field_type = _FIELD_CLASSVAR if marker == 'ClassVar' else _FIELD_INITVAR
         else:
             if isinstance(f.default, (list, dict, set, bytearray)) or getattr(type(f.default), '__hash__', MISSING) is None:
                 raise ValueError(f"mutable default {type(f.default)!r} for field {name} is not allowed: use default_factory")
             f._field_type = _FIELD
+        if f._field_type is _FIELD_CLASSVAR:
+            if f.kw_only is not MISSING:
+                raise TypeError(f'field {name} is a ClassVar but specifies kw_only')
+        elif f.kw_only is MISSING:
+            f.kw_only = kw_only
         if isinstance(default, Field):
             if f.default is MISSING:
                 delattr(cls, name)
@@ -355,13 +361,12 @@ def _decorate(cls, params):
                 setattr(cls, name, f.default)
         f.name = name
         f.type = annotation
-        if f.kw_only is MISSING:
-            f.kw_only = kw_only
         data[name] = f
     for name, value in own.items():
         if isinstance(value, Field) and name not in annotations:
             raise TypeError(f'{name!r} is a field but has no type annotation')
-    positional = [f for f in data.values() if f.init and not f.kw_only]
+    init_fields = {name: f for name, f in data.items() if f._field_type is not _FIELD_CLASSVAR}
+    positional = [f for f in init_fields.values() if f.init and not f.kw_only]
     cls.__dataclass_fields__ = data
     cls.__dataclass_params__ = params
 
@@ -378,7 +383,7 @@ def _decorate(cls, params):
                 last_default = f.name
             elif last_default is not None:
                 raise TypeError(f'non-default argument {f.name!r} follows default argument {last_default!r}')
-        install('__init__', _initializer(cls, data, positional, cls.__qualname__ + '.__init__', params.frozen))
+        install('__init__', _initializer(cls, init_fields, positional, cls.__qualname__ + '.__init__', params.frozen))
     if '__replace__' not in own:
         cls.__replace__ = _replace
     if params.match_args and '__match_args__' not in own:
