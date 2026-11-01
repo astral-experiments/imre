@@ -245,6 +245,7 @@ impl<'a> Visitor<'a> for Imports {
     fn visit_expr(&mut self, e: &'a Expr) {
         if matches!(e, Expr::Name(n) if n.id == "__import__" && n.ctx == ast::ExprContext::Load) {
             self.uses_import_builtin = true;
+            self.add(0, "importlib");
         }
         // A resource lookup can be the first operation to load its package.
         if let Expr::Call(call) = e

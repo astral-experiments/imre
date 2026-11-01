@@ -1,10 +1,17 @@
 """Filesystem predicates shared by the POSIX path modules."""
-from _imre_posixpath import exists as _exists, isfile as _isfile, islink as _islink
+from _imre_posixpath import exists as _exists, isdir as _isdir, isfile as _isfile, islink as _islink
 
 
 def exists(path):
     try:
         return _exists(path)
+    except (OSError, ValueError):
+        return False
+
+
+def isdir(path):
+    try:
+        return _isdir(path)
     except (OSError, ValueError):
         return False
 
@@ -44,6 +51,15 @@ def commonprefix(m):
         if c != s2[i]:
             return s1[:i]
     return s1
+
+
+@object.__new__
+class ALLOW_MISSING:
+    """Special value for use in realpath()."""
+    def __repr__(self):
+        return 'os.path.ALLOW_MISSING'
+    def __reduce__(self):
+        return self.__class__.__name__
 
 
 # os imports posixpath, which re-exports the functions above.

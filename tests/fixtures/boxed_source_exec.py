@@ -85,7 +85,126 @@ def syntax_members():
     print(str(error), str(error))
 
 
+def source_classes():
+    events = []
+    def mark(label):
+        events.append(("evaluate", label))
+        def apply(cls):
+            events.append(("apply", label, cls.__name__))
+            return cls
+        return apply
+    namespace = {"__name__": "disk_cases", "mark": mark, "events": events, "value": "global"}
+    code = compile("""class Base:
+    def label(self):
+        return 'base'
+
+@mark('outer')
+@mark('inner')
+class Case(Base):
+    'Source case.'
+    events.append(('body', value))
+    value = 'class'
+    def label(self):
+        self.__seen = value
+        return super().label(), self.__seen
+    def increment(self):
+        self.previous += 1
+    def nested(self):
+        class Child:
+            self.applied = True
+        return Child
+    @classmethod
+    def describe(cls):
+        return cls.__qualname__
+""", "disk_cases.py", "exec")
+    exec(code, namespace)
+    case = namespace["Case"]
+    assert events == [("evaluate", "outer"), ("evaluate", "inner"), ("body", "global"),
+                      ("apply", "inner", "Case"), ("apply", "outer", "Case")]
+    assert case.__doc__ == "Source case."
+    assert (case.__module__, case.__qualname__) == ("disk_cases", "Case")
+    assert case.label.__module__ == "disk_cases" and case.label.__qualname__ == "Case.label"
+    assert case.__static_attributes__ == ("__seen", "applied")
+    instance = case()
+    nested = instance.nested()
+    assert instance.applied and nested.__qualname__ == "Case.nested.<locals>.Child"
+    assert nested.__static_attributes__ == ()
+    instance.previous = 4
+    instance.increment()
+    assert instance.previous == 5
+    assert case().label() == ("base", "global")
+    assert case.describe() == "Case"
+    assert case.__firstlineno__ == 5
+    try:
+        deep_code = compile("class Deep:\n    total = 1" + "+1" * 8192, "deep_class.py", "exec")
+    except RecursionError:
+        pass
+    else:
+        deep = {}
+        exec(deep_code, deep)
+        assert deep["Deep"].total == 8193
+    old = object()
+    namespace["Broken"] = old
+    try:
+        exec(compile("class Broken:\n    events.append('started')\n    raise ValueError('class body')\n",
+                     "failure.py", "exec"), namespace)
+    except ValueError as error:
+        assert error.args == ("class body",)
+    else:
+        raise AssertionError("class body exception was lost")
+    assert namespace["Broken"] is old and events[-1] == "started"
+
+    def reject(cls):
+        events.append(cls.__name__)
+        raise LookupError("class decorator")
+    namespace["reject"] = reject
+    try:
+        exec(compile("@reject\nclass Broken:\n    events.append('decorated')\n", "failure.py", "exec"), namespace)
+    except LookupError as error:
+        assert error.args == ("class decorator",)
+    else:
+        raise AssertionError("class decorator exception was lost")
+    assert namespace["Broken"] is old and events[-2:] == ["decorated", "Broken"]
+
+
+def source_test_cases():
+    import types
+    import unittest
+
+    module = types.ModuleType("disk_cases")
+    visited = []
+    module.visited = visited
+    exec(compile("""import unittest
+
+class Cases(unittest.TestCase):
+    def setUp(self):
+        visited.append('setup')
+    def tearDown(self):
+        visited.append('teardown')
+    def test_pass(self):
+        visited.append('pass')
+        self.assertEqual(2 + 3, 5)
+    def test_fail(self):
+        visited.append('fail')
+        self.assertEqual(4, 5)
+    @unittest.skip('source method')
+    def test_skip(self):
+        raise AssertionError('skipped method executed')
+""", "disk_cases.py", "exec"), module.__dict__)
+    suite = unittest.TestLoader().loadTestsFromModule(module)
+    assert suite.countTestCases() == 3
+    result = unittest.TestResult()
+    suite.run(result)
+    assert result.testsRun == 3 and not result.wasSuccessful()
+    assert len(result.failures) == 1 and result.failures[0][0].id() == "disk_cases.Cases.test_fail"
+    assert len(result.skipped) == 1 and result.skipped[0][0].id() == "disk_cases.Cases.test_skip"
+    assert result.skipped[0][1] == "source method" and not result.errors
+    assert visited == ["setup", "fail", "teardown", "setup", "pass", "teardown"]
+
+
 def current():
+    source_classes()
+    source_test_cases()
     syntax_members()
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}

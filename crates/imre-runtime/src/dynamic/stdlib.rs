@@ -567,6 +567,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        ("os" | "posix", "listdir") if cfg!(unix) => ctx.builtin("posix.listdir"),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         ("os" | "posix", name) if os::is_descriptor_function(name) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -624,7 +625,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
-        | ("_imre_posixpath", "exists" | "extension_start" | "isfile" | "islink")
+        | (
+            "_imre_posixpath",
+            "exists" | "extension_start" | "isdir" | "isfile" | "islink" | "relative_parts"
+            | "realpath_parts" | "realpath_parent" | "realpath_kind" | "realpath_readlink"
+            | "realpath_notdir" | "realpath_loop",
+        )
         | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
@@ -1117,6 +1123,9 @@ pub(super) fn call(
         && os::is_descriptor_function(op)
     {
         return os::descriptor(ctx, op, args, kwargs);
+    }
+    if name == "posix.listdir" {
+        return os::listdir(ctx, args, kwargs);
     }
     if matches!(name, "posix.putenv" | "posix.unsetenv") {
         return os::change_environment(ctx, name, args, kwargs);

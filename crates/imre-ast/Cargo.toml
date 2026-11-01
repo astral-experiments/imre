@@ -10,6 +10,7 @@ license.workspace = true
 ruff_python_ast.workspace = true
 ruff_python_stdlib.workspace = true
 ruff_text_size.workspace = true
+stacker = "=0.1.25"
 unicode_names2 = "=1.3.0"
 
 [lints]

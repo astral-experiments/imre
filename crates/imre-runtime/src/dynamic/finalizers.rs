@@ -1,4 +1,4 @@
-use super::{Context, Id, Result};
+use super::{Context, Id, Result, Value};
 
 impl Context {
     /// A newly assigned class slot also applies to existing instances of subclasses.
@@ -26,7 +26,8 @@ impl Context {
     }
 
     pub(super) fn dispatch_finalizer(&mut self, owner: Id) {
-        let found = self.slot(owner, "__del__").is_some();
+        let generator = matches!(self.heap.get(owner), Value::Generator { .. });
+        let found = generator || self.slot(owner, "__del__").is_some();
         self.heap.take_finalizer(owner, found);
         if !found {
             return;
@@ -41,12 +42,16 @@ impl Context {
                 self.heap.keep(root);
             }
         }
-        let result = self.bound_slot(owner, "__del__").and_then(|method| {
-            if let Some(method) = method {
-                self.call(method, Vec::new(), Vec::new())?;
-            }
-            Ok(())
-        });
+        let result = if generator {
+            self.generator_close(owner).map(|_| ())
+        } else {
+            self.bound_slot(owner, "__del__").and_then(|method| {
+                if let Some(method) = method {
+                    self.call(method, Vec::new(), Vec::new())?;
+                }
+                Ok(())
+            })
+        };
         if let Err(error) = result {
             eprintln!("Exception ignored while calling __del__: {error}");
         }
