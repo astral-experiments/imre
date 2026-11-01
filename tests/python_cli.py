@@ -1438,6 +1438,7 @@ def report(text):
             "boxed_slice.py",
             "boxed_binascii.py",
             "boxed_zlib.py",
+            "boxed_hashlib_names.py",
             "boxed_standard_base64.py",
             "boxed_bytes_separators.py",
             "boxed_struct.py",
@@ -1543,6 +1544,15 @@ except ImportError:
             "print(h.name, h.block_size, h.digest_size, list(h.digest()), h.hexdigest())\n"
             "print(list(h.digest()), list(copy.digest()), factory().hexdigest())\n"
             "print(hashlib.sha1(usedforsecurity=False).hexdigest() == factory().hexdigest())\n"
+            "class Input(bytearray): pass\nclass Suffix(bytes): pass\n"
+            "source = Input(b'ab')\nh = hashlib.sha256(string=source)\n"
+            "source[0] = 99\nclone = h.copy()\nh.update(Suffix(b'c'))\n"
+            "print(h.hexdigest(), clone.hexdigest(), list(h.digest()))\n"
+            "for args, kw, message in [((b'a',), {'data': b'b', '_': 1}, 'given by name'), "
+            "((), {'data': b'a', 'string': b'b', '_': 1}, 'unexpected keyword argument'), "
+            "((b'a',), {'string': b'b'}, 'mutually exclusive')]:\n"
+            "    try:\n        hashlib.sha1(*args, **kw)\n"
+            "    except TypeError as exc:\n        print(message in str(exc))\n"
             "try:\n    hashlib.sha1(b'a', data=b'b', usedforsecurity=Flag())\n"
             "except TypeError:\n    print('duplicate data')\n"
             "try:\n    hashlib.sha1('bad', usedforsecurity=Flag())\n"

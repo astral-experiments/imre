@@ -17,6 +17,23 @@ pub(crate) enum State {
 }
 
 impl State {
+    pub(crate) const ALGORITHMS: [&str; 2] = ["sha1", "sha256"];
+
+    pub(crate) fn constructor(name: &str) -> Result<fn(&[u8]) -> Self> {
+        let matches =
+            |aliases: &[&str]| aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias));
+        if matches(&["sha1", "sha-1", "ssl3-sha1", "1.3.14.3.2.26"]) {
+            Ok(Self::sha1)
+        } else if matches(&["sha256", "sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"]) {
+            Ok(Self::sha256)
+        } else {
+            Err(Error::new(
+                Kind::ValueError,
+                format!("unsupported hash type {name}"),
+            ))
+        }
+    }
+
     pub(crate) fn sha1(data: &[u8]) -> Self {
         Self::Sha1(Sha1::new_with_prefix(data))
     }
@@ -71,17 +88,7 @@ fn handle(state: State) -> Result<*const Object> {
 pub unsafe extern "C" fn imre_hash_new(name: *const Str, data: *const Bytes) -> *const Object {
     // SAFETY: both operands remain owned for this operation.
     let (name, data) = unsafe { (&*name, &*data) };
-    let matches = |aliases: &[&str]| aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias));
-    let result = if matches(&["sha1", "sha-1", "ssl3-sha1", "1.3.14.3.2.26"]) {
-        handle(State::sha1(data))
-    } else if matches(&["sha256", "sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"]) {
-        handle(State::Sha256(Sha256::new_with_prefix(data)))
-    } else {
-        Err(Error::new(
-            Kind::ValueError,
-            format!("unsupported hash type {name}"),
-        ))
-    };
+    let result = State::constructor(name).and_then(|create| handle(create(data)));
     finish(result, ptr::null())
 }
 
@@ -94,7 +101,7 @@ pub extern "C" fn imre_hash_algorithms_available() -> *const Object {
         let set = match slot {
             Some(set) => set,
             None => slot.insert(super::mappings::Set::names(
-                ["sha1", "sha256"].into_iter(),
+                State::ALGORITHMS.into_iter(),
                 false,
             )?),
         };

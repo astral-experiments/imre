@@ -45,8 +45,13 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     let factory = match ctx.heap.get(digest) {
         Value::Str(name) => {
             let name = name.to_ascii_lowercase();
-            super::attribute(ctx, "hashlib", &name)
-                .map_err(|_| Error::new("ValueError", format!("unsupported hash type {name}")))?
+            if !crate::objects::HashState::ALGORITHMS.contains(&name.as_str()) {
+                return Err(Error::new(
+                    "ValueError",
+                    format!("unsupported hash type {name}"),
+                ));
+            }
+            super::attribute(ctx, "hashlib", &name)?
         }
         Value::Module { .. } => ctx.lookup_attr(digest, "new")?,
         _ => digest,
