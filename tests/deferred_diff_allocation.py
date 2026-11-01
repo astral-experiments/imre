@@ -31,6 +31,7 @@ def check(args, directory):
     cases += [(mode, shape, "A", "B") for mode in ("packed-slice", "packed-repeat")
               for shape in ("empty", "short")]
     cases += [("dict-copy-owners", shape, "A", "B") for shape in ("empty", "full")]
+    cases.append(("digit-sums", "short", "９０７３６０４９２７８３９２０４", "B"))
     passed = 0
     for level in args.opt_levels:
         exe = directory / f"deferred-diff-O{level}"
@@ -44,6 +45,8 @@ def check(args, directory):
             assert control.stdout == expected, (level, argv, control)
             count = int(re.fullmatch(rb"observed (\d+)\n", control.stderr)[1])
             assert count > 0, (level, argv, "no allocations observed")
+            if argv[0] == "digit-sums":
+                assert count == 2, (level, argv, "digit buffer and list owner", count)
             # repr's output buffer is covered separately; target its first row allocation.
             if argv[0] in ("packed-slice", "packed-repeat"):
                 # Packed storage is allocated just before the enclosing list owner.
@@ -65,7 +68,7 @@ def check(args, directory):
                 indices = (count - 1, count)
             else:
                 indices = range(1, count + 1)
-            refusal = b"refused\n" if argv[0] == "deepcopy-graph" else b"refused\nMemoryError()\n"
+            refusal = b"refused\n" if argv[0] in ("deepcopy-graph", "digit-sums") else b"refused\nMemoryError()\n"
             retry = expected.replace(b"armed\n", b"armed\n" + refusal, 1)
             for at in indices:
                 env["IMRE_DIFF_FAIL_N"] = str(at)

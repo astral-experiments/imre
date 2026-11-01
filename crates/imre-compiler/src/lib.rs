@@ -3,6 +3,7 @@ mod borrows;
 mod callables;
 mod classes;
 mod contracts;
+mod digit_sums;
 mod dynamic;
 mod effects;
 use imre_regex as fixed_regex;
@@ -485,6 +486,8 @@ fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);
     verify_after(module, "tuple scalarization")?;
+    digit_sums::specialize(module);
+    verify_after(module, "digit reduction fusion")?;
     list_bounds::specialize(module);
     verify_after(module, "list bounds specialization")?;
     list_specialization::specialize(module);

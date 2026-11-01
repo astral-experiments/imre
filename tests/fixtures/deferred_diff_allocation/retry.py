@@ -74,7 +74,31 @@ def check_dict_copy(shape: str) -> None:
     print(source)
 
 
+def alternating_sum(text: str) -> int:
+    digits = list(map(int, text))
+    right = sum(digits[-1::-2])
+    left = sum(digits[-2::-2])
+    return right + left
+
+
 def check(mode: str, shape: str) -> None:
+    if mode == "digit-sums":
+        text = argv[3]
+        # Keep both cached list headers occupied so the fallback needs a fresh owner.
+        first_header = [1]
+        second_header = [2]
+        print("armed")
+        for attempt in range(2):
+            try:
+                number = alternating_sum(text)
+                print("ok")
+                print(number)
+                print(first_header)
+                print(second_header)
+                return
+            except MemoryError:
+                print("refused")
+        raise RuntimeError("digit reduction did not recover")
     if mode == "dict-copy-owners":
         check_dict_copy(shape)
         return

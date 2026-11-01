@@ -523,7 +523,10 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
     // including an invalid ASCII byte's unpublished conversion, fit immediate
     // Int storage and own no allocation. Errors leave length zero for cleanup.
     unsafe { values.set_len(length) };
-    crate::new_list(values)
+    match crate::try_new_list(values) {
+        Ok(list) => crate::ListOwner::into_raw(list),
+        Err(_) => Error::allocation().returning(std::ptr::null()),
+    }
 }
 
 #[cfg(test)]
