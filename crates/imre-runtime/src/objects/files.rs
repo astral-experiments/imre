@@ -104,6 +104,11 @@ impl FileState {
     /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
     pub(crate) fn temporary(directory: Option<&str>) -> Result<Self> {
         let file = super::tempdirs::anonymous_file(directory)?;
+        Self::buffered_random(file)
+    }
+
+    /// Adopt an exclusively owned descriptor without reopening its pathname.
+    pub(crate) fn buffered_random(file: File) -> Result<Self> {
         let fd = file.as_raw_fd();
         let capacity = crate::text_output::binary_capacity(
             file.metadata().map_err(errno_error)?.blksize().into(),

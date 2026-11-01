@@ -1,0 +1,102 @@
+//! The boxed types.SimpleNamespace class and its Python-visible descriptors.
+
+use super::{Context, Error, Id, Result, Value};
+
+pub(super) const CLASS: &str = "types.SimpleNamespace";
+
+pub(super) fn class(ctx: &mut Context) -> Result<Id> {
+    if let Some(&class) = ctx.classes.get(CLASS) {
+        return Ok(class);
+    }
+    let scope = ctx.scope("types", None);
+    let module = ctx.text("types");
+    ctx.bind(scope, "__module__", module);
+    let name = ctx.text("SimpleNamespace");
+    ctx.bind(scope, "__qualname__", name);
+    for slot in ["__init__", "__repr__", "__eq__", "__ne__"] {
+        let method = ctx.builtin(&format!("{CLASS}.{slot}"));
+        ctx.bind(scope, slot, method);
+    }
+    let get = ctx.builtin("types.SimpleNamespace.__dict__");
+    let set = ctx.builtin("types.SimpleNamespace.readonly_dict");
+    let descriptor = ctx.alloc(Value::GetSetDescriptor {
+        get,
+        set: Some(set),
+        owner: CLASS,
+        name: "__dict__",
+    });
+    ctx.bind(scope, "__dict__", descriptor);
+    let object = ctx.builtin("object");
+    let class = ctx.allocate_class("SimpleNamespace".into(), scope, vec![object])?;
+    // The static type has dictionary storage but introduces no weak-reference slot.
+    if let Value::Scope(frame) = ctx.heap.get_mut(scope) {
+        frame.class_namespace.as_mut().unwrap().slot_names = Some(["__dict__".into()].into());
+    }
+    ctx.classes.insert(CLASS.into(), class);
+    ctx.builtins.insert(CLASS.into(), class);
+    Ok(class)
+}
+
+/// The type's slot descriptors are immutable; ordinary subclass attributes are writable.
+pub(super) fn check_class_write(ctx: &Context, obj: Id, name: &str) -> Result<()> {
+    if matches!(ctx.heap.get(obj), Value::Class { .. }) && ctx.classes.get(CLASS) == Some(&obj) {
+        return Err(Error::new(
+            "TypeError",
+            format!("cannot set '{name}' attribute of immutable type '{CLASS}'"),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn method(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (&object, rest) = args.split_first().ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!("descriptor '{name}' of '{CLASS}' object needs an argument"),
+        )
+    })?;
+    let class = ctx.classes[CLASS];
+    if !ctx.instance_of(object, class) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{name}' requires a '{CLASS}' object but received a '{}'",
+                ctx.type_name(object)
+            ),
+        ));
+    }
+    if name == "__init__" {
+        return super::namespace_init::initialize(ctx, object, rest, kwargs);
+    }
+    if name == "readonly_dict" {
+        return Err(Error::new("AttributeError", "readonly attribute"));
+    }
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("wrapper {name}() takes no keyword arguments"),
+        ));
+    }
+    match (name, rest) {
+        ("__repr__", []) => super::namespace_repr::representation(ctx, object),
+        ("__eq__" | "__ne__", [other]) => {
+            super::namespace_init::equal(ctx, object, *other, name == "__ne__")
+        }
+        ("__dict__", []) => {
+            let actual = ctx.exact_type(object)?;
+            Ok(ctx.instance_dictionary(object, actual))
+        }
+        _ => {
+            let expected = usize::from(matches!(name, "__eq__" | "__ne__"));
+            Err(Error::new(
+                "TypeError",
+                format!("expected {expected} arguments, got {}", rest.len()),
+            ))
+        }
+    }
+}

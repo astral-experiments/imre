@@ -233,9 +233,9 @@ impl Checker<'_> {
         }
         let count = call.arguments.args.len();
         let message = if call.arguments.keywords.is_empty() {
-            format!("sys.{name}() takes no arguments ({count} given)")
+            format!("{name}() takes no arguments ({count} given)")
         } else {
-            format!("sys.{name}() takes no keyword arguments")
+            format!("{name}() takes no keyword arguments")
         };
         self.sys_type_error(call, result.ty, message)
     }
@@ -486,7 +486,7 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(Builtin::SysGetRecursionLimit, vec![]),
                 };
                 return self
-                    .sys_no_args(call, "getrecursionlimit", result)
+                    .sys_no_args(call, "sys.getrecursionlimit", result)
                     .map(Some);
             }
             Some(Binding::Intrinsic(Intrinsic::SysSetRecursionLimit)) => {
@@ -519,7 +519,7 @@ impl Checker<'_> {
                     ty: self.types.optional(Type::Exception),
                     kind: ExprKind::Builtin(Builtin::ActiveException, Vec::new()),
                 };
-                return self.sys_no_args(call, "exception", result).map(Some);
+                return self.sys_no_args(call, "sys.exception", result).map(Some);
             }
             Some(Binding::Intrinsic(Intrinsic::SysJitPredicate(name))) => {
                 // Imre emits machine code before the program starts. No running
@@ -528,7 +528,9 @@ impl Checker<'_> {
                     ty: Type::Bool,
                     kind: ExprKind::Bool(false),
                 };
-                return self.sys_no_args(call, name, result).map(Some);
+                return self
+                    .sys_no_args(call, &format!("sys.{name}"), result)
+                    .map(Some);
             }
             _ => {}
         }

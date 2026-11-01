@@ -1371,6 +1371,16 @@ fn signature(
         })
         .map(|context| classes.instance(context.class));
     if !function.decorator_list.is_empty() || function.type_params.is_some() {
+        if function.decorator_list.iter().any(|decorator| {
+            decorator.expression.as_call_expr().is_some_and(|call| {
+                graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::Wraps))
+                    && graph
+                        .session
+                        .is_stdlib_function(module, &call.func, "functools", "wraps")
+            })
+        }) {
+            graph.needs_object_runtime.set(true);
+        }
         return Err(error(
             source,
             function,
@@ -5160,6 +5170,14 @@ impl<'a> Checker<'a> {
         {
             return self.assert_raises_scope(item, remaining, body, class, manager);
         }
+        if let Type::Class(class) = manager.ty {
+            let record = &self.classes.declarations.definitions[class];
+            if record.name == "_SubTestContext"
+                && self.graph.modules[record.definition.module].is_bundled("unittest")
+            {
+                return self.subtest_scope(item, remaining, body, class, manager);
+            }
+        }
         if self.types.payload(manager.ty).unwrap_or(manager.ty) == Type::HandlerLock {
             return self.handler_lock_scope(item, remaining, body, manager);
         }
@@ -7624,8 +7642,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 if let Some(layout) = self.types.dispatcher(receiver.ty)
-                    && let Some(value) =
-                        self.dispatch_attribute(&receiver, layout, attribute.attr.as_str())
+                    && let Some(value) = self.dispatch_attribute(&receiver, layout, attribute)
                 {
                     return Ok(value);
                 }
@@ -9861,7 +9878,12 @@ impl<'a> Checker<'a> {
                         ),
                     });
                 }
-                let (builtin, ty) = match (attribute.attr.as_str(), call.arguments.args.len()) {
+                // BytesIO has no raw device to refill, so read1 uses its ordinary memory read.
+                let method = match (receiver.ty, attribute.attr.as_str()) {
+                    (Type::BytesIO, "read1") => "read",
+                    (_, method) => method,
+                };
+                let (builtin, ty) = match (method, call.arguments.args.len()) {
                     ("read", 0) => (
                         if binary {
                             Builtin::BinaryRead

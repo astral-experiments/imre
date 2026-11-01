@@ -608,8 +608,15 @@ impl Reachable {
                                     || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty))));
                             let assertion_exit = source.bundled
                                 && source.name == "unittest"
-                                && class.name.as_str() == "_AssertRaisesContext"
-                                && matches!(name, "_missing" | "_check_regex");
+                                && match class.name.as_str() {
+                                    "_AssertRaisesContext" => {
+                                        matches!(name, "_missing" | "_check_regex")
+                                    }
+                                    "_SubTestContext" => {
+                                        matches!(name, "__enter__" | "_handle" | "_leave")
+                                    }
+                                    _ => false,
+                                };
                             let unittest_method = refs.found.unittest_classes.contains(&id)
                                 && (name.starts_with("test")
                                     || matches!(

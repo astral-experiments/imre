@@ -29,6 +29,7 @@ enum = ["Named `Enum` and `StrEnum` members and aliases.","tests/fixtures/classe
 errno = ["Named errno constants, aliases and the `errorcode` registry.","benchmarks/cpython_stdlib/full/errno/README.md"]
 fnmatch = ["`fnmatch`, `fnmatchcase`, `filter`, `filterfalse` and `translate`.","benchmarks/cpython_stdlib/full/fnmatch/README.md"]
 functools = ["Selected `partial`, caching decorators and dispatch operations.","benchmarks/cpython_stdlib/full/functools/EVIDENCE.md"]
+gc = ["`collect()` and `collect(2)` reclaim unreachable native cycles and dispatch weak-reference callbacks.","tests/fixtures/boxed_gc_collect.py"]
 genericpath = ["The genericpath companion suite is counted under `os`.","benchmarks/cpython_stdlib/full/os/README.md"]
 gettext = ["Translate singular, plural and contextual messages from GNU MO catalogs selected by domain and language, with source-text fallback.", "tests/fixtures/text/gettext_catalog.py"]
 gzip = ["Read text lines and binary chunks from gzip files.","tests/fixtures/files/stream_reads.py"]

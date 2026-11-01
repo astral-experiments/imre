@@ -119,14 +119,23 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
-        "collections" => Some((
-            "collections/__init__.py",
-            concat!(
-                include_str!("../stdlib/collections/__init__.py"),
-                "\n",
-                include_str!("../stdlib/collections/namedtuple_repr.py"),
-            ),
-        )),
+        "collections" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some(("collections/__init__.py", SOURCE.get_or_init(|| {
+                // The three user container classes form the tail of the pinned CPython module.
+                let (_, wrappers) = include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/collections/upstream/Lib/collections/__init__.py"
+                )
+                .split_once("### UserDict\n")
+                .expect("CPython 3.14.5 UserDict section");
+                concat!(
+                    include_str!("../stdlib/collections/__init__.py"),
+                    "\n",
+                    include_str!("../stdlib/collections/namedtuple_repr.py"),
+                    "\nimport _collections_abc\nimport sys as _sys\n",
+                ).to_owned() + wrappers
+            })))
+        }
         "contextlib" => Some((
             "contextlib.py",
             concat!(
@@ -262,6 +271,7 @@ pub(crate) enum IntrinsicModule {
     Imp,
     Ast,
     Marshal,
+    Gc,
     Pickle,
     Struct,
     AnnotationLib,
@@ -289,6 +299,7 @@ pub(crate) enum IntrinsicModule {
     Contextlib,
     Inspect,
     Linecache,
+    Locale,
     Functools,
     Fnmatch,
     Time,
@@ -707,6 +718,7 @@ impl IntrinsicModule {
             "_imp" => Some(Self::Imp),
             "ast" => Some(Self::Ast),
             "marshal" => Some(Self::Marshal),
+            "gc" => Some(Self::Gc),
             "pickle" => Some(Self::Pickle),
             "struct" => Some(Self::Struct),
             "annotationlib" => Some(Self::AnnotationLib),
@@ -720,6 +732,7 @@ impl IntrinsicModule {
             "contextvars" => Some(Self::ContextVars),
             "inspect" => Some(Self::Inspect),
             "linecache" => Some(Self::Linecache),
+            "locale" | "_locale" => Some(Self::Locale),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "fnmatch" => Some(Self::Fnmatch),
@@ -877,6 +890,7 @@ impl IntrinsicModule {
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
+            (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Struct, "Struct") => Intrinsic::ObjectRuntimeExport("struct.Struct"),
@@ -930,6 +944,9 @@ impl IntrinsicModule {
             }
             (Self::CollectionsAbc, "Reversible") => {
                 Intrinsic::ObjectRuntimeExport("collections.abc.Reversible")
+            }
+            (Self::Tempfile, "NamedTemporaryFile") => {
+                Intrinsic::ObjectRuntimeExport("tempfile.NamedTemporaryFile")
             }
             (Self::Tempfile, "mkstemp") => Intrinsic::ObjectRuntimeExport("tempfile.mkstemp"),
             (Self::Tempfile, "mkdtemp") => Intrinsic::ObjectRuntimeExport("tempfile.mkdtemp"),
@@ -1016,6 +1033,12 @@ impl IntrinsicModule {
                 "cache" => crate::ir::LinecacheOperation::Cache,
                 _ => return None,
             }),
+            (Self::Inspect, "Signature") => Intrinsic::ObjectRuntimeExport("inspect.Signature"),
+            (Self::Inspect, "Parameter") => Intrinsic::ObjectRuntimeExport("inspect.Parameter"),
+            (Self::Inspect, "BoundArguments") => {
+                Intrinsic::ObjectRuntimeExport("inspect.BoundArguments")
+            }
+            (Self::Inspect, "signature") => Intrinsic::ObjectRuntimeExport("inspect.signature"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
             (Self::Inspect, "iscoroutinefunction") => Intrinsic::InspectCoroutine { mark: false },
@@ -1120,6 +1143,7 @@ impl IntrinsicModule {
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
+            (Self::Locale, "getencoding") => Intrinsic::SysEncoding(SysEncoding::Locale),
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding(SysEncoding::Default),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding(SysEncoding::Filesystem),
             (Self::Sys, "getfilesystemencodeerrors") => {
@@ -1276,6 +1300,9 @@ impl IntrinsicModule {
             (Self::Hashlib, "algorithms_available") => Intrinsic::HashAvailable,
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
+            (Self::Io, "SEEK_SET") => Intrinsic::IntConstant(0),
+            (Self::Io, "SEEK_CUR") => Intrinsic::IntConstant(1),
+            (Self::Io, "SEEK_END") => Intrinsic::IntConstant(2),
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
             (Self::Io, "IOBase") => Intrinsic::IoBase(crate::ir::IoBase::Any),
             (Self::Io, "RawIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Raw),
@@ -1311,6 +1338,15 @@ impl IntrinsicModule {
             (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
+            (Self::Collections, "UserDict") => {
+                Intrinsic::ObjectRuntimeExport("collections.UserDict")
+            }
+            (Self::Collections, "UserList") => {
+                Intrinsic::ObjectRuntimeExport("collections.UserList")
+            }
+            (Self::Collections, "UserString") => {
+                Intrinsic::ObjectRuntimeExport("collections.UserString")
+            }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,

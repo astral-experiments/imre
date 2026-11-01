@@ -127,7 +127,7 @@ impl Context {
         let Value::Cached { entries, .. } = self.heap.get(callable) else {
             unreachable!()
         };
-        if entries.len() < 128 {
+        if entries.len() < value::CACHE_CAPACITY {
             return Ok(None);
         }
         let Value::Dict(table) = self.heap.get_mut(table) else {
@@ -296,8 +296,11 @@ impl Context {
         self.heap.keep(table);
         let marker = self.alloc(Value::Native("functools._cache_marker".into()));
         self.heap.keep(marker);
+        let dictionary = self.dict(Vec::new());
+        self.heap.keep(dictionary);
         let result = self.alloc(Value::Cached {
             function,
+            dictionary,
             entries: Vec::new(),
             table,
             marker,
@@ -464,6 +467,7 @@ impl Context {
                 | Value::AttrGetter(_)
                 | Value::ItemGetter(_)
                 | Value::StaticMethod { .. }
+                | Value::CacheParameters
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
@@ -595,7 +599,7 @@ impl Context {
                 return Ok(self.alloc(Value::Method {
                     callable: value,
                     receiver,
-                    explicit: false,
+                    explicit: matches!(self.heap.get(value), Value::Cached { .. }),
                 }));
             }
         }
@@ -1461,6 +1465,14 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::Cached { dictionary, .. } => {
+                if name == "__dict__" {
+                    return Ok(dictionary);
+                }
+                if let Some(value) = self.dictionary_field(Some(dictionary), name)? {
+                    return Ok(value);
+                }
+            }
             Value::ClassMethod(callable) if matches!(name, "__func__" | "__wrapped__") => {
                 return Ok(callable);
             }
@@ -2302,6 +2314,7 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        super::namespace::check_class_write(self, obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
@@ -2365,7 +2378,9 @@ impl Context {
         if self.update_os_field(obj, name, None)? {
             return Ok(());
         }
-        if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+        if name == "__dict__"
+            && matches!(self.heap.get(obj), Value::Raised(_) | Value::Cached { .. })
+        {
             return Err(Error::new("TypeError", "cannot delete __dict__"));
         }
         if name == "value"
@@ -2401,6 +2416,9 @@ impl Context {
         self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
+            Value::Cached { dictionary, .. } => {
+                self.update_dictionary_field(obj, dictionary, name, None)
+            }
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -2629,7 +2647,7 @@ impl Context {
     }
 
     /// Lazily expose the dictionary that subsequent ordinary attribute operations use.
-    fn instance_dictionary(&mut self, obj: Id, class: Id) -> Id {
+    pub(super) fn instance_dictionary(&mut self, obj: Id, class: Id) -> Id {
         if let Value::Instance {
             namespace: Some(dictionary),
             ..
@@ -2768,6 +2786,7 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        super::namespace::check_class_write(self, obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
         }
@@ -2896,7 +2915,9 @@ impl Context {
         if self.update_os_field(obj, name, Some(value))? {
             return Ok(());
         }
-        if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+        if name == "__dict__"
+            && matches!(self.heap.get(obj), Value::Raised(_) | Value::Cached { .. })
+        {
             if self.dict_storage(value).is_none() {
                 return Err(Error::new(
                     "TypeError",
@@ -2906,10 +2927,16 @@ impl Context {
                     ),
                 ));
             }
-            let Value::Raised(error) = self.heap.get_mut(obj) else {
-                unreachable!()
-            };
-            error.tracing().dictionary = Some(value);
+            match self.heap.get_mut(obj) {
+                Value::Raised(error) => error.tracing().dictionary = Some(value),
+                Value::Cached { dictionary, .. } => {
+                    let old = std::mem::replace(dictionary, value);
+                    if old != value {
+                        self.heap.weak_edge_removed(old);
+                    }
+                }
+                _ => unreachable!(),
+            }
             return Ok(());
         }
         if name == "value"
@@ -2968,6 +2995,11 @@ impl Context {
             return Ok(());
         }
         self.check_instance_field(obj, name)?;
+        if let Value::Cached { dictionary, .. } = *self.heap.get(obj)
+            && name != "__class__"
+        {
+            return self.update_dictionary_field(obj, dictionary, name, Some(value));
+        }
         if let Value::Instance {
             class, namespace, ..
         } = *self.heap.get(obj)
@@ -3050,6 +3082,9 @@ impl Context {
                     namespace.annotation_thunks = None;
                 }
                 self.bind(scope, name, value);
+                if name == "__del__" {
+                    self.register_class_finalizers();
+                }
             }
             _ => {
                 let attr = self.text(name);
@@ -3347,6 +3382,9 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
+            Value::CacheParameters => {
+                stdlib::call(self, "functools._cache_parameters", &args, &kwargs)
+            }
             Value::Cached {
                 function,
                 table,

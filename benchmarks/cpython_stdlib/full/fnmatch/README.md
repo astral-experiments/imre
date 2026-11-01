@@ -11,11 +11,14 @@ Imre's matcher uses the same component-pattern parser as `pathlib`. `fnmatch` an
 | Unchanged CPython methods with all fnmatch calls supplied by Imre | 24/24 | 24/24 |
 | Calls from those methods | 2,432 | 2,432 |
 | Distinct native calls compared with CPython | 2,429 | 2,429 |
-| Entire methods run with their original class, native assertions and unittest runner | 22/24 | 22/24 |
+| Unmodified suite, direct `unittest.main()` entry | 24/24 | 24/24 |
+| Unmodified suite, imported module and `defaultTestLoader` | 24/24 | 24/24 |
 
 The [operation runner](run_operations.py) traces the unchanged suite, checks return values and TypeError messages, and replays the native answers through the original CPython fixtures and assertions. The [body runner](run_bodies.py) compiles each original method with its class, required imports, helper and original `unittest.main()` entry. It also runs separate failure controls for the callable helper and the filter cases.
 
-The 22 native bodies include all 11 methods that use `check_match`. The two remaining cases, `test_translate_wildcards` and `test_translate_expressions`, use `self.subTest(pattern)`. The [per-case ledger](evidence-linux.json) records these as host-driven operations. At O0 and O3, a direct build of the unmodified file stops before discovery at line 260 on `subTest`. The [whole-suite runner](run_suite.py) also stages the full file and builds a standard loader entry. On this compiler, that entry builds at both levels but exits before discovery with `ModuleNotFoundError: No module named 'unittest'`.
+The [whole-suite runner](run_suite.py) stages the unchanged file and checks both entry points against Linux CPython 3.14.5. Each executable discovers and passes the same 24 methods, with no skips. The [per-occurrence ledger](evidence-linux.json) records the imported suite, including the original fixtures, assertions and fnmatch operations. The [startup checks](whole-suite-startup.json) also accept the imported module and its loader with and without `--reachable-only`.
+
+A separate failure control changes one expected `fnmatchcase` result and two input patterns. Both entry points still run all 24 methods, report the ordinary assertion failure and both failing subtests in order, and exit with status 1 at both optimization levels.
 
 ## Reproduce
 
@@ -23,6 +26,8 @@ Use CPython 3.14.5 and its pinned source tree. Supply absolute paths to the Imre
 
 ```sh
 suite=benchmarks/cpython_stdlib/full/fnmatch
+python3.14 "$suite/run_suite.py" --imre "$IMRE" --runtime "$IMRE_RUNTIME" --clang "$CLANG" \
+  --result /tmp/fnmatch-whole-suite.json
 python3.14 "$suite/run_operations.py" --imre "$IMRE" --runtime "$IMRE_RUNTIME" --clang "$CLANG" \
   --cpython-source "$CPYTHON" --result /tmp/fnmatch-operations.json
 python3.14 "$suite/run_bodies.py" --imre "$IMRE" --runtime "$IMRE_RUNTIME" --clang "$CLANG" \

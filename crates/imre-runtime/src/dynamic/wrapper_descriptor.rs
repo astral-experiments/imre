@@ -40,6 +40,10 @@ impl BuiltinDescriptor {
             "tuple.__repr__" => ("tuple", "__repr__"),
             "set.__repr__" => ("set", "__repr__"),
             "frozenset.__repr__" => ("frozenset", "__repr__"),
+            "types.SimpleNamespace.__init__" => (super::namespace::CLASS, "__init__"),
+            "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
+            "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
+            "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),
@@ -62,9 +66,13 @@ impl BuiltinDescriptor {
         }
     }
 
-    pub(super) fn method_repr(self) -> Option<String> {
-        self.method
-            .then(|| format!("<method '{}' of '{}' objects>", self.name, self.owner))
+    pub(super) fn repr(self) -> String {
+        let kind = if self.method {
+            "method"
+        } else {
+            "slot wrapper"
+        };
+        format!("<{kind} '{}' of '{}' objects>", self.name, self.owner)
     }
 
     pub(super) fn bind(self, ctx: &mut Context, descriptor: Id, receiver: Id) -> Result<Id> {
@@ -73,6 +81,9 @@ impl BuiltinDescriptor {
         }
         let accepts = match self.owner {
             "object" => true,
+            super::namespace::CLASS => {
+                ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
+            }
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
