@@ -871,57 +871,6 @@ pub(super) unsafe extern "C" fn imre_dyn_call_at(
     finish_at(ctx, result, span)
 }
 
-/// Preserve the native function ABI used by previously compiled modules.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_def(
-    ctx: *mut Context,
-    code: Code,
-    scope: Id,
-    name: Id,
-    parameters: Id,
-    defaults: Id,
-) -> Id {
-    // SAFETY: this entry point receives the same context-owned handles and native code.
-    unsafe {
-        imre_dyn_def_with_metadata(
-            ctx, code, scope, name, parameters, defaults, name, NONE, NONE, false,
-        )
-    }
-}
-
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
-    ctx: *mut Context,
-    code: Code,
-    scope: Id,
-    name: Id,
-    parameters: Id,
-    defaults: Id,
-    qualname: Id,
-    doc: Id,
-    annotate: Id,
-    annotation_scope: bool,
-) -> Id {
-    // SAFETY: all operands are generated from this context; code has the native function ABI.
-    let ctx = unsafe { &mut *ctx };
-    let location = ctx.heap.current_location().unwrap_or(value::Location {
-        file: "<native>".into(),
-        line: 1,
-        span: None,
-    });
-    let code = ctx.prelinked_code(code, scope, name, parameters, (qualname, doc), location);
-    ctx.define_function(
-        code,
-        scope,
-        name,
-        defaults,
-        qualname,
-        doc,
-        annotate,
-        annotation_scope,
-    )
-}
-
 /// Attach the original generator suite to the code object before applying Python decorators.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_generator_body(
@@ -1269,18 +1218,6 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
     if ctx.heap.assignment_target(live, replaced == TRUE) {
         ctx.collect_unreachable();
     }
-}
-
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_statement(
-    ctx: *mut Context,
-    live: *const Id,
-    len: usize,
-    file: *const c_char,
-    line: u32,
-) {
-    // SAFETY: older emitters supplied the same live roots and static file name.
-    unsafe { imre_dyn_statement_with_exception(ctx, live, len, file, line, NONE) };
 }
 
 #[unsafe(no_mangle)]
