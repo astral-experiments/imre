@@ -1354,6 +1354,7 @@ def report(text):
             "boxed_re_verbose.py",
             "boxed_re_split.py",
             "boxed_re_findall_empty.py",
+            "boxed_re_match_spans.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
             "boxed_email_dates.py",

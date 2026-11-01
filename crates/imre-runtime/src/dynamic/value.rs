@@ -816,8 +816,10 @@ pub(super) enum Value {
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
     RegexMatch {
+        subject: Id,
+        spans: Vec<Option<regex_automata::Span>>,
         groups: Vec<Option<Id>>,
-        names: HashMap<String, usize>,
+        names: Id,
     },
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
@@ -1108,7 +1110,15 @@ impl Value {
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
-            Self::RegexMatch { groups, .. } => visit.extend(groups.iter().flatten()),
+            Self::RegexMatch {
+                groups,
+                subject,
+                names,
+                ..
+            } => {
+                visit.extend([*subject, *names]);
+                visit.extend(groups.iter().flatten());
+            }
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented

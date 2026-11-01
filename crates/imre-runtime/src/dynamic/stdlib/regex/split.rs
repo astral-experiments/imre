@@ -55,53 +55,21 @@ pub(super) fn split(
     let length = text.len();
     let mut pieces = Vec::new();
     let mut cursor = 0;
-    let mut start = 0;
-    let mut retry = false;
+    let mut matches = Matches::new(&pattern);
     let mut count = 0;
-    let mut caps = pattern.regex.create_captures();
     while limit == 0 || count < limit {
-        let found = if retry {
-            match nonempty(&pattern, text, start, &mut caps) {
-                Ok(found) => found,
-                Err(message) => {
-                    return Err(super::pattern_error(
-                        ctx,
-                        pattern.source,
-                        pattern.flags,
-                        message,
-                    ));
-                }
-            }
-        } else {
-            true
+        let span = match matches.next(text) {
+            Ok(Some(span)) => span,
+            Ok(None) => break,
+            Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
         };
-        if !found {
-            if start == length {
-                break;
-            }
-            start += 1;
-            while !pattern.bytes && start < length && text[start] & 0xc0 == 0x80 {
-                start += 1;
-            }
-            retry = false;
-        }
-        if !retry {
-            pattern
-                .regex
-                .captures(Input::new(text).range(start..length), &mut caps);
-        }
-        let Some(span) = caps.get_group(0) else { break };
+        let caps = &matches.caps;
         let eol = caps.group_info().to_index(PatternID::ZERO, "imre.eol");
-        let end = eol
-            .and_then(|i| caps.get_group(i))
-            .map_or(span.end, |nl| nl.start);
         pieces.push(Some(cursor..span.start));
         pieces.extend(
             (1..eol.unwrap_or(caps.group_len())).map(|i| caps.get_group(i).map(|s| s.range())),
         );
-        cursor = end;
-        start = end;
-        retry = end == span.start;
+        cursor = span.end;
         count += 1;
     }
     pieces.push(Some(cursor..length));
@@ -124,9 +92,62 @@ pub(super) fn split(
     Ok(ctx.alloc(Value::List(items)))
 }
 
+/// Scan the original subject so anchors, UTF-8 boundaries and nonempty matches
+/// immediately following empty matches agree across split, findall and substitution.
+pub(super) struct Matches<'a> {
+    pattern: &'a Pattern,
+    pub(super) caps: Captures,
+    start: usize,
+    retry: bool,
+}
+
+impl<'a> Matches<'a> {
+    pub(super) fn new(pattern: &'a Pattern) -> Self {
+        Self {
+            pattern,
+            caps: pattern.regex.create_captures(),
+            start: 0,
+            retry: false,
+        }
+    }
+
+    pub(super) fn next(
+        &mut self,
+        text: &[u8],
+    ) -> std::result::Result<Option<std::ops::Range<usize>>, String> {
+        if self.retry && !nonempty(self.pattern, text, self.start, &mut self.caps)? {
+            if self.start == text.len() {
+                return Ok(None);
+            }
+            self.start += 1;
+            while !self.pattern.bytes && self.start < text.len() && text[self.start] & 0xc0 == 0x80
+            {
+                self.start += 1;
+            }
+            self.retry = false;
+        }
+        if !self.retry {
+            self.pattern.regex.captures(
+                Input::new(text).range(self.start..text.len()),
+                &mut self.caps,
+            );
+        }
+        let Some(span) = self.caps.get_group(0) else {
+            return Ok(None);
+        };
+        let eol = self.caps.group_info().to_index(PatternID::ZERO, "imre.eol");
+        let end = eol
+            .and_then(|i| self.caps.get_group(i))
+            .map_or(span.end, |nl| nl.start);
+        self.start = end;
+        self.retry = end == span.start;
+        Ok(Some(span.start..end))
+    }
+}
+
 /// After an empty split, Python tries the same position once more. Follow the
 /// engine's priority-ordered NFA, accepting only paths that consume input.
-pub(super) fn nonempty(
+fn nonempty(
     pattern: &Pattern,
     text: &[u8],
     start: usize,

@@ -548,7 +548,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "sha1" | "sha256")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
+        | ("re", "match" | "fullmatch" | "search" | "compile" | "split" | "sub")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
@@ -941,6 +941,9 @@ pub(super) fn call(
     {
         return os::descriptor(ctx, op, args, kwargs);
     }
+    if let Some(method @ ("start" | "end" | "span")) = name.strip_prefix("match.") {
+        return regex::match_position(ctx, method, args, kwargs);
+    }
     if matches!(name, "posix.putenv" | "posix.unsetenv") {
         return os::change_environment(ctx, name, args, kwargs);
     }
@@ -1270,6 +1273,9 @@ pub(super) fn call(
     }
     if name == "pattern.search" {
         return regex::search(ctx, args, kwargs);
+    }
+    if name == "pattern.sub" {
+        return regex::pattern_sub(ctx, args, kwargs);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);

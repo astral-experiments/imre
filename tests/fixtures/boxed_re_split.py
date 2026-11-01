@@ -31,3 +31,10 @@ def current():
         pattern.split("value", 1 << 100)
     except OverflowError as error:
         print(type(error).__name__, str(error))
+
+    for expr in (r"\n\n\n+", r"x*?", "$"):
+        compiled = re.compile(expr)
+        print(compiled.sub("!", "x\n\n\n\n"), compiled.sub("!", "x\n\n\n\n", count=1))
+    print(re.compile(r"(?P<word>a)|(b)").sub(r"<\g<word>:\2>", "éab"))
+    print(re.sub(rb"(a|b)", rb"\377\1", b"ab"))
+    print(re.compile(r"x?").sub(lambda m: m.group().upper() or None, "xyz"))
