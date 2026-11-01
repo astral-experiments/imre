@@ -1,6 +1,6 @@
 {
   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_sha256": "bfa53900c66598b517716227fb5745f69d7c4181b88f7174ec00dac4fea2ff0c",
+  "compiler_sha256": "4c458ba912657b38b344ec68f46b34df8ed8fa9156612fd24efbe27b20d89649",
   "operation": "check",
   "tests_executed": 0,
   "source": "vendored",
@@ -10,29 +10,29 @@
       "suite": "test.test_fnmatch",
       "entry": "import",
       "reachable_only": false,
-      "exit": 1,
-      "diagnostic": "Lib/test/test_fnmatch.py:260:18: Imre: unknown class method"
+      "exit": 0,
+      "diagnostic": ""
     },
     {
       "suite": "test.test_fnmatch",
       "entry": "import",
       "reachable_only": true,
-      "exit": 1,
-      "diagnostic": "Lib/test/test_fnmatch.py:16:5: Imre: cannot infer parameter \"filename\"; add an annotation or a concrete direct call"
+      "exit": 0,
+      "diagnostic": ""
     },
     {
       "suite": "test.test_fnmatch",
       "entry": "runner",
       "reachable_only": false,
-      "exit": 1,
-      "diagnostic": "Lib/test/test_fnmatch.py:260:18: Imre: unknown class method"
+      "exit": 0,
+      "diagnostic": ""
     },
     {
       "suite": "test.test_fnmatch",
       "entry": "runner",
       "reachable_only": true,
-      "exit": 1,
-      "diagnostic": "Lib/imre_suite.py:3:9: Imre: unknown class method"
+      "exit": 0,
+      "diagnostic": ""
     }
   ]
 }
