@@ -3,7 +3,9 @@ import sys
 original_type = type(sys.stdout)
 
 import _io
+import _locale
 import io
+import locale
 
 
 class Wrapper(io.TextIOWrapper):
@@ -18,6 +20,16 @@ def current():
     assert isinstance(sys.stderr, io.TextIOBase) and isinstance(sys.stdout, (bytes, io.TextIOWrapper))
     assert sys.getdefaultencoding() is sys.getdefaultencoding()
     assert sys.getdefaultencoding() == "utf-8"
+    assert locale.getencoding is _locale.getencoding
+    with io.TextIOWrapper(io.BytesIO(), encoding="locale") as text:
+        assert text.encoding == locale.getencoding()
+    for args, kwargs in (((1,), {}), ((), {"encoding": "ascii"})):
+        try:
+            locale.getencoding(*args, **kwargs)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("getencoding accepted arguments")
     raw = io.BytesIO()
     wrapper = Wrapper(raw, encoding="utf-8", line_buffering=True)
     assert type(wrapper) is Wrapper and wrapper.buffer is raw and not wrapper.isatty()

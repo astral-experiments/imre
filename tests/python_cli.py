@@ -982,6 +982,7 @@ def main():
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
         (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
         inspect_entry = root / "inspect_views.py"
@@ -1088,6 +1089,10 @@ from import_members import found
 print(found.value)
 """,
         )
+
+        opcode = run(imre, "-B", "-c", 'op = __import__("".join(("_", "opcode")))\n'
+                     'print(op.ENABLE_SPECIALIZATION, op.ENABLE_SPECIALIZATION_FT)')
+        assert (opcode.returncode, opcode.stdout, opcode.stderr) == (0, b"0 0\n", b""), opcode
 
         diagnostic = run(imre, "-c", "print(__file__)")
         assert diagnostic.returncode != 0 and b"<string>" in diagnostic.stderr, (
@@ -1318,6 +1323,7 @@ def report(text):
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
+            "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
             "boxed_namedtuple_factory.py",
             "boxed_slice_deep_repr.py",
@@ -1341,10 +1347,12 @@ def report(text):
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
+            "boxed_named_temporary_file.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
             "boxed_lru_cache_equality.py",
+            "boxed_lru_cache_metadata.py",
             "boxed_total_ordering.py",
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
@@ -1394,6 +1402,8 @@ def report(text):
             "boxed_set_union.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
+            "boxed_gc_collect.py",
+            "boxed_gc_finalizers.py",
             "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
@@ -1422,6 +1432,7 @@ def report(text):
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
             "boxed_mapping_abc.py",
+            "boxed_user_containers.py",
             "boxed_dict_pop.py",
             "boxed_recursive_equality.py",
             "boxed_selector_modify_data.py",

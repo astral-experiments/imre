@@ -37,6 +37,7 @@ def orphan():
 
 
 def current():
+    saved_bound_method()
     observed = []
 
     def first(wr):
@@ -272,3 +273,18 @@ def current():
             repeated *= Count()
             print(repeated)
         print(watched() is None)
+
+
+def saved_bound_method():
+    class Target:
+        def method(self):
+            return 42
+
+    target = Target()
+    saved = target.method
+    calls = []
+    witness = ref(target, lambda w: calls.append(w() is None))
+    del target
+    assert witness() is not None and saved() == 42 and not calls
+    del saved
+    assert witness() is None and calls == [True]

@@ -182,7 +182,7 @@ impl Context {
                     Ok(flag(replaced))
                 } else {
                     if replaced {
-                        self.heap.release_unbound_writers();
+                        self.heap.release_unbound_finalizers();
                     }
                     Ok(c)
                 }
@@ -197,8 +197,13 @@ impl Context {
             }
             "delname" | "clearname" => {
                 let name = copy_label(self.str_value(b)?)?;
+                let released = self.replacing_finalizer(a, &name, NONE);
                 let scope = self.binding_scope(a, &name);
-                if !self.remove_binding(scope, &name, b)? && op == "delname" {
+                if self.remove_binding(scope, &name, b)? {
+                    if released {
+                        self.heap.release_unbound_finalizers();
+                    }
+                } else if op == "delname" {
                     return Err(self.missing_binding(a, scope, &name));
                 }
                 Ok(NONE)
@@ -250,9 +255,9 @@ impl Context {
                 frozen: false,
             })),
             "dict" => Ok(self.dict(Vec::new())),
-            "tuple" => {
-                let vs = self.items(a)?;
-                Ok(self.alloc(Value::Tuple(vs)))
+            "tuple" | "constant_tuple" => {
+                let items = self.items(a)?;
+                Ok(self.heap.packed_tuple(items, op == "constant_tuple"))
             }
             "append" => {
                 match self.heap.get_mut(a) {
@@ -373,7 +378,7 @@ impl Context {
             "more" | "more_else" => {
                 let more = self.iterator_has_item(a)?;
                 if !more && op == "more_else" {
-                    self.heap.release_unbound_writers();
+                    self.heap.release_unbound_finalizers();
                 }
                 Ok(flag(more))
             }
@@ -434,7 +439,7 @@ impl Context {
                     .pending
                     .take()
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
-                self.heap.release_unbound_writers();
+                self.heap.release_unbound_finalizers();
                 Ok(self.raised_instance(error))
             }
             "restore_caught" => {
@@ -1221,7 +1226,7 @@ pub(super) unsafe extern "C" fn imre_dyn_named_assignment(
     let ctx = unsafe { &mut *ctx };
     if replaced == TRUE && ctx.heap.named_assignment(mark, value) {
         ctx.collect_unreachable();
-        ctx.heap.release_unbound_writers();
+        ctx.heap.release_unbound_finalizers();
     }
 }
 
@@ -1288,8 +1293,8 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 
 impl Context {
     /// Check the old binding without calling a Python mapping's lookup hook.
-    pub(super) fn replacing_writer(&self, scope: Id, name: &str, value: Id) -> bool {
-        if !self.heap.has_file_writers() {
+    pub(super) fn replacing_finalizer(&self, scope: Id, name: &str, value: Id) -> bool {
+        if !self.heap.tracks_finalizers() {
             return false;
         }
         let scope = self.binding_scope(scope, name);
@@ -1298,7 +1303,7 @@ impl Context {
             || data.exec_globals.is_some()
             || self
                 .scope_name(scope, name)
-                .is_some_and(|old| old != value && self.heap.could_own_writer(old, false))
+                .is_some_and(|old| old != value && self.heap.could_own_finalizer(old, false))
     }
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
@@ -1327,6 +1332,11 @@ impl Context {
     }
 
     pub(super) fn checkpoint(&mut self, live: &[Id], location: value::Location, caught: Id) {
+        if self.heap.has_ordinary_finalizers() {
+            self.heap.publish_statement(live, location, caught);
+            self.collect_garbage();
+            return;
+        }
         let (heap, roots) = self.heap_and_roots();
         if let Some(callbacks) = heap.statement(roots, live, location, caught) {
             self.run_weak_callbacks(callbacks);
@@ -1344,6 +1354,24 @@ impl Context {
 
     /// Run deferred callbacks when a native loop reaches a collection point.
     pub(super) fn collect_garbage(&mut self) {
+        if self.heap.has_ordinary_finalizers() {
+            if self.heap.cycles_due() {
+                let _ = self.collect_full();
+                return;
+            }
+            if self.heap.has_unbound_finalizer(NONE) {
+                match self.drain_acyclic_finalizers() {
+                    Ok(true) => {
+                        // Dropping a finalized instance releases its remaining strong edges,
+                        // including native resources whose close is visible to the next operand.
+                        self.collect_unreachable();
+                        return;
+                    }
+                    Err(_) => return,
+                    Ok(false) => {}
+                }
+            }
+        }
         let (heap, roots) = self.heap_and_roots();
         if let Some(callbacks) = heap.collect_if_due(roots) {
             self.run_weak_callbacks(callbacks);
@@ -1359,7 +1387,9 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        self.finish_call_operands(mark, NONE);
+        if self.heap.discard_truth_operands(mark) {
+            self.collect_unreachable();
+        }
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
@@ -1371,14 +1401,49 @@ impl Context {
 
     /// Sweep using the active frames and the context's roots before running callbacks.
     pub(super) fn collect_unreachable(&mut self) {
+        if self.drain_acyclic_finalizers().is_err() {
+            return;
+        }
         let (heap, roots) = self.heap_and_roots();
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);
         }
     }
 
+    /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.
+    pub(super) fn collect_full(&mut self) -> Result<usize> {
+        if self.heap.full_collection_active() {
+            return Ok(0);
+        }
+        self.drain_acyclic_finalizers()?;
+        let mark = self.heap.temporary_mark();
+        let (heap, roots) = self.heap_and_roots();
+        let callbacks = heap.begin_full_collection(roots)?;
+        let mut released = 0;
+        if !callbacks.is_empty() {
+            self.run_weak_callbacks(callbacks.iter().copied());
+            self.heap.release_temporaries_since(mark);
+            let (heap, roots) = self.heap_and_roots();
+            let (count, deferred) = heap.release_callback_refs(roots, &callbacks);
+            released = count;
+            if let Some(deferred) = deferred {
+                self.run_weak_callbacks(deferred);
+            }
+        }
+        while let Some(owner) = self.heap.pending_full_finalizer() {
+            self.dispatch_finalizer(owner);
+        }
+        let (heap, roots) = self.heap_and_roots();
+        let (count, callbacks) = heap.finish_full_collection(roots);
+        if let Some(callbacks) = callbacks {
+            self.run_weak_callbacks(callbacks);
+        }
+        self.heap.end_full_collection();
+        Ok(count + released)
+    }
+
     /// Invoke pending callbacks after the heap has cleared every dead reference.
-    fn run_weak_callbacks(&mut self, callbacks: Vec<(Id, Id)>) {
+    fn run_weak_callbacks(&mut self, callbacks: impl IntoIterator<Item = (Id, Id)>) {
         for (callback, reference) in callbacks {
             if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
                 eprintln!("Exception ignored while calling weakref callback: {error}");

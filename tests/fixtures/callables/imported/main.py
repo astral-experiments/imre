@@ -1,6 +1,6 @@
 import sys
 from functools import singledispatch
-from typing import Callable
+from typing import Callable, get_overloads, overload
 
 import operations
 from operations import decrement as down
@@ -17,6 +17,11 @@ def main() -> None:
     selected: Callable[[int], int] = operations.increment
     print(selected(1 << 100))
     selected = down
+    overload(selected)
+    registered = get_overloads(operations.decrement)
+    assert registered[0] is down
+    assert registered[0].__module__ == "operations"
+    assert registered[0].__qualname__ == "decrement"
     print(operations.apply(selected, -(1 << 100)))
     print(operations.choose(True)(7))
     print(sum(map(operations.increment, [1, 2, 3])))

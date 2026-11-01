@@ -1,0 +1,96 @@
+import inspect
+from functools import update_wrapper
+from inspect import Parameter, Signature
+
+
+def original(a, /, b: int = 3, *args, flag=False, **kwargs) -> str:
+    return str(a)
+
+
+def pair(a, b):
+    pass
+
+
+def wrapper(*values):
+    return original(*values)
+
+
+class C:
+    def method(self, /, value: bytes = b"x"):
+        pass
+
+
+
+class InheritedName(str):
+    pass
+
+
+class DeniedName(str):
+    def isidentifier(self):
+        return False
+
+
+class Published:
+    def __init__(self):
+        self.reads = 0
+
+    @property
+    def __signature__(self):
+        self.reads += 1
+        return Signature()
+
+    def __call__(self):
+        pass
+
+
+update_wrapper(wrapper, original)
+sig = Signature.from_callable(wrapper)
+print(str(sig), sig.return_annotation is str)
+print([(p.name, p.kind.name) for p in sig.parameters.values()])
+print(sig.parameters["a"].default is Parameter.empty, sig.parameters["flag"].default)
+print(sig.bind(1, 2, 3, extra=4).arguments)
+print(inspect.signature(wrapper, follow_wrapped=False).parameters["values"].kind.name)
+original.__defaults__ = (8,)
+print(str(Signature.from_callable(wrapper)))
+
+
+print(inspect.signature(C.method), inspect.signature(C().method))
+wrapper.__signature__ = Signature()
+print(inspect.signature(wrapper))
+wrapper.__signature__ = None
+print(tuple(inspect.signature(wrapper).parameters))
+del wrapper.__signature__
+wrapper.__wrapped__ = wrapper
+try:
+    inspect.signature(wrapper)
+except ValueError:
+    print("wrapper loop")
+try:
+    sig.bind()
+except TypeError as exc:
+    print(type(exc).__name__)
+
+try:
+    sig.parameters["other"] = sig.parameters["a"]
+except TypeError:
+    print("immutable parameters")
+try:
+    Parameter("not a name", Parameter.KEYWORD_ONLY)
+except ValueError:
+    print("invalid name")
+
+pair.__defaults__ = (1, 2, 3)
+print(inspect.signature(pair))
+published = Published()
+print(inspect.signature(published), published.reads)
+print(Parameter("from", Parameter.POSITIONAL_ONLY))
+try:
+    Parameter("from", Parameter.KEYWORD_ONLY)
+except ValueError:
+    print("keyword rejected")
+
+print(Parameter(InheritedName("valid"), Parameter.POSITIONAL_ONLY).name == "valid")
+try:
+    Parameter(DeniedName("valid"), Parameter.POSITIONAL_ONLY)
+except ValueError:
+    print("identifier override rejected")

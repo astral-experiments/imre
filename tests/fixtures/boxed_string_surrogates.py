@@ -21,6 +21,13 @@ def current():
     subtype = Text(low)
     assert _imp.is_frozen(low) is False and _imp.is_frozen(subtype) is False
     assert type(subtype) is Text and isinstance(subtype, str)
+    scalar = Text("🙂")
+    source = Text(low + low + low + scalar)
+    assert source.count(Text(low + low)) == 1
+    assert source.count(scalar, -2) == 1 and str.count(scalar, subtype) == 0
+    assert source.count(replacement) == 0 and str.count(high + "\udc00", "𐀀") == 0
+    assert source.count("", 4, 10**50) == 1 and source.count("", 5) == 0
+    assert source.count(subtype, -(10**50), 2) == 2
     assert str(subtype) == low and type(str(subtype)) is str
     assert os.fsdecode(subtype) is subtype and os.fsencode(subtype) == b"\xff"
     assert replacement == "�"

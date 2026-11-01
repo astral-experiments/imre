@@ -31,6 +31,33 @@ pub(super) fn call(
         "obj"
     };
     let mut obj = super::single_argument(name, param, args, kwargs)?;
+    match name {
+        "_signature_identifier" => {
+            // A str subclass can replace either the method or attribute lookup.
+            if let Value::Instance { class, .. } = *ctx.heap.get(obj) {
+                let overridden = ["isidentifier", "__getattribute__", "__getattr__"]
+                    .iter()
+                    .any(|name| ctx.class_attr(class, name).is_some());
+                match ctx.lookup_attr(obj, "isidentifier") {
+                    Ok(method) => return ctx.call(method, Vec::new(), Vec::new()),
+                    Err(err) if !overridden && ctx.is_attribute_error(&err) => {}
+                    Err(err) => return Err(err),
+                }
+            }
+            let name = ctx.str_value(obj)?;
+            let valid = ruff_python_stdlib::identifiers::is_identifier(name)
+                || ruff_python_stdlib::keyword::is_keyword(name);
+            return Ok(if valid { TRUE } else { FALSE });
+        }
+        "_signature_mapping" => {
+            let storage = ctx
+                .dict_storage(obj)
+                .ok_or_else(|| super::Error::new("TypeError", "expected a parameter dictionary"))?;
+            return Ok(ctx.alloc(Value::MappingProxy(storage)));
+        }
+        "_signature_layout" => return layout(ctx, obj),
+        _ => {}
+    }
     if name == "markcoroutinefunction" {
         obj = attribute(ctx, obj, "__func__")?.unwrap_or(obj);
         let mark = marker(ctx);
@@ -52,4 +79,34 @@ pub(super) fn call(
     let marked =
         attribute(ctx, obj, "_is_coroutine_marker")?.is_some_and(|value| value == marker(ctx));
     Ok(if marked { TRUE } else { FALSE })
+}
+
+/// Read the same argument layout used to bind the boxed function's calls.
+fn layout(ctx: &mut Context, obj: Id) -> Result<Id> {
+    let Value::Function { code, .. } = ctx.heap.get(obj) else {
+        return Err(super::Error::new("TypeError", "expected a Python function"));
+    };
+    let parameters = ctx.code_object(*code).parameters;
+    let spec: serde_json::Value = serde_json::from_str(ctx.str_value(parameters)?)
+        .map_err(|error| super::Error::new("SystemError", error.to_string()))?;
+    let mut result = Vec::new();
+    for (index, key) in ["posonly", "positional", "varargs", "kwonly", "kwargs"]
+        .iter()
+        .enumerate()
+    {
+        let kind = ctx.int(index as i64);
+        let names = &spec[*key];
+        let mut append = |name: &str| {
+            let name = ctx.text(name);
+            result.push(ctx.alloc(Value::Tuple(vec![kind, name])));
+        };
+        if let Some(names) = names.as_array() {
+            for name in names.iter().filter_map(serde_json::Value::as_str) {
+                append(name);
+            }
+        } else if let Some(name) = names.as_str() {
+            append(name);
+        }
+    }
+    Ok(ctx.alloc(Value::Tuple(result)))
 }
