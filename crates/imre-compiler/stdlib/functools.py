@@ -1,6 +1,6 @@
 """Decorator implementations from CPython 3.14.5 Lib/functools.py (PSF-2.0)."""
 
-from functools import WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, partial, update_wrapper
+from functools import WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, _CacheInfo, partial, update_wrapper
 
 
 def wraps(wrapped,
@@ -136,11 +136,11 @@ def total_ordering(cls):
     return cls
 
 
-def _unbounded_lru_cache():
-    from functools import _unbounded_cache, update_wrapper
+def _lru_cache_decorator(maxsize, typed):
+    from functools import _cache_wrapper, update_wrapper
     def decorating_function(user_function):
-        wrapper = _unbounded_cache(user_function)
-        wrapper.cache_parameters = lambda: {'maxsize': None, 'typed': False}
+        wrapper = _cache_wrapper(user_function, maxsize, typed)
+        wrapper.cache_parameters = lambda: {'maxsize': maxsize, 'typed': typed}
         return update_wrapper(wrapper, user_function)
     return decorating_function
 
