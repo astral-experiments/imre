@@ -2496,6 +2496,7 @@ impl Emitter<'_, '_> {
                 } else {
                     self.label()
                 };
+                self.uniform_struct_append(body, &args, *target, *cursor, &exhausted);
                 self.branch(&zero.operand, &fail, &condition);
                 self.start(&fail);
                 self.checked_line("call void @imre_range_step_zero()");
@@ -9663,6 +9664,7 @@ declare ptr @imre_record_default_repr(ptr)
 declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
+declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
 declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
