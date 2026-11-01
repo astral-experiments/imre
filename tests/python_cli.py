@@ -1555,6 +1555,7 @@ def report(text):
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
+            "boxed_shutil.py",
             "boxed_difflib.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
