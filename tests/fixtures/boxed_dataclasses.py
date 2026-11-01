@@ -132,6 +132,23 @@ def current():
     assert key > Key(41) and key >= Key(42, "other")
     assert key.__lt__(a) is NotImplemented
     assert Key.__hash__ is not None and Entry.__hash__ is None
+
+    @dataclass(frozen=True)
+    class CustomEquality:
+        part: int
+
+        def __eq__(self, other):
+            return self is other
+
+    assert hash(CustomEquality(42)) == hash((42,))
+    assert CustomEquality.__hash__.__qualname__ == CustomEquality.__qualname__ + ".__hash__"
+
+    @dataclass(frozen=True)
+    class ExplicitUnhashable:
+        __hash__ = None
+
+    assert ExplicitUnhashable.__hash__ is None
+
     for bad in (lambda: Entry(), lambda: Entry("x", name="y"), lambda: Entry("x", unknown=0)):
         try:
             bad()

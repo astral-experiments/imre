@@ -436,7 +436,8 @@ def _decorate(cls, params):
                 except NameError:
                     raise NotImplementedError('boxed dataclass hashing requires the hash builtin') from None
                 return hash_fields(tuple(getattr(self, f.name) for f in real_fields if (f.compare if f.hash is None else f.hash)))
-            install('__hash__', __hash__)
+            __hash__.__qualname__ = cls.__qualname__ + '.__hash__'
+            cls.__hash__ = __hash__
         elif params.eq:
             cls.__hash__ = None
     if params.frozen:
