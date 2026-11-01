@@ -64,7 +64,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 30 | 15 |
 | `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 136 | 63 |
-| `pickle` | Yes | Encode integers and booleans with `dumps(value, protocol=2)`. [Evidence](../tests/fixtures/boxed_bytecache.py) | — | — | — |
+| `pickle` | Yes | Encode integers, booleans, strings, `None` and tuples with `dumps` protocols 0–5. Custom reductions can return an importable global name or a reconstruction callable with positional arguments. Reduction state and cycles are outside this subset. Pre‑4 protocols support top-level globals, with a subset of Python 2 compatibility names for protocols 0–2. [Evidence](../tests/fixtures/boxed_pickle_reduction.py) | — | — | — |
 | `pkgutil` | Yes | No API example recorded. | — | — | — |
 | `platform` | Yes | Read `system()`, `machine()`, and the running Python version from `python_version()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — | — |
