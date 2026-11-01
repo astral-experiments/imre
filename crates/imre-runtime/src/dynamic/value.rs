@@ -1058,6 +1058,7 @@ impl Value {
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
+                visit.extend(alias.name);
                 if let super::typing::AliasKind::Literal(members) = alias.kind {
                     visit.push(members);
                 }

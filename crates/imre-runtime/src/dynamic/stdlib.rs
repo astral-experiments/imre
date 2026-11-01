@@ -403,6 +403,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_args"
             | "get_origin"
             | "_GenericAlias"
+            | "_CallableGenericAlias"
             | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),

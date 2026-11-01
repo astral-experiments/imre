@@ -1506,8 +1506,9 @@ def report(text):
                 assert (fault.returncode, fault.stdout, fault.stderr) == (0, oracle.stdout, b""), fault
                 retry = run(binary, extra=injected | {"IMRE_SECRETS_TEST_SOURCE": "reject"})
                 assert (retry.returncode, retry.stdout, retry.stderr) == (0, b"c\n", b"draw\ndraw\n"), retry
-        plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
-        compare("-IB", "-c", imports)
+        for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py"):
+            plugin.write_bytes((fixtures / fixture).read_bytes())
+            compare("-IB", "-c", imports)
         if sys.platform.startswith("linux"):
             import resource
 

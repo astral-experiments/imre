@@ -239,6 +239,172 @@ def Optional(self, parameters):
     return _typing.Union[arg, type(None)]
 
 
+def _alias_type_arg(arg):
+    arg = _type_check(arg, "Parameters to generic types must be types.")
+    if isinstance(arg, str):
+        raise NotImplementedError("string alias arguments require typing.ForwardRef")
+    return type(None) if arg is None else arg
+
+
+def _is_parameterized_typing_alias(value):
+    return type(value) in (_typing._GenericAlias, _typing._CallableGenericAlias, _typing._LiteralGenericAlias)
+
+
+def _named_alias_bases(alias, bases):
+    # As in _BaseGenericAlias.__mro_entries__, contribute Generic only if a
+    # later base will not do so. User-provided base hooks receive the original tuple.
+    result = [] if alias.__origin__ in bases else [alias.__origin__]
+    for index, base in enumerate(bases):
+        if base is alias or base == alias:
+            break
+    else:
+        raise ValueError("tuple.index(x): x not in tuple")
+    for base in bases[index + 1:]:
+        if isinstance(base, _SpecialGenericAlias) or _is_parameterized_typing_alias(base) or base is _typing.Callable:
+            break
+        if isinstance(base, type):
+            if issubclass(base, Generic):
+                break
+        else:
+            hook = getattr(base, "__mro_entries__", None)
+            expanded = hook(bases) if hook else None
+            if isinstance(expanded, tuple) and any(isinstance(b, type) and issubclass(b, Generic) for b in expanded):
+                break
+    else:
+        result.append(Generic)
+    return tuple(result)
+
+
+class _SpecialGenericAlias(_NotIterable):
+    """A named typing alias for a builtin collection."""
+    __module__ = __name__
+
+    def __init__(self, origin, nparams, *, name):
+        self.__origin__ = origin
+        self._name = name
+        self.__qualname__ = name
+        self._inst = False
+        self._nparams = nparams
+        self.__slots__ = None
+        self.__doc__ = f"Deprecated alias to {origin.__qualname__}."
+
+    def __repr__(self):
+        return "typing." + self._name
+
+    def __reduce__(self):
+        return self._name
+
+    def __getattr__(self, attr):
+        if attr in ("__name__", "__qualname__"):
+            return self._name
+        if not (attr.startswith("__") and attr.endswith("__")):
+            return getattr(self.__origin__, attr)
+        raise AttributeError(attr)
+
+    def __setattr__(self, attr, value):
+        if (attr.startswith("__") and attr.endswith("__")) or attr in ("_name", "_inst", "_nparams"):
+            object.__setattr__(self, attr, value)
+        else:
+            setattr(self.__origin__, attr, value)
+
+    def __call__(self, *args, **kwargs):
+        if not self._inst:
+            raise TypeError(f"Type {self._name} cannot be instantiated; use {self.__origin__.__name__}() instead")
+        result = self.__origin__(*args, **kwargs)
+        try:
+            result.__orig_class__ = self
+        except Exception:
+            pass
+        return result
+
+    def _getitem(self, params):
+        if not isinstance(params, tuple):
+            params = (params,)
+        args = tuple(_alias_type_arg(p) for p in params)
+        if len(args) != self._nparams:
+            count = "many" if len(args) > self._nparams else "few"
+            raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {self._nparams}")
+        return self.copy_with(args)
+
+    @lru_cache
+    def _cached_getitem(self, params):
+        return self._getitem(params)
+
+    def __getitem__(self, params):
+        try:
+            return self._cached_getitem(params)
+        except TypeError:
+            return self._getitem(params)
+
+    def copy_with(self, params):
+        return _typing._GenericAlias(self.__origin__, params, name=self._name, inst=self._inst)
+
+    def __instancecheck__(self, value):
+        return self.__subclasscheck__(type(value))
+
+    def __subclasscheck__(self, cls):
+        if isinstance(cls, _SpecialGenericAlias):
+            cls = cls.__origin__
+        elif cls is _typing.Callable:
+            cls = _typing.get_origin(cls)
+        elif _is_parameterized_typing_alias(cls):
+            raise TypeError("Subscripted generics cannot be used with class and instance checks")
+        return issubclass(cls, self.__origin__)
+
+    def __mro_entries__(self, bases):
+        return _named_alias_bases(self, bases)
+
+    def __or__(self, other):
+        return _typing.Union[self, other]
+
+    def __ror__(self, other):
+        return _typing.Union[other, self]
+
+
+List = _SpecialGenericAlias(list, 1, name="List")
+
+
+def _substitute_alias_argument(arg, replacements):
+    for parameter, value in replacements.items():
+        if arg is parameter:
+            return value
+    parameters = getattr(arg, '__parameters__', ())
+    if not parameters:
+        return arg
+    from types import GenericAlias
+    if type(arg) is GenericAlias:
+        return GenericAlias(arg.__origin__, tuple(
+            _substitute_alias_argument(item, replacements) for item in arg.__args__
+        ))
+    return arg[tuple(replacements[p] for p in parameters)]
+
+
+def _specialize_named_alias_uncached(alias, args):
+    parameters = alias.__parameters__
+    if not parameters:
+        raise TypeError(f"{alias} is not a generic class")
+    if not isinstance(args, tuple):
+        args = (args,)
+    args = tuple(_alias_type_arg(arg) for arg in args)
+    if len(args) != len(parameters):
+        which = "few" if len(args) < len(parameters) else "many"
+        expected = f"at least {len(parameters)}" if which == "few" else str(len(parameters))
+        raise TypeError(f"Too {which} arguments for {alias}; actual {len(args)}, expected {expected}")
+    replacements = dict(zip(parameters, args))
+    args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
+    return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
+
+
+_cached_named_specialization = lru_cache(_specialize_named_alias_uncached)
+
+
+def _specialize_named_alias(alias, args):
+    try:
+        return _cached_named_specialization(alias, args)
+    except TypeError:
+        return _specialize_named_alias_uncached(alias, args)
+
+
 class _TypedCacheSpecialForm(_SpecialForm):
     __module__ = __name__
 

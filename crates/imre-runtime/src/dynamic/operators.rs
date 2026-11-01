@@ -1754,11 +1754,16 @@ impl Context {
                                 }
                             }
                             work.push(Part::Text(if callable { "[[" } else { "[" }));
-                            work.push(match alias.kind {
-                                AliasKind::Callable => Part::Text("typing.Callable"),
-                                AliasKind::Literal(_) => Part::Text("typing.Literal"),
-                                _ => Part::TypeArgument(alias.origin, false),
-                            });
+                            if let Some(name) = alias.name {
+                                work.push(Part::Value(name, false));
+                                work.push(Part::Text("typing."));
+                            } else {
+                                work.push(match alias.kind {
+                                    AliasKind::Callable => Part::Text("typing.Callable"),
+                                    AliasKind::Literal(_) => Part::Text("typing.Literal"),
+                                    _ => Part::TypeArgument(alias.origin, false),
+                                });
+                            }
                             continue;
                         }
                         Value::Raised(error) => {
