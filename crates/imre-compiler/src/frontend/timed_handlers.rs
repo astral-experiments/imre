@@ -1,16 +1,7 @@
 //! Bind timed file handlers without rewriting or reordering their arguments.
+use super::calls::parameter;
 use super::*;
 use ir::TimedOperation as Op;
-
-fn param(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
-    Parameter {
-        name: name.into(),
-        ty,
-        kind: ParameterKind::PositionalOrKeyword,
-        default,
-        sign_only: false,
-    }
-}
 
 fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
@@ -21,7 +12,7 @@ fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
 
 impl Checker<'_> {
     pub(super) fn clock_time(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let integer = |name| param(name, Type::Int, Some(logging::number(0)));
+        let integer = |name| parameter(name, Type::Int, Some(logging::number(0)));
         let mut fold = integer("fold");
         fold.kind = ParameterKind::KeywordOnly;
         let params = [
@@ -29,7 +20,7 @@ impl Checker<'_> {
             integer("minute"),
             integer("second"),
             integer("microsecond"),
-            param("tzinfo", Type::None, Some(Expr::none())),
+            parameter("tzinfo", Type::None, Some(Expr::none())),
             fold,
         ];
         let args = self.arguments(call, &params, None)?;
@@ -41,8 +32,8 @@ impl Checker<'_> {
         let clock = self.types.optional(Type::ClockTime);
         let off = Expr::boolean(false);
         let params = [
-            param("filename", Type::Str, None),
-            param(
+            parameter("filename", Type::Str, None),
+            parameter(
                 "when",
                 Type::Str,
                 Some(Expr {
@@ -50,13 +41,13 @@ impl Checker<'_> {
                     kind: ExprKind::Str("h".into()),
                 }),
             ),
-            param("interval", Type::Int, Some(logging::number(1))),
-            param("backupCount", Type::Int, Some(logging::number(0))),
-            param("encoding", string, Some(Expr::absent(string))),
-            param("delay", Type::Bool, Some(off.clone())),
-            param("utc", Type::Bool, Some(off)),
-            param("atTime", clock, Some(Expr::absent(clock))),
-            param("errors", string, Some(Expr::absent(string))),
+            parameter("interval", Type::Int, Some(logging::number(1))),
+            parameter("backupCount", Type::Int, Some(logging::number(0))),
+            parameter("encoding", string, Some(Expr::absent(string))),
+            parameter("delay", Type::Bool, Some(off.clone())),
+            parameter("utc", Type::Bool, Some(off)),
+            parameter("atTime", clock, Some(Expr::absent(clock))),
+            parameter("errors", string, Some(Expr::absent(string))),
         ];
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             if index == 0 {
@@ -127,7 +118,7 @@ impl Checker<'_> {
         if attr.attr.as_str() == "shouldRollover" {
             let args = self.arguments_with(
                 call,
-                &[param("record", Type::None, None)],
+                &[parameter("record", Type::None, None)],
                 Some(receiver),
                 |checker, _, arg| checker.expr(arg),
             )?;
@@ -136,7 +127,7 @@ impl Checker<'_> {
         if attr.attr.as_str() == "computeRollover" {
             let args = self.arguments_with(
                 call,
-                &[param("currentTime", Type::Int, None)],
+                &[parameter("currentTime", Type::Int, None)],
                 Some(receiver),
                 |checker, _, arg| checker.expr(arg),
             )?;

@@ -1,19 +1,10 @@
 //! Binds native text methods without losing keyword evaluation order.
 
+use super::calls::parameter;
 use super::*;
 use crate::ir::TextOperation;
 
 /// Constructs a fixed signature slot for the shared argument binder.
-fn parameter(name: &str, ty: Type, kind: ParameterKind, default: Option<Expr>) -> Parameter {
-    Parameter {
-        name: name.to_owned(),
-        ty,
-        kind,
-        default,
-        sign_only: false,
-    }
-}
-
 impl Checker<'_> {
     pub(super) fn unicode_normalize(
         &mut self,
@@ -101,21 +92,9 @@ impl Checker<'_> {
     }
 
     pub(super) fn shlex_split(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let flag = |name, value| {
-            parameter(
-                name,
-                Type::Bool,
-                ParameterKind::PositionalOrKeyword,
-                Some(Expr::boolean(value)),
-            )
-        };
+        let flag = |name, value| parameter(name, Type::Bool, Some(Expr::boolean(value)));
         let parameters = [
-            parameter(
-                "s",
-                self.types.optional(Type::Str),
-                ParameterKind::PositionalOrKeyword,
-                None,
-            ),
+            parameter("s", self.types.optional(Type::Str), None),
             flag("comments", false),
             flag("posix", true),
         ];
@@ -498,7 +477,7 @@ impl Checker<'_> {
         name: &str,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        use ParameterKind::{PositionalOnly, PositionalOrKeyword};
+        use ParameterKind::PositionalOnly;
         if matches!(name, "startswith" | "endswith")
             && call.arguments.keywords.is_empty()
             && let [argument] = call.arguments.args.as_ref()
@@ -600,16 +579,10 @@ impl Checker<'_> {
                 TextOperation::Split(name == "rsplit"),
                 self.types.list(Type::Str),
                 vec![
-                    parameter(
-                        "sep",
-                        optional_string,
-                        PositionalOrKeyword,
-                        Some(Expr::absent(optional_string)),
-                    ),
+                    parameter("sep", optional_string, Some(Expr::absent(optional_string))),
                     parameter(
                         "maxsplit",
                         Type::Int,
-                        PositionalOrKeyword,
                         Some(Expr {
                             ty: Type::Int,
                             kind: ExprKind::Int("-1".to_owned()),
@@ -624,10 +597,9 @@ impl Checker<'_> {
                     _ => 0,
                 }),
                 Type::Str,
-                vec![parameter(
+                vec![PositionalOnly.parameter(
                     "chars",
                     optional_string,
-                    PositionalOnly,
                     Some(Expr::absent(optional_string)),
                 )],
             ),
@@ -638,14 +610,13 @@ impl Checker<'_> {
                     TextOperation::EndsWith
                 },
                 Type::Bool,
-                vec![parameter(
+                vec![PositionalOnly.parameter(
                     if name == "startswith" {
                         "prefix"
                     } else {
                         "suffix"
                     },
                     Type::Str,
-                    PositionalOnly,
                     None,
                 )],
             ),
@@ -655,11 +626,10 @@ impl Checker<'_> {
                     TextOperation::Find,
                     Type::Int,
                     vec![
-                        parameter("sub", Type::Str, PositionalOnly, None),
-                        parameter(
+                        PositionalOnly.parameter("sub", Type::Str, None),
+                        PositionalOnly.parameter(
                             "start",
                             optional_index,
-                            PositionalOnly,
                             Some(Expr::absent(optional_index)),
                         ),
                     ],
@@ -668,7 +638,7 @@ impl Checker<'_> {
             "partition" => (
                 TextOperation::Partition,
                 self.types.tuple(vec![Type::Str; 3]),
-                vec![parameter("sep", Type::Str, PositionalOnly, None)],
+                vec![PositionalOnly.parameter("sep", Type::Str, None)],
             ),
             _ => unreachable!("only supported text methods reach this binder"),
         };
@@ -755,12 +725,7 @@ impl Checker<'_> {
         name: &str,
         operation: TextOperation,
     ) -> Result<Expr, String> {
-        let parameters = [parameter(
-            name,
-            Type::Str,
-            ParameterKind::PositionalOrKeyword,
-            None,
-        )];
+        let parameters = [parameter(name, Type::Str, None)];
         let arguments = self.arguments(call, &parameters, None)?;
         Ok(self.ordered_builtin(Builtin::Text(operation), Type::Str, arguments))
     }

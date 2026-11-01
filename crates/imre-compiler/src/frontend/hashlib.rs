@@ -1,4 +1,5 @@
 //! A sealed hash object owns its state. Reading a digest leaves it usable.
+use super::calls::parameter;
 use super::*;
 
 impl Checker<'_> {
@@ -50,23 +51,19 @@ impl Checker<'_> {
         constructor: Intrinsic,
     ) -> Result<Expr, String> {
         let mut params = vec![
-            Parameter {
-                name: "data".into(),
-                ty: Type::Bytes,
-                kind: ParameterKind::PositionalOrKeyword,
-                default: Some(Expr {
+            parameter(
+                "data",
+                Type::Bytes,
+                Some(Expr {
                     ty: Type::Bytes,
                     kind: ExprKind::Bytes(Vec::new()),
                 }),
-                sign_only: false,
-            },
-            Parameter {
-                name: "usedforsecurity".into(),
-                ty: Type::Bool,
-                kind: ParameterKind::KeywordOnly,
-                default: Some(Expr::boolean(true)),
-                sign_only: false,
-            },
+            ),
+            ParameterKind::KeywordOnly.parameter(
+                "usedforsecurity",
+                Type::Bool,
+                Some(Expr::boolean(true)),
+            ),
         ];
         let named = constructor == Intrinsic::HashNew;
         let supplied = |key: &str| call.arguments.find_keyword(key).is_some();
@@ -86,16 +83,7 @@ impl Checker<'_> {
         }
         let mut name = None;
         let op = if named {
-            params.insert(
-                0,
-                Parameter {
-                    name: "name".into(),
-                    ty: Type::Str,
-                    kind: ParameterKind::PositionalOrKeyword,
-                    default: None,
-                    sign_only: false,
-                },
-            );
+            params.insert(0, parameter("name", Type::Str, None));
             Builtin::HashNew
         } else if let Intrinsic::NamedHash(algorithm) = constructor {
             name = Some(unpacking::string(algorithm));

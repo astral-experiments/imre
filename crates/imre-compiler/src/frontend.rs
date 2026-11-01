@@ -138,7 +138,7 @@ mod zipfile;
 use assignments::LocalState;
 pub(crate) use caller_cache::CallerCache;
 pub(crate) use calls::scalar_literal;
-use calls::{Parameter, ParameterKind};
+use calls::{Parameter, ParameterKind, parameter};
 use comprehensions::Helpers;
 pub(crate) use comprehensions::target_names;
 pub(crate) use function_text::{docstring, docstring_literal};
@@ -8831,16 +8831,14 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
             Some(Binding::Intrinsic(Intrinsic::SocketGetFqdn)) => {
-                let params = [Parameter {
-                    name: "name".into(),
-                    ty: Type::Str,
-                    kind: ParameterKind::PositionalOrKeyword,
-                    default: Some(Expr {
+                let params = [parameter(
+                    "name",
+                    Type::Str,
+                    Some(Expr {
                         ty: Type::Str,
                         kind: ExprKind::Str(String::new()),
                     }),
-                    sign_only: false,
-                }];
+                )];
                 let args = self.arguments(call, &params, None)?;
                 return Ok(self.ordered_builtin(
                     Builtin::Socket(ir::SocketOp::GetFqdn),
@@ -8891,16 +8889,14 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BytesIo)) => {
                 let args = self.arguments(
                     call,
-                    &[Parameter {
-                        name: "initial_bytes".into(),
-                        ty: Type::Bytes,
-                        kind: ParameterKind::PositionalOrKeyword,
-                        default: Some(Expr {
+                    &[parameter(
+                        "initial_bytes",
+                        Type::Bytes,
+                        Some(Expr {
                             ty: Type::Bytes,
                             kind: ExprKind::Bytes(Vec::new()),
                         }),
-                        sign_only: false,
-                    }],
+                    )],
                     None,
                 )?;
                 return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BytesIO, args));
@@ -9191,17 +9187,7 @@ impl<'a> Checker<'a> {
                 return self.base64_codec(call, op == Intrinsic::Base64Decode);
             }
             Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
-                let args = self.arguments(
-                    call,
-                    &[Parameter {
-                        name: "s".into(),
-                        ty: Type::Bytes,
-                        kind: ParameterKind::PositionalOrKeyword,
-                        default: None,
-                        sign_only: false,
-                    }],
-                    None,
-                )?;
+                let args = self.arguments(call, &[parameter("s", Type::Bytes, None)], None)?;
                 return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
             Some(Binding::Intrinsic(Intrinsic::UrlJoin)) => return self.url_join(call),
@@ -9623,17 +9609,8 @@ impl<'a> Checker<'a> {
                 return self.hash_method(receiver, attribute, call);
             }
             if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
-                let args = self.arguments(
-                    call,
-                    &[Parameter {
-                        name: "s".into(),
-                        ty: Type::Str,
-                        kind: ParameterKind::PositionalOrKeyword,
-                        default: None,
-                        sign_only: false,
-                    }],
-                    Some(receiver),
-                )?;
+                let args =
+                    self.arguments(call, &[parameter("s", Type::Str, None)], Some(receiver))?;
                 return Ok(self.ordered_builtin(Builtin::JsonDecoderDecode, Type::JsonRoot, args));
             }
             if receiver.ty == Type::ZipInfo
