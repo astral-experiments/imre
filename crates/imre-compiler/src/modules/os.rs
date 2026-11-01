@@ -31,6 +31,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
     }
     Some(match name {
+        "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
         "close" => Intrinsic::Fd(FdOperation::Close),

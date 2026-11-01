@@ -961,6 +961,20 @@ def main():
                 expected.stderr,
             )
 
+        if os.name == "posix":
+            compare(
+                "-IB", "-c",
+                "import sys; os = __import__(sys.argv[1]); posix = __import__(sys.argv[2])\n"
+                "f = os.getpid; pid = f()\n"
+                "print(type(pid) is int, pid > 0, pid == posix.getpid(), f is posix.getpid)\n"
+                "print(f.__module__, f.__name__, f.__qualname__, f.__self__ is posix, repr(f))\n"
+                "print(f.__doc__, f.__text_signature__)\n"
+                "for args, kw in (((1,), {}), ((), {'x': 1}), ((1,), {'x': 1})):\n"
+                "    try: f(*args, **kw)\n"
+                "    except TypeError as e: print(str(e))",
+                "os", "posix",
+            )
+
         hash_args = ["", b"", "latin1é", b"latin1\xe9", "Āfoo", "😀abc", bytes(range(32))]
         hash_calls = "\n".join(f"print(hash({value!r}))" for value in hash_args)
         for seed in ("0", "1", "4294967295"):
