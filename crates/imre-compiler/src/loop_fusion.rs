@@ -1,5 +1,7 @@
 //! Forward values across equal counted loops when their intermediate lists are private.
 
+mod records;
+
 use std::collections::{HashMap, HashSet};
 
 use crate::borrows::statements;
@@ -8,9 +10,12 @@ use crate::ir::{
 };
 
 pub(crate) fn specialize(module: &mut Module) {
+    let constructors = records::constructors(module);
     for function in &mut module.functions {
         for first in (0..function.body.len()).rev() {
-            if let Some((last, replacement, locals)) = fused(function, first) {
+            if let Some((last, replacement, locals)) =
+                fused(function, first).or_else(|| records::fuse(function, first, &constructors))
+            {
                 function.locals.extend(locals);
                 function.body.splice(first..=last, replacement);
             }
@@ -161,25 +166,25 @@ fn greater(left: &Expr, right: i128) -> Expr {
 
 /// Only the original append receivers and the forwarded reads may see these
 /// freshly initialized lists. Count slot transfers separately from expressions.
-fn private_columns(
+fn private_lists(
     function: &Function,
     first: usize,
-    columns: &HashMap<usize, Column>,
+    consumer_reads: &HashMap<usize, usize>,
     inputs: &HashSet<usize>,
 ) -> bool {
     let mut reads = HashMap::new();
     let mut writes = HashMap::new();
     let mut hidden = false;
-    let protected = |slot: &usize| columns.contains_key(slot) || inputs.contains(slot);
+    let protected = |slot: &usize| consumer_reads.contains_key(slot) || inputs.contains(slot);
     ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
-        ExprKind::Local(slot) if columns.contains_key(slot) => {
+        ExprKind::Local(slot) if consumer_reads.contains_key(slot) => {
             *reads.entry(*slot).or_insert(0_usize) += 1
         }
         ExprKind::Scope { clear, .. } => hidden |= clear.iter().any(&protected),
         _ => {}
     });
     statements(&function.body, &mut |s| match s {
-        Statement::Assign(slot, _) if columns.contains_key(slot) => {
+        Statement::Assign(slot, _) if consumer_reads.contains_key(slot) => {
             *writes.entry(*slot).or_insert(0) += 1
         }
         Statement::Move(a, b) => hidden |= protected(a) || protected(b),
@@ -192,7 +197,7 @@ fn private_columns(
         } => {
             hidden |= [target, cursor, stop, step]
                 .iter()
-                .any(|slot| columns.contains_key(*slot));
+                .any(|slot| consumer_reads.contains_key(*slot));
         }
         Statement::IterNext {
             iterator,
@@ -203,7 +208,7 @@ fn private_columns(
             hidden |= [Some(iterator), Some(key), value.as_ref(), Some(ready)]
                 .into_iter()
                 .flatten()
-                .any(|slot| columns.contains_key(slot));
+                .any(|slot| consumer_reads.contains_key(slot));
         }
         Statement::Clear(slot) => hidden |= protected(slot),
         Statement::Try { handlers, .. } => {
@@ -215,19 +220,19 @@ fn private_columns(
         Statement::Scope { clear, .. } => hidden |= clear.iter().any(&protected),
         _ => {}
     });
-    !hidden && columns.iter().all(|(slot, column)| {
+    !hidden && consumer_reads.iter().all(|(slot, expected)| {
         let initialized = function.body[..first].iter().any(|statement| {
             matches!(statement, Statement::Assign(to, Expr { kind: ExprKind::List(items), .. }) if to == slot && items.is_empty())
         });
         initialized
-            && column.reads > 0
-            && reads.get(slot) == Some(&(1 + column.reads))
+            && *expected > 0
+            && reads.get(slot) == Some(&(1 + expected))
             && writes.get(slot) == Some(&1)
     })
 }
 
-fn fused(function: &Function, first: usize) -> Option<(usize, Vec<Statement>, Vec<Type>)> {
-    let (bound, source_index, producer) = counted(&function.body[first])?;
+/// Only constant local initialization may separate the two loops.
+fn next_loop(function: &Function, first: usize) -> Option<usize> {
     let offset = function.body[first + 1..].iter().position(|s| {
         !matches!(
             s,
@@ -240,7 +245,64 @@ fn fused(function: &Function, first: usize) -> Option<(usize, Vec<Statement>, Ve
             )
         )
     })?;
-    let last = first + 1 + offset;
+    Some(first + 1 + offset)
+}
+
+/// Preserve oversized append errors, the last producer ordinal, and the gap.
+fn loop_prefix(
+    function: &Function,
+    first: usize,
+    last: usize,
+    bound: &Expr,
+    source_index: usize,
+    index: usize,
+) -> Vec<Statement> {
+    // An oversized producer must encounter the original append error before
+    // any consumer effect. Keep that producer intact on its cold path.
+    let mut replacement = vec![Statement::If(
+        greater(bound, crate::ranges::MAX_LIST_LEN),
+        vec![function.body[first].clone()],
+        vec![],
+    )];
+    if source_index != index {
+        let final_index = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Binary(Binary::Subtract, Box::new(bound.clone()), Box::new(int(1))),
+        };
+        replacement.push(Statement::If(
+            greater(bound, 0),
+            vec![Statement::Assign(source_index, final_index)],
+            vec![],
+        ));
+    }
+    replacement.extend_from_slice(&function.body[first + 1..last]);
+    replacement
+}
+
+/// A callback could observe intermediate ownership while a producer is rescheduled.
+fn observable_consumer(expr: &Expr) -> bool {
+    !matches!(
+        &expr.kind,
+        ExprKind::Int(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Float(_)
+            | ExprKind::Str(_)
+            | ExprKind::Bytes(_)
+            | ExprKind::Local(_)
+            | ExprKind::Tuple(_)
+            | ExprKind::Binary(..)
+            | ExprKind::Compare(..)
+            | ExprKind::Not(_)
+            | ExprKind::Negate(_)
+            | ExprKind::Boolean(..)
+            | ExprKind::Conditional(..)
+            | ExprKind::Builtin(Builtin::ListGet | Builtin::TupleGet | Builtin::Len, _)
+    ) && !matches!(&expr.kind, ExprKind::Field(base,_) if matches!(base.ty,Type::Tuple(_)))
+}
+
+fn fused(function: &Function, first: usize) -> Option<(usize, Vec<Statement>, Vec<Type>)> {
+    let (bound, source_index, producer) = counted(&function.body[first])?;
+    let last = next_loop(function, first)?;
     let (other, index, consumer) = counted(&function.body[last])?;
     if bound.ty != Type::Int
         || function.locals[source_index] != Type::Int
@@ -314,53 +376,22 @@ fn fused(function: &Function, first: usize) -> Option<(usize, Vec<Statement>, Ve
     }
     let mut observable = false;
     ir::walk_expressions(consumer, &mut |expr| {
-        // Scheduling a producer across a callback could expose intermediate ownership.
-        observable |= !matches!(
-            &expr.kind,
-            ExprKind::Int(_)
-                | ExprKind::Bool(_)
-                | ExprKind::Float(_)
-                | ExprKind::Str(_)
-                | ExprKind::Bytes(_)
-                | ExprKind::Local(_)
-                | ExprKind::Tuple(_)
-                | ExprKind::Binary(..)
-                | ExprKind::Compare(..)
-                | ExprKind::Not(_)
-                | ExprKind::Negate(_)
-                | ExprKind::Boolean(..)
-                | ExprKind::Conditional(..)
-                | ExprKind::Builtin(Builtin::ListGet | Builtin::TupleGet | Builtin::Len, _)
-        ) && !matches!(&expr.kind, ExprKind::Field(base,_) if matches!(base.ty,Type::Tuple(_)));
+        observable |= observable_consumer(expr);
         if let Some(slot) = row_read(expr, index)
             && let Some(column) = columns.get_mut(&slot)
         {
             column.reads += 1;
         }
     });
-    if observable || !private_columns(function, first, &columns, &inputs) {
+    let reads = columns
+        .iter()
+        .map(|(&slot, column)| (slot, column.reads))
+        .collect();
+    if observable || !private_lists(function, first, &reads, &inputs) {
         return None;
     }
 
-    // An oversized producer must encounter the original append error before
-    // any consumer effect. Keep that producer intact on its cold path.
-    let mut replacement = vec![Statement::If(
-        greater(bound, crate::ranges::MAX_LIST_LEN),
-        vec![function.body[first].clone()],
-        vec![],
-    )];
-    if source_index != index {
-        let final_index = Expr {
-            ty: Type::Int,
-            kind: ExprKind::Binary(Binary::Subtract, Box::new(bound.clone()), Box::new(int(1))),
-        };
-        replacement.push(Statement::If(
-            greater(bound, 0),
-            vec![Statement::Assign(source_index, final_index)],
-            vec![],
-        ));
-    }
-    replacement.extend_from_slice(&function.body[first + 1..last]);
+    let mut replacement = loop_prefix(function, first, last, bound, source_index, index);
     let mut combined = function.body[last].clone();
     let Statement::Scope { body, .. } = &mut combined else {
         unreachable!()
