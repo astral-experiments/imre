@@ -19,8 +19,20 @@ def assertEqual(self, first, second, msg=None):
     return self._baseAssertEqual(first, second, msg)
 
 
+def assertIs(self, expr1, expr2, msg=None):
+    if expr1 is not expr2:
+        _raise_identity_failure(self, _safe_repr(expr1), _safe_repr(expr2), msg)
+
+
+def assertIsNot(self, expr1, expr2, msg=None):
+    if expr1 is expr2:
+        _raise_identity_failure(self, _safe_repr(expr1), None, msg)
+
+
 TestCase._baseAssertEqual = _baseAssertEqual
 TestCase.assertEqual = assertEqual
+TestCase.assertIs = assertIs
+TestCase.assertIsNot = assertIsNot
 
 
 # Multiset comparison and diagnostics follow CPython 3.14.5 unittest.util and unittest.case.
