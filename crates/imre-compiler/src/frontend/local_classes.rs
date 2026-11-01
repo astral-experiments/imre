@@ -66,6 +66,13 @@ impl Checker<'_> {
     /// arbitrary bases and executable class statements must not be silently elided.
     pub(super) fn define_local_class(&mut self, node: &ast::StmtClassDef) -> Result<(), String> {
         let name = node.name.as_str();
+        for decorator in &node.decorator_list {
+            if let Some(crate::modules::Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) =
+                self.resolve(&decorator.expression)
+            {
+                return Err(self.object_runtime_export(name, decorator));
+            }
+        }
         if !self
             .local_classes
             .get(name)
