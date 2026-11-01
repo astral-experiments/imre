@@ -77,6 +77,41 @@ pub(super) fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CSt
     encoded.map_err(|_| Error::new("ValueError", nul_error))
 }
 
+/// Read cryptographically secure bytes from the operating system.
+pub(super) fn urandom(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "posix.urandom() takes no keyword arguments",
+        ));
+    }
+    let [size] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "posix.urandom() takes exactly one argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let size = ctx
+        .index_integer(*size)?
+        .to_i64()
+        .filter(|&n| isize::try_from(n).is_ok())
+        .ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+    if size < 0 {
+        return Err(Error::new("ValueError", "negative argument not allowed"));
+    }
+    let mut data = builtins::zeroed_bytes(size)?;
+    getrandom::fill(&mut data).map_err(|e| crate::objects::errno_error(e.into()))?;
+    Ok(ctx.alloc(Value::Bytes(data)))
+}
+
 /// Read directory entries in filesystem order, preserving the caller's bytes or text spelling.
 pub(super) fn listdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     use std::os::fd::{AsFd, FromRawFd, OwnedFd};

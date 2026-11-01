@@ -1696,6 +1696,12 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "posix.urandom" => {
+                        return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
+                    }
+                    "__text_signature__" if symbol == "posix.urandom" => {
+                        return Ok(self.text("($module, size, /)"));
+                    }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
                     }
