@@ -1172,6 +1172,7 @@ impl Context {
                         | "NotImplementedType"
                         | "ellipsis"
                         | super::namedtuple::GETTER
+                        | "functools.KeyWrapper"
                         | "member_descriptor"
                 )
             {

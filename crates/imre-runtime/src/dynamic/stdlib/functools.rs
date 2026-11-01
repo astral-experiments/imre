@@ -4,6 +4,87 @@ use crate::dynamic::{
     value::{CACHE_CAPACITY, Error, FALSE, Id, NONE, Result, Value},
 };
 
+/// Argument Clinic accepts either one positional argument or its named equivalent.
+pub(in crate::dynamic) fn key_argument(
+    name: &str,
+    param: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [value] = super::builtins::bind_builtin_arguments(name, args, kwargs, [param], 1)?;
+    Ok(value.expect("required argument checked by binder"))
+}
+
+pub(in crate::dynamic) fn key_comparison(
+    ctx: &mut Context,
+    slot: &str,
+    comparator: Id,
+    object: Option<Id>,
+    other: Id,
+) -> Result<Option<Id>> {
+    let op = match slot {
+        "__lt__" => "<",
+        "__le__" => "<=",
+        "__eq__" => "==",
+        "__ne__" => "!=",
+        "__ge__" => ">=",
+        "__gt__" => ">",
+        _ => return Ok(None),
+    };
+    let Value::KeyWrapper { object: rhs, .. } = *ctx.heap.get(other) else {
+        return Err(Error::new("TypeError", "other argument must be K instance"));
+    };
+    let (Some(left), Some(right)) = (object, rhs) else {
+        return Err(Error::new("AttributeError", "object"));
+    };
+    let result = ctx.call(comparator, vec![left, right], Vec::new())?;
+    let zero = ctx.int(0);
+    ctx.binary(op, result, zero).map(Some)
+}
+
+pub(super) fn key_method(
+    ctx: &mut Context,
+    slot: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{slot}' of 'functools.KeyWrapper' object needs an argument"),
+        ));
+    };
+    let Value::KeyWrapper { comparator, object } = *ctx.heap.get(receiver) else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{slot}' requires a 'functools.KeyWrapper' object but received a '{}'",
+                ctx.type_name(receiver)
+            ),
+        ));
+    };
+    if slot == "__call__" {
+        let value = key_argument("K", "obj", rest, kwargs)?;
+        return Ok(ctx.alloc(Value::KeyWrapper {
+            comparator,
+            object: Some(value),
+        }));
+    }
+    let &[other] = rest else {
+        return Err(Error::new(
+            "TypeError",
+            format!("expected 1 argument, got {}", rest.len()),
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("wrapper {slot}() takes no keyword arguments"),
+        ));
+    }
+    Ok(key_comparison(ctx, slot, comparator, object, other)?.expect("registered comparison slot"))
+}
+
 pub(super) const ASSIGNED: &[&str] = &[
     "__module__",
     "__name__",

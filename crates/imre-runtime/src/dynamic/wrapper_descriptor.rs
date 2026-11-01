@@ -21,6 +21,13 @@ impl BuiltinDescriptor {
                 attr,
                 stdlib::os::scandir::ITER_METHODS,
             )),
+            Some(("functools.KeyWrapper", attr)) => Some((
+                "functools.KeyWrapper",
+                attr,
+                &[
+                    "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__call__",
+                ][..],
+            )),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
@@ -97,6 +104,7 @@ impl BuiltinDescriptor {
         }
         let accepts = match self.owner {
             "object" => true,
+            "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => {
                 ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
             }

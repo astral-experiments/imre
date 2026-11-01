@@ -439,6 +439,7 @@ impl Context {
             Value::Cached { .. } => "_lru_cache_wrapper",
             Value::Partial { .. } => "partial",
             Value::PartialPlaceholder => "_PlaceholderType",
+            Value::KeyWrapper { .. } => "functools.KeyWrapper",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
@@ -839,6 +840,10 @@ pub(super) enum Value {
         coroutine_marker: Option<Id>,
     },
     PartialPlaceholder,
+    KeyWrapper {
+        comparator: Id,
+        object: Option<Id>,
+    },
     CacheDecorator {
         maxsize: Id,
         typed: Id,
@@ -1016,6 +1021,10 @@ impl Value {
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::TupleGetter { doc, .. } => visit.extend(doc),
             Self::ItemGetter(keys) => visit.push(*keys),
+            Self::KeyWrapper { comparator, object } => {
+                visit.push(*comparator);
+                visit.extend(object);
+            }
             Self::Map {
                 function, inputs, ..
             } => {
