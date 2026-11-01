@@ -14,6 +14,18 @@ use std::io;
 pub(super) mod links;
 pub(super) mod stat_result;
 
+/// Query both kernel-reported terminal dimensions, including zero-sized windows.
+pub(crate) fn terminal_dimensions(fd: i32) -> io::Result<(u16, u16)> {
+    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+    // SAFETY: TIOCGWINSZ initializes the winsize on success.
+    if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, size.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the ioctl succeeded.
+    let size = unsafe { size.assume_init() };
+    Ok((size.ws_col, size.ws_row))
+}
+
 /// The target's primary or alternate separator, shared by typed and boxed imports.
 pub(crate) fn os_separator(alternate: bool) -> Option<&'static str> {
     match (cfg!(windows), alternate) {

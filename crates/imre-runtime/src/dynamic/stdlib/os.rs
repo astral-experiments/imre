@@ -91,6 +91,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "dup"
             | "dup2"
             | "isatty"
+            | "get_terminal_size"
             | "lseek"
             | "pipe"
             | "close"
@@ -99,6 +100,50 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "get_inheritable"
             | "set_inheritable"
     )
+}
+
+fn terminal_record(ctx: &mut Context, values: Vec<Id>) -> Id {
+    ctx.alloc(Value::NamedTuple {
+        class: Some("os.terminal_size"),
+        names: ["columns", "lines"].map(str::to_owned).into(),
+        values,
+        extras: Vec::new(),
+    })
+}
+
+pub(super) fn terminal_size(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [sequence, attributes] = builtins::bind("structseq", args, kwargs, ["sequence", "dict"])?;
+    let sequence = sequence.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            "structseq() missing required argument 'sequence' (pos 1)",
+        )
+    })?;
+    let values = ctx.items(sequence)?;
+    if values.len() != 2 {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "os.terminal_size() takes a 2-sequence ({}-sequence given)",
+                values.len()
+            ),
+        ));
+    }
+    if let Some(mapping) = attributes {
+        let items = ctx.dict_entries(mapping).ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "os.terminal_size() takes a dict as second arg, if any",
+            )
+        })?;
+        if !items.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "os.terminal_size() got duplicate or unexpected field name(s)",
+            ));
+        }
+    }
+    Ok(terminal_record(ctx, values))
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -195,6 +240,26 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    if name == "get_terminal_size" {
+        let fd = match args {
+            [] => libc::STDOUT_FILENO,
+            [fd] => c_int(ctx, *fd)?,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "get_terminal_size expected at most 1 argument, got {}",
+                        args.len()
+                    ),
+                ));
+            }
+        };
+        let (columns, lines) =
+            native::terminal_dimensions(fd).map_err(crate::objects::errno_error)?;
+        let columns = ctx.int(i64::from(columns));
+        let lines = ctx.int(i64::from(lines));
+        return Ok(terminal_record(ctx, vec![columns, lines]));
     }
     if name == "pipe" {
         if !args.is_empty() {

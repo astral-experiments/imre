@@ -665,6 +665,7 @@ impl Context {
             return matches!(
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
+                    | ("os.terminal_size", "tuple")
                     | ("collections.defaultdict", "dict")
                     | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
@@ -799,6 +800,7 @@ impl Context {
                             | "getset_descriptor"
                             | "member_descriptor"
                             | "mappingproxy"
+                            | "os.terminal_size"
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
                             | super::namedtuple::GETTER
@@ -857,9 +859,9 @@ impl Context {
                 ..
             } => Ok(*class),
             Value::NamedTuple {
-                class: Some("time.struct_time"),
+                class: Some(name @ ("time.struct_time" | "os.terminal_size")),
                 ..
-            } => Ok(self.builtin("time.struct_time")),
+            } => Ok(self.builtin(name)),
             Value::Raised(error) => {
                 if let Some(class) = error.class() {
                     return Ok(class);
@@ -987,12 +989,12 @@ impl Context {
             ) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (
-                "time.struct_time",
+                kind @ ("time.struct_time" | "os.terminal_size"),
                 Value::NamedTuple {
-                    class: Some("time.struct_time"),
+                    class: Some(actual),
                     ..
                 },
-            ) => true,
+            ) => kind == *actual,
             (class, Value::Calendar { value, .. }) => {
                 class.strip_prefix("datetime.").is_some_and(|c| {
                     c == value.class() || (c == "date" && value.class() == "datetime")
@@ -1653,6 +1655,19 @@ impl Context {
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
+            Value::Native(ref class) if class == "os.terminal_size" => match name {
+                "__module__" => return Ok(self.text("os")),
+                "__base__" => return Ok(self.builtin("tuple")),
+                "__bases__" => {
+                    let tuple = self.builtin("tuple");
+                    return Ok(self.alloc(Value::Tuple(vec![tuple])));
+                }
+                "__mro__" => {
+                    let lineage = self.lineage(obj);
+                    return Ok(self.alloc(Value::Tuple(lineage)));
+                }
+                _ => {}
+            },
             Value::Native(ref class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
@@ -2111,8 +2126,10 @@ impl Context {
                 if let Some((_, value)) = extras.iter().find(|(key, _)| *key == name) {
                     return Ok(*value);
                 }
-                if class == Some("time.struct_time") && name == "__class__" {
-                    return Ok(self.builtin("time.struct_time"));
+                if let Some(kind @ ("time.struct_time" | "os.terminal_size")) = class
+                    && name == "__class__"
+                {
+                    return Ok(self.builtin(kind));
                 }
                 if matches!(class, Some("SplitResult" | "SplitResultBytes"))
                     && let Some(property) = stdlib::urllib::property(self, values[1], name)?

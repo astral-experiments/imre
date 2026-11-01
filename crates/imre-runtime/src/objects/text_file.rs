@@ -69,6 +69,11 @@ impl TextFile {
         }
     }
 
+    pub(crate) fn fileno(&self) -> Result<std::os::fd::RawFd> {
+        // SAFETY: only the descriptor number escapes this nonreentrant borrow.
+        unsafe { self.0.0.with(|storage| storage.file().fileno()) }
+    }
+
     /// Reports whether the live descriptor is attached to a terminal.
     pub(crate) fn isatty(&self) -> Result<bool> {
         // SAFETY: the borrow is nonreentrant and fileno rejects a closed stream.

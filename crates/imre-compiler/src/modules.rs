@@ -95,6 +95,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "importlib/__init__.py",
             include_str!("../stdlib/importlib/__init__.py"),
         )),
+        "shutil" => Some(("shutil.py", include_str!("../stdlib/shutil.py"))),
         "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
         "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
         "pkgutil" => Some((

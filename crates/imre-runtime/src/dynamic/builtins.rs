@@ -412,6 +412,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "write"
                     | "flush"
                     | "close"
+                    | "fileno"
                     | "isatty"
                     | "__enter__"
                     | "__exit__"

@@ -24,6 +24,7 @@ impl Context {
             if let Value::Native(name) = self.heap.get(class) {
                 match name.as_str() {
                     "bool" => lineage.push(self.builtin("int")),
+                    "os.terminal_size" => lineage.push(self.builtin("tuple")),
                     "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum" => {
                         let scalar = if name == "enum.StrEnum" { "str" } else { "int" };
                         lineage.push(self.builtin(scalar));

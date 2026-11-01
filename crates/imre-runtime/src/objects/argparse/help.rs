@@ -37,16 +37,8 @@ pub(super) fn width() -> usize {
     let columns = configured
         .flatten()
         .or_else(|| {
-            let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
-            // SAFETY: ioctl writes a winsize to this buffer only on success.
-            if unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, size.as_mut_ptr()) } == 0
-            {
-                // SAFETY: the successful ioctl initialized the terminal dimensions.
-                let columns = usize::from(unsafe { size.assume_init() }.ws_col);
-                (columns > 0).then_some(columns)
-            } else {
-                None
-            }
+            let (columns, _) = super::super::os::terminal_dimensions(libc::STDOUT_FILENO).ok()?;
+            (columns > 0).then_some(usize::from(columns))
         })
         .unwrap_or(80usize);
     columns.saturating_sub(2)

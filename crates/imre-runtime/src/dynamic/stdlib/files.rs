@@ -615,6 +615,7 @@ pub(super) fn text_method(
             file.write(value)?;
             Ok(ctx.int(value.chars().count() as i64))
         }
+        "fileno" => Ok(ctx.int(i64::from(file.fileno()?))),
         "isatty" => Ok(if file.isatty()? { TRUE } else { FALSE }),
         "flush" => {
             file.flush()?;

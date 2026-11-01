@@ -483,6 +483,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("os" | "posix", "terminal_size") => ctx.builtin("os.terminal_size"),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         ("os" | "posix", name) if os::is_descriptor_function(name) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -956,6 +957,9 @@ pub(super) fn call(
     }
     if let Some(method @ ("start" | "end" | "span")) = name.strip_prefix("match.") {
         return regex::match_position(ctx, method, args, kwargs);
+    }
+    if name == "os.terminal_size" {
+        return os::terminal_size(ctx, args, kwargs);
     }
     if matches!(name, "posix.putenv" | "posix.unsetenv") {
         return os::change_environment(ctx, name, args, kwargs);
