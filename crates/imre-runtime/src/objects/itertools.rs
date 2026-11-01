@@ -82,6 +82,7 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
     }
 }
 
+mod combinatorial;
 mod count;
 pub(crate) use count::CountValue;
 mod counter_elements;
@@ -91,6 +92,7 @@ use std::cell::{Cell, RefCell};
 
 pub(super) enum Adapter {
     CounterElements(RefCell<counter_elements::Elements>),
+    Combinatorial(RefCell<combinatorial::Cursor>),
     Sequence(sources::Sequence),
     Progression(sources::Progression),
     Count {
@@ -171,6 +173,7 @@ impl Adapter {
                 return Ok(());
             }
             Self::Progression(_) => "range_iterator",
+            Self::Combinatorial(cursor) => cursor.borrow().name(),
             Self::CounterElements(_) => "itertools.chain",
             Self::Sequence(_) => "iterator",
             Self::Tee(_) => "itertools._tee",
@@ -238,6 +241,7 @@ impl Adapter {
 
     pub(super) fn next(&self) -> Result<Option<OwnedWord>, Error> {
         match self {
+            Self::Combinatorial(cursor) => cursor.borrow_mut().next(),
             Self::CounterElements(elements) => elements.borrow_mut().next(),
             Self::Sequence(seq) => seq.next(),
             Self::Progression(count) => Ok(count.next()),

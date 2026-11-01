@@ -856,8 +856,19 @@ pub(crate) enum RandomOperation {
     ChoiceRange { secure: bool },
 }
 
+/// Selects an ordering over the pooled inputs of an itertools iterator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum Combinatorial {
+    Product,
+    Permutations,
+    Combinations,
+    CombinationsWithReplacement,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    Combinatorial(Combinatorial),
     DecimalIntegerText,
     Random(RandomOperation),
     Linecache(LinecacheOperation, Type, bool),
@@ -870,6 +881,7 @@ pub(crate) enum Builtin {
     Islice,
     Tee,
     TupleIndex,
+    IterableTuple,
     TupleBufferNew,
     TupleBufferPush,
     TupleBufferFinish,

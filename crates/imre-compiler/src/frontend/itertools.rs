@@ -73,11 +73,23 @@ impl Checker<'_> {
 
     fn cursor_source(&mut self, node: &ast::Expr) -> Result<(Expr, Type), String> {
         let source = self.cursor_source_value(node)?;
-        let element = match source.ty {
-            Type::Str => Some(Type::Str),
+        let element = self.cursor_source_element(source.ty).ok_or_else(|| {
+            error(
+                self.source,
+                node,
+                "iterator source requires one concrete element type",
+            )
+        })?;
+        Ok((source, element))
+    }
+
+    fn cursor_source_element(&self, ty: Type) -> Option<Type> {
+        match ty {
+            Type::Str | Type::StrLiteral(_) => Some(Type::Str),
             Type::Bytes => Some(Type::Int),
+            Type::VarTuple(_) => self.types.var_tuple_element(ty),
             Type::Tuple(_) => {
-                let fields = self.types.fields(source.ty).unwrap();
+                let fields = self.types.fields(ty).unwrap();
                 let first = fields.first().copied().unwrap_or(Type::Int);
                 fields.iter().all(|&t| t == first).then_some(first)
             }
@@ -88,14 +100,118 @@ impl Checker<'_> {
                 .or_else(|| self.types.set_element(ty))
                 .or_else(|| self.types.mapping(ty).map(|(key, _)| key)),
         }
-        .ok_or_else(|| {
-            error(
+    }
+
+    /// Convert a concrete iterable, reusing exact tuples as required by tuple().
+    pub(super) fn iterable_tuple(&self, source: &Expr) -> Option<Expr> {
+        if matches!(source.ty, Type::Tuple(_) | Type::VarTuple(_)) {
+            return self
+                .types
+                .tuple_origin(source.ty)
+                .is_none()
+                .then(|| source.clone());
+        }
+        let element = self.cursor_source_element(source.ty)?;
+        Some(Expr {
+            ty: self.types.var_tuple(element),
+            kind: ExprKind::Builtin(Builtin::IterableTuple, vec![source.clone()]),
+        })
+    }
+
+    /// Constructors consume each input once, but return an independently pullable cursor.
+    pub(super) fn combinatorial_cursor(
+        &mut self,
+        call: &ast::ExprCall,
+        op: ir::Combinatorial,
+    ) -> Result<Expr, String> {
+        use ir::Combinatorial::{Permutations, Product};
+
+        let mut elements = Vec::new();
+        let args = if op == Product {
+            let mut values = Vec::new();
+            for source in &call.arguments.args {
+                let (value, element) = self.cursor_source(source)?;
+                elements.push(element);
+                values.push(value);
+            }
+            let repeat = match call.arguments.keywords.as_ref() {
+                [] => pipelines::integer(1),
+                [kw] if kw
+                    .arg
+                    .as_ref()
+                    .is_some_and(|name| name.as_str() == "repeat") =>
+                {
+                    self.integer_index(&kw.value)?
+                }
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "product accepts only the repeat keyword",
+                    ));
+                }
+            };
+            values.push(repeat);
+            ir::CallArgs::positional(values)
+        } else {
+            let none = Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            };
+            let params = [
+                ("iterable", None),
+                ("r", (op == Permutations).then_some(none)),
+            ]
+            .map(|(name, default)| Parameter {
+                name: name.into(),
+                ty: Type::Int,
+                kind: ParameterKind::PositionalOrKeyword,
+                default,
+                sign_only: false,
+            });
+            self.arguments_with(call, &params, None, |checker, index, node| {
+                if index == 0 {
+                    let (value, element) = checker.cursor_source(node)?;
+                    elements.push(element);
+                    Ok(value)
+                } else {
+                    let value = checker.expr(node)?;
+                    if op == Permutations
+                        && (value.ty == Type::None
+                            || checker.types.payload(value.ty) == Some(Type::Int))
+                    {
+                        Ok(value)
+                    } else {
+                        checker.index_value(value, node)
+                    }
+                }
+            })?
+        };
+        let parameter = &args.values[*args.order.last().unwrap()];
+        // Retain fixed field types for destructuring. Large or runtime arities
+        // use homogeneous tuple storage, without expanding their shape here.
+        let size = match &parameter.kind {
+            ExprKind::Int(value) => value.parse::<usize>().ok(),
+            _ => None,
+        };
+        let row = if elements.is_empty() {
+            self.types.tuple(vec![])
+        } else if let Some(size) = size
+            && size
+                .checked_mul(elements.len())
+                .is_some_and(|len| len <= 256)
+        {
+            self.types.tuple(elements.repeat(size))
+        } else if elements.iter().all(|&element| element == elements[0]) {
+            self.types.var_tuple(elements[0])
+        } else {
+            return Err(error(
                 self.source,
-                node,
-                "iterator source requires one concrete element type",
-            )
-        })?;
-        Ok((source, element))
+                call,
+                "product of different element types requires a fixed result shape",
+            ));
+        };
+        Ok(self.ordered_builtin(Builtin::Combinatorial(op), self.types.cursor(row), args))
     }
 
     pub(super) fn count_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {

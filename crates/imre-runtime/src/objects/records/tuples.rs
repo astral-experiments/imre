@@ -51,16 +51,21 @@ pub unsafe extern "C" fn imre_tuple_buffer_finish(buffer: *const Object) -> *con
             std::mem::take(items)
         })
     };
-    let result = TupleBuilder::new(items.len()).map(|mut tuple| {
-        for item in items {
-            tuple.push(item);
-        }
-        tuple.finish()
-    });
-    match result {
+    match tuple_from_words(items.into_iter()) {
         Ok(tuple) => tuple.into_word() as *const usize,
         Err(error) => error.returning(std::ptr::null()),
     }
+}
+
+/// Build an ordinary immutable tuple, retaining the exact field representation of each word.
+pub(in crate::objects) fn tuple_from_words(
+    items: impl ExactSizeIterator<Item = OwnedWord>,
+) -> Result<OwnedWord, Error> {
+    let mut tuple = TupleBuilder::new(items.len())?;
+    for item in items {
+        tuple.push(item);
+    }
+    Ok(tuple.finish())
 }
 
 /// The header's tagged Rc points here; the descriptor must be the first field.

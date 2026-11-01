@@ -83,6 +83,31 @@ pub(super) unsafe fn acquire(mode: u32, source: usize) -> crate::ObjectOwner {
     }
 }
 
+/// Collect one source without retaining its iterator past exhaustion or failure.
+pub(super) unsafe fn collect(mode: u32, word: usize) -> Result<Vec<OwnedWord>, Error> {
+    // SAFETY: caller roots the source with this compiler-selected representation.
+    let cursor = unsafe { acquire(mode, word) };
+    let mut items = Vec::new();
+    while let Some(item) = next_item(&cursor)? {
+        items.try_reserve(1).map_err(|_| Error::memory_error())?;
+        items.push(item);
+    }
+    Ok(items)
+}
+
+/// # Safety
+/// The mode describes the rooted source. On success the result owns a tuple record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_iterable_tuple(mode: u32, word: usize) -> *const usize {
+    // SAFETY: the compiler supplies this source's concrete representation.
+    match unsafe { collect(mode, word) }
+        .and_then(|items| records::tuples::tuple_from_words(items.into_iter()))
+    {
+        Ok(tuple) => tuple.into_word() as *const usize,
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
 pub(in crate::objects) struct Progression {
     current: RefCell<Int>,
     step: Int,

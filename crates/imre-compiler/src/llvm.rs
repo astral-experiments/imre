@@ -6835,6 +6835,18 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            Builtin::IterableTuple => {
+                let source = &args[0].value;
+                let mode = iterable_mode(source.ty);
+                let word = self.word(source);
+                Value {
+                    ty: returns,
+                    operand: self.checked_pointer(format!(
+                        "call ptr @imre_iterable_tuple(i32 {mode}, i64 {word})"
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::TupleBufferNew => self.call("imre_tuple_buffer_new", returns, &[]),
             Builtin::TupleBufferPush => {
                 let value = &args[1].value;
@@ -6858,6 +6870,32 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::Combinatorial(op) => {
+                let (parameter, sources) = args.split_last().unwrap();
+                let modes = self.byte_array(
+                    sources
+                        .iter()
+                        .map(|arg| iterable_mode(arg.value.ty) as u8)
+                        .chain([0])
+                        .collect(),
+                );
+                let words = self.entry_alloca(format!("[{} x i64]", sources.len().max(1)));
+                for (i, arg) in sources.iter().enumerate() {
+                    let word = self.word(&arg.value);
+                    let slot = self.instruction(format!("getelementptr i64, ptr {words}, i64 {i}"));
+                    self.line(format!("store i64 {word}, ptr {slot}"));
+                }
+                let parameter = self.word(&parameter.value);
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_combinatorial(i32 {}, i64 {}, ptr @{modes}, ptr {words}, i64 {parameter})",
+                    *op as u8, sources.len()
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::Islice | Builtin::Cycle => {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
@@ -8719,11 +8757,11 @@ fn integer_string_argument(expression: &Expr) -> Option<&Expr> {
 fn iterable_mode(ty: Type) -> u32 {
     match ty {
         Type::Cursor(_) => 0,
-        Type::Str => 1,
+        Type::Str | Type::StrLiteral(_) => 1,
         Type::Bytes => 2,
         Type::ListInt => 3,
         Type::List(_) => 4,
-        Type::Tuple(_) => 5,
+        Type::Tuple(_) | Type::VarTuple(_) => 5,
         Type::Dict(_) => 6,
         Type::Set(_) => 7,
         _ => unreachable!("checked iterable"),
@@ -10020,6 +10058,8 @@ declare ptr @imre_tuple_buffer_new()
 declare i32 @imre_tuple_buffer_push(ptr, i32, i64)
 declare ptr @imre_tuple_buffer_finish(ptr)
 declare ptr @imre_cycle(i32, i64)
+declare ptr @imre_iterable_tuple(i32, i64)
+declare ptr @imre_combinatorial(i32, i64, ptr, ptr, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
 declare ptr @imre_repeat(i32, i64, i64)
 declare ptr @imre_formatter_parser(ptr, ptr)

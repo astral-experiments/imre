@@ -318,7 +318,11 @@ impl Checker<'_> {
         if matches!(
             self.resolve(&call.func),
             Some(Binding::Intrinsic(
-                Intrinsic::Repeat | Intrinsic::Count | Intrinsic::Islice | Intrinsic::Cycle
+                Intrinsic::Repeat
+                    | Intrinsic::Count
+                    | Intrinsic::Islice
+                    | Intrinsic::Cycle
+                    | Intrinsic::Combinatorial(_)
             ))
         ) {
             let cursor = self.call(call)?;
@@ -454,7 +458,8 @@ impl Checker<'_> {
                         self.callback_input(call, element, false)?,
                     )));
                 };
-                if !matches!(converter.id.as_str(), "int" | "str" | "ord")
+                let to_tuple = self.unshadowed_builtin(&call.arguments.args[0], "tuple");
+                if (!to_tuple && !matches!(converter.id.as_str(), "int" | "str" | "ord"))
                     || (converter.id == "ord"
                         && (self.names.contains_key("ord")
                             || self.resolve(&call.arguments.args[0]).is_some()))
@@ -467,7 +472,15 @@ impl Checker<'_> {
                 let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
                 let item = self.local(input.value);
-                let converted = if converter.id == "ord" {
+                let converted = if to_tuple {
+                    self.iterable_tuple(&item).ok_or_else(|| {
+                        error(
+                            self.source,
+                            call,
+                            "map(tuple, ...) requires concrete iterable elements",
+                        )
+                    })?
+                } else if converter.id == "ord" {
                     self.ordinal(item, call)?
                 } else if converter.id == "int" {
                     self.consumer_value(item, true, call)?
