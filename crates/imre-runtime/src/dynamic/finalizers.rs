@@ -26,6 +26,12 @@ impl Context {
     }
 
     pub(super) fn dispatch_finalizer(&mut self, owner: Id) {
+        if let Value::Scandir(scan) = self.heap.get(owner) {
+            let scan = std::rc::Rc::clone(scan);
+            self.heap.take_finalizer(owner, true);
+            super::stdlib::os::scandir::finalize(self, &scan);
+            return;
+        }
         let generator = matches!(self.heap.get(owner), Value::Generator { .. });
         let found = generator || self.slot(owner, "__del__").is_some();
         self.heap.take_finalizer(owner, found);

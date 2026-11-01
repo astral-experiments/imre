@@ -32,6 +32,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     }
     Some(match name {
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
+        "scandir" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.scandir"),
+        "DirEntry" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.DirEntry"),
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
         "close" => Intrinsic::Fd(FdOperation::Close),

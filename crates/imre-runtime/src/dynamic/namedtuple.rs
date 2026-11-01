@@ -77,7 +77,7 @@ pub(super) fn doc_method(
         return Err(Error::new("TypeError", "missing member descriptor"));
     };
     let field = match ctx.heap.get(member) {
-        Value::StatMember(field) => Some(*field),
+        Value::ReadOnlyMember(owner, field) => Some((*owner, *field)),
         _ => None,
     };
     if (!matches!(ctx.heap.get(member), Value::TupleGetterDoc) && field.is_none())
@@ -91,8 +91,8 @@ pub(super) fn doc_method(
     match (name, rest) {
         ("__get__", [obj] | [obj, _]) => {
             if *obj != NONE {
-                if let Some(field) = field {
-                    super::stdlib::os::stat::get_member(ctx, field, *obj)
+                if let Some((owner, field)) = field {
+                    ctx.read_member(owner, field, *obj)
                 } else {
                     document(ctx, *obj)
                 }
@@ -102,20 +102,17 @@ pub(super) fn doc_method(
                 Ok(member)
             }
         }
-        ("__set__", [obj, _]) | ("__delete__", [obj]) if let Some(field) = field => {
-            super::stdlib::os::stat::get_member(ctx, field, *obj)?;
+        ("__set__", [obj, _]) | ("__delete__", [obj]) if let Some((owner, field)) = field => {
+            ctx.read_member(owner, field, *obj)?;
             Err(Error::new("AttributeError", "readonly attribute"))
         }
         ("__set__", [obj, value]) => set_document(ctx, *obj, Some(*value)),
         ("__delete__", [obj]) => set_document(ctx, *obj, None),
         ("__reduce__", []) => {
             let get = ctx.builtin("getattr");
-            let class = ctx.builtin(if field.is_some() {
-                super::stdlib::os::stat::CLASS
-            } else {
-                GETTER
-            });
-            let doc = ctx.text(field.unwrap_or("__doc__"));
+            let (owner, field) = field.unwrap_or((GETTER, "__doc__"));
+            let class = ctx.builtin(owner);
+            let doc = ctx.text(field);
             let args = ctx.alloc(Value::Tuple(vec![class, doc]));
             Ok(ctx.alloc(Value::Tuple(vec![get, args])))
         }

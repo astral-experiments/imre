@@ -563,6 +563,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -1032,6 +1033,17 @@ pub(super) fn call(
             )
         })?;
         return ctx.abc_check_methods(class, args.get(1..).unwrap_or_default());
+    }
+    if matches!(name, os::scandir::ENTRY | os::scandir::ITER) {
+        return Err(Error::new(
+            "TypeError",
+            format!("cannot create '{name}' instances"),
+        ));
+    }
+    if let Some((owner, method)) = name.rsplit_once('.')
+        && matches!(owner, os::scandir::ENTRY | os::scandir::ITER)
+    {
+        return os::scandir::method(ctx, owner, method, args, kwargs);
     }
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);

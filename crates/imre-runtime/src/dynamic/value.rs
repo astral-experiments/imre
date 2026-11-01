@@ -390,6 +390,8 @@ impl Context {
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Slice(_) => "slice",
             Value::Range(_) => "range",
+            Value::Scandir(_) => super::stdlib::os::scandir::ITER,
+            Value::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
             Value::RangeIterator(iter) => iter.kind,
             Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
@@ -409,7 +411,7 @@ impl Context {
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::TupleGetter { .. } => "_tuplegetter",
-            Value::TupleGetterDoc | Value::StatMember(_) => "member_descriptor",
+            Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) => "member_descriptor",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
             Value::Cell(_) => "cell",
@@ -666,6 +668,8 @@ pub(super) enum Value {
         tzinfo: Id,
     },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
+    Scandir(std::rc::Rc<super::stdlib::os::scandir::Scan>),
+    DirEntry(super::stdlib::os::scandir::Entry),
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
     Range(super::range::Range),
@@ -793,7 +797,7 @@ pub(super) enum Value {
     },
     /// The writable document member of the native tuple descriptor type.
     TupleGetterDoc,
-    StatMember(&'static str),
+    ReadOnlyMember(&'static str, &'static str),
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -974,6 +978,8 @@ impl Value {
             | Self::SurrogateStr(_)
             | Self::Range(_)
             | Self::RangeIterator(_)
+            | Self::Scandir(_)
+            | Self::DirEntry(_)
             | Self::Code(_)
             | Self::Native(_)
             | Self::Scope(_)
@@ -1061,6 +1067,11 @@ impl Value {
                 for (key, value) in entries {
                     visit.extend([*value, *key]);
                 }
+            }
+            Self::Scandir(scan) => visit.push(scan.source),
+            Self::DirEntry(entry) => {
+                visit.extend([entry.name, entry.path]);
+                visit.extend(entry.cached_objects());
             }
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
@@ -1260,7 +1271,7 @@ impl Value {
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TupleGetterDoc
-            | Self::StatMember(_)
+            | Self::ReadOnlyMember(_, _)
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)

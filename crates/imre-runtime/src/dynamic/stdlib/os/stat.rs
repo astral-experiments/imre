@@ -105,7 +105,7 @@ fn integer(ctx: &mut Context, value: impl Into<num_bigint::BigInt>) -> Id {
     ctx.alloc(Value::Int(crate::Int::new(value.into())))
 }
 
-fn packed(ctx: &mut Context, stat: &libc::stat) -> Id {
+pub(super) fn packed(ctx: &mut Context, stat: &libc::stat) -> Id {
     let values = vec![
         integer(ctx, stat.st_mode),
         integer(ctx, stat.st_ino),
@@ -151,7 +151,7 @@ fn packed(ctx: &mut Context, stat: &libc::stat) -> Id {
     wrap(ctx, values, extras)
 }
 
-fn warn_bool_fd(ctx: &Context, value: Id) -> Result<()> {
+pub(super) fn warn_bool_fd(ctx: &Context, value: Id) -> Result<()> {
     if matches!(ctx.heap.get(value), Value::Bool(_)) {
         let location = ctx.heap.current_location();
         let (file, line) = location.as_ref().map_or(("<string>", 1), |loc| {
@@ -323,37 +323,7 @@ pub(in crate::dynamic) fn member(ctx: &mut Context, name: &str) -> Option<Id> {
         .iter()
         .chain(EXTRA)
         .find(|&&field| field == name)?;
-    let key = format!("{CLASS}.{field}");
-    if let Some(&id) = ctx.builtins.get(&key) {
-        return Some(id);
-    }
-    let descriptor = ctx.alloc(Value::StatMember(field));
-    ctx.builtins.insert(key, descriptor);
-    Some(descriptor)
-}
-
-pub(in crate::dynamic) fn get_member(
-    ctx: &mut Context,
-    field: &'static str,
-    receiver: Id,
-) -> Result<Id> {
-    if matches!(
-        ctx.heap.get(receiver),
-        Value::NamedTuple {
-            class: Some(CLASS),
-            ..
-        }
-    ) {
-        ctx.lookup_attr(receiver, field)
-    } else {
-        Err(Error::new(
-            "TypeError",
-            format!(
-                "descriptor '{field}' for '{CLASS}' objects doesn't apply to a '{}' object",
-                ctx.type_name(receiver)
-            ),
-        ))
-    }
+    Some(ctx.readonly_member(CLASS, field))
 }
 
 /// Enumerate struct sequence, tuple and object slots without invoking a descriptor.

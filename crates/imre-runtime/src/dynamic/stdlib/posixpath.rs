@@ -17,6 +17,9 @@ pub(super) fn fspath(ctx: &mut Context, path: Id) -> Result<Id> {
 }
 
 pub(super) fn path_arg(ctx: &mut Context, path: Id, expected: &str) -> Result<Id> {
+    if let Value::DirEntry(entry) = ctx.heap.get(path) {
+        return Ok(entry.path);
+    }
     if spelling(ctx, path) {
         return Ok(path);
     }

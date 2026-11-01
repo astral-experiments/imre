@@ -1,3 +1,4 @@
+pub(in crate::dynamic) mod scandir;
 pub(in crate::dynamic) mod stat;
 
 use std::ffi::CString;
@@ -18,7 +19,7 @@ pub(in crate::dynamic) fn install_capabilities(
             "supports_dir_fd",
             &["lstat", "open", "rmdir", "stat", "unlink"][..],
         ),
-        ("supports_fd", &["listdir", "stat"][..]),
+        ("supports_fd", &["listdir", "scandir", "stat"][..]),
         ("supports_follow_symlinks", &["stat"][..]),
         ("supports_effective_ids", &[][..]),
     ] {
@@ -277,6 +278,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
     matches!(
         name,
         "open"
+            | "scandir"
             | "remove"
             | "unlink"
             | "rmdir"
@@ -351,6 +353,9 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "scandir" {
+        return scandir::open(ctx, args, kwargs);
+    }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
     }
