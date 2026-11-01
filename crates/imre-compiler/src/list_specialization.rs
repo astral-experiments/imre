@@ -116,10 +116,7 @@ fn rewrite_block(body: &mut [Statement], locals: &mut Vec<Type>) {
             let slot = locals.len();
             locals.push(Type::Int);
             fast_body.push(Statement::Assign(slot, stop));
-            stop = Expr {
-                ty: Type::Int,
-                kind: ExprKind::Local(slot),
-            };
+            stop = Expr::local(slot, Type::Int);
             operands[1] = stop.clone();
         }
         if outputs.len() == 1 {
@@ -584,10 +581,7 @@ fn alias(expression: &Expr, aliases: &[Option<usize>]) -> Option<usize> {
 }
 
 fn list_local(slot: usize) -> Expr {
-    Expr {
-        ty: Type::ListInt,
-        kind: ExprKind::Local(slot),
-    }
+    Expr::local(slot, Type::ListInt)
 }
 
 fn builtin(operation: Builtin, args: Vec<Expr>) -> Expr {

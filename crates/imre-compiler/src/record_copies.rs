@@ -6,13 +6,6 @@ use crate::{ir::children_mut, reductions::count_writes};
 
 type Overrides = Vec<Option<Expr>>;
 
-fn local(slot: usize, ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Local(slot),
-    }
-}
-
 /// A pure constructor forwards each original field or supplies an immediate
 /// override. The same summary handles ordinary constructor calls and the private
 /// argument scope emitted for `**asdict(self)`.
@@ -232,7 +225,7 @@ impl Copies<'_> {
             && let Some(fields) = self.fields(source, slot, base)
         {
             let reader = self.readers[id].as_mut().unwrap();
-            let mut args = vec![local(slot, source.ty)];
+            let mut args = vec![Expr::local(slot, source.ty)];
             let target = if reader.fields.is_empty() {
                 id
             } else {
@@ -329,7 +322,7 @@ impl Copies<'_> {
             .map(|(i, &ty)| {
                 let original = || Expr {
                     ty,
-                    kind: ExprKind::Field(Box::new(local(slot, value.ty)), i),
+                    kind: ExprKind::Field(Box::new(Expr::local(slot, value.ty)), i),
                 };
                 let then_value = || yes[i].clone().unwrap_or_else(original);
                 if let Some(no) = no
@@ -338,7 +331,7 @@ impl Copies<'_> {
                     Expr {
                         ty,
                         kind: ExprKind::Conditional(
-                            Box::new(local(guard, Type::Bool)),
+                            Box::new(Expr::local(guard, Type::Bool)),
                             Box::new(then_value()),
                             Box::new(no[i].clone().unwrap_or_else(original)),
                         ),
@@ -360,7 +353,7 @@ impl Copies<'_> {
             return;
         }
         let ty = value.ty;
-        *value = local(root, ty);
+        *value = Expr::local(root, ty);
         if let Some(test) = test {
             // Evaluate truthiness exactly once, before snapshotting the chosen
             // input. It may rebind the source, raise, or have observable effects.
@@ -369,7 +362,7 @@ impl Copies<'_> {
                 ty,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Assign(guard, test)],
-                    value: Box::new(local(root, ty)),
+                    value: Box::new(Expr::local(root, ty)),
                     clear: Vec::new(),
                 },
             };

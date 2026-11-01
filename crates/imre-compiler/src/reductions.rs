@@ -605,13 +605,7 @@ pub(super) fn integer(value: i64) -> Expr {
 fn length(source: usize) -> Expr {
     Expr {
         ty: Type::Int,
-        kind: ExprKind::Builtin(
-            Builtin::Len,
-            vec![Expr {
-                ty: Type::ListInt,
-                kind: ExprKind::Local(source),
-            }],
-        ),
+        kind: ExprKind::Builtin(Builtin::Len, vec![Expr::local(source, Type::ListInt)]),
     }
 }
 

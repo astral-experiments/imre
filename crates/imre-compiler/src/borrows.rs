@@ -478,13 +478,6 @@ mod tests {
         super::analyze(module, &Targets::analyze(module))
     }
 
-    fn local(slot: usize, ty: Type) -> Expr {
-        Expr {
-            ty,
-            kind: ExprKind::Local(slot),
-        }
-    }
-
     fn function(params: Vec<usize>, locals: Vec<Type>, body: Vec<Statement>) -> Function {
         Function {
             params,
@@ -517,14 +510,14 @@ mod tests {
             vec![0],
             vec![ty; 7],
             vec![
-                Statement::Assign(1, local(0, ty)),
+                Statement::Assign(1, Expr::local(0, ty)),
                 Statement::Move(2, 1),
-                Statement::Assign(3, local(4, ty)),
-                Statement::Assign(4, local(3, ty)),
+                Statement::Assign(3, Expr::local(4, ty)),
+                Statement::Assign(4, Expr::local(3, ty)),
                 // One rooted definition cannot legitimize the disconnected cycle.
-                Statement::Assign(5, local(0, ty)),
-                Statement::Assign(5, local(3, ty)),
-                Statement::Assign(6, local(5, ty)),
+                Statement::Assign(5, Expr::local(0, ty)),
+                Statement::Assign(5, Expr::local(3, ty)),
+                Statement::Assign(6, Expr::local(5, ty)),
                 Statement::Clear(2),
             ],
         );
@@ -547,12 +540,12 @@ mod tests {
             vec![0, 1],
             vec![ty, callback, ty],
             vec![
-                Statement::Assign(2, local(0, ty)),
+                Statement::Assign(2, Expr::local(0, ty)),
                 Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Invoke {
-                        callable: Box::new(local(1, callback)),
-                        args: CallArgs::positional(vec![local(2, ty)]),
+                        callable: Box::new(Expr::local(1, callback)),
+                        args: CallArgs::positional(vec![Expr::local(2, ty)]),
                     },
                 }),
             ],
@@ -573,12 +566,12 @@ mod tests {
                 vec![0, 1],
                 vec![list, callback, list],
                 vec![
-                    Statement::Assign(2, local(0, list)),
+                    Statement::Assign(2, Expr::local(0, list)),
                     Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Invoke {
-                            callable: Box::new(local(1, callback)),
-                            args: CallArgs::positional(vec![local(2, list)]),
+                            callable: Box::new(Expr::local(1, callback)),
+                            args: CallArgs::positional(vec![Expr::local(2, list)]),
                         },
                     }),
                 ],
@@ -606,14 +599,17 @@ mod tests {
         };
         module.functions[1].body = vec![Statement::Expr(Expr {
             ty: Type::None,
-            kind: ExprKind::Builtin(Builtin::Append, vec![local(0, list), integer.clone()]),
+            kind: ExprKind::Builtin(Builtin::Append, vec![Expr::local(0, list), integer.clone()]),
         })];
         let facts = analyze(&module);
         assert!(facts[2].locals[2]);
         assert!(facts[2].length_roots.iter().all(Option::is_none));
 
-        module.functions[1].body =
-            vec![Statement::SetItem(local(0, list), integer.clone(), integer)];
+        module.functions[1].body = vec![Statement::SetItem(
+            Expr::local(0, list),
+            integer.clone(),
+            integer,
+        )];
         let facts = analyze(&module);
         assert!(facts[2].rooted.iter().all(|&rooted| !rooted));
         assert!(facts[2].length_roots.iter().all(Option::is_none));
@@ -625,8 +621,8 @@ mod tests {
         let scoped = |clear| Expr {
             ty,
             kind: ExprKind::Scope {
-                body: vec![Statement::Assign(1, local(0, ty))],
-                value: Box::new(local(1, ty)),
+                body: vec![Statement::Assign(1, Expr::local(0, ty))],
+                value: Box::new(Expr::local(1, ty)),
                 clear,
             },
         };
@@ -652,18 +648,22 @@ mod tests {
         let initializer = function(
             vec![0, 1],
             vec![ty; 2],
-            vec![Statement::SetField(local(0, ty), 0, local(1, ty))],
+            vec![Statement::SetField(
+                Expr::local(0, ty),
+                0,
+                Expr::local(1, ty),
+            )],
         );
         let fresh = function(
             vec![0],
             vec![ty; 2],
             vec![
-                Statement::Assign(1, local(0, ty)),
+                Statement::Assign(1, Expr::local(0, ty)),
                 Statement::Expr(Expr {
                     ty,
                     kind: ExprKind::Construct {
                         initializer: 0,
-                        args: CallArgs::positional(vec![local(0, ty)]),
+                        args: CallArgs::positional(vec![Expr::local(0, ty)]),
                     },
                 }),
             ],
@@ -672,10 +672,13 @@ mod tests {
             vec![0],
             vec![ty; 2],
             vec![
-                Statement::Assign(1, local(0, ty)),
+                Statement::Assign(1, Expr::local(0, ty)),
                 Statement::Expr(Expr {
                     ty: Type::None,
-                    kind: ExprKind::Call(0, CallArgs::positional(vec![local(0, ty), local(0, ty)])),
+                    kind: ExprKind::Call(
+                        0,
+                        CallArgs::positional(vec![Expr::local(0, ty), Expr::local(0, ty)]),
+                    ),
                 }),
             ],
         );
@@ -688,15 +691,15 @@ mod tests {
                     ty: callback,
                     kind: ExprKind::Callable {
                         function: 0,
-                        receiver: Some(Box::new(local(0, ty))),
+                        receiver: Some(Box::new(Expr::local(0, ty))),
                     },
                 }),
-                Statement::Assign(2, local(0, ty)),
+                Statement::Assign(2, Expr::local(0, ty)),
                 Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Invoke {
-                        callable: Box::new(local(1, callback)),
-                        args: CallArgs::positional(vec![local(0, ty)]),
+                        callable: Box::new(Expr::local(1, callback)),
+                        args: CallArgs::positional(vec![Expr::local(0, ty)]),
                     },
                 }),
             ],
@@ -715,16 +718,20 @@ mod tests {
         let mutating = function(
             vec![0],
             vec![ty],
-            vec![Statement::SetField(local(0, ty), 0, local(0, ty))],
+            vec![Statement::SetField(
+                Expr::local(0, ty),
+                0,
+                Expr::local(0, ty),
+            )],
         );
         let nested = Expr {
             ty,
             kind: ExprKind::Scope {
                 body: vec![Statement::Expr(Expr {
                     ty: Type::None,
-                    kind: ExprKind::Call(0, CallArgs::positional(vec![local(0, ty)])),
+                    kind: ExprKind::Call(0, CallArgs::positional(vec![Expr::local(0, ty)])),
                 })],
-                value: Box::new(local(0, ty)),
+                value: Box::new(Expr::local(0, ty)),
                 clear: Vec::new(),
             },
         };
@@ -732,7 +739,7 @@ mod tests {
             vec![0],
             vec![ty; 2],
             vec![
-                Statement::Assign(1, local(0, ty)),
+                Statement::Assign(1, Expr::local(0, ty)),
                 Statement::Expr(Expr {
                     ty,
                     kind: ExprKind::Construct {
@@ -752,10 +759,13 @@ mod tests {
         let optional = types.optional(Type::Float);
         let boxed = Expr {
             ty: optional,
-            kind: ExprKind::Present(Box::new(local(0, Type::Float))),
+            kind: ExprKind::Present(Box::new(Expr::local(0, Type::Float))),
         };
         assert_eq!(projection_root(&boxed, &types, &[]), None);
-        assert_eq!(projection_root(&local(0, optional), &types, &[]), None);
+        assert_eq!(
+            projection_root(&Expr::local(0, optional), &types, &[]),
+            None
+        );
         let function = function(
             vec![0],
             vec![Type::Str; 3],
@@ -767,7 +777,7 @@ mod tests {
                         kind: ExprKind::Str("fresh".into()),
                     },
                 ),
-                Statement::Assign(2, local(1, Type::Str)),
+                Statement::Assign(2, Expr::local(1, Type::Str)),
             ],
         );
         let facts = analyze(&module(vec![function]));
@@ -850,7 +860,10 @@ def stored(rows: list[Row]) -> Row:
             vec![ty; 2],
             vec![Statement::Expr(Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::Append, vec![local(1, ty), local(0, ty)]),
+                kind: ExprKind::Builtin(
+                    Builtin::Append,
+                    vec![Expr::local(1, ty), Expr::local(0, ty)],
+                ),
             })],
         );
         let caller = function(
@@ -863,11 +876,11 @@ def stored(rows: list[Row]) -> Row:
                         ty,
                         kind: ExprKind::Construct {
                             initializer: 0,
-                            args: CallArgs::positional(vec![local(0, ty)]),
+                            args: CallArgs::positional(vec![Expr::local(0, ty)]),
                         },
                     },
                 ),
-                Statement::Return(local(1, ty)),
+                Statement::Return(Expr::local(1, ty)),
             ],
         );
         assert!(!private::analyze(&module(vec![initializer, caller]))[1][1]);
@@ -982,7 +995,7 @@ def total(rows: list[Row], fail: bool) -> int:
             vec![0],
             vec![Type::Str; 3],
             vec![
-                Statement::Assign(1, local(0, Type::Str)),
+                Statement::Assign(1, Expr::local(0, Type::Str)),
                 Statement::Assign(
                     2,
                     Expr {
@@ -991,7 +1004,7 @@ def total(rows: list[Row], fail: bool) -> int:
                     },
                 ),
                 Statement::Move(2, 1),
-                Statement::Return(local(2, Type::Str)),
+                Statement::Return(Expr::local(2, Type::Str)),
             ],
         );
         function.returns = Type::Str;
@@ -1027,10 +1040,13 @@ def total(rows: list[Row], fail: bool) -> int:
                 vec![0],
                 vec![ty; 2],
                 vec![
-                    Statement::Assign(1, local(0, ty)),
+                    Statement::Assign(1, Expr::local(0, ty)),
                     Statement::Expr(Expr {
                         ty: Type::None,
-                        kind: ExprKind::Call(callee, CallArgs::positional(vec![local(0, ty)])),
+                        kind: ExprKind::Call(
+                            callee,
+                            CallArgs::positional(vec![Expr::local(0, ty)]),
+                        ),
                     }),
                 ],
             );
@@ -1042,7 +1058,7 @@ def total(rows: list[Row], fail: bool) -> int:
     fn length(slot: usize, ty: Type) -> Expr {
         Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Len, vec![local(slot, ty)]),
+            kind: ExprKind::Builtin(Builtin::Len, vec![Expr::local(slot, ty)]),
         }
     }
 
@@ -1051,7 +1067,7 @@ def total(rows: list[Row], fail: bool) -> int:
             ty: Type::Str,
             kind: ExprKind::Builtin(
                 Builtin::SequenceGetInBounds,
-                vec![local(slot, ty), local(cursor, Type::Int)],
+                vec![Expr::local(slot, ty), Expr::local(cursor, Type::Int)],
             ),
         }
     }
@@ -1062,12 +1078,12 @@ def total(rows: list[Row], fail: bool) -> int:
         let ty = module.types.list(Type::Str);
         let read = Statement::Expr(sequence_read(0, 2, ty));
         let inner = Statement::While(
-            local(1, Type::Bool),
+            Expr::local(1, Type::Bool),
             vec![read.clone(), Statement::Break],
             Vec::new(),
         );
         let outer = Statement::While(
-            local(1, Type::Bool),
+            Expr::local(1, Type::Bool),
             vec![read.clone(), inner, Statement::Break],
             Vec::new(),
         );
@@ -1082,7 +1098,7 @@ def total(rows: list[Row], fail: bool) -> int:
                         kind: ExprKind::Int("0".into()),
                     },
                 ),
-                Statement::If(local(1, Type::Bool), vec![outer.clone()], vec![outer]),
+                Statement::If(Expr::local(1, Type::Bool), vec![outer.clone()], vec![outer]),
                 read,
             ],
         ));
@@ -1107,12 +1123,12 @@ def total(rows: list[Row], fail: bool) -> int:
     fn list_length_snapshots_are_shared_only_by_dominated_nested_loops() {
         let read = Statement::Expr(length(0, Type::ListInt));
         let inner = Statement::While(
-            local(1, Type::Bool),
+            Expr::local(1, Type::Bool),
             vec![read.clone(), Statement::Break],
             Vec::new(),
         );
         let outer = Statement::While(
-            local(1, Type::Bool),
+            Expr::local(1, Type::Bool),
             vec![read.clone(), inner, Statement::Break],
             Vec::new(),
         );
@@ -1120,7 +1136,7 @@ def total(rows: list[Row], fail: bool) -> int:
             vec![0, 1],
             vec![Type::ListInt, Type::Bool],
             vec![
-                Statement::If(local(1, Type::Bool), vec![outer.clone()], vec![outer]),
+                Statement::If(Expr::local(1, Type::Bool), vec![outer.clone()], vec![outer]),
                 // This read is outside the conditional snapshot's dominance.
                 read,
             ],
@@ -1140,7 +1156,7 @@ def total(rows: list[Row], fail: bool) -> int:
                 vec![0],
                 vec![ty, ty, ty, Type::Int],
                 vec![
-                    Statement::Assign(1, local(0, ty)),
+                    Statement::Assign(1, Expr::local(0, ty)),
                     Statement::Assign(
                         3,
                         Expr {
@@ -1215,7 +1231,7 @@ def total(rows: list[Row], fail: bool) -> int:
                 kind: ExprKind::Builtin(
                     Builtin::Append,
                     vec![
-                        local(0, Type::ListInt),
+                        Expr::local(0, Type::ListInt),
                         Expr {
                             ty: Type::Int,
                             kind: ExprKind::Int("1".into()),
@@ -1228,7 +1244,7 @@ def total(rows: list[Row], fail: bool) -> int:
             vec![0],
             vec![Type::ListInt; 2],
             vec![
-                Statement::Assign(1, local(0, Type::ListInt)),
+                Statement::Assign(1, Expr::local(0, Type::ListInt)),
                 Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Scope {
@@ -1236,7 +1252,7 @@ def total(rows: list[Row], fail: bool) -> int:
                             ty: Type::None,
                             kind: ExprKind::Call(
                                 0,
-                                CallArgs::positional(vec![local(1, Type::ListInt)]),
+                                CallArgs::positional(vec![Expr::local(1, Type::ListInt)]),
                             ),
                         })],
                         value: Box::new(Expr {
@@ -1259,8 +1275,8 @@ def total(rows: list[Row], fail: bool) -> int:
             vec![0, 1, 2],
             vec![Type::ListInt, Type::ListInt, Type::Bytes, Type::ListInt],
             vec![
-                Statement::Assign(3, local(0, Type::ListInt)),
-                Statement::Assign(3, local(1, Type::ListInt)),
+                Statement::Assign(3, Expr::local(0, Type::ListInt)),
+                Statement::Assign(3, Expr::local(1, Type::ListInt)),
             ],
         );
         let facts = analyze(&module(vec![function]));

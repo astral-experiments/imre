@@ -175,10 +175,7 @@ fn group(
                 ty: Type::Int,
                 kind: ExprKind::Binary(
                     Binary::Add,
-                    Box::new(Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Local(result),
-                    }),
+                    Box::new(Expr::local(result, Type::Int)),
                     Box::new(term),
                 ),
             },

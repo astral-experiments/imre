@@ -136,10 +136,7 @@ impl Checker<'_> {
         let mut arguments: Vec<_> = locals
             .iter()
             .enumerate()
-            .map(|(slot, &ty)| Expr {
-                ty,
-                kind: ExprKind::Local(slot),
-            })
+            .map(|(slot, &ty)| Expr::local(slot, ty))
             .collect();
         // Membership IR takes the needle first, while a saved method binds its receiver first.
         if matches!(builtin, Builtin::SetContains) {
@@ -182,17 +179,13 @@ impl Checker<'_> {
             kind: ExprKind::Tuple(vec![value]),
         });
         let first = context.as_ref().map_or(Type::Str, |c| c.ty);
-        let local = |slot, ty| Expr {
-            ty,
-            kind: ExprKind::Local(slot),
-        };
         let separator = if context.is_some() {
             Expr {
                 ty: Type::Str,
-                kind: ExprKind::Field(Box::new(local(0, first)), 0),
+                kind: ExprKind::Field(Box::new(Expr::local(0, first)), 0),
             }
         } else {
-            local(0, Type::Str)
+            Expr::local(0, Type::Str)
         };
         let id = self.helpers.reserve();
         self.helpers.finish(
@@ -212,7 +205,7 @@ impl Checker<'_> {
                         ty: Type::Str,
                         kind: ExprKind::Builtin(
                             Builtin::StringJoin,
-                            vec![separator, local(1, list)],
+                            vec![separator, Expr::local(1, list)],
                         ),
                     })],
                 },

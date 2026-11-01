@@ -163,22 +163,13 @@ impl Checker<'_> {
             locals.push(context.ty);
             operands.push(Expr {
                 ty: Type::JsonDecoder,
-                kind: ExprKind::Field(
-                    Box::new(Expr {
-                        ty: context.ty,
-                        kind: ExprKind::Local(0),
-                    }),
-                    0,
-                ),
+                kind: ExprKind::Field(Box::new(Expr::local(0, context.ty)), 0),
             });
             Builtin::JsonDecoderDecode
         } else {
             Builtin::JsonLoads
         };
-        operands.push(Expr {
-            ty: *input,
-            kind: ExprKind::Local(locals.len()),
-        });
+        operands.push(Expr::local(locals.len(), *input));
         locals.push(*input);
         let value = self.coerce(
             Expr {

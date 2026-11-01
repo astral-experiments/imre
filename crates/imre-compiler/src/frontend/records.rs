@@ -1323,10 +1323,7 @@ impl Checker<'_> {
         let args = params
             .iter()
             .enumerate()
-            .map(|(slot, &ty)| Expr {
-                ty,
-                kind: ExprKind::Local(slot),
-            })
+            .map(|(slot, &ty)| Expr::local(slot, ty))
             .collect();
         let record = Expr {
             ty: Type::Class(class),

@@ -1591,18 +1591,12 @@ mod tests {
                                 ),
                                 Statement::Move(2, 1),
                             ],
-                            value: Box::new(Expr {
-                                ty: Type::Int,
-                                kind: ExprKind::Local(2),
-                            }),
+                            value: Box::new(Expr::local(2, Type::Int)),
                             clear: vec![1, 2],
                         },
                     },
                 ),
-                Statement::Expr(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Local(2),
-                }),
+                Statement::Expr(Expr::local(2, Type::Int)),
             ];
             let facts = analyze(&module);
             let function = &module.functions[0];
@@ -1628,12 +1622,7 @@ mod tests {
         let function = &mut module.functions[0];
         let optional = function.locals[1];
         function.locals.extend([Type::Int, optional]);
-        let local = |slot, ty| {
-            Statement::Expr(Expr {
-                ty,
-                kind: ExprKind::Local(slot),
-            })
-        };
+        let local = |slot, ty| Statement::Expr(Expr::local(slot, ty));
         function.body = vec![
             Statement::Move(2, 0),
             Statement::Move(3, 1),
@@ -1712,20 +1701,14 @@ mod tests {
             function.body = vec![
                 Statement::Assign(1, integer("2")),
                 Statement::While(
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Local(0),
-                    },
+                    Expr::local(0, Type::Bool),
                     vec![Statement::Scope {
                         body,
                         clear: vec![1],
                     }],
                     Vec::new(),
                 ),
-                Statement::Return(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Local(1),
-                }),
+                Statement::Return(Expr::local(1, Type::Int)),
             ];
             let facts = analyze(&module);
             let function = &module.functions[0];
@@ -1743,10 +1726,7 @@ mod tests {
             let mut module = module("def branch(flag: bool) -> int:\n    return 0\n");
             let function = &mut module.functions[0];
             function.locals.push(Type::Int);
-            let flag = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Local(0),
-            };
+            let flag = Expr::local(0, Type::Bool);
             let write = Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Scope {
@@ -1788,10 +1768,7 @@ mod tests {
                     ty: Type::Bool,
                     kind: expression,
                 }),
-                Statement::Return(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Local(1),
-                }),
+                Statement::Return(Expr::local(1, Type::Int)),
             ];
             let facts = analyze(&module);
             let function = &module.functions[0];
@@ -1817,10 +1794,7 @@ mod tests {
             ty: Type::Bool,
             kind: ExprKind::Compare(
                 vec![
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Local(0),
-                    },
+                    Expr::local(0, Type::Int),
                     Expr {
                         ty: Type::Int,
                         kind: ExprKind::Scope {
@@ -1839,10 +1813,7 @@ mod tests {
             // The actual comparison is 1 < 2. Rereading slot 0 after the RHS
             // would incorrectly discard this branch and prove the result zero.
             Statement::If(test, vec![Statement::Assign(1, huge)], Vec::new()),
-            Statement::Return(Expr {
-                ty: Type::Int,
-                kind: ExprKind::Local(1),
-            }),
+            Statement::Return(Expr::local(1, Type::Int)),
         ];
         let facts = analyze(&module);
         let function = &module.functions[0];
@@ -1873,28 +1844,19 @@ mod tests {
                                 ty: Type::Int,
                                 kind: ExprKind::Binary(
                                     Binary::Multiply,
-                                    Box::new(Expr {
-                                        ty: Type::Int,
-                                        kind: ExprKind::Local(1),
-                                    }),
+                                    Box::new(Expr::local(1, Type::Int)),
                                     Box::new(integer("2")),
                                 ),
                             },
                         )],
-                        value: Box::new(Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Local(0),
-                        }),
+                        value: Box::new(Expr::local(0, Type::Bool)),
                         clear: Vec::new(),
                     },
                 },
                 Vec::new(),
                 Vec::new(),
             ),
-            Statement::Return(Expr {
-                ty: Type::Int,
-                kind: ExprKind::Local(1),
-            }),
+            Statement::Return(Expr::local(1, Type::Int)),
         ];
         let facts = analyze(&module);
         let function = &module.functions[0];
@@ -2304,14 +2266,8 @@ def parameter(unknown: int) -> int:
                     value: items.then_some(2),
                     ready: 3,
                 },
-                Statement::Expr(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Local(1),
-                }),
-                Statement::Expr(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Local(2),
-                }),
+                Statement::Expr(Expr::local(1, Type::Int)),
+                Statement::Expr(Expr::local(2, Type::Int)),
             ];
             let facts = analyze(&module);
             let function = &module.functions[0];

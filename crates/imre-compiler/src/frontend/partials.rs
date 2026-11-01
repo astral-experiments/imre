@@ -27,13 +27,6 @@ enum Target {
     Indirect,
 }
 
-fn local(slot: usize, ty: Type) -> Expr {
-    Expr {
-        ty,
-        kind: ExprKind::Local(slot),
-    }
-}
-
 fn raised(ty: Type, mut arguments: Vec<Expr>, message: &str) -> Expr {
     arguments.push(Expr {
         ty: Type::Exception,
@@ -389,13 +382,13 @@ impl Checker<'_> {
             .partial_frame(captured.iter().map(|v| v.ty).collect());
         let field = |index, ty| Expr {
             ty,
-            kind: ExprKind::Field(Box::new(local(0, frame)), index),
+            kind: ExprKind::Field(Box::new(Expr::local(0, frame)), index),
         };
         let arguments = slots.into_iter().map(|(bound, index, ty)| {
             if bound {
                 field(index, ty)
             } else {
-                local(index, ty)
+                Expr::local(index, ty)
             }
         });
         let (call, calls) = match target {
