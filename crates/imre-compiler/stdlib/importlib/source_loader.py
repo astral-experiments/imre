@@ -1,4 +1,4 @@
-"""Filesystem loader for Python modules compiled into the executable."""
+"""Load Python modules from registered code or filesystem source."""
 
 from _imre_importlib import get_code as _registered_code, loader_fields as _loader_fields
 from os import sep
@@ -34,7 +34,11 @@ class SourceFileLoader:
             return file.read()
 
     def get_code(self, fullname):
-        return _registered_code(self.name, self.get_filename(fullname))
+        path = self.get_filename(fullname)
+        code = _registered_code(self.name, path)
+        if code is not None:
+            return code
+        return compile(self.get_data(path), path, "exec")
 
     def exec_module(self, module):
         exec(self.get_code(module.__name__), module.__dict__)
