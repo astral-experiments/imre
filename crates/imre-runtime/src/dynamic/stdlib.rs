@@ -569,6 +569,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("posix", "environ") => os::environment(ctx),
         ("posix", "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
+        ("os" | "posix", "getpid") if cfg!(unix) => ctx.builtin("posix.getpid"),
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
@@ -944,6 +945,7 @@ pub(super) fn call(
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
+            | "posix.getpid"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
@@ -976,6 +978,7 @@ pub(super) fn call(
                 ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
             }
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
+            "posix.getpid" => ctx.int(i64::from(std::process::id())),
             "sys.getdefaultencoding" => ctx.default_encoding,
             // As in typed SysJitPredicate, Imre compiles before the process starts.
             _ => FALSE,

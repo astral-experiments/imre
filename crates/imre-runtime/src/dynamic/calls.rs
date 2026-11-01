@@ -1630,6 +1630,12 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "posix.getpid" => {
+                        return Ok(self.text("Return the current process id."));
+                    }
+                    "__text_signature__" if symbol == "posix.getpid" => {
+                        return Ok(self.text("($module, /)"));
+                    }
                     "__self__" => {
                         let module = module.to_owned();
                         return self.module(&module);
