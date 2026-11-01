@@ -249,3 +249,72 @@ class permutations:
                 raise StopIteration
         self._started = True
         return tuple(self._pool[indices[i]] for i in range(len(cycles)))
+
+
+def _islice_index(value, default):
+    if value is None:
+        return default
+    try:
+        return _ssize_index(value)
+    except BaseException:
+        # islice maps failed index conversions to its own argument errors.
+        return -1
+
+
+class islice:
+    """Iterate selected positions of an input iterator."""
+
+    __slots__ = ("_source", "_position", "_target", "_stop", "_step")
+
+    def __init__(self, *args, **kwargs):
+        # CPython initializes the cursor in its constructor; explicit reinitialization is inert.
+        if hasattr(self, "_source"):
+            return
+        if kwargs:
+            raise TypeError("islice() takes no keyword arguments")
+        count = len(args)
+        if count < 2:
+            raise TypeError(f"islice expected at least 2 arguments, got {count}")
+        if count > 4:
+            raise TypeError(f"islice expected at most 4 arguments, got {count}")
+        start = args[1] if count >= 3 else None
+        stop = args[2] if count >= 3 else args[1]
+        step = args[3] if count == 4 else None
+        target = _islice_index(start, 0)
+        limit = _islice_index(stop, -1)
+        if stop is not None and limit == -1:
+            raise ValueError("Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.")
+        if target < 0 or limit < -1:
+            raise ValueError("Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.")
+        stride = _islice_index(step, 1)
+        if stride < 1:
+            raise ValueError("Step for islice() must be a positive integer or None.")
+        self._source = iter(args[0])
+        self._position = 0
+        self._target = target
+        self._stop = limit
+        self._step = stride
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        source = self._source
+        if source is None:
+            raise StopIteration
+        try:
+            while self._position < self._target:
+                next(source)
+                self._position += 1
+            if self._stop != -1 and self._position >= self._stop:
+                raise StopIteration
+            value = next(source)
+        except BaseException:
+            self._source = None
+            raise
+        self._position += 1
+        target = self._target + self._step
+        if target > _maxsize or (self._stop != -1 and target > self._stop):
+            target = self._stop
+        self._target = target
+        return value
