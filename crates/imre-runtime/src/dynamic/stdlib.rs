@@ -558,7 +558,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
         | ("warnings", "warn")
-        | ("fnmatch", "filter")
+        | ("fnmatch", "filter" | "fnmatchcase")
         | ("subprocess", "run") => ctx.alloc(Value::Native(format!("{module}.{name}"))),
         (
             "codecs",
@@ -950,8 +950,8 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
         return pkgutil::call(ctx, operation, args, kwargs);
     }
-    if name == "fnmatch.filter" {
-        return fnmatch::filter(ctx, args, kwargs);
+    if let Some(function) = name.strip_prefix("fnmatch.") {
+        return fnmatch::call(ctx, function, args, kwargs);
     }
     if name == "_collections._count_elements" {
         return count_elements(ctx, args, kwargs);

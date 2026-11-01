@@ -1,5 +1,14 @@
 def current():
-    from fnmatch import filter
+    from fnmatch import filter, fnmatchcase
+
+    print(fnmatchcase(name="TestCase.test_Options", pat="*test_[A-Z]*"))
+    print(fnmatchcase("TestCase.test_options", "*test_[A-Z]*"))
+    print(fnmatchcase(bytearray(b"\xff"), b"?"))
+    for name, pat in ((b"x", "*"), ("x", b"*"), ("x", bytearray(b"*"))):
+        try:
+            fnmatchcase(name, pat)
+        except TypeError as error:
+            print(error.args)
 
     names = ["__jinja2_東京.cache", "keep", "__jinja2_.cache", "__jinja2_x.cache.tmp"]
     print(filter(names, "__jinja2_*.cache"))
