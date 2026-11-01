@@ -391,6 +391,25 @@ def _decorate(cls, params):
                     return False
             return True
         install('__eq__', __eq__)
+
+    if params.order:
+        names = tuple(f.name for f in data.values() if f.compare)
+
+        def ordering(op):
+            def compare(self, other):
+                if other.__class__ is self.__class__:
+                    left = tuple(getattr(self, name) for name in names)
+                    right = tuple(getattr(other, name) for name in names)
+                    return op(left, right)
+                return NotImplemented
+            return compare
+
+        for name, op in (('__lt__', lambda a, b: a < b), ('__le__', lambda a, b: a <= b),
+                         ('__gt__', lambda a, b: a > b), ('__ge__', lambda a, b: a >= b)):
+            if name in own:
+                raise TypeError(f'Cannot overwrite attribute {name} in class {cls.__name__} '
+                                'Consider using functools.total_ordering')
+            install(name, ordering(op))
     explicit_hash = '__hash__' in own and not (own['__hash__'] is None and '__eq__' in own)
     if params.unsafe_hash and explicit_hash:
         raise TypeError(f'Cannot overwrite attribute __hash__ in class {cls.__name__}')
@@ -429,8 +448,8 @@ def dataclass(cls=None, /, *, init=True, repr=True, eq=True, order=False,
         raise ValueError('eq must be true if order is true')
     if weakref_slot and not slots:
         raise TypeError('weakref_slot is True but slots is False')
-    if order or slots:
-        raise NotImplementedError('boxed dataclass ordering and slots')
+    if slots:
+        raise NotImplementedError('boxed dataclass slots')
     params = _DataclassParams(init, repr, eq, order, unsafe_hash, frozen, match_args, kw_only, slots, weakref_slot)
     def wrap(cls):
         return _decorate(cls, params)
