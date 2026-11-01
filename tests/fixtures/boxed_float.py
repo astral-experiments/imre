@@ -23,6 +23,24 @@ def current():
     class Weight(float):
         pass
 
+    class Kind(str):
+        pass
+
+    for receiver, owner in ((float, float), (0.5, float), (Weight, Weight), (Weight(), Weight)):
+        method = receiver.__getformat__
+        assert method.__self__ is owner
+        print(method("float"), method(Kind("double")))
+    for args, kwargs, kind in (((), {}, TypeError), (("float", "double"), {}, TypeError),
+                               ((), {"typestr": "float"}, TypeError), ((1,), {}, TypeError),
+                               (("half",), {}, ValueError), (("float\x00",), {}, ValueError),
+                               (("\ud800",), {}, UnicodeEncodeError)):
+        try:
+            Weight.__getformat__(*args, **kwargs)
+        except kind as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("accepted invalid __getformat__ argument")
+
     weight = Weight("1.5")
     assert type(weight) is Weight and isinstance(weight, float)
     assert float(weight) == 1.5 and weight + 0.5 == 2.0

@@ -918,6 +918,7 @@ pub(super) fn call(
                 text::builtin_format(ctx, owner, args[0], Some(args[1]))
             }
             "module" => ctx.module_method(method, args, kwargs),
+            "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {

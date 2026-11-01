@@ -496,9 +496,8 @@ impl Context {
             || self.slot(descriptor, "__delete__").is_some()
     }
 
-    /// Bind the inherited dictionary constructor to the class used for the result.
-    fn bind_dict_fromkeys(&mut self, owner: Id) -> Id {
-        let callable = self.builtin("dict.fromkeys");
+    /// Bind a native class method to the class through which it was retrieved.
+    fn bind_native_classmethod(&mut self, callable: Id, owner: Id) -> Id {
         self.alloc(Value::Method {
             callable,
             receiver: owner,
@@ -507,8 +506,9 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if name == "dict.fromkeys") {
-            return Ok(self.bind_dict_fromkeys(owner));
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "float.__getformat__"))
+        {
+            return Ok(self.bind_native_classmethod(value, owner));
         }
         if matches!(self.heap.get(value), Value::Native(name) if name == "object.__init_subclass__")
         {
@@ -1903,11 +1903,21 @@ impl Context {
                 }
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
+            Value::Float(_) if name == "__getformat__" => {
+                let owner = self.builtin("float");
+                let method = self.builtin("float.__getformat__");
+                return Ok(self.bind_native_classmethod(method, owner));
+            }
+            Value::Native(ref class) if class == "float" && name == "__getformat__" => {
+                let method = self.builtin("float.__getformat__");
+                return Ok(self.bind_native_classmethod(method, obj));
+            }
             Value::Native(ref class)
                 if name == "fromkeys"
                     && matches!(class.as_str(), "dict" | "collections.defaultdict") =>
             {
-                return Ok(self.bind_dict_fromkeys(obj));
+                let method = self.builtin("dict.fromkeys");
+                return Ok(self.bind_native_classmethod(method, obj));
             }
             Value::Native(ref class)
                 if class == "collections.defaultdict"
@@ -2055,7 +2065,8 @@ impl Context {
             }
             Value::Dict(_) | Value::DefaultDict { .. } if name == "fromkeys" => {
                 let owner = self.exact_type(obj)?;
-                return Ok(self.bind_dict_fromkeys(owner));
+                let method = self.builtin("dict.fromkeys");
+                return Ok(self.bind_native_classmethod(method, owner));
             }
             Value::Native(ref class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
@@ -3331,6 +3342,7 @@ impl Context {
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "float.__format__"
+                            | "float.__getformat__"
                     )
                     || !name.contains('.')
                     || matches!(
