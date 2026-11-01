@@ -11,23 +11,15 @@ The [versioned native evidence](evidence-linux.json) covers all eight suites
 at both optimization levels. See [execution and reproduction](routines.md)
 and the [dependency inventory](startup.md) for array registration, argparse's
 Mapping class base, and the copy protocols exercised by 16 original cases.
-The [branch verification runs](runs/README.md) retain full historical reports
-for individual compiler trees. Each report has its own O0 and O3 denominator.
+The [recorded compiler and runtime](source-linux.json) ran eight complete cases natively at both optimization levels. Fourteen more exercised a native operation from CPython, and eight ran the test body in Imre with CPython fixtures.
 
-On [repaired main `e328ca3`](runs/e328ca39a14d/README.md), both levels recorded **8 fully native / 659**, eight native bodies using CPython fixtures, 14 CPython-driven operations, four cases without a collections operation, three reference skips and 622 blockers. The eighth is `TestBasic.test_init`; this is the only [classification change](runs/e328ca39a14d/role-changes.json) from the seven-method report below. The supplementary `dict.fromkeys` case remains outside this denominator.
+To reproduce the report, run the suite with a fresh output directory and test-enabled CPython 3.14.5.
 
-On [canonical main `03c8d84`](runs/03c8d84fa4c1/README.md), both levels recorded
-**7 fully native / 659**, eight native bodies with host fixtures, 14 host-driven
-native operations, four cases without a collections operation, three reference
-skips and 623 blockers. The separate [dict.fromkeys dependency](fromkeys/)
-does not add an occurrence to this total.
-
-Run [measure.py](measure.py) with a pinned CPython and explicit Imre artifacts
-to reproduce the ledger. The [run instructions](runs/03c8d84fa4c1/README.md) show the arguments.
-
-The [docs stack rerun](runs/3da09720e93c/verified-defaults.json) matched all seven original controls and 28 native executions. Its [source and artifact hashes](runs/3da09720e93c/source.json) identify the compiled source and the separate [table check](runs/3da09720e93c/independent-82d6826-table.json).
-
-The [published-docs verification](runs/c2f397dbe55d/verified-defaults.json) repeats the seven CPython controls and 28 native runs on main at c7b1dca. The [receipt](runs/c2f397dbe55d/source.json) identifies the binaries and generated support table.
+```sh
+python3.14 -B benchmarks/cpython_stdlib/full/collections/measure.py \
+    --imre "$IMRE" --runtime "$RUNTIME" --clang "$CLANG" \
+    --compiler-revision "$IMRE_REVISION" --output collections-results
+```
 
 | Suite | IDs |
 | --- | ---: |
@@ -60,11 +52,7 @@ and the host fixture role. The same cases are attributed by the full runner.
 `deque_methods.py` uses the shared runner to compile the four complete
 `test_big_queue_*` and `test_big_stack_*` methods plus `test_setitem`. The
 deque operations and the integer or list assertions run in Imre; the original module, class, and
-instance fixture hooks run in CPython. The historical
-[O0](runs/pr605-7f3772b78ab4/deque-methods-O0.json) and
-[O3](runs/pr605-7f3772b78ab4/deque-methods-O3.json) reports record all five
-method hashes. Their directory identifies the original PR head; the reports
-do not identify the compiler revision.
+instance fixture hooks run in CPython.
 Pass `--imre`, `--runtime`, `--clang`, `--opt-level`, and `--result` to
 the pinned Python build.
 
@@ -76,3 +64,5 @@ level, respectively. The [O0](deque-index-host-O0.json) and
 [O3](deque-index-host-O3.json) reports count their operations. Run the same
 command-line options as above on Linux. `measure.py` also includes these two
 operations with their CPython roles. All seven IDs belong to the 659 above.
+
+[Archived collections branch reports](https://github.com/astral-experiments/imre/blob/8234cc525f4991c9cd61cd9a486def8f064964dc/benchmarks/cpython_stdlib/full/collections/runs/README.md)
