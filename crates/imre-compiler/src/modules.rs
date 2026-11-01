@@ -1415,7 +1415,9 @@ impl IntrinsicModule {
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "Field") => Intrinsic::ObjectRuntimeExport("dataclasses.Field"),
+            (Self::Dataclasses, "replace") => Intrinsic::ObjectRuntimeExport("dataclasses.replace"),
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
+            (Self::Dataclasses, "InitVar") => Intrinsic::ObjectRuntimeExport("dataclasses.InitVar"),
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
             (Self::Pathlib, "PurePath" | "PurePosixPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Posix)
@@ -2517,6 +2519,14 @@ fn textwrap_implementation(name: &str) -> Option<&'static str> {
 
 /// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
+    if module == IntrinsicModule::Dataclasses
+        && matches!(name, "MISSING" | "_MISSING_TYPE")
+        && let Some(source) = modules
+            .iter()
+            .find(|source| source.is_bundled("dataclasses"))
+    {
+        return source.export(name);
+    }
     if module == IntrinsicModule::Selectors
         && matches!(
             name,
@@ -3457,6 +3467,15 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::ImportlibBootstrapExternal
             );
         }
+        if module == Some(IntrinsicModule::Dataclasses)
+            && imports.is_none_or(|names| {
+                names
+                    .iter()
+                    .any(|a| matches!(a.name.as_str(), "MISSING" | "_MISSING_TYPE"))
+            })
+        {
+            self.load_module(name)?;
+        }
         if module == Some(IntrinsicModule::Selectors)
             && cfg!(any(target_os = "linux", target_os = "macos"))
         {
@@ -3645,6 +3664,11 @@ impl<'a> Loader<'a> {
         }
         let bundled = match name {
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
+            // Keep the public typeshed decorator signatures available alongside this singleton.
+            "dataclasses" => Some((
+                "<imre stdlib>/dataclasses.py",
+                include_str!("../stdlib/dataclasses_missing.py"),
+            )),
             "_imre_socketserver_reader" => Some((
                 "_imre_socketserver_reader.py",
                 include_str!("../stdlib/_socketserver_reader_typed.py"),
