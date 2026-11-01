@@ -1055,8 +1055,8 @@ impl Function<'_, '_> {
             return;
         };
         let manager = self.expr(&item.context_expr);
-        let enter = self.op("lookup_enter", &[&manager]);
         let exit = self.op("lookup_exit", &[&manager]);
+        let enter = self.op("lookup_enter", &[&manager]);
         let value = self.invoke(&enter, &[]);
         let handler = self.name("b");
         let done = self.name("b");
