@@ -579,7 +579,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("posix", "environ") => os::environment(ctx),
         ("posix", "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
-        ("os" | "posix", "getpid") if cfg!(unix) => ctx.builtin("posix.getpid"),
+        ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
@@ -1142,6 +1144,9 @@ pub(super) fn call(
         && os::is_descriptor_function(op)
     {
         return os::descriptor(ctx, op, args, kwargs);
+    }
+    if name == "posix.urandom" {
+        return os::urandom(ctx, args, kwargs);
     }
     if name == "posix.listdir" {
         return os::listdir(ctx, args, kwargs);
