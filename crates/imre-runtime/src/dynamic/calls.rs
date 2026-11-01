@@ -2107,6 +2107,7 @@ impl Context {
                             | "__setattr__"
                             | "__delattr__"
                             | "__init__"
+                            | "__new__"
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
@@ -2298,6 +2299,12 @@ impl Context {
             match self.heap.get(base) {
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
+                Value::Class { .. } | Value::Instance { .. } => {
+                    let class = self.heap.get(base).instance_class().unwrap_or(base);
+                    if self.allocation_base(class) == self.builtins.get("object").copied() {
+                        return Ok(self.builtin("object.__new__"));
+                    }
+                }
                 _ => {}
             }
         }
@@ -3162,6 +3169,77 @@ impl Context {
         })
     }
 
+    /// The first non-Python base owns the instance layout. Native classes
+    /// represented with a class namespace (e.g. BytesIO) have no Python class cell.
+    fn allocation_base(&self, class: Id) -> Option<Id> {
+        self.find_in_mro(class, |base| match self.heap.get(base) {
+            Value::Native(_) => Some(base),
+            Value::Class { scope, .. } if self.scope_data(*scope).class_cell.is_none() => {
+                Some(base)
+            }
+            _ => None,
+        })
+    }
+
+    /// Allocate a plain instance without invoking its constructor or initializer.
+    fn new_object(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&class, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "object.__new__(): not enough arguments",
+            ));
+        };
+        if !matches!(
+            self.builtin_type_name(class),
+            Some("type" | "typing._AnyMeta")
+        ) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "object.__new__(X): X is not a type object ({})",
+                    self.type_name(class)
+                ),
+            ));
+        }
+        let object = self.builtin("object");
+        let base = self.allocation_base(class).unwrap_or(class);
+        let new = self.class_attr(class, "__new__");
+        if base != object {
+            let name = self.class_name(class);
+            let owner = if new.is_some_and(|new| !matches!(self.heap.get(new), Value::Native(_))) {
+                self.class_name(base)
+            } else {
+                name
+            };
+            return Err(Error::new(
+                "TypeError",
+                format!("object.__new__({name}) is not safe, use {owner}.__new__()"),
+            ));
+        }
+        if !rest.is_empty() || !kwargs.is_empty() {
+            if new.is_some_and(|new| Some(&new) != self.builtins.get("object.__new__")) {
+                return Err(Error::new(
+                    "TypeError",
+                    "object.__new__() takes exactly one argument (the type to instantiate)",
+                ));
+            }
+            let init = self.class_attr(class, "__init__");
+            if init.is_none_or(|init| Some(&init) == self.builtins.get("object.__init__")) {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{}() takes no arguments", self.class_name(class)),
+                ));
+            }
+        }
+        if let Value::Class { scope, .. } = *self.heap.get(class)
+            && self.scope_data(scope).is_abstract
+        {
+            let name = self.class_name(class).to_owned();
+            return Err(self.abstract_class_error(scope, &name)?);
+        }
+        Ok(self.instance(class, None))
+    }
+
     /// Allocate a binary64 payload while retaining the requested float subclass.
     ///
     /// ```python
@@ -3344,6 +3422,7 @@ impl Context {
             Value::Native(name) if name == stdlib::hash_info::TYPE => {
                 stdlib::hash_info::construct(self, &args, &kwargs)
             }
+            Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {
                 super::namedtuple::allocate(self, &args, &kwargs)

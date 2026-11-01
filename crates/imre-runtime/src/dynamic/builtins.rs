@@ -212,7 +212,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(owner, "float" | "int" | "str") || is_exception(owner)).then_some(owner)
+    (matches!(owner, "object" | "float" | "int" | "str") || is_exception(owner)).then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
