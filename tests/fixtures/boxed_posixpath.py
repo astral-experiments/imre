@@ -60,8 +60,15 @@ def current():
     ):
         assert os.path.commonprefix(paths) == expected
     assert os.path.getsize is posixpath.getsize is genericpath.getsize
+    assert os.path.samestat is posixpath.samestat is genericpath.samestat
+    assert os.path.samefile is posixpath.samefile is genericpath.samefile
+    assert os.path.sameopenfile is posixpath.sameopenfile is genericpath.sameopenfile
     with open(__file__, "rb") as input_file:
         assert genericpath.getsize(filename=__file__) == len(input_file.read())
+        fd = input_file.fileno()
+        assert os.path.samestat(s1=os.stat(__file__), s2=os.fstat(fd))
+        assert os.path.samefile(f1=__file__, f2=__file__)
+        assert os.path.sameopenfile(fp1=fd, fp2=fd)
     missing = __file__ + ".missing"
     try:
         os.path.getsize(missing)

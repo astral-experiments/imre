@@ -1518,6 +1518,15 @@ impl IntrinsicModule {
             (Self::GenericPath | Self::PosixPath, "getsize") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.getsize")
             }
+            (Self::GenericPath | Self::PosixPath, "samefile") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.samefile")
+            }
+            (Self::GenericPath | Self::PosixPath, "sameopenfile") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.sameopenfile")
+            }
+            (Self::GenericPath | Self::PosixPath, "samestat") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.samestat")
+            }
             (Self::GenericPath | Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
