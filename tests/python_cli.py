@@ -1038,6 +1038,18 @@ def main():
             set_method.write_text("items = {1, 2}\nalias = items\n" + statement + "\nprint(sorted(alias))\n")
             compare("-B", set_method, native_args=("run", set_method, "--quiet"))
 
+        temporary_read = root / "temporary_readinto.py"
+        temporary_read.write_text(
+            "from tempfile import TemporaryFile\n"
+            "with TemporaryFile() as stream:\n"
+            "    stream.write(b'abc')\n"
+            "    stream.seek(0)\n"
+            "    readinto = stream.readinto\n"
+            "    target = bytearray(b'?????')\n"
+            "    print(readinto(target), bytes(target), stream.tell())\n"
+        )
+        compare("-B", temporary_read, native_args=("run", temporary_read, "--quiet"))
+
         array_import = root / "array_import.py"
         for statement in (
             "from array import array as cls",
