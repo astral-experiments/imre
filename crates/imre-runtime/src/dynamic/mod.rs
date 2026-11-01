@@ -2021,6 +2021,7 @@ impl Context {
                 self.bind(scope, "_bootstrap_external", external);
             }
             "io" => stdlib::io::install(self, scope),
+            "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => {
                 self.module("io")?;

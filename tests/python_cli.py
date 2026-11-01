@@ -809,6 +809,38 @@ def check_marshal_allocation(exe):
     assert (child.returncode, out, err) == (0, b"refused\nTrue\n", b""), (out, err)
 
 
+def check_pickle_reductions(imre, root, run):
+    import pickle
+
+    fixture = Path(__file__).resolve().with_name("fixtures") / "boxed_pickle_reduction.py"
+    work = root / "pickle-reductions"
+    work.mkdir()
+    (work / fixture.name).write_bytes(fixture.read_bytes())
+    entry = work / "main.py"
+    entry.write_text("from boxed_pickle_reduction import produce\nproduce()\n")
+    sys.path.insert(0, str(work))  # CPython must import the reconstruction function by name.
+    try:
+        for optimization in (0, 3):
+            executable = work / f"pickle-O{optimization}"
+            build = run(imre, "build", entry, "--module-root", work, "--runtime-imports",
+                        "--no-cache", "--opt-level", str(optimization), "-o", executable)
+            assert build.returncode == 0, build
+            result = run(executable)
+            assert (result.returncode, result.stderr) == (0, b""), result
+            records = result.stdout.splitlines()
+            assert len(records) == 6, result
+            for protocol, record in enumerate(records):
+                data = bytes(json.loads(record))
+                if protocol >= 2:
+                    assert data.startswith(bytes([0x80, protocol])), data
+                value = pickle.loads(data)
+                shared = ("\0\n\r\\\x1aéĀ🍏", 1 << 2048, -2147483649, True, None)
+                assert value == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
+                assert value[0] is value[1] and value[2] is value[3]
+    finally:
+        sys.path.pop(0)
+
+
 def check_unittest_file_discovery(imre, root, run):
     entry = root / "discover_after_build.py"
     entry.write_text(
@@ -885,6 +917,7 @@ def main():
             check_boxed_literal_roots_allocation(imre, root, run)
             check_boxed_call_allocation(imre, run, flags)
         check_boxed_json_callback_allocation(imre, root, run)
+        check_pickle_reductions(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
