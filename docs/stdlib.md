@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 96 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 191 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 97 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 443 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,507 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 444 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,500 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -29,7 +29,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `contextlib` | Yes | `nullcontext` and selected single-yield `@contextmanager` functions. [Evidence](../tests/fixtures/processes/async_resource_arguments.py) | — | — | — |
 | `contextvars` | Yes | Create and copy contexts, set and reset variable bindings, and isolate them in supported asyncio tasks. [Evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md) | [2 / 56](../benchmarks/cpython_stdlib/full/contextvars/) | 0 | 12 |
 | `copy` | Yes | Shallow and deep copies of supported containers and fixed-layout objects. [Evidence](../benchmarks/cpython_stdlib/full/copy/README.md) | [6 / 81](../benchmarks/cpython_stdlib/full/copy/) | 0 | 4 |
-| `csv` | Yes | Read rows and apply supported CSV dialect options. [Evidence](../benchmarks/cpython_stdlib/full/csv/README.md) | [18 / 128](../benchmarks/cpython_stdlib/full/csv/) | 0 | 7 |
+| `csv` | Yes | Read and write rows and dictionaries, register dialects, and detect delimiters and headers. [Evidence](../benchmarks/cpython_stdlib/full/csv/README.md) | [122 / 128](../benchmarks/cpython_stdlib/full/csv/) | 0 | 0 |
 | `dataclasses` | Yes | Construct fixed-field dataclasses with defaults and factories. [Evidence](../tests/fixtures/dataclasses/record_factories.py) | — | — | — |
 | `datetime` | Yes | Construct, combine and compare civil dates and times, add timedeltas, replace datetime fields and convert to a fixed timezone. [Evidence](../benchmarks/cpython_stdlib/full/datetime/README.md) | [0 / 1,098](../benchmarks/cpython_stdlib/full/datetime/) | 12 | 0 |
 | `decimal` | Yes | Construct Decimal values from strings and integers and preserve default-context str and repr, including signed zero, scale and special values. Arithmetic and numeric comparisons are unsupported. [Evidence](../tests/fixtures/text/decimal_conversion.py) | — | — | — |
@@ -85,7 +85,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `string` | Yes | Selected `Template` substitution, validation and identifier operations. [Evidence](../benchmarks/cpython_stdlib/full/string/README.md) | [15 / 54](../benchmarks/cpython_stdlib/full/string/) | 0 | 0 |
 | `struct` | Yes | Pack and unpack unsigned timestamps with bound methods of `Struct(">Q")`, or read them with `unpack(">Q", data)`. [Evidence](../tests/imports.py) | — | — | — |
 | `subprocess` | Yes | Launch with `Popen` and `run`, capture streams and handle deadlines. `getoutput` and `getstatusoutput` capture combined shell output. [Evidence](../benchmarks/cpython_stdlib/full/subprocess/README.md) | [0 / 353](../benchmarks/cpython_stdlib/full/subprocess/) | 54 | 97 |
-| `sys` | Yes | Process arguments, streams, interpreter flags, and `sys.setrecursionlimit(2000)`. [Evidence](../benchmarks/cpython_stdlib/full/sys/README.md) | [0 / 97](../benchmarks/cpython_stdlib/full/sys/) | 7 | 7 |
+| `sys` | Yes | Process arguments, streams, interpreter flags, and `sys.setrecursionlimit(2000)`. [Evidence](../benchmarks/cpython_stdlib/full/sys/README.md) | [0 / 97](../benchmarks/cpython_stdlib/full/sys/) | 8 | 7 |
 | `sysconfig` | Yes | `get_path("scripts")`. [Evidence](../tests/fixtures/paths/executables.py) | — | — | — |
 | `tempfile` | Yes | Scoped `TemporaryDirectory` workspaces. [Evidence](../tests/fixtures/workspaces/arguments.py) | — | — | — |
 | `textwrap` | Yes | Dedent, indent, wrapping and shortening, including selected `TextWrapper` options. [Evidence](../benchmarks/cpython_stdlib/full/textwrap/README.md) | [68 / 68](../benchmarks/cpython_stdlib/full/textwrap/) | 0 | 0 |
@@ -236,6 +236,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_collections` | Yes | No API example recorded. | — | — | — |
 | `_frozen_importlib_external` | Yes | No API example recorded. | — | — | — |
 | `_imp` | Yes | `is_frozen` reports frozen modules, and `_override_frozen_modules_for_tests` changes their import precedence. [Evidence](../tests/imports.py) | — | — | — |
+| `_io` | Yes | No API example recorded. | — | — | — |
 | `_locale` | Yes | No API example recorded. | — | — | — |
 | `_opcode` | Yes | `ENABLE_SPECIALIZATION` and `ENABLE_SPECIALIZATION_FT` are both zero for Imre’s native executables. [Evidence](../tests/fixtures/imports/opcode_flags.py) | — | — | — |
 | `_string` | Yes | `formatter_parser` and `formatter_field_name_split` iterate format fields and their components. [Evidence](../tests/fixtures/text/formatter_ownership.py) | — | — | — |
@@ -283,7 +284,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_interpchannels` |
 | `_interpqueues` |
 | `_interpreters` |
-| `_io` |
 | `_ios_support` |
 | `_json` |
 | `_lsprof` |
