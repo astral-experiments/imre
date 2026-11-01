@@ -146,6 +146,38 @@ fn decode(data: &[u8], strict: bool, urlsafe: bool) -> Result<Bytes> {
     Ok(decoded)
 }
 
+/// Decode ASCII hex pairs with binascii's strict length and alphabet rules.
+pub(crate) fn unhexlify(data: &[u8]) -> Result<Bytes> {
+    let (pairs, remainder) = data.as_chunks::<2>();
+    if !remainder.is_empty() {
+        return Err(Error::new(Kind::BinasciiError, "Odd-length string"));
+    }
+    let mut decoded = allocate(pairs.len())?;
+    for &[high, low] in pairs {
+        let (Some(high), Some(low)) = (
+            super::text::hexadecimal(high),
+            super::text::hexadecimal(low),
+        ) else {
+            return Err(Error::new(
+                Kind::BinasciiError,
+                "Non-hexadecimal digit found",
+            ));
+        };
+        decoded.push(high << 4 | low);
+    }
+    Ok(decoded)
+}
+
+/// Decode the hexadecimal data in a rooted immutable bytes object.
+///
+/// # Safety
+/// The caller roots an exact bytes owner throughout the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_binascii_unhexlify(value: *const Bytes) -> *const Bytes {
+    // SAFETY: the caller supplied a rooted bytes owner.
+    finish(unhexlify(unsafe { &*value }).map(owned), std::ptr::null())
+}
+
 pub(crate) fn binascii_encode(data: &[u8], newline: bool) -> Result<Bytes> {
     encode(data, &STANDARD, newline)
 }

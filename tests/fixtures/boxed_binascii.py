@@ -24,6 +24,14 @@ class DropIndex:
 
 
 def current():
+    for decode in (binascii.a2b_hex, binascii.unhexlify):
+        print(repr(decode), decode.__name__, decode.__qualname__, decode.__module__,
+              decode.__text_signature__, decode.__self__ is binascii)
+        for value in (b"AbCf", bytearray(b"FF00"), "00aa", chr(0xd800), "é?", b"$", b"0$"):
+            try:
+                print(decode(value))
+            except (ValueError, TypeError) as error:
+                print(type(error).__name__, str(error))
     from binascii import Error, Incomplete, a2b_base64, b2a_base64
 
     print(type(a2b_base64) is type(len), a2b_base64 is binascii.a2b_base64)
