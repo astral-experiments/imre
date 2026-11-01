@@ -33,6 +33,8 @@ class _BoxedRaisesContext:
             if self.callable_name:
                 message += " by " + self.callable_name
             raise self.test_case.failureException(self.test_case._formatMessage(self.msg, message))
+        import traceback
+        traceback.clear_frames(tb)
         if not issubclass(exc_type, self.expected):
             return False
         exc.__traceback__ = None
