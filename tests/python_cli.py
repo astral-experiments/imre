@@ -270,24 +270,28 @@ def check_boxed_json_callback_allocation(imre, root, run):
 
 
 
-def check_noncallable_allocation(imre, root, run):
-    fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "noncallable_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "refuse_noncallable.c", "-o", wrapper], check=True)
-    flags = "\x1f".join([
+def marked_call_refusal_flags(root):
+    fixture = Path(__file__).resolve().with_name("fixtures") / "refuse_marked_call.c"
+    wrapper = root / "refuse_marked_call.o"
+    subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
+    return "\x1f".join([
         "-C", f"link-arg={wrapper}",
         "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
+
+
+def check_noncallable_allocation(imre, run, flags):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
     for shape in [0, 4, 10, 11, 13, 15]:
         for target in [0, 1, "all"]:
-            extra = {"IMRE_ENCODED_FLAGS": flags, "NONCALLABLE_REFUSE_NTH": str(target if target != "all" else 0)}
+            extra = {"IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_REFUSE_NTH": str(target if target != "all" else 0)}
             if target == "all":
-                extra["NONCALLABLE_REFUSE_ALL"] = "1"
+                extra["IMRE_TEST_CALL_REFUSE_ALL"] = "1"
             result = run(imre, "-B", fixtures / "boxed_noncallable_allocation.py", str(shape), extra=extra)
             assert result.returncode == 0 and result.stdout.endswith(b"preserved True\nretry True\n"), result
             if target:
                 assert result.stdout.startswith(b"kind MemoryError\n"), result
-                assert b"noncallable_allocation 1 " in result.stderr and b" 1\n" in result.stderr, result
+                assert b"call_allocation 1 " in result.stderr and b" 1\n" in result.stderr, result
             else:
                 reference = run(sys.executable, "-B", fixtures / "boxed_noncallable_allocation.py", str(shape))
                 assert result.stdout == reference.stdout and reference.returncode == 0, (result, reference)
@@ -326,31 +330,25 @@ def call_allocation_flags(root):
     ])
 
 
-def check_callable_label_allocation(imre, root, run):
+def check_callable_label_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "callable_label_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "refuse_callable_label.c", "-o", wrapper], check=True)
-    flags = "\x1f".join([
-        "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
-    ])
     for shape in range(10):
         reference = run(sys.executable, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape))
         assert reference.returncode == 0, reference
         for target in [0, 1, 2, "all"]:
-            extra = {"IMRE_ENCODED_FLAGS": flags, "CALL_LABEL_REFUSE_NTH": str(target if target != "all" else 0)}
+            extra = {"IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_REFUSE_NTH": str(target if target != "all" else 0)}
             if target == "all":
-                extra["CALL_LABEL_REFUSE_ALL"] = "1"
+                extra["IMRE_TEST_CALL_REFUSE_ALL"] = "1"
             result = run(imre, "-B", fixtures / "boxed_callable_label_allocation.py", str(shape), extra=extra)
             assert result.returncode == 0 and b"preserved True\n" in result.stdout, result
-            expected = reference.stdout if not any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines()) else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            activated = any(line.startswith(b"call_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
+            expected = reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1) if activated else reference.stdout
             assert result.stdout == expected, (result, reference)
-            activated = any(line.startswith(b"call_label_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
             expected_denial = target in (1, "all") or (shape >= 8 and target == 2)
             assert activated == expected_denial, (shape, target, result)
             if activated:
                 assert result.stdout.startswith(b"kind MemoryError\n"), result
-                assert b"call_label_allocation " in result.stderr, result
+                assert b"call_allocation " in result.stderr, result
 
 
 def check_boxed_call_allocation(imre, run, flags):
@@ -654,28 +652,22 @@ print(sys.intern(value) is value, sys._is_interned(value))
         ), result
 
 
-def check_bound_method_allocation(imre, root, run):
+def check_bound_method_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "bound_method_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "refuse_bound_method.c", "-o", wrapper], check=True)
-    flags = "\x1f".join([
-        "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
-    ])
     for shape in range(6):
         reference = run(sys.executable, "-B", fixtures / "boxed_bound_method_allocation.py", str(shape))
         assert reference.returncode == 0, reference
         for target in [0, 1, "all"]:
-            extra = {"IMRE_ENCODED_FLAGS": flags, "BOUND_METHOD_REFUSE_NTH": str(target if target != "all" else 0)}
+            extra = {"IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_REFUSE_NTH": str(target if target != "all" else 0)}
             if target == "all":
-                extra["BOUND_METHOD_REFUSE_ALL"] = "1"
+                extra["IMRE_TEST_CALL_REFUSE_ALL"] = "1"
             result = run(imre, "-B", fixtures / "boxed_bound_method_allocation.py", str(shape), extra=extra)
             assert result.returncode == 0 and b"preserved True\n" in result.stdout, result
             expected = reference.stdout if not target else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
             assert result.stdout == expected, (result, reference)
             if target:
                 assert result.stdout.startswith(b"kind MemoryError\n"), result
-                assert b"bound_method_allocation " in result.stderr and b" 1\n" in result.stderr, result
+                assert b"call_allocation " in result.stderr and b" 1\n" in result.stderr, result
 
 
 def check_ffi_result_roots(imre, root, run):
@@ -766,28 +758,22 @@ def check_argument_allocation(imre, run, flags):
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
 
 
-def check_class_metadata_allocation(imre, root, run):
+def check_class_metadata_allocation(imre, run, flags):
     fixtures = Path(__file__).resolve().with_name("fixtures")
-    wrapper = root / "class_metadata_refuse.o"
-    subprocess.run(["cc", "-c", fixtures / "refuse_class_metadata.c", "-o", wrapper], check=True)
-    flags = "\x1f".join([
-        "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
-    ])
     for shape in range(7):
         reference = run(sys.executable, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape))
         assert reference.returncode == 0, reference
         for target in [0, 1, 2, "all"]:
-            extra = {"IMRE_ENCODED_FLAGS": flags, "CLASS_METADATA_REFUSE_NTH": str(target if target != "all" else 0)}
+            extra = {"IMRE_ENCODED_FLAGS": flags, "IMRE_TEST_CALL_REFUSE_NTH": str(target if target != "all" else 0)}
             if target == "all":
-                extra["CLASS_METADATA_REFUSE_ALL"] = "1"
+                extra["IMRE_TEST_CALL_REFUSE_ALL"] = "1"
             result = run(imre, "-B", fixtures / "boxed_class_metadata_allocation.py", str(shape), extra=extra)
             assert result.returncode == 0 and b"metadata True True\n" in result.stdout, result
             expected = reference.stdout if not target else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
             assert result.stdout == expected, (result, reference)
             if target:
                 assert result.stdout.startswith(b"kind MemoryError\n"), result
-                assert b"class_metadata_allocation " in result.stderr and b" 1\n" in result.stderr, result
+                assert b"call_allocation " in result.stderr and b" 1\n" in result.stderr, result
 
 
 
@@ -899,17 +885,18 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
-            check_bound_method_allocation(imre, root, run)
+            marked_call_flags = marked_call_refusal_flags(root)
+            check_bound_method_allocation(imre, run, marked_call_flags)
             check_ffi_result_roots(imre, root, run)
             check_weak_proxy_root_allocation(imre, root, run)
-            check_noncallable_allocation(imre, root, run)
+            check_noncallable_allocation(imre, run, marked_call_flags)
             check_select_result_allocation(imre, root, run)
             check_select_input_root_allocation(imre, root, run)
             check_poll_result_allocation(imre, root, run)
             flags = call_allocation_flags(root)
-            check_callable_label_allocation(imre, root, run)
+            check_callable_label_allocation(imre, run, marked_call_flags)
             check_argument_allocation(imre, run, flags)
-            check_class_metadata_allocation(imre, root, run)
+            check_class_metadata_allocation(imre, run, marked_call_flags)
             check_raise_site_allocation(imre, root, run)
             check_io_compaction_allocation(imre, root, run)
             check_context_protocol_allocation(imre, root, run)

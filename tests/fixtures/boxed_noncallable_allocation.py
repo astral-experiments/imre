@@ -17,7 +17,7 @@ class DisabledCall(NoCall):
 owner = NoCall(41)
 targets = [None, 1, True, 1.5, "text" * 1024, b"text" * 1024, [1, 2], (1, 2), {"kept": 41}, {1, 2}, NoCall(41), ValueError(41), 1 << 2048, proxy(owner), bytearray(b"kept"), DisabledCall(41)]
 target = targets[shape]
-marker = "arm noncallable diagnostic refusal"
+marker = "arm call allocation refusal"
 try:
     target()
 except MemoryError:

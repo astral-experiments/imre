@@ -15,7 +15,7 @@ def answer_with_a_keyword_only_label(*, value=41):
 targets = [list, dict, tuple, set, int, str, object, time.time, answer_with_a_deliberately_long_qualified_name, answer_with_a_keyword_only_label]
 shape = int(sys.argv[1])
 target = targets[shape]
-marker = "arm callable label refusal"
+marker = "arm call allocation refusal"
 kind = "ok"
 try:
     result = target()
