@@ -1,6 +1,74 @@
 use super::*;
 use crate::dynamic::complex::Complex;
 
+/// Report the representation of the native floating-point type named by Python.
+pub(super) fn getformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&owner, args)) = args.split_first() else {
+        return Err(type_error(
+            "unbound method float.__getformat__() needs an argument",
+        ));
+    };
+    let class = ctx
+        .own_class_attr(owner, "__qualname__")
+        .and_then(|id| ctx.str_value(id).ok())
+        .unwrap_or_else(|| ctx.class_name(owner));
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "{class}.__getformat__() takes no keyword arguments"
+        )));
+    }
+    let [kind] = args else {
+        return Err(type_error(format!(
+            "{class}.__getformat__() takes exactly one argument ({} given)",
+            args.len()
+        )));
+    };
+    let storage = ctx.scalar_value(*kind);
+    let invalid = || {
+        Error::new(
+            "ValueError",
+            "__getformat__() argument 1 must be 'double' or 'float'",
+        )
+    };
+    let format = match ctx.heap.get(storage) {
+        Value::Str(s) if s == "float" => {
+            native_format(16_711_938.0_f32.to_ne_bytes(), [0x4b, 0x7f, 0x01, 0x02])
+        }
+        Value::Str(s) if s == "double" => native_format(
+            9_006_104_071_832_581.0_f64.to_ne_bytes(),
+            [0x43, 0x3f, 0xff, 0x01, 0x02, 0x03, 0x04, 0x05],
+        ),
+        Value::Str(s) if s.contains('\0') => {
+            return Err(Error::new("ValueError", "embedded null character"));
+        }
+        Value::Str(_) => return Err(invalid()),
+        Value::SurrogateStr(_) => {
+            ctx.encode_utf8_codepoints(*kind, false, "strict")?;
+            return Err(invalid());
+        }
+        _ => {
+            return Err(type_error(format!(
+                "__getformat__() argument must be str, not {}",
+                ctx.type_name(*kind)
+            )));
+        }
+    };
+    Ok(ctx.text(format))
+}
+
+// Compare the same finite values and byte patterns as CPython's native layout probe.
+fn native_format<const N: usize>(bytes: [u8; N], mut ieee_big: [u8; N]) -> &'static str {
+    if bytes == ieee_big {
+        return "IEEE, big-endian";
+    }
+    ieee_big.reverse();
+    if bytes == ieee_big {
+        "IEEE, little-endian"
+    } else {
+        "unknown"
+    }
+}
+
 /// Construct a boxed binary64 using Python's numeric slots or decimal text grammar.
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {

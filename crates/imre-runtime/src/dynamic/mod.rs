@@ -1627,7 +1627,7 @@ impl Context {
             "bytearray" => builtins::BYTEARRAY_METHODS,
             "property" => property::METHODS,
             "int" => &["bit_length", "to_bytes", "__format__"],
-            "float" => &["__format__"],
+            "float" => &["__format__", "__getformat__"],
             "bytes" => builtins::BYTES_METHODS,
             "str" => {
                 self.builtin("str.maketrans");
