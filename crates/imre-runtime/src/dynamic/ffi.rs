@@ -744,8 +744,8 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
         }
         // The compiler packs non-scalar string literals as little-endian code points.
         7 => {
-            let chunks = data.chunks_exact(4);
-            if !chunks.remainder().is_empty() {
+            let (chunks, remainder) = data.as_chunks::<4>();
+            if !remainder.is_empty() {
                 return finish(
                     ctx,
                     Err(Error::new("SystemError", "invalid code point literal")),
@@ -756,7 +756,7 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
                 return finish(ctx, Err(crate::Error::memory_error().into()));
             }
             for chunk in chunks {
-                let point = u32::from_le_bytes(chunk.try_into().unwrap());
+                let point = u32::from_le_bytes(*chunk);
                 if point > 0x10ffff {
                     return finish(
                         ctx,
