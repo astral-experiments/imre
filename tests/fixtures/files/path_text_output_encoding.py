@@ -1,9 +1,12 @@
+import locale
 from pathlib import Path
 
 
 def inspect_encoding(path: Path, name: str | None) -> None:
     with path.open("w", encoding=name, errors="strict") as stream:
         spelling = stream.encoding
+        if name == "locale":
+            assert locale.getencoding() == spelling
         print(spelling)
         print(spelling is name)
     print(stream.encoding is spelling)

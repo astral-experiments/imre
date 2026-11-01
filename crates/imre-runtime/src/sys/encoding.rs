@@ -47,6 +47,14 @@ pub(crate) fn file_encoding(name: Option<&str>) -> &str {
     }
 }
 
+/// Return the locale codeset even when UTF-8 mode overrides the default file encoding.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_locale_encoding() -> *const crate::Str {
+    crate::StrOwner::into_raw(crate::StrOwner::new(crate::Str::new(file_encoding(Some(
+        "locale",
+    )))))
+}
+
 /// Report the captured startup mode used by Python's text-file encoding default.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_utf8_mode() -> bool {

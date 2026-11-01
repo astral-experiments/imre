@@ -1741,6 +1741,19 @@ impl Heap {
             .as_ref()
             .expect("live native handle")
     }
+    /// Borrow a read source and a distinct writable target without copying either payload.
+    pub(super) fn source_and_target(
+        &mut self,
+        source: Id,
+        target: Id,
+    ) -> Option<(&Value, &mut Value)> {
+        let [source, target] = self
+            .slots
+            .get_disjoint_mut([source as usize, target as usize])
+            .ok()?;
+        Some((source.value.as_ref()?, target.value.as_mut()?))
+    }
+
     pub fn get_mut(&mut self, id: Id) -> &mut Value {
         self.slots[id as usize]
             .value

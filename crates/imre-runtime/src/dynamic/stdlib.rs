@@ -65,6 +65,8 @@ pub(super) fn is_module(name: &str) -> bool {
             | "_io"
             | "_weakref"
             | "io"
+            | "locale"
+            | "_locale"
             | "traceback"
             | "sysconfig"
             | "ast"
@@ -318,6 +320,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "abspath" | "mkdir" | "random_name" | "default_directory" | "open_named"
             | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
+        ("locale" | "_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         (
@@ -861,7 +864,10 @@ pub(super) fn call(
     }
     if matches!(
         name,
-        "sys.getdefaultencoding" | "sys.getfilesystemencoding" | "sys.getfilesystemencodeerrors"
+        "sys.getdefaultencoding"
+            | "_locale.getencoding"
+            | "sys.getfilesystemencoding"
+            | "sys.getfilesystemencodeerrors"
     ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -882,6 +888,7 @@ pub(super) fn call(
             "sys.getfilesystemencodeerrors" => {
                 ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
             }
+            "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
             _ => ctx.default_encoding,
         });
     }

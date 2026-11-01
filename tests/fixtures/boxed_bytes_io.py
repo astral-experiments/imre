@@ -10,7 +10,52 @@ def current():
     class Stream(io.BytesIO):
         pass
 
+    class Lines(io.BytesIO):
+        def __iter__(self):
+            raise AssertionError("BytesIO.readlines used the iterator override")
+
+        def write(self, data):
+            raise AssertionError("BytesIO.writelines used the write override")
+
+    lines = Lines(b"a\nb\nend")
+    assert lines.readlines(2) == [b"a\n"] and lines.tell() == 2
+    assert lines.readlines(None) == [b"b\n", b"end"]
+    lines.seek(0)
+    snapshot = lines.getvalue()
+    try:
+        lines.writelines([bytearray(b"x"), b"y", "bad"])
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("writelines accepted text")
+    assert lines.tell() == 2 and lines.getvalue() == b"xyb\nend"
+    assert snapshot == b"a\nb\nend"
+    lines.close()
+    try:
+        lines.readlines("bad")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("readlines accepted a closed stream")
+
     payload = b"\x00ab\xff\nlast"
+    class Source(io.BytesIO):
+        def readline(self):
+            raise AssertionError("BytesIO.__next__ used the readline override")
+
+    source = Source(payload)
+    iterator = iter(source)
+    assert iterator is source
+    assert next(iterator) == payload[:5] and source.tell() == 5
+    assert source.read() == payload[5:] and next(iterator, None) is None
+    source.close()
+    assert iter(source) is source
+    try:
+        next(source)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("advanced a closed BytesIO")
     stream = Stream(initial_bytes=payload)
     assert isinstance(stream, io.BufferedIOBase)
     assert stream.getvalue() is payload and stream.read() is payload
@@ -90,5 +135,31 @@ def current():
         assert str(error) == "invalid whence (7, should be 0, 1 or 2)"
     else:
         raise AssertionError("accepted invalid whence")
+    class Reader(io.BufferedIOBase):
+        def read(self, size):
+            return b"abc"[:size]
+
+        def read1(self, size):
+            return self.read(min(1, size))
+
+    reader = Reader()
+    dest = bytearray(b"????")
+    assert reader.readinto(dest) == 3 and dest == b"abc?"
+    dest[:] = b"????"
+    assert reader.readinto1(dest) == 1 and dest == b"a???"
+    assert reader.readinto(bytearray()) == 0
+    assert io.BytesIO(b"xy").readinto1(dest) == 2 and dest == b"xy??"
+
+    class Resizes(io.BufferedIOBase):
+        def read(self, size):
+            dest.clear()
+
+    try:
+        Resizes().readinto(dest)
+    except BufferError:
+        assert dest == b"xy??"
+    else:
+        raise AssertionError("reader resized the exported bytearray")
+    dest.clear()
     assert io.StringIO("π").getvalue() == "π"
     print("BytesIO retains native stream position and immutable snapshots")

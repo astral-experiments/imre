@@ -3,6 +3,7 @@
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SysEncoding {
+    Locale,
     Default,
     Filesystem,
     FilesystemErrors,
@@ -11,9 +12,10 @@ pub(crate) enum SysEncoding {
 impl SysEncoding {
     pub(crate) fn method(self) -> &'static str {
         match self {
-            Self::Default => "getdefaultencoding",
-            Self::Filesystem => "getfilesystemencoding",
-            Self::FilesystemErrors => "getfilesystemencodeerrors",
+            Self::Locale => "_locale.getencoding",
+            Self::Default => "sys.getdefaultencoding",
+            Self::Filesystem => "sys.getfilesystemencoding",
+            Self::FilesystemErrors => "sys.getfilesystemencodeerrors",
         }
     }
 }
