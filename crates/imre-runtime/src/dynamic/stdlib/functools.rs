@@ -95,6 +95,80 @@ pub(super) const ASSIGNED: &[&str] = &[
 ];
 pub(super) const UPDATED: &[&str] = &["__dict__"];
 
+/// Reduce consumes one item between calls, leaving the iterator at the failure point.
+pub(super) fn reduce(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 3 {
+        let kind = if args.is_empty() { "keyword " } else { "" };
+        return Err(Error::new(
+            "TypeError",
+            format!("reduce() takes at most 3 {kind}arguments ({count} given)"),
+        ));
+    }
+    let [function, iterable, rest @ ..] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "reduce() takes at least 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let [initial] =
+        super::builtins::bind_builtin_arguments("reduce", rest, kwargs, ["initial"], 0)?;
+    let roots = ctx.heap.temporary_mark();
+    let result = reduce_iterable(ctx, *function, *iterable, initial);
+    ctx.heap.release_temporaries_since(roots);
+    match &result {
+        Ok(value) => ctx.heap.keep(*value),
+        Err(error) => {
+            for value in error.roots() {
+                ctx.heap.keep(value);
+            }
+        }
+    }
+    result
+}
+
+fn reduce_iterable(
+    ctx: &mut Context,
+    function: Id,
+    iterable: Id,
+    initial: Option<Id>,
+) -> Result<Id> {
+    let iterator = ctx.iterator(iterable).map_err(|error| {
+        let type_error = ctx.builtin("TypeError");
+        if ctx.raised_error_matches(&error, type_error) {
+            Error::new("TypeError", "reduce() arg 2 must support iteration")
+        } else {
+            error
+        }
+    })?;
+    ctx.heap.keep(iterator);
+    let mark = ctx.heap.temporary_mark();
+    let mut accumulator = match initial {
+        Some(value) => value,
+        None => ctx.next_item(iterator)?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "reduce() of empty iterable with no initial value",
+            )
+        })?,
+    };
+    ctx.heap.keep(accumulator);
+    while let Some(item) = ctx.next_item(iterator)? {
+        // CPython keeps the last two callback operands alive until the next item arrives.
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(accumulator);
+        ctx.heap.keep(item);
+        accumulator = ctx.call(function, vec![accumulator, item], Vec::new())?;
+        ctx.heap.keep(accumulator);
+        ctx.heap.reserve_slot_or_request_collection();
+        ctx.collect_garbage();
+    }
+    Ok(accumulator)
+}
+
 pub(super) fn cache(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if kwargs.iter().any(|(key, _)| key == "user_function") {
         return Err(Error::new(

@@ -32,7 +32,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         {
             Some((module, function))
         }
-        "functools" if function == "cmp_to_key" => Some(("_functools", function)),
+        "functools" if matches!(function, "cmp_to_key" | "reduce") => {
+            Some(("_functools", function))
+        }
         "zlib" if function == "adler32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -1773,6 +1775,20 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "functools.cmp_to_key" => {
                         return Ok(self.text("($module, /, mycmp)"));
+                    }
+                    "__doc__" if symbol == "functools.reduce" => {
+                        return Ok(self.text(concat!(
+                            "Apply a function of two arguments cumulatively to the items of an iterable, from left to right.\n\n",
+                            "This effectively reduces the iterable to a single value.  If initial is present,\n",
+                            "it is placed before the items of the iterable in the calculation, and serves as\n",
+                            "a default when the iterable is empty.\n\n",
+                            "For example, reduce(lambda x, y: x+y, [1, 2, 3, 4, 5])\n",
+                            "calculates ((((1 + 2) + 3) + 4) + 5)."
+                        )));
+                    }
+                    "__text_signature__" if symbol == "functools.reduce" => {
+                        return Ok(self
+                            .text("($module, function, iterable, /, initial=<unrepresentable>)"));
                     }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
