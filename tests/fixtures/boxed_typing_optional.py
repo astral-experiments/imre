@@ -5,6 +5,28 @@ import typing
 def current():
     from typing import Callable, Final, Generic, TypeVar
 
+    from typing import LiteralString, Never, NoReturn, Self, TypeAlias
+
+    class Model:
+        pass
+
+    Alias: TypeAlias = Model
+    assert Alias is Model
+    assert NoReturn is not Never
+    for form in (LiteralString, Never, NoReturn, Self, TypeAlias):
+        assert getattr(typing, form.__name__) is form
+        assert repr(form) == "typing." + form.__name__
+        assert typing.get_origin(form) is None and typing.get_args(form) == ()
+        marked = Final[form]
+        assert typing.get_origin(marked) is Final and typing.get_args(marked) == (form,)
+        assert typing.get_args(typing.Optional[form]) == (form, type(None))
+        try:
+            form[int]
+        except TypeError as error:
+            assert str(error) == repr(form) + " is not subscriptable"
+        else:
+            raise AssertionError("unsubscriptable special form accepted an argument")
+
     parameter = TypeVar("parameter")
 
     class Container(Generic[parameter]):
