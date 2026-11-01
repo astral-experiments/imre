@@ -21,6 +21,7 @@ from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
 import encoding_methods
+import exit_case
 import executable_case
 import jit_case
 import locale_case
@@ -225,6 +226,8 @@ def select(toolchain, work, source, module):
     fs_id = SYS + "test_getfilesystemencoding"
     executions[fs_id] = filesystem_method(toolchain, directory(work, "filesystem"), source, fs_id)
 
+    executions[exit_case.CASE_ID] = exit_case.observer(
+        module, toolchain, directory(work, "exit-method"), source)
     executions[argv_case.CASE_ID] = argv_case.observer(
         module, toolchain, work / "argv-controls", pinned_methods["SysModuleTest", "test_orig_argv"])
     executions[executable_case.CASE_ID] = executable_case.observer(
