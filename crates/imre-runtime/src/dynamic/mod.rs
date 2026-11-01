@@ -334,7 +334,6 @@ impl Context {
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
-                | Value::MappingViewIterator { .. }
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Filter { .. }
@@ -391,14 +390,6 @@ impl Context {
                 kind,
                 ordered,
             } => return Ok(self.dict_iterator(dict, kind, ordered, false)),
-            Value::MappingView { mapping, kind } => {
-                return Ok(self.alloc(Value::MappingViewIterator {
-                    mapping: Some(mapping),
-                    source: None,
-                    kind,
-                    running: false,
-                }));
-            }
             ref value
                 if let Some(class) = value.instance_class()
                     && let Some(slot) = self.class_attr(class, "__iter__") =>
@@ -469,7 +460,6 @@ impl Context {
             Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
-                | Value::MappingViewIterator { .. }
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
                 | Value::Filter { .. }
@@ -752,7 +742,6 @@ impl Context {
             }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
-            Value::MappingViewIterator { .. } => return self.next_mapping_view_item(id),
             Value::DictIterator(iter) => return (*iter).next(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
@@ -835,68 +824,6 @@ impl Context {
             }
         }
         Ok(Some(item))
-    }
-
-    /// Advance a Mapping ABC view as a generator, without snapshotting its keys or values.
-    fn next_mapping_view_item(&mut self, id: Id) -> Result<Option<Id>> {
-        let (mapping, source, kind) = match *self.heap.get(id) {
-            Value::MappingViewIterator { mapping: None, .. } => return Ok(None),
-            Value::MappingViewIterator { running: true, .. } => {
-                return Err(Error::new("ValueError", "generator already executing"));
-            }
-            Value::MappingViewIterator {
-                mapping: Some(mapping),
-                source,
-                kind,
-                ..
-            } => (mapping, source, kind),
-            _ => unreachable!(),
-        };
-        self.heap.keep(id);
-        if let Value::MappingViewIterator { running, .. } = self.heap.get_mut(id) {
-            *running = true;
-        }
-        let item = (|| {
-            let source = match source {
-                Some(source) => source,
-                None => {
-                    let source = self.iterator(mapping)?;
-                    if let Value::MappingViewIterator { source: slot, .. } = self.heap.get_mut(id) {
-                        *slot = Some(source);
-                    }
-                    source
-                }
-            };
-            let Some(key) = self.next_item(source)? else {
-                return Ok(None);
-            };
-            if matches!(kind, DictViewKind::Keys) {
-                return Ok(Some(key));
-            }
-            let value = self.get_item(mapping, key)?;
-            Ok(Some(match kind {
-                DictViewKind::Values => value,
-                DictViewKind::Items => self.alloc(Value::Tuple(vec![key, value])),
-                DictViewKind::Keys => unreachable!(),
-            }))
-        })();
-        if let Value::MappingViewIterator {
-            mapping,
-            source,
-            running,
-            ..
-        } = self.heap.get_mut(id)
-        {
-            *running = false;
-            if !matches!(&item, Ok(Some(_))) {
-                *mapping = None;
-                *source = None;
-            }
-        }
-        if !matches!(&item, Ok(Some(_))) {
-            self.heap.weak_edge_removed(mapping);
-        }
-        item
     }
 
     /// Consume the values required by an assignment, probing one extra item for fixed targets.
@@ -1034,9 +961,7 @@ impl Context {
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
-                | Value::MappingViewIterator { .. }
                 | Value::DictView { .. }
-                | Value::MappingView { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
@@ -1116,7 +1041,6 @@ impl Context {
                 }
                 Ok(items)
             }
-            Value::MappingView { mapping, kind } => mapping_abc::view_items(self, mapping, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())

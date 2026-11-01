@@ -65,3 +65,13 @@ for item in deque(source(), maxlen=limit_value()):
     print(item)
 for item in deque(maxlen=limit_value(), iterable=source()):
     print(item)
+
+bounded = deque("ab", maxlen=3)
+alias = bounded
+bounded += "cd"
+bounded += alias
+print(list(alias))
+try:
+    hash(alias)
+except TypeError as error:
+    print(str(error))

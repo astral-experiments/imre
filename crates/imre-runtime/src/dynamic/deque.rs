@@ -11,9 +11,11 @@ pub(super) const METHODS: &[&str] = &[
     "clear",
     "copy",
     "__copy__",
+    "__iadd__",
     "extend",
     "extendleft",
     "remove",
+    "index",
     "pop",
     "popleft",
     "reverse",
@@ -126,7 +128,7 @@ fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]
 }
 
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
-fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Result<()> {
+pub(super) fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Result<()> {
     let source = if queue == source {
         let items = ctx.items(source)?;
         ctx.alloc(Value::Tuple(items))
@@ -389,6 +391,65 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
     result
 }
 
+/// Keep the element alive while its equality and truth hooks run.
+fn element_matches(ctx: &mut Context, item: Id, value: Id) -> Result<bool> {
+    if item == value {
+        return Ok(true);
+    }
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(item);
+    let equal = ctx
+        .binary("==", item, value)
+        .and_then(|result| ctx.truth(result));
+    ctx.heap.release_temporaries_since(mark);
+    equal
+}
+
+/// Convert index bounds before capturing deque state; both conversions may run Python code.
+fn index(ctx: &mut Context, queue: Id, args: &[Id]) -> Result<Id> {
+    let Some((&value, bounds)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "index expected at least 1 argument, got 0",
+        ));
+    };
+    if bounds.len() > 2 {
+        return Err(Error::new(
+            "TypeError",
+            format!("index expected at most 3 arguments, got {}", args.len()),
+        ));
+    }
+    let mut limits = [None, None];
+    for (limit, &bound) in limits.iter_mut().zip(bounds) {
+        *limit = Some(ctx.index_value(bound)?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "slice indices must be integers or have an __index__ method",
+            )
+        })?);
+    }
+    let Value::Deque(ring) = ctx.heap.get(queue) else {
+        unreachable!()
+    };
+    let state = ring.state;
+    for i in ring.search_range(limits[0].as_ref(), limits[1].as_ref()) {
+        let Value::Deque(ring) = ctx.heap.get(queue) else {
+            unreachable!()
+        };
+        let item = ring.items[i];
+        if element_matches(ctx, item, value)? {
+            return Ok(ctx.int(i as i64));
+        }
+        let Value::Deque(ring) = ctx.heap.get(queue) else {
+            unreachable!()
+        };
+        if ring.state != state {
+            return Err(Error::new("RuntimeError", "deque mutated during iteration"));
+        }
+    }
+    Err(Error::new("ValueError", "deque.index(x): x not in deque"))
+}
+
 /// A Python equality callback may mutate the queue or raise before a match is removed.
 fn remove(ctx: &mut Context, queue: Id, value: Id) -> Result<()> {
     let Value::Deque(ring) = ctx.heap.get(queue) else {
@@ -400,15 +461,7 @@ fn remove(ctx: &mut Context, queue: Id, value: Id) -> Result<()> {
             unreachable!()
         };
         let item = ring.items[index];
-        let equal = item == value || {
-            let mark = ctx.heap.temporary_mark();
-            ctx.heap.keep(item);
-            let equal = ctx
-                .binary("==", item, value)
-                .and_then(|result| ctx.truth(result));
-            ctx.heap.release_temporaries_since(mark);
-            equal?
-        };
+        let equal = element_matches(ctx, item, value)?;
         let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
             unreachable!()
         };
@@ -462,8 +515,15 @@ pub(super) fn method(
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("deque.{name}() takes no keyword arguments"),
+            if name == "__iadd__" {
+                "wrapper __iadd__() takes no keyword arguments".to_owned()
+            } else {
+                format!("deque.{name}() takes no keyword arguments")
+            },
         ));
+    }
+    if name == "index" {
+        return index(ctx, receiver, rest);
     }
     match (name, rest) {
         ("__getitem__", [index]) => return IndexOp::Get.apply(ctx, receiver, *index, true),
@@ -471,7 +531,11 @@ pub(super) fn method(
             return IndexOp::Set(*value).apply(ctx, receiver, *index, true);
         }
         ("__delitem__", [index]) => return IndexOp::Delete.apply(ctx, receiver, *index, true),
-        ("__getitem__" | "__delitem__", _) => {
+        ("__iadd__", [item]) => {
+            extend(ctx, receiver, *item, false)?;
+            return Ok(receiver);
+        }
+        ("__getitem__" | "__delitem__" | "__iadd__", _) => {
             return Err(Error::new(
                 "TypeError",
                 format!("expected 1 argument, got {}", rest.len()),

@@ -26,7 +26,50 @@ class DictChild(dict):
     pass
 
 
+def hashable_classes():
+    from collections.abc import Hashable
+
+    class Inherited(Hashable):
+        def __hash__(self):
+            return super().__hash__()
+
+    class EqualOnly:
+        def __eq__(self, other):
+            return self is other
+
+    class RefusesHash:
+        def __hash__(self):
+            raise ValueError("hash called")
+
+    class Advertised:
+        __hash__ = 1
+
+    class Disabled:
+        __hash__ = None
+
+    class Enabled(Disabled, RefusesHash):
+        __hash__ = RefusesHash.__hash__
+
+    assert not issubclass(Disabled, Hashable)
+    assert issubclass(Enabled, Hashable)
+    for value in (Inherited(), RefusesHash(), Advertised(), ([],), object(), frozenset(), type):
+        assert isinstance(value, Hashable)
+        assert issubclass(type(value), Hashable)
+    for value in (EqualOnly(), [], {}, set(), bytearray(), {}.keys()):
+        assert not isinstance(value, Hashable)
+        assert not issubclass(type(value), Hashable)
+    assert hash(Inherited()) == 0
+    assert not issubclass(int, Inherited)
+    try:
+        Hashable()
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("instantiated abstract Hashable")
+
+
 def current():
+    hashable_classes()
     from collections.abc import Collection, Container, Iterable, Sized
 
     class Protocol:

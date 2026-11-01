@@ -7165,6 +7165,19 @@ impl Emitter<'_, '_> {
                 self.check_deque_method_index(&args[1].value, *method);
                 self.get_item(&args[0].value, &args[1].value, returns, false)
             }
+            Builtin::DequeIndex => {
+                let word = self.word(&args[1].value);
+                let start = args.get(2).map_or("0", |arg| arg.value.operand.as_str());
+                let stop = args.get(3).map_or("0", |arg| arg.value.operand.as_str());
+                Value {
+                    ty: Type::Int,
+                    operand: self.checked_instruction(format!(
+                        "call i64 @imre_deque_index(ptr {}, i64 {word}, i64 {start}, i64 {stop})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::DequeContains => {
                 let word = self.word(&args[0].value);
                 let found = self.instruction(format!(
@@ -9674,6 +9687,7 @@ declare void @imre_deque_check_method_index(i64)
 declare i64 @imre_deque_get(ptr, i64)
 declare void @imre_deque_set(ptr, i64, i64)
 declare void @imre_deque_delete(ptr, i64)
+declare i64 @imre_deque_index(ptr, i64, i64, i64)
 declare i32 @imre_deque_contains(ptr, i64)
 declare i64 @imre_deque_len(ptr)
 declare i64 @imre_deque_maxlen(ptr)

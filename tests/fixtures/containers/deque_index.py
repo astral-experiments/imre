@@ -127,3 +127,12 @@ print(list(filter(read, [False, True])))
 mixed_readers(flags, True)
 mixed_readers(flags, False)
 rebind_methods(deque("ab"), deque("cd"))
+
+matches = deque("abaca")
+print(matches.index("a"))
+print(matches.index("a", 1))
+print(matches.index("a", -3, 10**50))
+try:
+    matches.index("a", -10**50, -5)
+except ValueError as error:
+    print(str(error))

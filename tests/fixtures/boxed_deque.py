@@ -96,6 +96,45 @@ def current():
     assert list(bounded) == [4, 3, 1]
     bounded.extendleft(bounded)
     assert list(bounded) == [1, 3, 4]
+    alias = bounded
+    bounded += "abc"
+    assert bounded is alias and list(alias) == list("abc")
+    bounded += alias
+    assert list(bounded) == list("abc")
+    assert bounded.__iadd__(range(2)) is alias and list(alias) == ["c", 0, 1]
+
+    class Reflected:
+        def __radd__(self, other):
+            return marker
+
+    bounded += Reflected()
+    assert bounded is marker
+
+    class Match:
+        def __init__(self, result):
+            self.result = result
+
+        def __eq__(self, other):
+            bounded.clear()
+            return self.result
+
+    bounded = deque([Match(True)])
+    assert bounded.index(99) == 0
+    bounded.append(Match(False))
+    try:
+        bounded.index(99)
+    except RuntimeError as error:
+        assert str(error) == "deque mutated during iteration"
+    else:
+        raise AssertionError("changed deque during search")
+
+    class Bound:
+        def __index__(self):
+            bounded.extend([1, 2, 1])
+            return -2
+
+    assert bounded.index(1, Bound(), 10**50) == 2
+
     class Source:
         def __init__(self):
             self.count = 0
@@ -110,7 +149,7 @@ def current():
             raise ValueError("source")
 
     for bound in (0, None):
-        for extend in (deque.extend, deque.extendleft):
+        for extend in (deque.extend, deque.extendleft, deque.__iadd__):
             queue = deque(maxlen=bound)
             source = Source()
             try:
