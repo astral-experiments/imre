@@ -156,12 +156,42 @@ impl Checker<'_> {
                 let value = self.unpacking_value(target, &assignment.value)?;
                 return self.bind_pattern(target, value);
             }
-            let value = if let Some(expected) = self.target_context(target) {
+            let local = target.as_name_expr().filter(|_| {
+                !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
+            });
+            let previous = local.and_then(|name| {
+                let slot = *self.names.get(name.id.as_str())?;
+                self.inferred_lists
+                    .contains(&slot)
+                    .then_some((name.id.as_str(), slot))
+            });
+            let context = self.target_context(target);
+            let value = if let Some((_, old)) = previous {
+                // Keep the original literal context (e.g. for []) while allowing
+                // a list-producing operation to determine its own element type.
+                self.expr_expected_if(&assignment.value, self.locals[old], |c, ty| {
+                    c.types.element(ty).is_some()
+                })?
+            } else if let Some(expected) = context {
                 self.expr_expected(&assignment.value, expected)?
             } else {
                 self.typed_expr(&assignment.value)?
             };
-            return Ok(vec![self.assign_value(target, value)?]);
+            if let Some((name, old)) = previous
+                && value.ty != self.locals[old]
+            {
+                return Ok(self.replace_local(name, old, value.ty, value));
+            }
+            let statement = self.assign_value(target, value)?;
+            if context.is_none()
+                && let Some(name) = local
+            {
+                let slot = self.names[name.id.as_str()];
+                if self.types.element(self.locals[slot]).is_some() {
+                    self.inferred_lists.insert(slot);
+                }
+            }
+            return Ok(vec![statement]);
         }
         let context = assignment
             .targets

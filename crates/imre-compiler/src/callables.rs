@@ -23,8 +23,14 @@ impl Targets {
         let mut open = HashSet::new();
         for function in module.functions.iter().chain([&module.entry]) {
             ir::walk_expressions(&function.body, &mut |value| {
-                if matches!(value.kind, ExprKind::Builtin(ir::Builtin::BuiltinsLen, _)) {
-                    // The original builtin has a runtime entry point. A singleton Python
+                if matches!(
+                    value.kind,
+                    ExprKind::Builtin(
+                        ir::Builtin::BuiltinsLen | ir::Builtin::FnmatchFunction { .. },
+                        _
+                    )
+                ) {
+                    // These builtins have runtime entry points. A singleton Python
                     // function of this signature cannot prove the target of a live lookup.
                     open.insert(value.ty);
                 }

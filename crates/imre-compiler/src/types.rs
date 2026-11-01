@@ -46,6 +46,7 @@ enum Shape {
     DeferredCmpFrame((usize, u32), Vec<Type>),
     Callable(Vec<Type>, Type),
     IndexCallable(Type),
+    BoundSourceMethod(Type, usize, usize),
     RecordConstructor(usize, Vec<Type>),
     PartialCallable(PartialFunction),
     DeclaredCache(Type, usize),
@@ -252,6 +253,7 @@ impl Types {
                     Shape::Callable(..)
                         | Shape::RecordConstructor(..)
                         | Shape::IndexCallable(_)
+                        | Shape::BoundSourceMethod(..)
                         | Shape::DeclaredCache(..)
                         | Shape::CachedCallable(_)
                         | Shape::DispatchCallable(_)
@@ -388,7 +390,9 @@ impl Types {
                 | Shape::PartialFrame(fields)
                 | Shape::DeferredCmpFrame(_, fields)
                 | Shape::Union(fields) => fields.clone(),
-                Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
+                Shape::IndexCallable(callable)
+                | Shape::BoundSourceMethod(callable, ..)
+                | Shape::DeclaredCache(callable, _) => {
                     vec![*callable]
                 }
                 Shape::PartialCallable(p) => vec![p.callable, p.frame],
@@ -645,14 +649,11 @@ impl Types {
                 .join(left, right)
                 .map(|value| self.directory_context(value));
         }
-        if left == right
-            || self.payload(left) == Some(right)
-            || self.index_callable_signature(right) == Some(left)
-        {
+        if left == right || self.payload(left) == Some(right) {
             Some(left)
-        } else if self.payload(right) == Some(left)
-            || self.index_callable_signature(left) == Some(right)
-        {
+        } else if let Some(signature) = self.common_method_signature(left, right) {
+            Some(signature)
+        } else if self.payload(right) == Some(left) {
             Some(right)
         } else if left == Type::None {
             Some(self.optional(right))
@@ -1140,6 +1141,9 @@ impl Types {
                             | Type::StrLiteral(_)
                             | Type::Bytes
                     ) || self.payload(field) == Some(Type::Str)
+                        || self
+                            .members(field)
+                            .is_some_and(|members| members == [Type::Str, Type::Bytes])
                         || matches!(
                             self.element(field),
                             Some(Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes)
@@ -1365,6 +1369,39 @@ impl Types {
         }
     }
 
+    /// A bound source method retains its declaration for keyword and default binding.
+    pub(crate) fn bound_source_method(&self, callable: Type, class: usize, method: usize) -> Type {
+        Type::Callable(self.intern(Shape::BoundSourceMethod(callable, class, method)))
+    }
+
+    pub(crate) fn bound_method_site(&self, ty: Type) -> Option<(usize, usize)> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes.get(id) {
+            Some(Shape::BoundSourceMethod(_, class, method)) => Some((*class, *method)),
+            _ => None,
+        }
+    }
+
+    /// A local may hold a different function at its original positional ABI.
+    pub(crate) fn method_signature(&self, ty: Type) -> Option<Type> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes.get(id) {
+            Some(Shape::IndexCallable(signature) | Shape::BoundSourceMethod(signature, ..)) => {
+                Some(*signature)
+            }
+            _ => None,
+        }
+    }
+
+    /// Different bound declarations may still share a positional call ABI.
+    pub(crate) fn common_method_signature(&self, left: Type, right: Type) -> Option<Type> {
+        let left_abi = self.method_signature(left);
+        let right_abi = self.method_signature(right);
+        left_abi
+            .or(right_abi)
+            .filter(|&ty| left_abi.unwrap_or(left) == ty && right_abi.unwrap_or(right) == ty)
+    }
+
     /// A class value can construct an instance but owns no instance or bound receiver.
     pub(crate) fn record_constructor(&self, base: usize, params: Vec<Type>) -> Type {
         Type::Callable(self.intern(Shape::RecordConstructor(base, params)))
@@ -1446,9 +1483,9 @@ impl Types {
         let mut current = ty;
         while let Type::Callable(id) = current {
             current = match shapes.shapes.get(id)? {
-                Shape::IndexCallable(underlying) | Shape::DeclaredCache(underlying, _) => {
-                    *underlying
-                }
+                Shape::IndexCallable(underlying)
+                | Shape::BoundSourceMethod(underlying, ..)
+                | Shape::DeclaredCache(underlying, _) => *underlying,
                 Shape::CachedCallable(cache) => cache.callable,
                 Shape::DispatchCallable(dispatcher) => dispatcher.callable,
                 Shape::PartialCallable(p) => p.callable,
@@ -1519,9 +1556,9 @@ impl Types {
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
             Shape::RecordConstructor(base, params) => Some((params.clone(), Type::Class(*base))),
-            Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
-                self.signature(*callable)
-            }
+            Shape::IndexCallable(callable)
+            | Shape::BoundSourceMethod(callable, ..)
+            | Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
             Shape::DispatchCallable(d) => self.signature(d.callable),
             Shape::PartialCallable(p) => self.signature(p.callable),
@@ -1901,7 +1938,9 @@ impl TypeDescription<'_> {
             Shape::CallbackArgument(_) => return self.write_str("object"),
             Shape::CallbackPositional => return self.write_str("callback positional arguments"),
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
-            Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
+            Shape::IndexCallable(callable)
+            | Shape::BoundSourceMethod(callable, ..)
+            | Shape::DeclaredCache(callable, _) => {
                 return self.write_type(*callable);
             }
             Shape::ContextValue(value) => {

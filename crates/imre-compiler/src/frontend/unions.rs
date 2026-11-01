@@ -116,7 +116,7 @@ impl Checker<'_> {
             .types
             .partial_function(ty)
             .is_some_and(|p| p.callable == value.ty)
-            || self.types.index_callable_signature(ty) == Some(value.ty)
+            || self.types.method_signature(ty) == Some(value.ty)
         {
             return Expr {
                 ty,

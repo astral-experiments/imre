@@ -193,7 +193,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::Fnmatch(_) => Contract::new(true, PreservesLists),
+            Self::Fnmatch(_) | Self::FnmatchFunction { .. } => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
@@ -270,6 +270,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::WarningScopeEnter | Self::WarningScopeExit => Contract::new(false, PreservesLists),
             Self::TimeExtras | Self::TimeExtra(_) => Contract::new(false, PreservesLists),
             Self::Mktime | Self::MktimeOffset | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep
             | Self::PercentFormat
@@ -488,6 +489,7 @@ impl Builtin {
             | Self::StringFormat
             | Self::RegexSub(_)
             | Self::UnittestCompilePattern
+            | Self::RegexSearchText { .. }
             | Self::StringIterationList
             | Self::StringJoin
             | Self::JoinBufferFinish

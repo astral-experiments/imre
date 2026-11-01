@@ -37,6 +37,14 @@ def mixed_filters(entries: list[str | bytes]) -> None:
         print(str(exc))
 
 
+def matched(name: str | bytes | Path, pat: str | bytes | Path, fn=fnmatch.fnmatch) -> bool:
+    return fn(name, pat)
+
+
+def never_match(name: str | bytes | Path, pat: str | bytes | Path) -> bool:
+    return False
+
+
 print(repr(filter(pat=pattern(), names=names())))
 print(repr(fnmatch.filterfalse(names(), pattern())))
 print(repr(list(filter(["a", "b"], "a"))))
@@ -64,3 +72,17 @@ print(repr(fnmatch.translate("**[b-a]*[!b-a]")))
 mixed_filters(["ab", "z"])
 mixed_filters([b"ab", b"z"])
 mixed_filters([b"z", "mixed", b"unread"])
+
+
+print(matched("abc", "*", never_match))
+print(matched("é", "?"))
+print(matched(b"\xc3\xa9", b"??", fnmatch.fnmatchcase))
+print(matched(Path("dir/.hidden"), Path("*/.*")))
+try:
+    print(matched(Path("dir/.hidden"), "*/.*", fnmatch.fnmatchcase))
+except TypeError as exc:
+    print(str(exc))
+try:
+    print(matched(b"abc", "*"))
+except TypeError as exc:
+    print(str(exc))

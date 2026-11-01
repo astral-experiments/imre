@@ -354,6 +354,7 @@ fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
             return unsafe {
                 object(word as *const Object).0.with(|s| match s {
                     Storage::Sequence(_) => "list".into(),
+                    Storage::RegexMatch(_) => "re.Match".into(),
                     Storage::Dictionary(_) => "dict".into(),
                     Storage::Set(_) => "set".into(),
                     Storage::File(file) if let Some((name, _)) = file.memory_class() => name.into(),

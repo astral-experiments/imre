@@ -38,6 +38,17 @@ print(subprocess.call([true_path], pass_fds=(), close_fds=False))
 print(subprocess.call([true_path], pass_fds=(1,), close_fds=True))
 
 warnings.simplefilter("error", Warning)
+# The inner filter is restored on normal exit, the outer one on exception.
+try:
+    with warnings.catch_warnings() as value:
+        assert value is None
+        warnings.simplefilter("ignore", RuntimeWarning)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Warning)
+        assert subprocess.call([true_path], pass_fds=(1,), close_fds=False) == 0
+        raise ValueError("leave the warning scope")
+except ValueError:
+    pass
 warnings.filterwarnings("ignore", "pass_fds", RuntimeWarning, "subprocess$", 863)
 warnings.simplefilter("ignore", ResourceWarning)
 try:

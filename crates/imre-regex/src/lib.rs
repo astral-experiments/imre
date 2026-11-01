@@ -89,14 +89,15 @@ pub fn preserve_zero_repeat_groups(source: String) -> Result<String, String> {
 
 /// Translate the supported Python pattern grammar without changing search semantics.
 pub fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, String> {
-    translate_with_ascii(pattern, verbose, false)
+    translate_with_flags(pattern, verbose, false, false)
 }
 
 /// Translate with the character classes selected by Python's ASCII flag.
-pub fn translate_with_ascii(
+pub fn translate_with_flags(
     pattern: &str,
     verbose: bool,
     ascii: bool,
+    mut dotall: bool,
 ) -> Result<FixedPattern, String> {
     let mut input = pattern.chars().peekable();
     let mut output = String::new();
@@ -122,12 +123,23 @@ pub fn translate_with_ascii(
                 continue;
             }
             '(' => {
-                outer_prefixes.push(may_backtrack);
+                outer_prefixes.push((may_backtrack, dotall));
                 may_backtrack = false;
                 output.push('(');
                 if input.next_if_eq(&'?').is_some() {
                     if input.next_if_eq(&':').is_some() {
                         output.push_str("?:");
+                    } else if input.next_if_eq(&'s').is_some() {
+                        if input.next() != Some(':') {
+                            return Err("expected scoped dotall group".into());
+                        }
+                        output.push_str("?s:");
+                        dotall = true;
+                    } else if input.next_if_eq(&'>').is_some() {
+                        atomic_delimited(&mut input, &mut output, dotall, verbose, ascii)?;
+                        (may_backtrack, dotall) = outer_prefixes.pop().unwrap();
+                        can_repeat = true;
+                        continue;
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
                         let mut name = String::new();
                         loop {
@@ -159,14 +171,17 @@ pub fn translate_with_ascii(
                 // An empty character class is an unreachable branch that keeps
                 // these alternatives separate without adding a capture.
                 output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
-                if let Some(outer) = outer_prefixes.last_mut() {
+                if let Some((outer, _)) = outer_prefixes.last_mut() {
                     *outer = true; // The enclosing prefix now contains a choice.
                 }
                 may_backtrack = false;
                 can_repeat = false;
             }
             ')' => {
-                may_backtrack |= outer_prefixes.pop().unwrap_or(false);
+                if let Some((backtrack, previous_dotall)) = outer_prefixes.pop() {
+                    may_backtrack |= backtrack;
+                    dotall = previous_dotall;
+                }
                 output.push(c);
                 can_repeat = true;
             }
@@ -413,6 +428,40 @@ fn verbose_tail(mut input: Input<'_>) -> bool {
     true
 }
 
+/// A lazy scan inside an atomic group commits to its first matching delimiter.
+/// Removing those characters from the repetition prevents a later suffix from
+/// making the engine reconsider that choice, including across newlines under DOTALL.
+fn atomic_delimited(
+    input: &mut Input<'_>,
+    output: &mut String,
+    dotall: bool,
+    verbose: bool,
+    ascii: bool,
+) -> Result<(), String> {
+    if !['.', '*', '?'].into_iter().all(|c| input.next() == Some(c)) {
+        return Err("unsupported atomic regex group".into());
+    }
+    let mut delimiter = String::new();
+    match input.next() {
+        Some('[') => class(input, &mut delimiter, ascii)?,
+        Some('\\') => {
+            if escaped(input, &mut delimiter, false, ascii)? == Escape::Anchor {
+                return Err("an atomic scan delimiter must consume a character".into());
+            }
+        }
+        Some(c) if !".^$*+?{}()|".contains(c) && !(verbose && (verbose_space(c) || c == '#')) => {
+            literal(&mut delimiter, c);
+        }
+        _ => return Err("expected a single-character delimiter in an atomic regex group".into()),
+    }
+    if input.next() != Some(')') {
+        return Err("unsupported atomic regex group".into());
+    }
+    let newline = if dotall { "" } else { r"\n" };
+    write!(output, "?:[^{delimiter}{newline}]*{delimiter})").unwrap();
+    Ok(())
+}
+
 fn verbose_space(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0b' | '\x0c')
 }
@@ -622,6 +671,22 @@ mod tests {
             let compiled = Regex::new(&translate(pattern, false).unwrap().source).unwrap();
             assert_eq!(compiled.find(text).unwrap().as_str(), expected);
         }
+    }
+
+    #[test]
+    fn atomic_lazy_scans_commit_to_the_first_delimiter() {
+        for (pattern, matches, misses) in [
+            (r"\A(?>.*?a)b", "zab", "aab"),
+            (r"\A(?s:(?>.*?x)y)", "\nxy", "xxy"),
+            (r"\A(?s:.)(?>.*?x)y", "\n.xy", "\n\nxy"),
+            (r"\A(?>.*?[ab])x", "-ax", "abx"),
+            (r"\A(?>.*?\+)x", "-+x", "++x"),
+        ] {
+            let regex = Regex::new(&translate(pattern, false).unwrap().source).unwrap();
+            assert!(regex.is_match(matches));
+            assert!(!regex.is_match(misses));
+        }
+        assert!(translate("(?>.*?a|b)c", false).is_err());
     }
 
     #[test]

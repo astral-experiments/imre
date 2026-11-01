@@ -40,7 +40,8 @@ pub(super) fn adapters(
             }
             invoked |= matches!(
                 value.kind,
-                ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::BuiltinsLen, _)
+                ExprKind::Invoke { .. }
+                    | ExprKind::Builtin(Builtin::BuiltinsLen | Builtin::FnmatchFunction { .. }, _)
             );
             empty_partial |= matches!(value.kind, ExprKind::Builtin(Builtin::EmptyPartial, _));
             if let ExprKind::Builtin(builtin, _) = &value.kind {

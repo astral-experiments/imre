@@ -453,6 +453,7 @@ pub(crate) enum Intrinsic {
     TimeSleep,
     WarningFilter { simple: bool },
     WarningReset,
+    CatchWarnings,
     WarningDisplay { show: bool },
     PatchSet,
     PatchedFile,
@@ -564,6 +565,7 @@ pub(crate) enum Intrinsic {
     CsvError,
     RegexCompile,
     RegexSearch,
+    RegexMatchStart,
     RegexSub,
     RegexVerbose,
     RegexUnicode,
@@ -1017,6 +1019,7 @@ impl IntrinsicModule {
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
+            (Self::Warnings, "catch_warnings") => Intrinsic::CatchWarnings,
             (Self::Warnings, "resetwarnings") => Intrinsic::WarningReset,
             (Self::Warnings, "formatwarning") => Intrinsic::WarningDisplay { show: false },
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
@@ -1277,6 +1280,7 @@ impl IntrinsicModule {
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
+            (Self::Re, "match") => Intrinsic::RegexMatchStart,
             (Self::Re, "sub") => Intrinsic::RegexSub,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
@@ -1442,7 +1446,7 @@ pub(crate) struct SourceModule {
     type_bindings: HashMap<String, Binding>,
     /// Only an executed explicit submodule import populates the bare importlib namespace.
     importlib_children: HashMap<&'static str, TextSize>,
-    local_metadata_imports: Vec<LocalMetadataImport>,
+    local_static_imports: Vec<LocalStaticImport>,
     pub(crate) aliases: Vec<TypeAlias>,
     /// Decorated declarations register their original function at module initialization.
     pub(crate) overloads: HashSet<usize>,
@@ -2194,19 +2198,19 @@ impl SourceGraph {
 
     /// Resolves namespace paths while leaving local-value attributes to the expression checker.
     pub(crate) fn resolve(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
-        if let Some(import) = self.local_metadata_binding(module, expression) {
-            return self.metadata_attribute(module, expression, import);
+        if let Some(import) = self.local_static_binding(module, expression) {
+            return self.local_import_value(module, expression, import);
         }
         resolve_binding(&self.modules, module, expression)
     }
 
     /// An import binds its name throughout the function, even before the import executes.
-    fn local_metadata_binding(
+    fn local_static_binding(
         &self,
         module: ModuleId,
         expression: &ast::Expr,
-    ) -> Option<&LocalMetadataImport> {
-        let imports = &self.modules[module].local_metadata_imports;
+    ) -> Option<&LocalStaticImport> {
+        let imports = &self.modules[module].local_static_imports;
         if imports.is_empty() {
             return None;
         }
@@ -2220,40 +2224,63 @@ impl SourceGraph {
             .find(|i| i.name == name && i.body.contains_range(expression.range()))
     }
 
-    fn metadata_attribute(
+    fn local_import_value(
         &self,
         module: ModuleId,
         expression: &ast::Expr,
-        import: &LocalMetadataImport,
+        import: &LocalStaticImport,
     ) -> Option<Binding> {
-        let attr = expression.as_attribute_expr()?;
-        if expression.start() < import.initialized
-            || !self
-                .session
-                .is_stdlib_module(module, &attr.value, "importlib.metadata")
-        {
+        if expression.start() < import.initialized {
             return None;
         }
-        stdlib_symbol(
-            &self.modules,
-            IntrinsicModule::ImportlibMetadata,
-            attr.attr.as_str(),
-        )
+        if import.module_name == "importlib.metadata" {
+            let attr = expression.as_attribute_expr()?;
+            return self
+                .session
+                .is_stdlib_module(module, &attr.value, "importlib.metadata")
+                .then(|| {
+                    stdlib_symbol(
+                        &self.modules,
+                        IntrinsicModule::ImportlibMetadata,
+                        attr.attr.as_str(),
+                    )
+                })?;
+        }
+        let (root, attribute) = match expression {
+            ast::Expr::Attribute(attr) => (&*attr.value, Some(attr.attr.as_str())),
+            ast::Expr::Name(_) => (expression, None),
+            _ => return None,
+        };
+        if !self.session.has_import_binding(
+            module,
+            root,
+            import.alias,
+            &self.modules[module].parsed,
+        ) {
+            return None;
+        }
+        let owner = IntrinsicModule::named(import.module_name)?;
+        match (&import.symbol, attribute) {
+            (None, None) => Some(Binding::IntrinsicModule(owner)),
+            (None, Some(attr)) => owner.symbol(attr),
+            (Some(symbol), None) => owner.symbol(symbol),
+            (Some(_), Some(_)) => None,
+        }
     }
 
     /// The loader has already resolved this import and recorded the scope of its binding.
-    pub(crate) fn local_metadata_import(&self, module: ModuleId, stmt: &ast::Stmt) -> bool {
-        stmt.is_import_stmt()
+    pub(crate) fn local_static_import(&self, module: ModuleId, stmt: &ast::Stmt) -> bool {
+        matches!(stmt, ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_))
             && self.modules[module]
-                .local_metadata_imports
+                .local_static_imports
                 .iter()
                 .any(|i| i.initialized == stmt.end())
     }
 
     /// A postponed annotation may reference a type imported under TYPE_CHECKING.
     pub(crate) fn resolve_type(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
-        if let Some(import) = self.local_metadata_binding(module, expression) {
-            return self.metadata_attribute(module, expression, import);
+        if let Some(import) = self.local_static_binding(module, expression) {
+            return self.local_import_value(module, expression, import);
         }
         match expression {
             ast::Expr::Name(name) => self.modules[module]
@@ -2273,31 +2300,63 @@ impl SourceGraph {
     }
 }
 
-struct LocalMetadataImport {
+struct LocalStaticImport {
     name: String,
+    module_name: &'static str,
+    symbol: Option<String>,
+    alias: TextRange,
     body: TextRange,
     initialized: TextSize,
 }
 
 /// An unconditional function-local import dominates the remaining statements in that body.
 /// The semantic model checks the receiver at each use, including local rebindings.
-fn metadata_import_scopes(f: &ast::StmtFunctionDef, imports: &mut Vec<LocalMetadataImport>) {
+fn static_import_scopes(f: &ast::StmtFunctionDef, imports: &mut Vec<LocalStaticImport>) {
     for stmt in &f.body {
-        if let ast::Stmt::Import(import) = stmt
-            && !import.is_lazy
-            && let [alias] = import.names.as_slice()
-            && alias.name.as_str() == "importlib.metadata"
-        {
-            imports.push(LocalMetadataImport {
-                name: alias
-                    .asname
-                    .as_ref()
-                    .map_or("importlib", |n| n.as_str())
-                    .into(),
-                body: TextRange::new(f.body[0].start(), f.end()),
-                initialized: stmt.end(),
-            });
-        }
+        // These modules have no observable initialization or mutable exports.
+        // Other local imports still take their ordinary lowering path.
+        let (alias, module_name, symbol, default_name) = match stmt {
+            ast::Stmt::Import(import) if !import.is_lazy => {
+                let [alias] = import.names.as_slice() else {
+                    continue;
+                };
+                match alias.name.as_str() {
+                    "importlib.metadata" => (alias, "importlib.metadata", None, "importlib"),
+                    "fnmatch" => (alias, "fnmatch", None, "fnmatch"),
+                    "re" => (alias, "re", None, "re"),
+                    _ => continue,
+                }
+            }
+            ast::Stmt::ImportFrom(import) if !import.is_lazy && import.level == 0 => {
+                let [alias] = import.names.as_slice() else {
+                    continue;
+                };
+                let owner = match import.module.as_deref() {
+                    Some("fnmatch") => "fnmatch",
+                    Some("re") => "re",
+                    _ => continue,
+                };
+                let name = alias.name.as_str();
+                if !matches!(IntrinsicModule::named(owner).and_then(|m| m.symbol(name)), Some(Binding::Intrinsic(symbol)) if !matches!(symbol, Intrinsic::Declaration(_)))
+                {
+                    continue;
+                }
+                (alias, owner, Some(name.to_owned()), name)
+            }
+            _ => continue,
+        };
+        imports.push(LocalStaticImport {
+            name: alias
+                .asname
+                .as_ref()
+                .map_or(default_name, |n| n.as_str())
+                .into(),
+            module_name,
+            symbol,
+            alias: alias.range(),
+            body: TextRange::new(f.body[0].start(), f.end()),
+            initialized: stmt.end(),
+        });
     }
 }
 
@@ -2539,7 +2598,7 @@ impl<'a> Loader<'a> {
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
             importlib_children: HashMap::new(),
-            local_metadata_imports: Vec::new(),
+            local_static_imports: Vec::new(),
             aliases: Vec::new(),
             overloads: HashSet::new(),
             type_guards: Vec::new(),
@@ -2700,18 +2759,34 @@ impl<'a> Loader<'a> {
         let mut imports = Vec::new();
         for stmt in &parsed.syntax().body {
             match stmt {
-                ast::Stmt::FunctionDef(f) => metadata_import_scopes(f, &mut imports),
+                ast::Stmt::FunctionDef(f) => static_import_scopes(f, &mut imports),
                 ast::Stmt::ClassDef(c) => {
                     for f in c.body.iter().filter_map(ast::Stmt::as_function_def_stmt) {
-                        metadata_import_scopes(f, &mut imports);
+                        static_import_scopes(f, &mut imports);
                     }
                 }
                 _ => {}
             }
         }
         if !imports.is_empty() {
-            self.intrinsic_module("importlib.metadata", None)?;
-            self.modules[id].local_metadata_imports = imports;
+            for module_name in imports
+                .iter()
+                .map(|import| import.module_name)
+                .collect::<std::collections::BTreeSet<_>>()
+            {
+                self.intrinsic_module(module_name, None)?;
+            }
+            // Typeshed omits CPython's private _translate companion. The import
+            // was resolved above against the sealed module's real export.
+            self.checked_builtin_imports.extend(
+                imports
+                    .iter()
+                    .filter(|i| {
+                        i.module_name == "fnmatch" && i.symbol.as_deref() == Some("_translate")
+                    })
+                    .map(|i| (id, i.alias)),
+            );
+            self.modules[id].local_static_imports = imports;
         }
         let last_definition = parsed.syntax().body.iter().rposition(|statement| {
             matches!(
@@ -3156,6 +3231,11 @@ impl<'a> Loader<'a> {
                                 alias.name
                             )
                         })?;
+                        if binding
+                            == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
+                        {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
                         if binding == Binding::Intrinsic(Intrinsic::BuiltinsLen) {
                             return Err("from builtins import len needs an import-time snapshot; use a qualified lookup".into());
                         }

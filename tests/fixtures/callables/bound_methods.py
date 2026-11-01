@@ -9,6 +9,9 @@ class Item:
         self.text = text
         self.number = number
 
+    def label(self, prefix, suffix="!"):
+        return prefix + self.text + suffix
+
     def render(self, suffix: str) -> str:
         return self.text + suffix + str(self.number)
 
@@ -31,7 +34,10 @@ def main() -> None:
     print(select(items)(replace(items)))
     item = Item("kept", -(1 << 100))
     fn: Callable[[str], str] = item.render
+    label = item.label
     item = Item("rebound", 3)
+    print(label("prefix"))
+    print(label(suffix="?", prefix="before"))
     print(fn("!"))
     # A bound receiver is shared, so later field changes remain visible.
     other = Item("before", 4)

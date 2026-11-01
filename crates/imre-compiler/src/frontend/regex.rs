@@ -337,22 +337,50 @@ impl Checker<'_> {
         })
     }
 
-    pub(super) fn search_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    pub(super) fn search_regex(
+        &mut self,
+        call: &ast::ExprCall,
+        anchored: bool,
+    ) -> Result<Expr, String> {
         let flags = self.regex_flags(call, 2)?;
         let pattern = &call.arguments.args[0];
         let pattern = if matches!(pattern, ast::Expr::StringLiteral(_)) {
             self.fixed_regex(pattern, flags & 64 != 0)?
         } else {
+            let value = self.expr(pattern)?;
+            if value.ty == Type::Str {
+                // Evaluate both arguments before compiling the runtime pattern.
+                let text = self.expr_expected(&call.arguments.args[1], Type::Str)?;
+                return Ok(Expr {
+                    ty: self.types.optional(Type::RegexMatch),
+                    kind: ExprKind::Builtin(
+                        Builtin::RegexSearchText {
+                            anchored,
+                            verbose: flags & 64 != 0,
+                        },
+                        vec![value, text],
+                    ),
+                });
+            }
             if flags != 0 {
                 return Err(error(
                     self.source,
                     pattern,
-                    "re.search cannot apply flags to a compiled pattern",
+                    "cannot apply flags to a compiled pattern",
                 ));
             }
-            self.expr_expected(pattern, Type::RegexPattern)?
+            self.expect(Type::RegexPattern, value.ty, pattern)?;
+            value
         };
-        self.pattern_search(pattern, &call.arguments.args[1], Builtin::RegexSearch)
+        self.pattern_search(
+            pattern,
+            &call.arguments.args[1],
+            if anchored {
+                Builtin::RegexMatchStart
+            } else {
+                Builtin::RegexSearch
+            },
+        )
     }
 
     fn pattern_search(

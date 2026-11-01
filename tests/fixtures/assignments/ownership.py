@@ -66,6 +66,22 @@ def first_name(rows: list[str]) -> str:
     return rows
 
 
+def encode_names(names: list[str]) -> list[bytes]:
+    return [name.encode() for name in names]
+
+
+def rebound_list() -> None:
+    names = ["one", "two"]
+    original = names
+    names = encode_names(names)
+    print(names[0] == b"one")
+    print(original[1] == "two")
+    names = []
+    names.append(b"three")
+    print(names[0] == b"three")
+
+
+rebound_list()
 execute()
 print(first_name(["row " + str(4)]))
 first, second = paired_parameter("tuple")
