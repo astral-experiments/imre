@@ -393,6 +393,47 @@ pub unsafe extern "C" fn imre_struct_list_new(layout: *const RecordDescriptor) -
     crate::ObjectOwner::into_raw(Words::from_rows(Rows::new(unsafe { &*layout })).into_object())
 }
 
+/// Append a loop-invariant value to an empty scalar struct list in one step.
+/// Returning false leaves the list untouched for the original append loop.
+///
+/// # Safety
+/// The caller roots the list and a boxed immutable record of the given layout.
+/// The only effect of every skipped iteration is appending that record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_try_fill_empty(
+    list: *const Object,
+    layout: *const RecordDescriptor,
+    row: *const usize,
+    stop: i64,
+) -> bool {
+    if stop <= 1 || stop & 1 == 0 || list.is_null() || row.is_null() {
+        return false;
+    }
+    let Ok(len) = usize::try_from(stop >> 1) else {
+        return false;
+    };
+    // SAFETY: generated code keeps both objects live. Retaining a scalar
+    // record and replacing empty storage cannot call Python or reenter the list.
+    unsafe {
+        object(list).0.with_mut(|storage| {
+            let Storage::Sequence(words) = storage else {
+                return false;
+            };
+            let Some(rows) = words.rows_mut() else {
+                return false;
+            };
+            if rows.len != 0 || !std::ptr::eq(rows.layout, layout) || rows.word_count(len).is_err()
+            {
+                return false;
+            }
+            let base = WordKind::new(6).acquire(row as usize);
+            *rows = rows.with_default(base, len);
+            words.update_header();
+            true
+        })
+    }
+}
+
 /// # Safety
 /// The rooted list has this exact element layout. The input is initialized,
 /// independently rooted scalar storage; no pointer into the list is accepted.
