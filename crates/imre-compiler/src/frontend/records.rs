@@ -991,6 +991,20 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(receiver, value))
     }
 
+    /// Route inherited instance assertions to the object runtime when a typed class lacks the member.
+    pub(super) fn missing_class_member(
+        &self,
+        class: usize,
+        name: &str,
+        node: &impl Ranged,
+        diagnostic: &str,
+    ) -> String {
+        if matches!(name, "assertIsInstance" | "assertNotIsInstance") && self.unittest_case(class) {
+            return self.object_runtime_export("unittest instance assertions", node);
+        }
+        error(self.source, node, diagnostic)
+    }
+
     pub(super) fn direct_class_attribute(
         &mut self,
         attribute: &ast::ExprAttribute,
@@ -1019,7 +1033,14 @@ impl Checker<'_> {
         }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())
-            .ok_or_else(|| error(self.source, attribute, "unknown class member"))?
+            .ok_or_else(|| {
+                self.missing_class_member(
+                    class,
+                    attribute.attr.as_str(),
+                    attribute,
+                    "unknown class member",
+                )
+            })?
             .clone();
         match signature.method.unwrap().kind(&self.classes.declarations) {
             MethodKind::Property => {
@@ -1234,7 +1255,14 @@ impl Checker<'_> {
         }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())
-            .ok_or_else(|| error(self.source, call, "unknown class method"))?
+            .ok_or_else(|| {
+                self.missing_class_member(
+                    class,
+                    attribute.attr.as_str(),
+                    call,
+                    "unknown class method",
+                )
+            })?
             .clone();
         let kind = signature.method.unwrap().kind(&self.classes.declarations);
         if self.classes.keyword_copies.contains(&signature.id)
