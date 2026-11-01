@@ -1,5 +1,6 @@
 import re
 from functools import singledispatch
+import sys
 
 
 def base(value: str | bytes) -> str:
@@ -50,6 +51,8 @@ def wrapper_text(flag: bool) -> None:
         return "fallback"
 
     print(nested.__name__)
+    if sys.flags.optimize < 2:
+        print(nested.__doc__.split())
     local_doc = nested.__doc__
     if local_doc is not None:
         print(repr(local_doc))

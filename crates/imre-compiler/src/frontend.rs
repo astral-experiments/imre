@@ -1371,6 +1371,16 @@ fn signature(
         })
         .map(|context| classes.instance(context.class));
     if !function.decorator_list.is_empty() || function.type_params.is_some() {
+        if function.decorator_list.iter().any(|decorator| {
+            decorator.expression.as_call_expr().is_some_and(|call| {
+                graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::Wraps))
+                    && graph
+                        .session
+                        .is_stdlib_function(module, &call.func, "functools", "wraps")
+            })
+        }) {
+            graph.needs_object_runtime.set(true);
+        }
         return Err(error(
             source,
             function,
@@ -7632,8 +7642,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 if let Some(layout) = self.types.dispatcher(receiver.ty)
-                    && let Some(value) =
-                        self.dispatch_attribute(&receiver, layout, attribute.attr.as_str())
+                    && let Some(value) = self.dispatch_attribute(&receiver, layout, attribute)
                 {
                     return Ok(value);
                 }
