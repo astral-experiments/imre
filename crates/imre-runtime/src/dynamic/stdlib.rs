@@ -663,7 +663,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("enum", "_simple_enum")
         | (
             "functools",
-            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "partial" | "update_wrapper",
+            "cache" | "cmp_to_key" | "lru_cache" | "_cache_wrapper" | "partial" | "reduce"
+            | "update_wrapper",
         )
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
@@ -1663,6 +1664,7 @@ pub(super) fn call(
                 object: None,
             }));
         }
+        "functools.reduce" => return functools::reduce(ctx, args, kwargs),
         "functools.cache" => return functools::cache(ctx, args, kwargs),
         "functools.lru_cache" => return functools::lru_cache(ctx, args, kwargs),
         "functools._cache_wrapper" => (3, &[]),

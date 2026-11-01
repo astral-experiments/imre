@@ -1,6 +1,6 @@
 """Decorator implementations from CPython 3.14.5 Lib/functools.py (PSF-2.0)."""
 
-from functools import WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, _CacheInfo, partial, update_wrapper
+from functools import WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, _CacheInfo, partial, reduce, update_wrapper
 
 
 def wraps(wrapped,
