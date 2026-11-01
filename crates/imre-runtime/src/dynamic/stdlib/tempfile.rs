@@ -1,6 +1,9 @@
-//! Runtime-imported binary update files backed by the native anonymous file owner.
+//! Filesystem primitives for the runtime-loaded tempfile module.
 
 use std::cell::RefCell;
+use std::ffi::OsStr;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::path::{Path, PathBuf};
 
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 use crate::objects::{FileState, errno_error};
@@ -17,6 +20,74 @@ pub(in crate::dynamic) const METHODS: &[&str] = &[
     "__enter__",
     "__exit__",
 ];
+
+/// Decode a POSIX spelling as a Python filesystem string, including surrogate escapes.
+fn filesystem_text(ctx: &mut Context, path: PathBuf) -> Id {
+    match path.into_os_string().into_string() {
+        Ok(text) => ctx.text(text),
+        Err(path) => {
+            let points = crate::objects::interpreter_stdlib::fsdecode(path.as_bytes()).collect();
+            ctx.text_codepoints(points)
+        }
+    }
+}
+
+/// Keep native path bytes intact when the caller requests a bytes filename.
+pub(super) fn path_operation(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    use crate::objects::tempdirs;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name} takes no keyword arguments"),
+        ));
+    }
+    match (name, args) {
+        ("random_name", []) => Ok(ctx.text(tempdirs::random_name().map_err(errno_error)?)),
+        ("default_directory", []) => Ok(filesystem_text(ctx, tempdirs::find_default_directory()?)),
+        ("abspath" | "mkdir", &[arg]) => {
+            let arg = super::posixpath::fspath(ctx, arg)?;
+            let value = ctx.heap.get(ctx.scalar_value(arg));
+            let is_bytes = matches!(value, Value::Bytes(_));
+            let encoded;
+            let path = match value {
+                Value::Str(text) => Path::new(text),
+                Value::SurrogateStr(_) => {
+                    encoded = ctx.encode_filesystem_string(arg)?;
+                    Path::new(OsStr::from_bytes(&encoded))
+                }
+                Value::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
+                _ => return Err(Error::new("UnicodeError", "cannot encode filesystem path")),
+            };
+            if name == "mkdir" {
+                if path.as_os_str().as_bytes().contains(&0) {
+                    return Err(Error::new(
+                        "ValueError",
+                        "mkdir: embedded null character in path",
+                    ));
+                }
+                return match tempdirs::create_private_directory(path) {
+                    Ok(()) => Ok(NONE),
+                    Err(error) => Err(ctx.with_errno_filename(errno_error(error).into(), arg)?),
+                };
+            }
+            let path = tempdirs::absolute(path).map_err(errno_error)?;
+            if is_bytes {
+                Ok(ctx.alloc(Value::Bytes(path.into_os_string().into_vec())))
+            } else {
+                Ok(filesystem_text(ctx, path))
+            }
+        }
+        _ => Err(Error::new(
+            "TypeError",
+            format!("invalid arguments to {name}"),
+        )),
+    }
+}
 
 /// Opens the binary update modes supported by the native TemporaryFile constructor.
 pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

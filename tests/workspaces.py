@@ -56,7 +56,6 @@ REJECTED = {
     "replace_optional_target": "def move(target: Path | None) -> Path:\n    return Path('a').replace(target)",
     "replace_duplicate": "Path('a').replace('b', target='c')",
     "replace_unknown_keyword": "Path('a').replace(destination='b')",
-    "unsupported_factory": "from tempfile import mkdtemp\nprint(mkdtemp())",
 }
 
 ENVIRONMENTS = {

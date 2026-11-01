@@ -96,6 +96,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "email"
             | "email.utils"
             | "tempfile"
+            | "_imre_tempfile"
             | "time"
             | "random"
             | "secrets"
@@ -310,6 +311,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin("enum.Enum.__copy__");
             ctx.builtin("enum.Enum.__deepcopy__");
             ctx.builtin(&format!("enum.{name}"))
+        }
+        ("_imre_tempfile", "abspath" | "mkdir" | "random_name" | "default_directory") => {
+            ctx.builtin(&format!("{module}.{name}"))
         }
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
@@ -1218,6 +1222,9 @@ pub(super) fn call(
     }
     if let Some(algorithm @ ("sha1" | "sha256")) = name.strip_prefix("hashlib.") {
         return hashlib::hash(ctx, algorithm, args, kwargs);
+    }
+    if let Some(name) = name.strip_prefix("_imre_tempfile.") {
+        return tempfile::path_operation(ctx, name, args, kwargs);
     }
     if name == "tempfile.TemporaryFile" {
         return tempfile::open(ctx, args, kwargs);
