@@ -1628,11 +1628,17 @@ impl Context {
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
             "set" | "frozenset" => &["__repr__"],
-            "bytearray" => builtins::BYTEARRAY_METHODS,
+            "bytearray" => {
+                self.builtin("bytearray.fromhex");
+                builtins::BYTEARRAY_METHODS
+            }
             "property" => property::METHODS,
             "int" => &["bit_length", "to_bytes", "__format__"],
             "float" => &["__format__", "__getformat__"],
-            "bytes" => builtins::BYTES_METHODS,
+            "bytes" => {
+                self.builtin("bytes.fromhex");
+                builtins::BYTES_METHODS
+            }
             "str" => {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS

@@ -101,6 +101,11 @@ pub(super) struct Array {
 }
 
 impl Array {
+    /// Borrow the contiguous native-order bytes used to store the elements.
+    pub(super) fn as_bytes(&self) -> &[u8] {
+        self.bytes.as_slice()
+    }
+
     pub(super) fn len(&self) -> usize {
         self.bytes.len() / self.format.width()
     }
