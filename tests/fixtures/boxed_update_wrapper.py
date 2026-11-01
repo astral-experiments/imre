@@ -1,5 +1,5 @@
 from __future__ import annotations
-from functools import WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, update_wrapper
+from functools import WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, update_wrapper, wraps
 from sys import path
 
 
@@ -80,3 +80,38 @@ namespace = FunctionNamespace(existing=7)
 wrapper.__dict__ = namespace
 wrapper.added = 8
 print(wrapper.__dict__ is namespace, wrapper.existing, dict.__getitem__(namespace, "added"))
+
+
+def original(value):
+    """Original docstring."""
+    return value + 1
+
+
+original.tag = "copied"
+decorate = wraps(wrapped=original)
+print(decorate.func is update_wrapper, decorate.args, decorate.keywords["wrapped"] is original)
+print(decorate.keywords["assigned"] is WRAPPER_ASSIGNMENTS, decorate.keywords["updated"] is WRAPPER_UPDATES)
+
+
+@decorate
+def first(value):
+    return 2 * original(value)
+
+
+@wraps(original, ("__doc__",), updated=())
+def second(value):
+    return -original(value)
+
+
+print(first(2), first.__wrapped__ is original, first.__name__, first.tag)
+print(second(2), second.__wrapped__ is original, second.__name__, second.__doc__, hasattr(second, "tag"))
+
+
+@wraps(first)
+def outer(value):
+    return first(value) + 1
+
+
+assert outer.__wrapped__ is first
+assert outer.__wrapped__.__wrapped__ is original
+assert outer(2) == 7

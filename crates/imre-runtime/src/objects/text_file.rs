@@ -2,6 +2,12 @@
 
 use super::{exceptions::Result, files, text};
 
+/// A boxed snapshot uses UTF-8 unless its code points include a surrogate.
+pub(crate) enum MemoryText {
+    Utf8(crate::Str),
+    Surrogates(Vec<u32>),
+}
+
 #[derive(Clone)]
 pub(crate) struct TextFile(crate::ObjectOwner);
 
@@ -22,26 +28,50 @@ impl TextFile {
         files::FileState::string_io(initial, newline).map(Self)
     }
 
-    pub(crate) fn getvalue(&self) -> Result<crate::Str> {
+    pub(crate) fn memory_value(&self) -> Result<MemoryText> {
         // SAFETY: the snapshot owns its text and the memory stream cannot reenter Python.
         unsafe {
             self.0
                 .0
-                .with_mut(|storage| storage.file_mut().string_io_value())
+                .with_mut(|storage| storage.file_mut().string_io_points())
         }
     }
 
-    pub(crate) fn read_memory(&self, size: Option<&crate::Int>) -> Result<crate::Str> {
-        let size = size
-            .map(super::bytes::native_size)
-            .transpose()?
-            .and_then(|n| usize::try_from(n).ok());
+    pub(crate) fn read_memory(&self, size: Option<usize>, line: bool) -> Result<MemoryText> {
         // SAFETY: the stream remains owned and reading characters runs no Python callbacks.
         unsafe {
             self.0
                 .0
-                .with_mut(|storage| storage.file_mut().read_string_io(size))
+                .with_mut(|storage| storage.file_mut().read_string_io_points(size, line))
         }
+    }
+
+    pub(crate) fn write_memory(&self, points: &[u32]) -> Result<()> {
+        // SAFETY: writing the given code points does not call Python code.
+        unsafe {
+            self.0
+                .0
+                .with_mut(|s| s.file_mut().write_string_io_points(points))
+        }
+    }
+
+    pub(crate) fn seek_memory(&self, pos: i64, whence: i32) -> Result<usize> {
+        // SAFETY: the offset and whence have already been converted outside this borrow.
+        unsafe {
+            self.0
+                .0
+                .with_mut(|s| s.file_mut().seek_string_io(pos, whence))
+        }
+    }
+
+    pub(crate) fn truncate_memory(&self, size: Option<isize>) -> Result<usize> {
+        // SAFETY: the stream remains owned and changing its length cannot reenter Python.
+        unsafe { self.0.0.with_mut(|s| s.file_mut().truncate_string_io(size)) }
+    }
+
+    pub(crate) fn memory_newlines(&self) -> Result<u8> {
+        // SAFETY: this access only copies the memory stream's newline mask.
+        unsafe { self.0.0.with_mut(|s| s.file_mut().string_io_newlines()) }
     }
 
     pub(crate) fn memory_position(&self) -> Result<usize> {

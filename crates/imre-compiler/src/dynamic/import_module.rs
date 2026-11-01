@@ -4,6 +4,38 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Python sources used only by the boxed importer.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "inspect" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some((
+                "inspect.py",
+                SOURCE.get_or_init(|| {
+                    // Keep the full CPython Parameter, BoundArguments and Signature implementations.
+                    // The runtime supplies read-only mappings and Unicode identifier validation.
+                    const UPSTREAM: &str = include_str!(
+                        "../../../../benchmarks/cpython_stdlib/full/inspect/upstream/Lib/inspect.py"
+                    );
+                    let section = |start, end| {
+                        let begin = UPSTREAM.find(start).unwrap();
+                        UPSTREAM[begin..].split_once(end).unwrap().0
+                    };
+                    let classes = section("_POSITIONAL_ONLY         = ", "class BufferFlags(")
+                        .replace("name.isidentifier()", "_signature_identifier(name)")
+                        .replace(
+                            "types.MappingProxyType(params)",
+                            "_signature_mapping(params)",
+                        );
+                    [
+                        include_str!("../../stdlib/inspect.py"),
+                        include_str!("../../stdlib/inspect_signature.py"),
+                        section("def formatannotation(", "def formatannotationrelativeto("),
+                        section("def _signature_bound_method(", "def _signature_is_builtin("),
+                        section("class _void:", "class _ParameterKind("),
+                        &classes,
+                    ]
+                    .join("\n")
+                }),
+            ))
+        }
         "annotationlib" => Some((
             "annotationlib.py",
             include_str!("../../stdlib/annotationlib.py"),

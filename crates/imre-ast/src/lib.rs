@@ -11,6 +11,20 @@ use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use ruff_text_size::{Ranged, TextSize};
 
+/// A display of literal values is held by the code's constant table in CPython.
+pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::NoneLiteral(_)
+        | ast::Expr::EllipsisLiteral(_)
+        | ast::Expr::BooleanLiteral(_)
+        | ast::Expr::NumberLiteral(_)
+        | ast::Expr::StringLiteral(_)
+        | ast::Expr::BytesLiteral(_) => true,
+        ast::Expr::Tuple(node) => node.elts.iter().all(literal_tuple_element),
+        _ => false,
+    }
+}
+
 /// Names imported by the module scope disable method binding even after reassignment.
 pub fn module_imports(body: &[ast::Stmt]) -> BTreeSet<String> {
     use ast::visitor::{Visitor, walk_stmt};

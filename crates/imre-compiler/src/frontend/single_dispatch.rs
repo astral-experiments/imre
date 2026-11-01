@@ -424,9 +424,9 @@ impl Checker<'_> {
         &mut self,
         receiver: &Expr,
         layout: DispatchFunction,
-        name: &str,
+        attribute: &ast::ExprAttribute,
     ) -> Option<Expr> {
-        let (index, ty) = match name {
+        let (index, ty) = match attribute.attr.as_str() {
             "__wrapped__" => return Some(original(receiver.clone(), layout)),
             "__name__" => (0, Type::Str),
             "__doc__" => (1, self.types.optional(Type::Str)),
@@ -454,11 +454,30 @@ impl Checker<'_> {
             ty: self.types.payload(layout.metadata).unwrap(),
             kind: ExprKind::Unwrap(Box::new(metadata.clone())),
         };
-        Some(scope.finish(conditional(
+        let value = scope.finish(conditional(
             builtin(Builtin::IsNone, Type::Bool, vec![metadata]),
             missing,
             field(text, index, ty),
-        )))
+        ));
+        // A local function definition cannot be rebound. Its dispatcher copies the
+        // docstring once, and register only mutates the separate implementation table.
+        if attribute.attr.as_str() == "__doc__"
+            && let Some(binding) = self.local_function_binding(&attribute.value)
+            && binding
+                .value_slot
+                .is_some_and(|slot| matches!(receiver.kind, ExprKind::Local(id) if id == slot))
+            && let Ok(function) = binding.target(self.source, attribute)
+            && self
+                .function_text(self.module, &function.definition)
+                .doc
+                .is_some()
+        {
+            return Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Unwrap(Box::new(value)),
+            });
+        }
+        Some(value)
     }
 
     pub(super) fn single_dispatch_method(

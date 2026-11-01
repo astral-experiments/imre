@@ -5463,6 +5463,7 @@ impl Emitter<'_, '_> {
                 use crate::ir::SysEncoding;
                 self.uses_string_interning = true;
                 let function = match query {
+                    SysEncoding::Locale => "imre_locale_encoding",
                     SysEncoding::Default => "imre_sys_default_encoding",
                     SysEncoding::Filesystem => "imre_sys_filesystem_encoding",
                     SysEncoding::FilesystemErrors => "imre_sys_filesystem_errors",
@@ -9540,6 +9541,7 @@ declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
 declare i1 @imre_sys_utf8_mode()
 declare void @imre_sys_init_encoding_names()
+declare ptr @imre_locale_encoding()
 declare ptr @imre_sys_default_encoding()
 declare ptr @imre_sys_filesystem_encoding()
 declare ptr @imre_sys_filesystem_errors()

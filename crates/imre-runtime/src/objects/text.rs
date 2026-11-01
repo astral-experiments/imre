@@ -831,9 +831,9 @@ pub unsafe extern "C" fn imre_str_affix(value: *const Str, affix: *const Str, re
     })
 }
 
-/// Finds the byte boundary for a Python scalar offset without truncating big ints.
-/// Starts beyond the end remain invalid even when searching for an empty string.
-fn search_start(source: &str, start: Option<&Int>) -> Option<(usize, usize)> {
+/// Negative search bounds count from the end. Keep positive bounds unclamped so
+/// an empty needle still fails to match when the start exceeds the string length.
+fn search_offset(start: Option<&Int>, length: impl FnOnce() -> usize) -> Option<usize> {
     let start = if let Some(start) = start {
         if let Some(value) = start.as_small() {
             value as isize
@@ -848,11 +848,15 @@ fn search_start(source: &str, start: Option<&Int>) -> Option<(usize, usize)> {
     } else {
         0
     };
-    let start = if start < 0 {
-        (source.chars().count() as isize + start).max(0) as usize
+    Some(if start < 0 {
+        (length() as isize + start).max(0) as usize
     } else {
         start as usize
-    };
+    })
+}
+
+fn search_start(source: &str, start: Option<&Int>) -> Option<(usize, usize)> {
+    let start = search_offset(start, || source.chars().count())?;
     if start == 0 {
         return Some((0, 0));
     }
@@ -884,6 +888,57 @@ pub unsafe extern "C" fn imre_str_find(
     find_text(source, needle, start.as_deref(), None, false).into_raw()
 }
 
+/// Resolve Python search bounds, preserving a start beyond the end even for an empty needle.
+fn search_window<'a>(
+    source: &'a str,
+    start: Option<&Int>,
+    end: Option<&Int>,
+) -> Option<(&'a str, usize)> {
+    let (begin, scalar) = search_start(source, start)?;
+    let end = end
+        .and_then(|i| search_start(source, Some(i)))
+        .map_or(source.len(), |(b, _)| b);
+    Some((source.get(begin..end)?, scalar))
+}
+
+pub(crate) fn count_text(
+    source: &str,
+    needle: &str,
+    start: Option<&Int>,
+    end: Option<&Int>,
+) -> Int {
+    Int::from_usize(
+        search_window(source, start, end).map_or(0, |(window, _)| window.matches(needle).count()),
+    )
+}
+
+/// Count non-overlapping matches when either Python string contains surrogate code points.
+pub(crate) fn count_codepoints(
+    source: &[u32],
+    needle: &[u32],
+    start: Option<&Int>,
+    end: Option<&Int>,
+) -> Int {
+    let length = || source.len();
+    let end = end
+        .and_then(|n| search_offset(Some(n), length))
+        .unwrap_or(source.len())
+        .min(source.len());
+    let Some(mut window) = search_offset(start, length).and_then(|start| source.get(start..end))
+    else {
+        return Int::from_usize(0);
+    };
+    if needle.is_empty() {
+        return Int::from_usize(window.len() + 1);
+    }
+    let mut count = 0;
+    while let Some(index) = window.windows(needle.len()).position(|part| part == needle) {
+        count += 1;
+        window = &window[index + needle.len()..];
+    }
+    Int::from_usize(count)
+}
+
 /// Search a Python slice without converting its Unicode-scalar bounds to byte indices twice.
 pub(crate) fn find_text(
     source: &str,
@@ -892,11 +947,7 @@ pub(crate) fn find_text(
     end: Option<&Int>,
     reverse: bool,
 ) -> Int {
-    let found = search_start(source, start).and_then(|(begin, scalar)| {
-        let end = end
-            .and_then(|i| search_start(source, Some(i)))
-            .map_or(source.len(), |(b, _)| b);
-        let window = source.get(begin..end)?;
+    let found = search_window(source, start, end).and_then(|(window, scalar)| {
         let offset = if reverse {
             window.rfind(needle)
         } else {

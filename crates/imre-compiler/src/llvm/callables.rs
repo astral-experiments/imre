@@ -317,7 +317,7 @@ impl Emitter<'_, '_> {
         }
         if !bound
             && policy.is_none()
-            && self.module.types.is_plain_callback(ty)
+            && self.module.types.needs_function_metadata(ty, function)
             && let Some(site) = self.module.types.function_site(function)
         {
             let module = self.pooled_literal(site.module.as_bytes(), Type::Str);
