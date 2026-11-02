@@ -2467,11 +2467,8 @@ pub(super) fn call(
                 kwargs,
             );
         }
-        "file.seek" => (3, &["whence"]),
-        "file.truncate" => (2, &[]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
-        | "file.readinto" | "file.write" => (2, &[]),
+        "struct.unpack" => (2, &[]),
         "match.expand" => return regex::match_expand(ctx, args, kwargs),
         "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
@@ -2495,14 +2492,6 @@ pub(super) fn call(
         | "collections.defaultdict.__reduce__"
         | "functools._lru_cache_wrapper.cache_clear"
         | "functools._lru_cache_wrapper.cache_info"
-        | "file.close"
-        | "file.readable"
-        | "file.writable"
-        | "file.seekable"
-        | "file.isatty"
-        | "file.flush"
-        | "file.fileno"
-        | "file.tell"
         | "file.__enter__" => (1, &[]),
         _ => (0, &[]),
     };
@@ -2512,20 +2501,6 @@ pub(super) fn call(
                 .iter()
                 .any(|(key, _)| !keywords.contains(&key.as_str())))
     {
-        if name == "file.flush"
-            && let Some((&receiver, positional)) = args.split_first()
-        {
-            let class = ctx.type_name(receiver).trim_start_matches("_io.");
-            let message = if kwargs.is_empty() {
-                format!(
-                    "{class}.flush() takes no arguments ({} given)",
-                    positional.len()
-                )
-            } else {
-                format!("{class}.flush() takes no keyword arguments")
-            };
-            return Err(Error::new("TypeError", message));
-        }
         return Err(Error::new(
             "TypeError",
             format!("unsupported arguments to {name}"),
@@ -2785,7 +2760,9 @@ pub(super) fn call(
             }
             return Err(ctx.exception("SystemExit", args));
         }
-        name if name.starts_with("os.path.") || name.starts_with("file.") => {
+        name if name.starts_with("os.path.")
+            || matches!(name, "file.__enter__" | "file.__exit__") =>
+        {
             return files::call(ctx, name, args, kwargs);
         }
         "match.groups" | "match.groupdict" => {
