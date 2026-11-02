@@ -28,6 +28,7 @@ pub(super) fn resolve(
         }
         path.push(id);
         let mut base: Option<usize> = None;
+        let mut mixin = None;
         if let Some(args) = &node.arguments {
             for argument in &args.args {
                 if graph.is_protocol_base(definition.module, argument) {
@@ -113,10 +114,17 @@ pub(super) fn resolve(
                         if let Some(first) = base {
                             let parent: &Class = classes[first].as_ref().unwrap();
                             if !parent.bases.contains(&next) {
-                                return Err(module.error(
-                                    argument,
-                                    "multiple independent base classes are unsupported",
-                                ));
+                                let donor = classes[next].as_ref().unwrap();
+                                if args.args.len() != 2
+                                    || first == next
+                                    || !method_only_mixin(graph, donor)
+                                {
+                                    return Err(module.error(
+                                        argument,
+                                        "multiple independent base classes are unsupported",
+                                    ));
+                                }
+                                mixin = Some(next);
                             }
                         } else {
                             base = Some(next);
@@ -135,7 +143,7 @@ pub(super) fn resolve(
             module,
             definition,
             node,
-            base.map(|i| (i, classes[i].as_ref().unwrap())),
+            [base, mixin].map(|parent| parent.map(|id| (id, classes[id].as_ref().unwrap()))),
             exceptions.layouts.contains(&definition),
             &exceptions.ids,
         )?;
@@ -169,6 +177,25 @@ pub(super) fn resolve(
         build(id, graph, nodes, ids, exceptions, &mut classes, &mut path)?;
     }
     Ok(classes.into_iter().map(Option::unwrap).collect())
+}
+
+/// A trailing root mixin supplies ordinary methods without changing the receiver layout.
+fn method_only_mixin(graph: &SourceGraph, class: &Class) -> bool {
+    let node = &class.node;
+    node.decorator_list.is_empty()
+        && node.type_params.is_none()
+        && node.arguments.as_ref().is_none_or(|args| {
+            args.keywords.is_empty()
+                && (args.args.is_empty()
+                    || matches!(&*args.args, [base]
+                if graph.session.builtin_object_base(class.definition.module, base)))
+        })
+        && node.body.iter().all(|stmt| match stmt {
+            ast::Stmt::FunctionDef(f) => !f.name.starts_with("__") && f.decorator_list.is_empty(),
+            ast::Stmt::Expr(expr) => matches!(&*expr.value, ast::Expr::StringLiteral(_)),
+            ast::Stmt::Pass(_) => true,
+            _ => false,
+        })
 }
 
 /// Return the member and the name whose binding must be the builtin `super`.
