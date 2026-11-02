@@ -277,6 +277,7 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "zip"
             | "itertools.count"
             | "itertools.repeat"
+            | "_io.BufferedRandom"
             | "_io.BufferedReader"
             | "_io.BufferedWriter"
             | super::deque::ITERATOR
@@ -341,6 +342,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "__repr__",
     "decode",
     "endswith",
+    "join",
     "lstrip",
     "rfind",
     "rsplit",
@@ -904,6 +906,28 @@ fn delete_attribute(
         ctx.delete_named_attr(*obj, &name, Some(*attr))?;
     }
     Ok(NONE)
+}
+
+impl Context {
+    /// Direct Python calls carry their lexical scope, including inlined comprehensions.
+    pub(super) fn call_in_scope(
+        &mut self,
+        scope: Id,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        if scope != NONE
+            && args.is_empty()
+            && kwargs.is_empty()
+            && matches!(self.heap.get(callable), Value::Native(name) if name == "dir")
+            && self.scope_data(scope).parent.is_none()
+        {
+            let namespace = self.module_globals(scope)?;
+            return collections::sorted(self, &[namespace], &[]);
+        }
+        self.call(callable, args, kwargs)
+    }
 }
 
 pub(super) fn call(

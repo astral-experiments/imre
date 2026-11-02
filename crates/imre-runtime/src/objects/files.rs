@@ -33,7 +33,7 @@ pub(crate) struct FileState {
     stream: Option<Stream>,
     pub(super) name: Option<StrOwner>,
     // A closed text wrapper still owns its encoding; StringIO has no byte codec.
-    encoding: Option<StrOwner>,
+    pub(super) encoding: Option<StrOwner>,
     errors: Option<StrOwner>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
@@ -429,6 +429,14 @@ impl FileState {
         }
         self.write_with(text, input)?;
         self.write("\n")
+    }
+
+    /// Boxed native text files are standard writers or read-only files.
+    pub(super) fn standard_writer(&mut self) -> Result<bool> {
+        match self.stream()? {
+            Stream::Standard(stderr) => Ok(*stderr),
+            _ => Err(Error::new(Kind::UnsupportedOperation, "not writable")),
+        }
     }
 
     pub(super) fn has_encoding(&self) -> bool {

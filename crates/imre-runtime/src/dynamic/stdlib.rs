@@ -437,6 +437,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "loaded_module"
             | "members"
             | "metadata"
+            | "native_iterator"
+            | "slot_bases"
             | "slotted_type"
             | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
@@ -605,7 +607,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
-        ("posixpath", "join" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("posixpath", "dirname") => ctx.builtin("os.path.dirname"),
         ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -1096,6 +1098,10 @@ pub(super) fn call(
             .heap
             .caller_module_at(depth.max(0) as usize)
             .unwrap_or(NONE));
+    }
+    if name == "sys.displayhook" {
+        let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
+        return super::displayhook::default_hook(ctx, value);
     }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
@@ -1657,7 +1663,7 @@ pub(super) fn call(
                 let bases = ctx
                     .tuple_items(*bases)?
                     .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
-                return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
+                return ctx.make_dataclass_type(name, bases, *members);
             }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
@@ -1700,6 +1706,10 @@ pub(super) fn call(
                 }
                 return Ok(FALSE);
             }
+            ("native_iterator", [obj], []) => {
+                return Ok(if ctx.is_native_iterator(*obj) { TRUE } else { FALSE });
+            }
+            ("slot_bases", [class], []) => return ctx.dataclass_slot_bases(*class),
             ("slotted_type", [old, namespace], []) => {
                 return ctx.slotted_dataclass(*old, *namespace);
             }
@@ -1974,7 +1984,7 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer")) =
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer" | "findall")) =
         name.strip_prefix("pattern.")
     {
         return regex::search(ctx, method, args, kwargs);
@@ -2029,9 +2039,9 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.findall" | "file.read" | "file.read1" | "file.readline"
+        "struct.unpack" | "file.read" | "file.read1" | "file.readline"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
-        "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" | "match.groupdict" => (2, &["default"]),
         "match.start" | "match.end" | "match.span" => (2, &[]),

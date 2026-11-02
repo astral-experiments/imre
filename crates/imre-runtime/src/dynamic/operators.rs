@@ -1952,6 +1952,14 @@ impl Context {
                             push_frame(&mut work, Part::Value(*value, true))?;
                             continue;
                         }
+                        Value::MappingProxy(mapping) => {
+                            if repr {
+                                append_rendered_text(&mut output, "mappingproxy(")?;
+                                push_frame(&mut work, Part::Text(")"))?;
+                            }
+                            push_frame(&mut work, Part::Value(*mapping, repr))?;
+                            continue;
+                        }
                         Value::Slice(_) => {
                             if slice_budget.is_some_and(|limit| slice_depth >= limit) {
                                 return Err(Error::new(
@@ -3964,7 +3972,7 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 }
 
 impl Context {
-    /// Native timedelta participates in the same reflected multiplication ordering as a Python class.
+    /// Native timedelta participates in the same reflected arithmetic ordering as a Python class.
     fn timedelta_slot_class(&self, value: Id) -> Option<Id> {
         match self.heap.get(value) {
             Value::Calendar { value, .. } if value.class() == "timedelta" => {
@@ -3986,12 +3994,15 @@ impl Context {
         {
             return Ok(None);
         }
-        let method =
-            if matches!(name, "__mul__" | "__rmul__") && self.timedelta_slot_class(obj).is_some() {
-                Some(self.lookup_attr(obj, name)?)
-            } else {
-                self.bound_slot(obj, name)?
-            };
+        let method = if matches!(
+            name,
+            "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__"
+        ) && self.timedelta_slot_class(obj).is_some()
+        {
+            Some(self.lookup_attr(obj, name)?)
+        } else {
+            self.bound_slot(obj, name)?
+        };
         let Some(method) = method else {
             // Overriding one multiplication method installs a numeric slot for both directions.
             if let Some(peer) = match name {
@@ -4206,7 +4217,7 @@ impl Context {
         };
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if op == "*" {
+                if matches!(op, "*" | "/") {
                     self.timedelta_slot_class(id)
                 } else {
                     None

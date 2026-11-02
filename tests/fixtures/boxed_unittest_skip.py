@@ -82,3 +82,50 @@ def current():
             pass
         else:
             raise AssertionError("non-callable result callback was treated as missing")
+
+    events = []
+
+    class Recording(unittest.TestResult):
+        def addSubTest(self, parent, child, error):
+            events.append((parent, child, error, parent._subtest))
+            super().addSubTest(parent, child, error)
+
+        def addSkip(self, child, reason):
+            events.append((child.test_case, child, reason, child.test_case._subtest))
+            super().addSkip(child, reason)
+
+        def addSuccess(self, test):
+            events.append(test)
+
+    class Subtests(unittest.TestCase):
+        def test_nested(self):
+            values = []
+            with self.subTest(group=1):
+                parent_params = self._subtest.params
+                with self.subTest(values=values):
+                    values.append(2)
+                parent_params["group"] = 3
+                with self.subTest("broken"):
+                    raise problem
+                with self.subTest("skipped"):
+                    self.skipTest("reason")
+            with self.subTest(group=2):
+                pass
+
+    problem = AssertionError("body failed")
+    parent = Subtests("test_nested")
+    result = Recording()
+    parent.run(result)
+    assert [child.id() for _, child, _, _ in events] == [
+        parent.id() + " (values=[2], group=3)",
+        parent.id() + " [broken] (group=3)",
+        parent.id() + " [skipped] (group=3)",
+        parent.id() + " (group=2)",
+    ]
+    assert all(test is parent and child is active for test, child, _, active in events)
+    assert events[0][2] is None and events[3][2] is None
+    typ, value, tb = events[1][2]
+    assert typ is AssertionError and value is problem and tb is not None
+    assert result.failures[0][0] is events[1][1]
+    assert result.skipped == [(events[2][1], "reason")]
+    assert parent._subtest is None
