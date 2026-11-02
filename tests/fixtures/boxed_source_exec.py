@@ -293,6 +293,7 @@ def choose(value, guard):
 
 def current():
     source_match()
+    check_scope_directives()
     relative_import_hooks()
     source_name_deletion()
     source_classes()
@@ -525,6 +526,122 @@ def from_class(x):
         assert error.value == 11
     else:
         raise AssertionError("generator did not return")
+
+
+def check_scope_directives():
+    namespace = {"x": 90}
+    source = """def enclosing(x):
+    def update(value):
+        if False:
+            nonlocal x
+        x = value
+    def remove():
+        nonlocal x
+        del x
+    class Owner:
+        x = 99
+        def read(self):
+            nonlocal x
+            return x
+    def write_global(value):
+        if False:
+            global x
+        x = value
+    def generate():
+        nonlocal x
+        yield x
+        x += 1
+        yield x
+    return update, remove, Owner().read, write_global, generate
+
+def skip_class(x):
+    class C:
+        global x
+        def read(self):
+            nonlocal x
+            return x
+    return C().read()
+"""
+    exec(compile(source, "directives.py", "exec"), namespace)
+    update, remove, read, write_global, generate = namespace['enclosing'](2)
+    assert read() == 2
+    update(7)
+    assert read() == 7
+    assert namespace['x'] == 90
+    assert update.__code__.co_freevars == ("x",)
+    assert update.__closure__[0] is remove.__closure__[0]
+    write_global(13)
+    assert namespace['x'] == 13
+    assert read() == 7
+    assert namespace['skip_class'](2) == 2
+    it = generate()
+    assert next(it) == 7
+    assert next(it) == 8
+    assert read() == 8
+    remove()
+    try:
+        read()
+    except NameError:
+        pass
+    else:
+        raise AssertionError("nonlocal delete left a binding")
+    update(5)
+    assert read() == 5
+
+    local = {}
+    exec("if False:\n    global x\nx = 11\nlocal_only = x", namespace, local)
+    assert namespace['x'] == 11 and local == {"local_only": 11}
+    separate = {}
+    exec("y = 7\ndef writes():\n    global y", namespace, separate)
+    assert namespace['y'] == 7 and 'y' not in separate
+    compile("def f():\n    (lambda: x)\n    global x", "valid.py", "exec")
+    compile("def f():\n    [x for i in []]\n    global x", "valid.py", "exec")
+    exec("""class C:
+    def read(self):
+        return __class__
+    def make_writer(self):
+        def write(value):
+            nonlocal __class__
+            __class__ = value
+        return write
+    def clear(self):
+        nonlocal __class__
+        del __class__
+""", namespace)
+    namespace['__class__'] = False
+    obj = namespace['C']()
+    assert obj.read() is type(obj)
+    write = obj.make_writer()
+    write(int)
+    assert obj.read() is int
+    obj.clear()
+    try:
+        obj.read()
+    except NameError:
+        pass
+    else:
+        raise AssertionError("class cell was not cleared")
+    write(str)
+    assert obj.read() is str
+    for bad in (
+        "nonlocal x",
+        "def f():\n    nonlocal x",
+        "def f(x):\n    global x",
+        "def f(x):\n    nonlocal x",
+        "def f():\n    x = 5\n    global x",
+        "def f():\n    print(x)\n    global x",
+        "def f():\n    global x\n    nonlocal x",
+        "def f():\n    global x\n    x: int",
+        "def f():\n    [i for i in x]\n    global x",
+        "def f(x):\n    def mid():\n        global x\n        def child():\n            nonlocal x",
+    ):
+        try:
+            compile(bad, "invalid.py", "exec")
+        except SyntaxError:
+            pass
+        else:
+            raise AssertionError(bad)
+
 
 
 if __name__ == "__main__":

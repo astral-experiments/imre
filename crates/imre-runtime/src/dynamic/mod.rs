@@ -1351,7 +1351,7 @@ impl Context {
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
         if let Some(&cell) = scope.closure.cells.get(name)
-            && let Value::Cell(contents) = self.heap.get(cell)
+            && let Value::Cell(contents) | Value::ClassCell(contents) = self.heap.get(cell)
         {
             return *contents;
         }
@@ -1594,9 +1594,9 @@ impl Context {
             if name == "__class__"
                 && s.class_body.is_none()
                 && let Some(cell) = s.class_cell
-                && let Value::ClassCell(Some(class)) = self.heap.get(cell)
+                && let Value::ClassCell(value) = self.heap.get(cell)
             {
-                return Ok(*class);
+                return value.ok_or_else(|| Error::new("NameError", "cannot access free variable '__class__' where it is not associated with a value in enclosing scope"));
             }
             if let Some(parent) = s.parent {
                 scope = parent;
