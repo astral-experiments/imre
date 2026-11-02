@@ -13,6 +13,7 @@ from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
 from _typing import _idfunc
 from typing import Any, Callable, Generic, Protocol, TypeVar
+from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
