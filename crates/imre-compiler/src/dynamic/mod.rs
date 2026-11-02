@@ -764,6 +764,7 @@ pub(crate) fn compile(
         "stat",
         "string",
         "string.templatelib",
+        "subprocess",
         "token",
         "zipimport",
     ]
