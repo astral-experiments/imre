@@ -2,6 +2,7 @@
 
 import _typing as _typing_runtime
 import builtins as _builtins
+import copyreg
 import functools
 import sys as _sys
 import typing as _typing
@@ -24,6 +25,19 @@ from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def _pickle_psargs(psargs):
+    return ParamSpecArgs, (psargs.__origin__,)
+
+
+def _pickle_pskwargs(pskwargs):
+    return ParamSpecKwargs, (pskwargs.__origin__,)
+
+
+copyreg.pickle(ParamSpecArgs, _pickle_psargs)
+copyreg.pickle(ParamSpecKwargs, _pickle_pskwargs)
+del _pickle_psargs, _pickle_pskwargs
+
+
 def _is_unpacked_typevartuple(x: Any) -> bool:
     # Need to check 'is True' here
     # See: https://github.com/python/cpython/issues/137706
