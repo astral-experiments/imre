@@ -2273,6 +2273,7 @@ def report(text):
             "boxed_function_defaults.py",
             "boxed_reprlib.py",
             "boxed_asyncio_policy.py",
+            "boxed_multiprocessing_context.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
             "boxed_dict_view_equality.py",
