@@ -3,6 +3,17 @@
 use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+/// Release one native owner's strong edge before the next observable state change.
+fn release_child(ctx: &mut Context, child: Option<Id>) -> Result<()> {
+    if let Some(child) = child {
+        let (heap, roots) = ctx.heap_and_roots();
+        if heap.released_last_finalizer_ref(child, roots)? {
+            ctx.dispatch_finalizer(child);
+        }
+    }
+    Ok(())
+}
+
 mod newline_decoder;
 pub(in crate::dynamic) const NEWLINE_DECODER: &str = "IncrementalNewlineDecoder";
 mod buffered_io;

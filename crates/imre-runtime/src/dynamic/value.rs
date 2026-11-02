@@ -3630,12 +3630,40 @@ impl Heap {
         owner: Id,
         roots: impl Iterator<Item = Id>,
     ) -> Result<WeakCallbacks> {
+        self.clear_owner_weakrefs(owner, roots, true)
+    }
+
+    /// After a strong edge is released, expire this target only if it stayed unreachable.
+    /// A finalizer can resurrect it, and an uncollected cycle can still own it.
+    pub(super) fn clear_released_weakrefs(
+        &mut self,
+        owner: Id,
+        roots: impl Iterator<Item = Id>,
+    ) -> Result<WeakCallbacks> {
+        self.clear_owner_weakrefs(owner, roots, false)
+    }
+
+    fn clear_owner_weakrefs(
+        &mut self,
+        owner: Id,
+        roots: impl Iterator<Item = Id>,
+        deallocating: bool,
+    ) -> Result<WeakCallbacks> {
         if !self.weak.contains_key(&owner) {
             return Ok(Vec::new());
         }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let callbacks = self.clear_weak_targets(None, Some(owner));
+        let reachable = self.slots[owner as usize].marked();
+        let callbacks = if deallocating || !reachable {
+            if !reachable {
+                // Weakrefs in the owner's dictionary are still live during its deallocation.
+                self.mark(std::iter::once(owner));
+            }
+            self.clear_weak_targets(None, Some(owner))
+        } else {
+            Vec::new()
+        };
         for slot in &self.slots {
             slot.trace.set(UNMARKED);
         }
