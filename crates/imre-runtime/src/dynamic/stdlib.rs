@@ -20,7 +20,7 @@ mod files;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
-pub(super) mod hash_info;
+mod hash_info;
 mod hashlib;
 mod hmac;
 mod inspect;
@@ -45,6 +45,7 @@ pub(super) mod regex;
 mod secrets;
 mod select;
 mod socket;
+pub(super) mod structseq;
 mod structure;
 mod traceback;
 pub(super) mod urllib;
@@ -575,6 +576,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
+        ("os" | "posix", "terminal_size") => ctx.builtin(structseq::TERMINAL_SIZE.name),
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))

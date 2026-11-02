@@ -786,7 +786,7 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if child == stdlib::hash_info::TYPE && parent == "tuple" {
+            if stdlib::structseq::lookup(child).is_some() && parent == "tuple" {
                 return true;
             }
             if parent == "object" {
@@ -1053,7 +1053,8 @@ impl Context {
                 class:
                     Some(
                         class @ ("time.struct_time"
-                        | stdlib::hash_info::TYPE
+                        | stdlib::structseq::HASH_NAME
+                        | stdlib::structseq::TERMINAL_NAME
                         | stdlib::os::stat::CLASS),
                     ),
                 ..
@@ -1213,7 +1214,12 @@ impl Context {
             (
                 name,
                 Value::NamedTuple {
-                    class: Some(class @ ("time.struct_time" | stdlib::hash_info::TYPE)),
+                    class:
+                        Some(
+                            class @ ("time.struct_time"
+                            | stdlib::structseq::HASH_NAME
+                            | stdlib::structseq::TERMINAL_NAME),
+                        ),
                     ..
                 },
             ) if name == *class => true,
@@ -2345,8 +2351,8 @@ impl Context {
                 let method = self.builtin("float.__getformat__");
                 return Ok(self.bind_native_classmethod(method, obj));
             }
-            Value::Native(ref class) if class == stdlib::hash_info::TYPE => {
-                if let Some(value) = stdlib::hash_info::type_attribute(self, name, true) {
+            Value::Native(ref class) if let Some(record) = stdlib::structseq::lookup(class) => {
+                if let Some(value) = record.attribute(self, name, true) {
                     return Ok(value);
                 }
             }
@@ -2733,7 +2739,11 @@ impl Context {
                         return Ok(self.int(n));
                     }
                 }
-                if let Some(owner @ ("time.struct_time" | stdlib::hash_info::TYPE)) = class
+                if let Some(
+                    owner @ ("time.struct_time"
+                    | stdlib::structseq::HASH_NAME
+                    | stdlib::structseq::TERMINAL_NAME),
+                ) = class
                     && name == "__class__"
                 {
                     return Ok(self.builtin(owner));
@@ -2744,8 +2754,8 @@ impl Context {
                 ) && let Some(property) = stdlib::urllib::property(self, values[1], name)?
                 {
                     return Ok(property);
-                } else if class == Some(stdlib::hash_info::TYPE)
-                    && let Some(value) = stdlib::hash_info::type_attribute(self, name, false)
+                } else if let Some(record) = class.and_then(stdlib::structseq::lookup)
+                    && let Some(value) = record.attribute(self, name, false)
                 {
                     return Ok(value);
                 }
@@ -3993,8 +4003,8 @@ impl Context {
             Value::Native(name) if name == "method_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "method_descriptor", &args, &kwargs)
             }
-            Value::Native(name) if name == stdlib::hash_info::TYPE => {
-                stdlib::hash_info::construct(self, &args, &kwargs)
+            Value::Native(name) if let Some(record) = stdlib::structseq::lookup(&name) => {
+                record.construct(self, &args, &kwargs)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
