@@ -1,0 +1,370 @@
+{
+  "group": "test.test_typing.AllTests",
+  "first_ordinal": 1,
+  "last_ordinal": 2,
+  "originals": 2,
+  "archive": "/workspace/scratch/intact-results/eaae-cohorts/002-test.test_typing.AllTests.tar.gz",
+  "archive_sha256": "78d896ea98f0d7acc9c8a8adc400407acf597cf8e11d169ed7894ae71d175100",
+  "modes": {
+    "ordinary-O0": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 6,
+        "next_class_START": {
+          "index": 7,
+          "kind": "START",
+          "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "e16f7fede0d052058230e7ac8c7f470d9b254f1771cb31c2ef2b2400d87c5201",
+      "methods": [
+        {
+          "ordinal": 1,
+          "id": "test.test_typing.AllTests.test_all",
+          "parent_callbacks": [
+            {
+              "index": 1,
+              "kind": "START",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 2,
+              "kind": "ERROR",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": [
+                "ImportError",
+                "cannot import name '__all__' from 'typing' (<imre stdlib>/typing.py)"
+              ]
+            },
+            {
+              "index": 3,
+              "kind": "STOP",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 2,
+          "id": "test.test_typing.AllTests.test_all_exported_names",
+          "parent_callbacks": [
+            {
+              "index": 4,
+              "kind": "START",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 5,
+              "kind": "ERROR",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": [
+                "AttributeError",
+                "module 'typing' has no attribute '__all__'"
+              ]
+            },
+            {
+              "index": 6,
+              "kind": "STOP",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [],
+      "new_to_named_181_paired_in_mode": []
+    },
+    "ordinary-O3": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 6,
+        "next_class_START": {
+          "index": 7,
+          "kind": "START",
+          "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "8f585d67850b0d7060803129d80dbb4ee20ddea6ec3ab65ab5a44d55f3314298",
+      "methods": [
+        {
+          "ordinal": 1,
+          "id": "test.test_typing.AllTests.test_all",
+          "parent_callbacks": [
+            {
+              "index": 1,
+              "kind": "START",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 2,
+              "kind": "ERROR",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": [
+                "ImportError",
+                "cannot import name '__all__' from 'typing' (<imre stdlib>/typing.py)"
+              ]
+            },
+            {
+              "index": 3,
+              "kind": "STOP",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 2,
+          "id": "test.test_typing.AllTests.test_all_exported_names",
+          "parent_callbacks": [
+            {
+              "index": 4,
+              "kind": "START",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 5,
+              "kind": "ERROR",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": [
+                "AttributeError",
+                "module 'typing' has no attribute '__all__'"
+              ]
+            },
+            {
+              "index": 6,
+              "kind": "STOP",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [],
+      "new_to_named_181_paired_in_mode": []
+    },
+    "boxed-O0": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 6,
+        "next_class_START": {
+          "index": 7,
+          "kind": "START",
+          "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "e16f7fede0d052058230e7ac8c7f470d9b254f1771cb31c2ef2b2400d87c5201",
+      "methods": [
+        {
+          "ordinal": 1,
+          "id": "test.test_typing.AllTests.test_all",
+          "parent_callbacks": [
+            {
+              "index": 1,
+              "kind": "START",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 2,
+              "kind": "ERROR",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": [
+                "ImportError",
+                "cannot import name '__all__' from 'typing' (<imre stdlib>/typing.py)"
+              ]
+            },
+            {
+              "index": 3,
+              "kind": "STOP",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 2,
+          "id": "test.test_typing.AllTests.test_all_exported_names",
+          "parent_callbacks": [
+            {
+              "index": 4,
+              "kind": "START",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 5,
+              "kind": "ERROR",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": [
+                "AttributeError",
+                "module 'typing' has no attribute '__all__'"
+              ]
+            },
+            {
+              "index": 6,
+              "kind": "STOP",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [],
+      "new_to_named_181_paired_in_mode": []
+    },
+    "boxed-O3": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 6,
+        "next_class_START": {
+          "index": 7,
+          "kind": "START",
+          "case": "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "8f585d67850b0d7060803129d80dbb4ee20ddea6ec3ab65ab5a44d55f3314298",
+      "methods": [
+        {
+          "ordinal": 1,
+          "id": "test.test_typing.AllTests.test_all",
+          "parent_callbacks": [
+            {
+              "index": 1,
+              "kind": "START",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 2,
+              "kind": "ERROR",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": [
+                "ImportError",
+                "cannot import name '__all__' from 'typing' (<imre stdlib>/typing.py)"
+              ]
+            },
+            {
+              "index": 3,
+              "kind": "STOP",
+              "case": "test.test_typing.AllTests.test_all",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 2,
+          "id": "test.test_typing.AllTests.test_all_exported_names",
+          "parent_callbacks": [
+            {
+              "index": 4,
+              "kind": "START",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 5,
+              "kind": "ERROR",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": [
+                "AttributeError",
+                "module 'typing' has no attribute '__all__'"
+              ]
+            },
+            {
+              "index": 6,
+              "kind": "STOP",
+              "case": "test.test_typing.AllTests.test_all_exported_names",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [],
+      "new_to_named_181_paired_in_mode": []
+    }
+  }
+}
