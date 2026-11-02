@@ -475,7 +475,6 @@ impl Context {
             Value::Repeat(_) => "repeat",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
-            Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(..) => "_io.BufferedRandom",
             Value::NamedTuple {
                 class: Some(class), ..
@@ -670,6 +669,8 @@ pub(super) struct ClassNamespace {
     pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
+    /// Run pending instance finalizers after user exit callbacks, while the heap is live.
+    pub finalize_at_shutdown: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
     /// Dynamic classes install real descriptors instead of using inline fields by spelling.
@@ -1101,7 +1102,6 @@ pub(super) enum Value {
         retry: bool,
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
-    NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
     BufferedRandom(
         crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
         Id,
@@ -1748,8 +1748,7 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::ProcessHandle(_)
-            | Self::NamedFileCloser(_) => {}
+            | Self::ProcessHandle(_) => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
@@ -3780,7 +3779,6 @@ impl Heap {
             let slot = &self.slots[id as usize];
             slot.marked()
                 && match &slot.value {
-                    Some(Value::NamedFileCloser(closer)) => closer.borrow().needs_cleanup(),
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
                     _ => false,

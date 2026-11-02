@@ -1,6 +1,34 @@
 use super::{Context, Id, Result, Value};
 
 impl Context {
+    /// Run retained resource finalizers after the last user exit callback. A finalizer
+    /// can drop another owner or create a new one, so look up the next owner after it runs.
+    pub(super) fn finalize_shutdown_resources(&mut self) {
+        while let Some(owner) = self
+            .heap
+            .pending_finalizers()
+            .iter()
+            .rev()
+            .find_map(|&owner| {
+                let Value::Instance { class, .. } = self.heap.get(owner) else {
+                    return None;
+                };
+                self.find_in_mro(*class, |base| {
+                    let Value::Class { scope, .. } = self.heap.get(base) else {
+                        return None;
+                    };
+                    self.scope_data(*scope)
+                        .class_namespace
+                        .as_ref()?
+                        .finalize_at_shutdown
+                        .then_some(owner)
+                })
+            })
+        {
+            self.dispatch_finalizer(owner);
+        }
+    }
+
     /// A newly assigned class slot also applies to existing instances of subclasses.
     pub(super) fn register_class_finalizers(&mut self) {
         for index in 0..self.heap.slot_count() {
