@@ -502,7 +502,10 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
         || (cfg!(target_os = "linux")
-            && matches!(name, "lockf" | "posix_fadvise" | "posix_fallocate" | "sendfile"))
+            && matches!(
+                name,
+                "copy_file_range" | "lockf" | "posix_fadvise" | "posix_fallocate" | "sendfile"
+            ))
 }
 
 /// Retry a POSIX call that returns its error number directly instead of setting errno.
@@ -971,6 +974,35 @@ pub(super) fn descriptor(
     }
     if name == "open" {
         return open(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "copy_file_range" {
+        let [Some(src), Some(dst), Some(count), offset_src, offset_dst] =
+            builtins::bind_builtin_arguments(
+                name,
+                args,
+                kwargs,
+                ["src", "dst", "count", "offset_src", "offset_dst"],
+                3,
+            )?
+        else {
+            unreachable!("copy_file_range requires both descriptors and a count")
+        };
+        let src = c_int(ctx, src)?;
+        let dst = c_int(ctx, dst)?;
+        let count = native::copy_count(ssize_t(ctx, count)?)?;
+        let mut offset = |value: Option<Id>| {
+            value
+                .filter(|id| *id != NONE)
+                .map(|id| file_offset(ctx, id))
+                .transpose()
+        };
+        let offset_src = offset(offset_src)?;
+        let offset_dst = offset(offset_dst)?;
+        let copied = native::copy_file_range(src, dst, count, offset_src, offset_dst, || {
+            ctx.dispatch_signals()
+        })?;
+        return Ok(ctx.int(copied as i64));
     }
     #[cfg(target_os = "linux")]
     if name == "sendfile" {

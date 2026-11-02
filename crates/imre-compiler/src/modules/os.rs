@@ -114,6 +114,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "posix_fallocate" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.posix_fallocate")
         }
+        "copy_file_range" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::CopyFileRange),
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
         "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),

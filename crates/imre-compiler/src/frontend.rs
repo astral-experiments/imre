@@ -9014,7 +9014,10 @@ impl<'a> Checker<'a> {
                     return self.credential_call(call, name);
                 }
                 Some(Binding::Intrinsic(Intrinsic::Fd(
-                    op @ (ir::FdOperation::Pipe2 | ir::FdOperation::Read | ir::FdOperation::Write),
+                    op @ (ir::FdOperation::Pipe2
+                    | ir::FdOperation::Read
+                    | ir::FdOperation::Write
+                    | ir::FdOperation::CopyFileRange),
                 ))) => {
                     return self.fd_call(call, op);
                 }

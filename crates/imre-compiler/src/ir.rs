@@ -2160,6 +2160,9 @@ pub(crate) enum Readiness {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     TransferFd,
+    CopyFileRange,
+    CheckCopyCount,
+    CheckCopyOffset,
     Read,
     Write,
     Open,

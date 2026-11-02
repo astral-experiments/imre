@@ -1,7 +1,11 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
+#[cfg(target_os = "linux")]
+mod copy_range;
 mod credentials;
+#[cfg(target_os = "linux")]
+pub(crate) use copy_range::{copy_count, copy_file_range};
 pub(crate) use credentials::{credential_id, geteuid, getgid, getgroups, getuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};

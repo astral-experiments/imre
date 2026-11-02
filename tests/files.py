@@ -945,8 +945,16 @@ def main() -> None:
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
         for fixture in sorted((Path(__file__).parent / "fixtures/files").glob("*.py")):
+            if fixture.stem == "copy_file_range" and (
+                sys.platform != "linux"
+                or run([args.python, "-c", "import os, sys; sys.exit(not hasattr(os, 'copy_file_range'))"], temporary).returncode
+            ):
+                continue
             source = fixture.read_text(encoding="utf-8")
             cases.append((fixture.stem, source, None))
+            if fixture.stem == "copy_file_range":
+                aliases = "\nimport posix\nassert os.copy_file_range is posix.copy_file_range\n"
+                cases.append(("boxed_copy_file_range", source + aliases, None))
             if fixture.stem == "zipimport_resources":
                 cases.append(("boxed_zipimport_resources", source, None))
         cases += [
@@ -993,7 +1001,7 @@ def main() -> None:
                         "--opt-level",
                         level,
                         *flags,
-                        *(["--runtime-imports"] if name in {"boxed_zipimport_resources", "named_text_update", "binary_update"} else []),
+                        *(["--runtime-imports"] if name in {"boxed_copy_file_range", "boxed_zipimport_resources", "named_text_update", "binary_update"} else []),
                     ],
                     temporary,
                 )
