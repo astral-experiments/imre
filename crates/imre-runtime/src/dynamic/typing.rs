@@ -1693,7 +1693,17 @@ impl Context {
             )),
             Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
             _ => {
-                if let Some(check) = self.bound_slot(class, "__instancecheck__")? {
+                // An exact instance wins before the class's metaclass can intercept the check.
+                if self.heap.get(value).instance_class() == Some(class) {
+                    return Ok(true);
+                }
+                // A declared Protocol uses typing's stricter public check, even when it
+                // inherits ABCMeta's native implementation.
+                if let Some(check) = self.bound_slot(class, "__instancecheck__")?
+                    && !(self.is_protocol_declaration(class)
+                        && self.slot(class, "__instancecheck__")
+                            == self.builtins.get("abc.__instancecheck__").copied())
+                {
                     let result = self.call(check, vec![value], Vec::new())?;
                     return self.truth(result);
                 }
@@ -1736,6 +1746,43 @@ impl Context {
         }
     }
 
+    /// ABCMeta checks the instance's reported class first, then its actual type if different.
+    pub(super) fn abc_meta_instance_check(&mut self, value: Id, class: Id) -> Result<Id> {
+        super::mapping_abc::check_impl(self, class)?;
+        let reported = self.lookup_attr(value, "__class__")?;
+        self.heap.keep(reported);
+        let actual = self.exact_type(value)?;
+        let check = |ctx: &mut Self, child| {
+            if ctx.heap.get(class).instance_class().is_some()
+                || ctx.class_attr(class, "__subclasscheck__").is_some()
+            {
+                let method = ctx.lookup_attr(class, "__subclasscheck__")?;
+                return ctx.call(method, vec![child], Vec::new());
+            }
+            // Synthetic protocol declarations have no stored metaclass.
+            ctx.abc_meta_subclass_check(child, class)
+        };
+        let result = check(self, reported)?;
+        if reported != actual && !self.truth(result)? {
+            check(self, actual)
+        } else {
+            Ok(result)
+        }
+    }
+
+    /// The base ABC hook bypasses typing's public protocol guards and custom metaclass hooks.
+    pub(super) fn abc_meta_subclass_check(&mut self, child: Id, class: Id) -> Result<Id> {
+        if !self.is_type_object(child) {
+            return Err(Error::new(
+                "TypeError",
+                "issubclass() arg 1 must be a class",
+            ));
+        }
+        super::mapping_abc::check_impl(self, class)?;
+        self.abc_subclass_check(child, class)
+            .map(super::builtins::boolean)
+    }
+
     /// Freeze the declared field names or inherit the first named-tuple layout in the MRO.
     fn namedtuple_layout(
         &mut self,
@@ -1747,34 +1794,63 @@ impl Context {
         if bases.iter().any(|&base| {
             matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
         }) {
-            let fields = self.scope_name(scope, "__annotations__")
-                .and_then(|annotations| self.dict_entries(annotations))
-                .unwrap_or_default();
-            let named_fields: std::rc::Rc<[String]> = fields
-                .iter()
-                .filter_map(|&(key, _)| self.str_value(key).ok().map(str::to_owned))
-                .collect();
-            let mut defaults = Vec::new();
-            for field in named_fields.iter() {
-                if !ruff_python_stdlib::identifiers::is_identifier(field) {
-                    return Err(Error::new("ValueError", format!("invalid named tuple field {field:?}")));
+            let fields = self.scope_name(scope, "__annotations__");
+            let (fields, provider) = if fields.is_none()
+                && let Some(original) = self.scope_name(scope, "__annotate_func__")
+            {
+                let annotate = self.call_typing_helper("_namedtuple_annotate", vec![original])?;
+                self.heap.keep(annotate);
+                let forwardref = self.int(3);
+                let fields = self.call(annotate, vec![forwardref], Vec::new())?;
+                (Some(fields), Some(annotate))
+            } else {
+                (fields, None)
+            };
+            let mut named_fields = Vec::new();
+            if let Some(fields) = fields {
+                self.heap.keep(fields);
+                let keys = self.items(fields)?;
+                for &key in &keys {
+                    self.heap.keep(key);
                 }
+                for key in keys {
+                    named_fields.push(super::namedtuple::string(self, key)?);
+                }
+            }
+            let mut defaults = Vec::new();
+            for field in &named_fields {
                 if let Some(value) = self.scope_name(scope, field) {
                     defaults.push(value);
                 } else if !defaults.is_empty() {
                     return Err(Error::new("TypeError", format!("non-default field {field} cannot follow default fields")));
                 }
             }
+            super::namedtuple::validate_fields(name, &named_fields, false)?;
+            if let Some(attr) = self.scope_data(scope).names.keys().find(|key| {
+                matches!(
+                    key.as_str(),
+                    "__new__" | "__init__" | "__slots__" | "__getnewargs__" |
+                    "_fields" | "_field_defaults" | "_make" | "_replace" | "_asdict" | "_source"
+                )
+            }) {
+                return Err(Error::new(
+                    "AttributeError",
+                    format!("Cannot overwrite NamedTuple attribute {attr}"),
+                ));
+            }
+            let fields = super::namedtuple::bind_field_metadata(self, scope, &named_fields, &defaults);
             let defaults = self.alloc(Value::Tuple(defaults));
-            super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
+            let new = super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
+            if let Some(annotate) = provider {
+                self.bind_local(scope, "__annotate_func__", annotate);
+                self.set_attr(new, "__annotate__", annotate)?;
+            }
             if self.scope_name(scope, "__repr__").is_none() {
-                let fields = named_fields.iter().map(|field| self.text(field)).collect();
-                let fields = self.alloc(Value::Tuple(fields));
                 let name = self.text(name);
                 super::namedtuple::bind_repr(self, scope, name, fields)?;
             }
             super::namedtuple::bind_fields(self, scope, &named_fields);
-            return Ok(Some(named_fields));
+            return Ok(Some(named_fields.into()));
         }
         Ok(ancestors
             .iter()

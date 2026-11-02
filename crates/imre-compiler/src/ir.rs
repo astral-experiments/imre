@@ -925,6 +925,7 @@ pub(crate) enum LinecacheOperation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RandomOperation {
+    Shuffle,
     Seed,
     Float,
     Bits,

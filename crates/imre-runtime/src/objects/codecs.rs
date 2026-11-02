@@ -224,6 +224,79 @@ impl Utf16Order {
         }
     }
 
+    pub(crate) fn from_sign(order: i32) -> Self {
+        if order < 0 || order == 0 && cfg!(target_endian = "little") {
+            Self::Little
+        } else {
+            Self::Big
+        }
+    }
+
+    pub(crate) fn unit(self, bytes: [u8; 2]) -> u16 {
+        match self {
+            Self::Little => u16::from_le_bytes(bytes),
+            Self::Big => u16::from_be_bytes(bytes),
+        }
+    }
+
+    /// Decode complete units, leaving the trailing partial unit or surrogate pair to the caller.
+    pub(crate) fn decode_prefix(
+        self,
+        points: &mut Vec<u32>,
+        bytes: &[u8],
+        mut offset: usize,
+        final_chunk: bool,
+    ) -> Result<(usize, Option<DecodeIssue>)> {
+        points
+            .try_reserve((bytes.len() - offset).div_ceil(2))
+            .map_err(|_| Error::allocation())?;
+        while offset < bytes.len() {
+            let rest = &bytes[offset..];
+            let (reason, end) = if let Some((first, rest)) = rest.split_first_chunk::<2>() {
+                let first = self.unit(*first);
+                match first {
+                    0xd800..=0xdbff => {
+                        if let Some(second) = rest.first_chunk::<2>() {
+                            let second = self.unit(*second);
+                            if (0xdc00..=0xdfff).contains(&second) {
+                                let high = u32::from(first - 0xd800);
+                                let low = u32::from(second - 0xdc00);
+                                points.push(0x10000 + (high << 10) + low);
+                                offset += 4;
+                                continue;
+                            }
+                            ("illegal UTF-16 surrogate", offset + 2)
+                        } else if final_chunk {
+                            ("unexpected end of data", bytes.len())
+                        } else {
+                            break;
+                        }
+                    }
+                    0xdc00..=0xdfff => ("illegal encoding", offset + 2),
+                    _ => {
+                        points.push(u32::from(first));
+                        offset += 2;
+                        continue;
+                    }
+                }
+            } else if final_chunk {
+                ("truncated data", bytes.len())
+            } else {
+                break;
+            };
+            return Ok((
+                offset,
+                Some(DecodeIssue {
+                    encoding: self.name(),
+                    start: offset,
+                    end,
+                    reason,
+                }),
+            ));
+        }
+        Ok((offset, None))
+    }
+
     pub(crate) fn append(
         self,
         bytes: &mut Vec<u8>,

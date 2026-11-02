@@ -1,9 +1,70 @@
 # URL helpers from CPython 3.14.5 Lib/urllib/parse.py (PSF-2.0).
 
 from collections import namedtuple
+import functools
+import math
 import re
 import warnings
-from urllib.parse import unquote
+
+__all__ = ["urlparse", "urlunparse", "urljoin", "urldefrag",
+           "urlsplit", "urlunsplit", "urlencode", "parse_qs",
+           "parse_qsl", "quote", "quote_plus", "quote_from_bytes",
+           "unquote", "unquote_plus", "unquote_to_bytes",
+           "DefragResult", "ParseResult", "SplitResult",
+           "DefragResultBytes", "ParseResultBytes", "SplitResultBytes"]
+
+
+@functools.lru_cache(typed=True)
+def urlsplit(url, scheme='', allow_fragments=True):
+    """Parse a URL into 5 components:
+    <scheme>://<netloc>/<path>?<query>#<fragment>
+
+    The result is a named 5-tuple with fields corresponding to the
+    above. It is either a SplitResult or SplitResultBytes object,
+    depending on the type of the url parameter.
+
+    The username, password, hostname, and port sub-components of netloc
+    can also be accessed as attributes of the returned object.
+
+    The scheme argument provides the default value of the scheme
+    component when no scheme is found in url.
+
+    If allow_fragments is False, no attempt is made to separate the
+    fragment component from the previous component, which can be either
+    path or query.
+
+    Note that % escapes are not expanded.
+    """
+    fields = _imre_urlsplit(url, scheme, allow_fragments)
+    result = SplitResult(*fields)
+    return result if isinstance(url, str) else result.encode('ascii', 'strict')
+
+
+def urlparse(url, scheme='', allow_fragments=True):
+    """Parse a URL into 6 components:
+    <scheme>://<netloc>/<path>;<params>?<query>#<fragment>
+
+    The result is a named 6-tuple with fields corresponding to the
+    above. It is either a ParseResult or ParseResultBytes object,
+    depending on the type of the url parameter.
+
+    The username, password, hostname, and port sub-components of netloc
+    can also be accessed as attributes of the returned object.
+
+    The scheme argument provides the default value of the scheme
+    component when no scheme is found in url.
+
+    If allow_fragments is False, no attempt is made to separate the
+    fragment component from the previous component, which can be either
+    path or query.
+
+    Note that % escapes are not expanded.
+
+    urlsplit() should generally be used instead of urlparse().
+    """
+    fields = _imre_urlparse(url, scheme, allow_fragments)
+    result = ParseResult(*fields)
+    return result if isinstance(url, str) else result.encode('ascii', 'strict')
 
 
 class _ResultMixinStr(object):
@@ -63,6 +124,64 @@ class DefragResultBytes(_DefragResultBase, _ResultMixinBytes):
 
 DefragResult._encoded_counterpart = DefragResultBytes
 DefragResultBytes._decoded_counterpart = DefragResult
+
+
+_SplitResultBase = namedtuple('_SplitResultBase', 'scheme netloc path query fragment')
+_ParseResultBase = namedtuple('_ParseResultBase', 'scheme netloc path params query fragment')
+
+
+class _NetlocResultMixinBase:
+    __slots__ = ()
+
+    @property
+    def username(self):
+        return _netloc_property(self.netloc, 'username')
+
+    @property
+    def password(self):
+        return _netloc_property(self.netloc, 'password')
+
+    @property
+    def hostname(self):
+        return _netloc_property(self.netloc, 'hostname')
+
+    @property
+    def port(self):
+        return _netloc_property(self.netloc, 'port')
+
+
+class SplitResult(_SplitResultBase, _NetlocResultMixinBase, _ResultMixinStr):
+    __slots__ = ()
+
+    def geturl(self):
+        return urlunsplit(self)
+
+
+class ParseResult(_ParseResultBase, _NetlocResultMixinBase, _ResultMixinStr):
+    __slots__ = ()
+
+    def geturl(self):
+        return urlunparse(self)
+
+
+class SplitResultBytes(_SplitResultBase, _NetlocResultMixinBase, _ResultMixinBytes):
+    __slots__ = ()
+
+    def geturl(self):
+        return urlunsplit(self)
+
+
+class ParseResultBytes(_ParseResultBase, _NetlocResultMixinBase, _ResultMixinBytes):
+    __slots__ = ()
+
+    def geturl(self):
+        return urlunparse(self)
+
+
+SplitResult._encoded_counterpart = SplitResultBytes
+SplitResultBytes._decoded_counterpart = SplitResult
+ParseResult._encoded_counterpart = ParseResultBytes
+ParseResultBytes._decoded_counterpart = ParseResult
 
 
 _WHATWG_C0_CONTROL_OR_SPACE = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f '
@@ -447,3 +566,195 @@ def parse_qsl(qs, keep_blank_values=False, strict_parsing=False,
                 value = _unquote(value)
                 result.append((name, value))
     return result
+
+
+def clear_cache():
+    """Clear internal performance caches. Undocumented; some tests want it."""
+    urlsplit.cache_clear()
+    _byte_quoter_factory.cache_clear()
+
+
+_ALWAYS_SAFE = frozenset(b'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                         b'abcdefghijklmnopqrstuvwxyz'
+                         b'0123456789'
+                         b'_.-~')
+_ALWAYS_SAFE_BYTES = bytes(_ALWAYS_SAFE)
+
+
+class _Quoter(dict):
+    """A mapping from bytes numbers (in range(0,256)) to strings.
+
+    String values are percent-encoded byte values, unless the key < 128, and
+    in either of the specified safe set, or the always safe set.
+    """
+    # Keeps a cache internally, via __missing__, for efficiency (lookups
+    # of cached keys don't call Python code at all).
+    def __init__(self, safe):
+        """safe: bytes object."""
+        self.safe = _ALWAYS_SAFE | frozenset(safe)
+
+    def __repr__(self):
+        return f"<Quoter {dict(self)!r}>"
+
+    def __missing__(self, b):
+        # Handle a cache miss. Store quoted string in cache and return.
+        res = chr(b) if b in self.safe else '%{:02X}'.format(b)
+        self[b] = res
+        return res
+
+def quote(string, safe='/', encoding=None, errors=None):
+    """quote('abc def') -> 'abc%20def'
+
+    Each part of a URL, e.g. the path info, the query, etc., has a
+    different set of reserved characters that must be quoted. The
+    quote function offers a cautious (not minimal) way to quote a
+    string for most of these parts.
+
+    RFC 3986 Uniform Resource Identifier (URI): Generic Syntax lists
+    the following (un)reserved characters.
+
+    unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
+    reserved      = gen-delims / sub-delims
+    gen-delims    = ":" / "/" / "?" / "#" / "[" / "]" / "@"
+    sub-delims    = "!" / "$" / "&" / "'" / "(" / ")"
+                  / "*" / "+" / "," / ";" / "="
+
+    Each of the reserved characters is reserved in some component of a URL,
+    but not necessarily in all of them.
+
+    The quote function %-escapes all characters that are neither in the
+    unreserved chars ("always safe") nor the additional chars set via the
+    safe arg.
+
+    The default for the safe arg is '/'. The character is reserved, but in
+    typical usage the quote function is being called on a path where the
+    existing slash characters are to be preserved.
+
+    Python 3.7 updates from using RFC 2396 to RFC 3986 to quote URL strings.
+    Now, "~" is included in the set of unreserved characters.
+
+    string and safe may be either str or bytes objects. encoding and errors
+    must not be specified if string is a bytes object.
+
+    The optional encoding and errors parameters specify how to deal with
+    non-ASCII characters, as accepted by the str.encode method.
+    By default, encoding='utf-8' (characters are encoded with UTF-8), and
+    errors='strict' (unsupported characters raise a UnicodeEncodeError).
+    """
+    if isinstance(string, str):
+        if not string:
+            return string
+        if encoding is None:
+            encoding = 'utf-8'
+        if errors is None:
+            errors = 'strict'
+        string = string.encode(encoding, errors)
+    else:
+        if encoding is not None:
+            raise TypeError("quote() doesn't support 'encoding' for bytes")
+        if errors is not None:
+            raise TypeError("quote() doesn't support 'errors' for bytes")
+    return quote_from_bytes(string, safe)
+
+def quote_plus(string, safe='', encoding=None, errors=None):
+    """Like quote(), but also replace ' ' with '+', as required for quoting
+    HTML form values. Plus signs in the original string are escaped unless
+    they are included in safe. It also does not have safe default to '/'.
+    """
+    # Check if ' ' in string, where string may either be a str or bytes.  If
+    # there are no spaces, the regular quote will produce the right answer.
+    if ((isinstance(string, str) and ' ' not in string) or
+        (isinstance(string, bytes) and b' ' not in string)):
+        return quote(string, safe, encoding, errors)
+    if isinstance(safe, str):
+        space = ' '
+    else:
+        space = b' '
+    string = quote(string, safe + space, encoding, errors)
+    return string.replace(' ', '+')
+
+# Expectation: A typical program is unlikely to create more than 5 of these.
+@functools.lru_cache
+def _byte_quoter_factory(safe):
+    return _Quoter(safe).__getitem__
+
+def quote_from_bytes(bs, safe='/'):
+    """Like quote(), but accepts a bytes object rather than a str, and does
+    not perform string-to-bytes encoding.  It always returns an ASCII string.
+    quote_from_bytes(b'abc def\x3f') -> 'abc%20def%3f'
+    """
+    if not isinstance(bs, (bytes, bytearray)):
+        raise TypeError("quote_from_bytes() expected bytes")
+    if not bs:
+        return ''
+    if isinstance(safe, str):
+        # Normalize 'safe' by converting to bytes and removing non-ASCII chars
+        safe = safe.encode('ascii', 'ignore')
+    else:
+        # List comprehensions are faster than generator expressions.
+        safe = bytes([c for c in safe if c < 128])
+    if not bs.rstrip(_ALWAYS_SAFE_BYTES + safe):
+        return bs.decode()
+    quoter = _byte_quoter_factory(safe)
+    if (bs_len := len(bs)) < 200_000:
+        return ''.join(map(quoter, bs))
+    else:
+        # This saves memory - https://github.com/python/cpython/issues/95865
+        chunk_size = math.isqrt(bs_len)
+        chunks = [''.join(map(quoter, bs[i:i+chunk_size]))
+                  for i in range(0, bs_len, chunk_size)]
+        return ''.join(chunks)
+
+
+def urlencode(query, doseq=False, safe='', encoding=None, errors=None, quote_via=quote_plus):
+    """Encode a dict or sequence of two-element tuples into a URL query string.
+
+    If any values in the query arg are sequences and doseq is true, each
+    sequence element is converted to a separate parameter.
+
+    If the query arg is a sequence of two-element tuples, the order of the
+    parameters in the output will match the order of parameters in the
+    input.
+
+    The components of a query arg may each be either a string or a bytes type.
+
+    The safe, encoding, and errors parameters are passed down to the function
+    specified by quote_via (encoding and errors only if a component is a str).
+    """
+    return _imre_urlencode(query, doseq, safe, encoding, errors, quote_via)
+
+
+def unquote(string, encoding='utf-8', errors='replace'):
+    """Replace %xx escapes by their single-character equivalent. The optional
+    encoding and errors parameters specify how to decode percent-encoded
+    sequences into Unicode characters, as accepted by the bytes.decode()
+    method.
+    By default, percent-encoded sequences are decoded with UTF-8, and invalid
+    sequences are replaced by a placeholder character.
+
+    unquote('abc%20def') -> 'abc def'.
+    """
+    return _imre_unquote(string, encoding, errors)
+
+
+def urljoin(base, url, allow_fragments=True):
+    """Join a base URL and a possibly relative URL to form an absolute
+    interpretation of the latter."""
+    return _imre_urljoin(base, url, allow_fragments)
+
+
+def urlunparse(components):
+    """Put a parsed URL back together again.  This may result in a
+    slightly different, but equivalent URL, if the URL that was parsed
+    originally had redundant delimiters, e.g. a ? with an empty query
+    (the draft states that these are equivalent)."""
+    return _imre_urlunparse(components)
+
+
+def urlunsplit(components):
+    """Combine the elements of a tuple as returned by urlsplit() into a
+    complete URL as a string. The data argument can be any five-item iterable.
+    This may result in a slightly different, but equivalent URL, if the URL that
+    was parsed originally had unnecessary delimiters (for example, a ? with an
+    empty query; the RFC states that these are equivalent)."""
+    return _imre_urlunsplit(components)

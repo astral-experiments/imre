@@ -1,6 +1,7 @@
 from array import array
 import gc
 import io
+import os
 import sys
 from io import RawIOBase
 
@@ -415,6 +416,19 @@ def exercise(path):
     assert target.tobytes() == b"bccxxxxx"
     view.release()
     assert independent.tobytes() == b"xxxxxxxx"
+
+    read_fd, write_fd = os.pipe()
+    try:
+        os.set_blocking(read_fd, False)
+        with open(read_fd, "rb", closefd=False) as reader:
+            dest = bytearray(b"..")
+            assert reader.readinto(dest) is None
+            os.write(write_fd, b"Q")
+            assert reader.readinto(dest) == 1
+            assert bytes(dest) == b"Q."
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
 
     lines = path + ".lines"
     with open(lines, "w") as output:

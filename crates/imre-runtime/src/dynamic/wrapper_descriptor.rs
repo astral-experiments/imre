@@ -22,6 +22,15 @@ impl BuiltinDescriptor {
                 method: true,
             });
         }
+        if let Some((deque::CLASS, name)) = symbol.rsplit_once('.')
+            && let Some(member) = deque::member(name)
+        {
+            return Some(Self {
+                owner: deque::CLASS,
+                name: member.name,
+                method: member.is_method(),
+            });
+        }
         let slots = match symbol.rsplit_once('.') {
             Some((stdlib::os::scandir::ENTRY, attr)) => Some((
                 stdlib::os::scandir::ENTRY,
@@ -52,7 +61,11 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
+            Some((defaultdict::CLASS, attr)) => {
+                Some((defaultdict::CLASS, attr, defaultdict::METHODS))
+            }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("mappingproxy", attr)) => Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS)),
             Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
@@ -65,12 +78,12 @@ impl BuiltinDescriptor {
             Some(("set", attr)) => Some((
                 "set",
                 attr,
-                &["__reduce__", "difference", "issubset", "update"][..],
+                &["__reduce__", "difference", "issubset", "union", "update"][..],
             )),
             Some(("frozenset", attr)) => Some((
                 "frozenset",
                 attr,
-                &["__reduce__", "difference", "issubset"][..],
+                &["__reduce__", "difference", "issubset", "union"][..],
             )),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
@@ -87,6 +100,7 @@ impl BuiltinDescriptor {
                 owner,
                 name,
                 method: !name.starts_with("__")
+                    || (owner == defaultdict::CLASS && matches!(name, "__copy__" | "__missing__"))
                     || matches!(
                         name,
                         "__reversed__"
@@ -135,9 +149,6 @@ impl BuiltinDescriptor {
             "dict.__repr__" => ("dict", "__repr__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
-            "collections.deque.__contains__" => (deque::CLASS, "__contains__"),
-            "collections.deque.__repr__" => (deque::CLASS, "__repr__"),
-            "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "set.__repr__" => ("set", "__repr__"),
             "frozenset.__repr__" => ("frozenset", "__repr__"),
@@ -272,6 +283,14 @@ impl BuiltinDescriptor {
         receiver: Option<Id>,
     ) -> Option<Id> {
         Some(match name {
+            "__doc__" | "__text_signature__" if self.owner == deque::CLASS => {
+                let member = deque::member(self.name)?;
+                ctx.text(if name == "__doc__" { member.doc } else { member.signature })
+            }
+            "__doc__" | "__text_signature__" if self.owner == defaultdict::CLASS => {
+                let (doc, signature) = defaultdict::metadata(self.name)?;
+                ctx.text(if name == "__doc__" { doc } else { signature })
+            }
             "__doc__" | "__text_signature__"
                 if matches!(self.owner, "set" | "frozenset")
                     && let Some(op) = builtins::set_operator(self.name) =>
@@ -293,6 +312,8 @@ impl BuiltinDescriptor {
                 {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" => ctx.class_qualname(receiver),
+                        Value::Deque(_) if self.owner == deque::CLASS => "deque",
+                        Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
                         Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::os::stat::layout(owner) => layout.name(),
                         value if let Some(class) = value.instance_class() => ctx
                             .class_attr(class, "__qualname__")
@@ -307,6 +328,17 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.owner == "mappingproxy" && self.method => ctx.text(match self.name {
+                "keys" => "D.keys() -> a set-like object providing a view on D's keys",
+                "values" => "D.values() -> an object providing a view on D's values",
+                "items" => "D.items() -> a set-like object providing a view on D's items",
+                "copy" => "D.copy() -> a shallow copy of D",
+                "get" => "Return the value for key if key is in the mapping, else default.",
+                _ => return None,
+            }),
+            "__text_signature__" if self.owner == "mappingproxy" && self.method => {
+                ctx.text(if self.name == "get" { "($self, key, default=None, /)" } else { "($self, /)" })
+            }
             "__doc__" if self.name == "add_note" => ctx.text("Add a note to the exception"),
             "__text_signature__" if self.name == "add_note" => ctx.text("($self, note, /)"),
             "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),

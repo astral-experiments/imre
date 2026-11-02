@@ -3,6 +3,8 @@
 use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+mod newline_decoder;
+pub(in crate::dynamic) const NEWLINE_DECODER: &str = "IncrementalNewlineDecoder";
 mod buffered_io;
 mod descriptor_buffer;
 mod native_reader;
@@ -12,6 +14,7 @@ pub(in crate::dynamic) use descriptor_buffer::{
 };
 mod bytes_io;
 mod bytes_writer;
+pub(in crate::dynamic) use bytes_writer::has_pending_callback_write;
 mod docstrings;
 mod file_io;
 pub(super) use file_io::{
@@ -30,6 +33,7 @@ pub(in crate::dynamic) enum MemoryStream {
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
+    Decoder(newline_decoder::Decoder),
 }
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
@@ -254,6 +258,13 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
     let object = ctx.builtin("object");
+    class(
+        ctx,
+        module,
+        NEWLINE_DECODER,
+        object,
+        newline_decoder::METHODS,
+    );
     let io = class(
         ctx,
         module,
@@ -388,6 +399,11 @@ fn class(
         unreachable!()
     };
     *io_kind = Some(name.trim_start_matches('_'));
+    if name == NEWLINE_DECODER
+        && let Value::Scope(frame) = ctx.heap.get_mut(scope)
+    {
+        frame.class_namespace.as_mut().unwrap().slot_names = Some([].into());
+    }
     if let Some(doc) = docstrings::base(name) {
         let doc = ctx.text(doc);
         ctx.bind(scope, "__doc__", doc);
@@ -405,6 +421,7 @@ fn class(
         "BufferedReader" => "_io.BufferedReader",
         "BufferedWriter" => "_io.BufferedWriter",
         "BytesIO" => "_io.BytesIO",
+        NEWLINE_DECODER => newline_decoder::CLASS,
         _ => "_io._IOBase",
     };
     for &name in methods {
@@ -694,6 +711,9 @@ pub(in super::super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let owner_kind = ctx.heap.get(owner).io_kind();
+    if owner_kind == Some(NEWLINE_DECODER) {
+        return newline_decoder::call(ctx, owner, name, args, kwargs);
+    }
     let raw = owner_kind == Some("RawIOBase");
     let buffered = owner_kind == Some("BufferedIOBase");
     let text = owner_kind == Some("TextIOBase");
@@ -706,6 +726,8 @@ pub(in super::super) fn call(
         Some("_TextIOBase")
     } else if matches!(owner_kind, Some("BufferedReader" | "BufferedWriter")) {
         owner_kind
+    } else if owner_kind == Some("TextIOWrapper") && name == "__next__" {
+        Some("TextIOWrapper")
     } else if bytes_io {
         Some("BytesIO")
     } else {
@@ -715,6 +737,9 @@ pub(in super::super) fn call(
         let message = match (descriptor, name) {
             (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter")), "__init__") => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
+            }
+            (Some("TextIOWrapper"), "__next__") => {
+                "descriptor '__next__' of '_io.TextIOWrapper' object needs an argument".into()
             }
             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
             _ => format!("unbound I/O method {name} needs a receiver"),
@@ -736,6 +761,14 @@ pub(in super::super) fn call(
                     "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
                 )
             }
+            (Some("TextIOWrapper"), "__next__") => {
+                let actual = receiver_class
+                    .and_then(|class| ctx.heap.get(class).io_kind())
+                    .map_or_else(|| actual.to_string(), |_| format!("_io.{actual}"));
+                format!(
+                    "descriptor '__next__' requires a '_io.TextIOWrapper' object but received a '{actual}'"
+                )
+            }
             (Some(class), _) => format!(
                 "descriptor '{name}' for '_io.{class}' objects doesn't apply to a '{actual}' object"
             ),
@@ -744,6 +777,11 @@ pub(in super::super) fn call(
         return Err(Error::new("TypeError", message));
     };
     match owner_kind {
+        Some("TextIOWrapper")
+            if name == "__next__" && matches!(ctx.heap.get(receiver), Value::Instance { .. }) =>
+        {
+            return text_wrapper::next(ctx, receiver, receiver_class == owner, rest, kwargs);
+        }
         Some("BufferedReader") => return native_reader::call(ctx, receiver, name, rest, kwargs),
         Some("BufferedWriter") => return native_writer::call(ctx, receiver, name, rest, kwargs),
         _ => {}

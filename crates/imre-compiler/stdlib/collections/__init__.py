@@ -1,5 +1,6 @@
 """Dictionary and mapping classes for the runtime collections module."""
 
+import _collections_abc
 import operator as _operator
 from _collections_abc import MutableMapping as _MutableMapping, MutableSequence as _MutableSequence
 from itertools import repeat as _repeat
@@ -109,6 +110,66 @@ class ChainMap(_MutableMapping):
             return f"{type(self).__name__}({', '.join(map(repr, self.maps))})"
         finally:
             _chainmap_repr_stack.pop()
+
+    # From CPython 3.14.5, Lib/collections/__init__.py (licenses/CPython.txt).
+    def copy(self):
+        'New ChainMap or subclass with a new copy of maps[0] and refs to maps[1:]'
+        return self.__class__(self.maps[0].copy(), *self.maps[1:])
+
+    __copy__ = copy
+
+    def new_child(self, m=None, **kwargs):      # like Django's Context.push()
+        '''New ChainMap with a new map followed by all previous maps.
+        If no map is provided, an empty dict is used.
+        Keyword arguments update the map or new empty dict.
+        '''
+        if m is None:
+            m = kwargs
+        elif kwargs:
+            m.update(kwargs)
+        return self.__class__(m, *self.maps)
+
+    @property
+    def parents(self):                          # like Django's Context.pop()
+        'New ChainMap from maps[1:].'
+        return self.__class__(*self.maps[1:])
+
+    def popitem(self):
+        'Remove and return an item pair from maps[0]. Raise KeyError is maps[0] is empty.'
+        try:
+            return self.maps[0].popitem()
+        except KeyError:
+            raise KeyError('No keys found in the first mapping.')
+
+    def pop(self, key, *args):
+        'Remove *key* from maps[0] and return its value. Raise KeyError if *key* not in maps[0].'
+        try:
+            return self.maps[0].pop(key, *args)
+        except KeyError:
+            raise KeyError(f'Key not found in the first mapping: {key!r}')
+
+    def clear(self):
+        'Clear maps[0], leaving maps[1:] intact.'
+        self.maps[0].clear()
+
+    def __ior__(self, other):
+        self.maps[0].update(other)
+        return self
+
+    def __or__(self, other):
+        if not isinstance(other, _collections_abc.Mapping):
+            return NotImplemented
+        m = self.copy()
+        m.maps[0].update(other)
+        return m
+
+    def __ror__(self, other):
+        if not isinstance(other, _collections_abc.Mapping):
+            return NotImplemented
+        m = dict(other)
+        for child in reversed(self.maps):
+            m.update(child)
+        return self.__class__(m)
 
 
 class Counter(dict):

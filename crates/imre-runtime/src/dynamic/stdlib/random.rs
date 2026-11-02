@@ -76,6 +76,44 @@ pub(super) fn choice(
     ctx.get_item(seq, key)
 }
 
+/// Shuffle by subscription, preserving the read and assignment order of Python's tuple swap.
+pub(super) fn shuffle(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [x] = arguments("Random.shuffle", ["x"], "2", args, kwargs)?;
+    let x = x.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            "Random.shuffle() missing 1 required positional argument: 'x'",
+        )
+    })?;
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(x);
+    let step = ctx.heap.temporary_mark();
+    let result: Result<Id> = (|| {
+        let length = builtins::call(ctx, "len", &[x], &[])?;
+        let length = ctx.as_integer(length)? as usize;
+        for indices in objects::shuffle_swaps(length) {
+            ctx.heap.release_temporaries_since(step);
+            let (i, j) = indices?;
+            let i = ctx.int(i as i64);
+            let j = ctx.int(j as i64);
+            let right = ctx.get_item(x, j)?;
+            ctx.heap.keep(right);
+            let left = ctx.get_item(x, i)?;
+            ctx.heap.keep(left);
+            ctx.put_item(x, i, right)?;
+            ctx.put_item(x, j, left)?;
+        }
+        Ok(NONE)
+    })();
+    ctx.heap.release_temporaries_since(roots);
+    if let Err(error) = &result {
+        for root in error.roots() {
+            ctx.heap.keep(root);
+        }
+    }
+    result
+}
+
 /// Format the original Python arguments, including user-defined __format__ methods.
 fn empty_range(ctx: &mut Context, operands: &[Id]) -> Result<Id> {
     let mut message = ctx.text("empty range in randrange(");

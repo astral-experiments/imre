@@ -497,7 +497,7 @@ impl Context {
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }
-        if let Value::MemoryView { owner, hash } = *self.heap.get(key) {
+        if let Value::MemoryView { owner, hash, .. } = *self.heap.get(key) {
             if let Some(hash) = hash {
                 return Ok(ControlFlow::Break(hash));
             }

@@ -212,15 +212,30 @@ impl Context {
             self.bind_local(scope, &key, value);
         }
         let class = self.allocate_class(name, scope, bases)?;
-        self.finish_namespace_class(class, scope, cell, Vec::new())
+        self.finish_namespace_class(class, scope, cell, None, Vec::new())
     }
 
-    /// Construct a class from a copied namespace, optionally using the builtin ABCMeta.
+    /// Validate the receiver of the unbound ABCMeta.__new__ method.
+    pub(super) fn abc_new_from_namespace(
+        &mut self,
+        meta: Id,
+        name: Id,
+        bases: Id,
+        namespace: Id,
+        keywords: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        if !self.is_abc_metaclass(meta) {
+            return Err(Error::new("TypeError", "ABCMeta.__new__ requires an ABCMeta subtype"));
+        }
+        self.type_from_namespace(Some(meta), name, bases, namespace, &keywords)
+    }
+
+    /// Construct a class from a copied namespace, optionally using an ABC metaclass.
     pub(super) fn type_from_namespace(
         &mut self,
         explicit_meta: Option<Id>,
         name: Id,
-        bases: Id,
+        base_tuple: Id,
         namespace: Id,
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
@@ -237,8 +252,8 @@ impl Context {
             .string_storage(name)
             .ok_or_else(|| argument(self, 1, "str", name))?;
         let bases = self
-            .tuple_items(bases)?
-            .ok_or_else(|| argument(self, 2, "tuple", bases))?;
+            .tuple_items(base_tuple)?
+            .ok_or_else(|| argument(self, 2, "tuple", base_tuple))?;
         let storage = self
             .dict_storage(namespace)
             .ok_or_else(|| argument(self, 3, "dict", namespace))?;
@@ -274,18 +289,40 @@ impl Context {
                 None,
                 false,
             )?;
-            if winner.is_none()
-                || winner.as_ref() != self.builtins.get("abc.ABCMeta")
-                || bases
-                    .iter()
-                    .any(|&base| self.direct_subclass(base, type_class))
-            {
+            let Some(winner) = winner.filter(|&meta| self.is_abc_metaclass(meta)) else {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "type() with specialized metaclasses is unsupported",
+                ));
+            };
+            if bases.iter().any(|&base| self.direct_subclass(base, type_class)) {
                 return Err(Error::new(
                     "NotImplementedError",
                     "type() with specialized metaclasses is unsupported",
                 ));
             }
-            winner
+            let abc = self.abc_meta();
+            if explicit_meta != Some(winner)
+                && self.class_attr(winner, "__new__") != self.class_attr(abc, "__new__")
+            {
+                let result = self.call_abc_new(winner, name, base_tuple, namespace, kwargs.to_vec())?;
+                if explicit_meta.is_some() {
+                    // The outer ABCMeta.__new__ also initializes a more derived __new__ result.
+                    let Value::Class { scope, .. } = *self.heap.get(result) else {
+                        self.lookup_attr(result, "__dict__")?;
+                        return Err(Error::new("NotImplementedError", "ABC initialization requires a Python class"));
+                    };
+                    if !self.is_bundled_abc(result) {
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "ABC initialization of an unrelated metaclass result is unsupported",
+                        ));
+                    }
+                    self.init_abstract_class(result, scope)?;
+                }
+                return Ok(result);
+            }
+            Some(winner)
         } else {
             None
         };
@@ -328,22 +365,23 @@ impl Context {
             self.heap.keep(key);
             self.heap.keep(value);
         }
-        let creator_scope = match metaclass.map(|meta| self.heap.get(meta)) {
+        // Inherited ABCMeta.__new__ calls type.__new__ from abc's defining globals.
+        let creator = metaclass.and(self.builtins.get("abc.ABCMeta").copied());
+        let creator_scope = match creator.map(|meta| self.heap.get(meta)) {
             Some(Value::Class { scope, .. }) => *scope,
             _ => self.heap.current_scope(),
         };
         let globals = self.module_globals(creator_scope)?;
         let module = self.dict_named_item(globals, "__name__");
         let module_text = self.scope_data(creator_scope).module.clone();
-        let cell = match self.type_namespace_cell(namespace, "__classcell__")? {
+        let cell = match self.type_namespace_cell("__classcell__", self.dict_named_item(namespace, "__classcell__"))? {
             Some(cell) => cell,
             None => self.alloc(Value::Cell(None)),
         };
-        let dict_cell = self.type_namespace_cell(namespace, "__classdictcell__")?;
+        let dict_cell = self.dict_named_item(namespace, "__classdictcell__");
         let class_namespace = super::value::ClassNamespace {
             name_override: Some(name),
             dictionary: Some(namespace),
-            annotation_dict_cell: dict_cell,
             ..Default::default()
         };
         let scope = self.namespace_scope(&module_text, class_namespace, cell);
@@ -378,6 +416,13 @@ impl Context {
         if self.scope_name(scope, "__qualname__").is_none() {
             self.bind_local(scope, "__qualname__", name);
         }
+        if self.scope_name(scope, "__annotate_func__").is_some() {
+            self.enable_class_annotation_provider(scope);
+        }
+        if metaclass.is_some() {
+            let original = self.scope_name(scope, "__orig_bases__");
+            super::typing::class_parameters(self, scope, original, &bases)?;
+        }
         let ancestors = self.linearized_bases(&bases, false)?;
         let class =
             self.allocate_prepared_class(name_text, scope, bases, ancestors, layout, slots)?;
@@ -394,15 +439,14 @@ impl Context {
             unreachable!()
         };
         *class_meta = metaclass;
-        self.finish_namespace_class(class, scope, cell, kwargs.to_vec())?;
+        self.finish_namespace_class(class, scope, cell, dict_cell, kwargs.to_vec())?;
         if metaclass.is_some() {
             self.init_abstract_class(class, scope)?;
         }
         Ok(class)
     }
 
-    fn type_namespace_cell(&self, namespace: Id, name: &str) -> Result<Option<Id>> {
-        let cell = self.dict_named_item(namespace, name);
+    fn type_namespace_cell(&self, name: &str, cell: Option<Id>) -> Result<Option<Id>> {
         if let Some(value) = cell
             && !matches!(self.heap.get(value), Value::Cell(_))
         {
@@ -440,15 +484,14 @@ impl Context {
         class: Id,
         scope: Id,
         cell: Id,
+        dict_cell: Option<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
         self.heap.replace_cell(cell, Some(class));
-        if let Some(dict_cell) = self
-            .scope_data(scope)
-            .class_namespace
-            .as_ref()
-            .and_then(|ns| ns.annotation_dict_cell)
-        {
+        // A valid __classcell__ is populated even when the following dictionary cell is invalid.
+        if let Some(dict_cell) = self.type_namespace_cell("__classdictcell__", dict_cell)? {
+            let Value::Scope(frame) = self.heap.get_mut(scope) else { unreachable!() };
+            frame.class_namespace.as_mut().expect("namespace class").annotation_dict_cell = Some(dict_cell);
             let dict = self.class_namespace_dict(scope, false);
             self.heap.replace_cell(dict_cell, Some(dict));
         }

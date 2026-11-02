@@ -151,24 +151,20 @@ pub(super) fn initialize(
             "buffer size must be strictly positive",
         ));
     }
-    if !reading && super::bytes_writer::is_bytes_io(ctx, raw) {
-        return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
-    }
-    let handle = native_raw(ctx, raw, methods, owner)?;
+    let handle = match native_raw(ctx, raw, methods, owner) {
+        Ok(handle) => handle,
+        Err(_) if !reading => {
+            return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
+        }
+        Err(error) => return Err(error),
+    };
     if backing(ctx, receiver).is_some() || super::bytes_writer::state(ctx, receiver).is_some() {
         return Err(Error::new(
             "NotImplementedError",
             format!("{owner} reinitialization is unsupported"),
         ));
     }
-    // Both standard Rust buffer constructors allocate infallibly.
-    if capacity as u64 > crate::text_output::binary_capacity(i128::MAX) as u64 {
-        return Err(Error::new(
-            "NotImplementedError",
-            format!("explicit {owner} buffers above 8 MiB are unsupported"),
-        ));
-    }
-    let mut fd = BufferedFd::new(raw, handle, reading, capacity as usize);
+    let mut fd = BufferedFd::new(raw, handle, reading, capacity as usize)?;
     if !reading {
         fd.drop_fallback = Some(Cell::new(true));
     }
@@ -336,9 +332,13 @@ fn buffer_error(ctx: &mut Context, error: io::Error) -> Error {
     else {
         return os_error(error);
     };
-    let errno = ctx.int(i64::from(blocked.errno));
+    blocking_error(ctx, blocked.errno, blocked.accepted)
+}
+
+pub(super) fn blocking_error(ctx: &mut Context, errno: i32, accepted: usize) -> Error {
+    let errno = ctx.int(i64::from(errno));
     let message = ctx.text(BlockedWrite::DESCRIPTION);
-    let accepted = ctx.int(blocked.accepted as i64);
+    let accepted = ctx.int(accepted as i64);
     ctx.os_exception("BlockingIOError", None, &[errno, message, accepted], None)
         .unwrap_or_else(|error| error)
 }
@@ -406,33 +406,48 @@ pub(in crate::dynamic) struct BufferedFd {
     pub(in crate::dynamic) writing: bool,
     drop_fallback: Option<Cell<bool>>,
     handle: Rc<RawFile>,
+    truncating: Cell<bool>,
     buffer: RefCell<Option<Buffer>>,
 }
 
 impl BufferedFd {
-    pub(super) fn new(raw: Id, handle: Rc<RawFile>, reading: bool, capacity: usize) -> Self {
+    pub(super) fn new(
+        raw: Id,
+        handle: Rc<RawFile>,
+        reading: bool,
+        capacity: usize,
+    ) -> Result<Self> {
         let mut descriptor = Descriptor {
             handle: handle.clone(),
             raw_position: None,
             last_read: 0,
         };
         let buffer = if reading {
+            // std::io::BufReader cannot adopt fallibly reserved storage.
+            if capacity > crate::text_output::binary_capacity(i128::MAX) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "explicit BufferedReader buffers above 8 MiB are unsupported",
+                ));
+            }
             let _ = descriptor.stream_position();
             Buffer::Reader(BufReader::with_capacity(capacity, descriptor))
         } else {
-            Buffer::Writer(BinaryOutput::with_buffer(
-                Vec::with_capacity(capacity),
-                descriptor,
-            ))
+            let mut pending = Vec::new();
+            pending
+                .try_reserve_exact(capacity)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            Buffer::Writer(BinaryOutput::with_buffer(pending, descriptor))
         };
-        Self {
+        Ok(Self {
             raw,
             reading,
             writing: !reading,
             handle,
             drop_fallback: None,
+            truncating: Cell::new(false),
             buffer: RefCell::new(Some(buffer)),
-        }
+        })
     }
 
     pub(super) fn update(raw: Id, handle: Rc<RawFile>, capacity: usize) -> Result<Self> {
@@ -451,6 +466,7 @@ impl BufferedFd {
             reading: true,
             writing: true,
             drop_fallback: None,
+            truncating: Cell::new(false),
             buffer: RefCell::new(Some(Buffer::Random(buffer))),
         })
     }
@@ -462,6 +478,7 @@ impl BufferedFd {
             reading,
             writing: !reading,
             drop_fallback: None,
+            truncating: Cell::new(false),
             buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
         }
     }
@@ -505,6 +522,49 @@ impl BufferedFd {
 
     pub(in crate::dynamic) fn closed(&self) -> bool {
         self.handle.live_fd().is_none()
+    }
+
+    /// A Python raw truncate or size conversion can call back into its own buffer.
+    fn check_reentry(&self, ctx: &Context) -> Result<()> {
+        if self.truncating.get() {
+            let name = ctx.raw_instance_field(self.raw, "name");
+            let value = name.map_or_else(
+                || "<_io.BufferedRandom>".to_owned(),
+                |id| format!("<_io.BufferedRandom name={}>", ctx.repr(id)),
+            );
+            return Err(Error::new(
+                "RuntimeError",
+                format!("reentrant call inside {value}"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Realign the raw offset first and let the live FileIO truncate implement its size protocol.
+    fn truncate(&self, ctx: &mut Context, size: Id) -> Result<Id> {
+        self.check_reentry(ctx)?;
+        // The native flush writes and seeks on the descriptor without calling Python.
+        native_raw(ctx, self.raw, &["write", "seek"], "BufferedRandom")?;
+        {
+            let mut slot = self.buffer.borrow_mut();
+            let Some(Buffer::Random(file)) = slot.as_mut() else {
+                return Err(Error::new("ValueError", "truncate of closed file"));
+            };
+            file.flush().map_err(os_error)?;
+        }
+        self.truncating.set(true);
+        let result = ctx
+            .lookup_attr(self.raw, "truncate")
+            .and_then(|truncate| ctx.call(truncate, vec![size], Vec::new()));
+        if let Ok(id) = result {
+            ctx.heap.keep(id);
+            // CPython refreshes the raw position after success and ignores a failed tell.
+            let _ = ctx
+                .lookup_attr(self.raw, "tell")
+                .and_then(|tell| ctx.call(tell, Vec::new(), Vec::new()));
+        }
+        self.truncating.set(false);
+        result
     }
 
     fn close(&self, mut ctx: Option<&mut Context>, flush: bool) -> Result<()> {
@@ -552,15 +612,16 @@ impl BufferedFd {
     ) -> Result<Id> {
         let name = name.strip_prefix("file.").unwrap_or(name);
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
+            self.check_reentry(ctx)?;
             self.check_raw(ctx, receiver, name)?;
             self.close(Some(ctx), true)?;
             return Ok(NONE);
         }
-        if let ("readinto", [target]) = (name, args)
-            && !self.reading
-        {
+        if let ("readinto", [target]) = (name, args) {
             files::readinto_target(ctx, *target)?;
-            return Err(Error::new("UnsupportedOperation", "read"));
+            if !self.reading {
+                return Err(Error::new("UnsupportedOperation", "read"));
+            }
         }
         let closed = || {
             Error::new(
@@ -569,9 +630,10 @@ impl BufferedFd {
                     "read" | "read1" => "read of closed file",
                     "readline" => "readline of closed file",
                     "readinto" => "readinto of closed file",
+                    "truncate" => "truncate of closed file",
                     "seek" => "seek of closed file",
                     "write" => "write to closed file",
-                    "flush" if !self.reading => "flush of closed file",
+                    "flush" if self.writing => "flush of closed file",
                     "flush" | "__enter__" => "I/O operation on closed file.",
                     _ => "I/O operation on closed file",
                 },
@@ -637,6 +699,9 @@ impl BufferedFd {
         };
         self.check_raw(ctx, receiver, name)?;
         let fd = self.handle.live_fd().ok_or_else(closed)?;
+        if name == "truncate" {
+            return self.truncate(ctx, args.first().copied().unwrap_or(NONE));
+        }
         let mut slot = self.buffer.borrow_mut();
         let buffer = slot.as_mut().ok_or_else(closed)?;
         match name {
@@ -651,6 +716,7 @@ impl BufferedFd {
                 unsafe { libc::lseek(fd, 0, libc::SEEK_CUR) } >= 0,
             )),
             "flush" => {
+                self.check_reentry(ctx)?;
                 match buffer {
                     Buffer::Random(file) => file.flush().map_err(os_error)?,
                     Buffer::Writer(w) => w.flush().map_err(|err| buffer_error(ctx, err))?,
@@ -661,6 +727,7 @@ impl BufferedFd {
             }
             "tell" => Ok(ctx.int(buffer.position().map_err(os_error)? as i64)),
             "seek" => {
+                self.check_reentry(ctx)?;
                 let pos = buffer
                     .seek(seek.expect("validated seek"))
                     .map_err(|err| buffer_error(ctx, err))?;
@@ -671,6 +738,15 @@ impl BufferedFd {
                     return Err(Error::new("UnsupportedOperation", "read"));
                 }
                 let size = size.unwrap_or(-1);
+                if name == "read" && size < -1 {
+                    return Err(Error::new(
+                        "ValueError",
+                        "read length must be non-negative or -1",
+                    ));
+                }
+                if size != 0 {
+                    self.check_reentry(ctx)?;
+                }
                 if name == "read1" {
                     let bytes = match buffer {
                         Buffer::Reader(r) => read_once(r, size)?,
@@ -689,12 +765,6 @@ impl BufferedFd {
                         Buffer::Writer(_) => unreachable!(),
                     };
                     return Ok(ctx.alloc(Value::Bytes(bytes)));
-                }
-                if name == "read" && size < -1 {
-                    return Err(Error::new(
-                        "ValueError",
-                        "read length must be non-negative or -1",
-                    ));
                 }
                 if name == "read" && size > crate::MAX_BYTES_LEN as i64 {
                     return Err(Error::new("OverflowError", "byte string is too large"));
@@ -723,6 +793,10 @@ impl BufferedFd {
                 Ok(ctx.alloc(Value::Bytes(data)))
             }
             "readinto" if args.len() == 1 => {
+                if self.truncating.get() {
+                    files::readinto_target(ctx, args[0])?;
+                    self.check_reentry(ctx)?;
+                }
                 let bytes = files::readinto_bytes(ctx, args[0])?;
                 if let Buffer::Pipe(pipe) = buffer {
                     let data = pipe.read(Some(bytes.len()), false)?;
@@ -736,7 +810,10 @@ impl BufferedFd {
                 };
                 let mut total = 0;
                 while total < bytes.len() {
-                    let n = r.read(&mut bytes[total..]).map_err(os_error)?;
+                    let n = match r.read(&mut bytes[total..]) {
+                        Ok(n) => n,
+                        Err(e) => return files::readinto_error(ctx, e, total),
+                    };
                     if n == 0 {
                         break;
                     }
@@ -749,6 +826,7 @@ impl BufferedFd {
                     return Err(Error::new("UnsupportedOperation", "write"));
                 }
                 let data = files::output_bytes(ctx, args[0])?;
+                self.check_reentry(ctx)?;
                 let count = data.len();
                 match buffer {
                     Buffer::Pipe(pipe) => pipe.write(data)?,

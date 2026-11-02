@@ -102,6 +102,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "O_DIRECTORY" => Intrinsic::DescriptorConstant("o_directory"),
         "O_NOFOLLOW" => Intrinsic::DescriptorConstant("o_nofollow"),
         "O_NONBLOCK" => Intrinsic::DescriptorConstant("o_nonblock"),
+        "O_TMPFILE" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_tmpfile"),
         "SEEK_SET" => Intrinsic::DescriptorConstant("seek_set"),
         "SEEK_CUR" => Intrinsic::DescriptorConstant("seek_cur"),
         "SEEK_END" => Intrinsic::DescriptorConstant("seek_end"),

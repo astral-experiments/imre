@@ -1,5 +1,5 @@
 import random
-from random import choice, random as draw
+from random import choice, random as draw, shuffle
 
 
 def current():
@@ -93,3 +93,53 @@ def current():
             print(str(error))
         else:
             raise AssertionError("invalid range accepted")
+
+    assert shuffle is random.shuffle
+    assert shuffle(x=[]) is None
+    assert shuffle((0,)) is None
+    try:
+        shuffle((0, 1))
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("immutable pair was shuffled")
+
+    class Marker(Exception):
+        pass
+
+    class Token:
+        def __init__(self, number):
+            self.number = number
+
+    class SequenceProbe:
+        def __len__(self):
+            events.append("len")
+            return 3
+
+        def __getitem__(self, index):
+            import gc
+            gc.collect()
+            events.append(("get", index))
+            return Token(len(events))
+
+        def __setitem__(self, index, value):
+            import gc
+            gc.collect()
+            events.append(("set", index, value.number))
+            if len(events) == 4:
+                self.first_write = value
+            else:
+                raise Marker(value)
+
+    events = []
+    probe = SequenceProbe()
+    try:
+        shuffle(x=probe)
+    except Marker as error:
+        assert error.args[0].number == 3
+    else:
+        raise AssertionError("setter exception was lost")
+    assert probe.first_write.number == 2
+    j = events[1][1]
+    assert 0 <= j <= 2
+    assert events == ["len", ("get", j), ("get", 2), ("set", 2, 2), ("set", j, 3)]

@@ -26,6 +26,9 @@ def current():
     assert isinstance(Path("child").info, path_types.PathInfo)
     assert not isinstance("child", path_types.PathInfo)
 
+    assert bytes(PurePosixPath("a/b")) == b"a/b"
+    assert bytes(PureWindowsPath("a/b")) == b"a\\b"
+
     path = PurePosixPath("parent")
     assert not path.joinpath("child").is_absolute()
     assert path.joinpath("/child").is_absolute()
