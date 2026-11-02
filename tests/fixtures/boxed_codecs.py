@@ -26,12 +26,23 @@ def check_text_encoding_flag():
 
 
 def check_raw_unicode_escape():
+    source = "\0\n\\u1234\x1aÿĀ€\ud800\udfff😀"
+    encoded = b"\0\n\\u1234\x1a\xff" + br"\u0100\u20ac\ud800\udfff\U0001f600"
     for alias in ("raw-unicode-escape", "raw_unicode_escape", "RAW Unicode ESCAPE"):
+        assert source.encode(alias, "unknown.policy") == encoded
+        assert codecs.encode(source, alias) == encoded
         assert str(b"A\xff\x00", alias) == "A\xff\x00"
         assert br"\u20AC:\U0001f600".decode(alias) == "€:😀"
         assert codecs.decode(br"\\u20ac\\\u20ac", alias) == "\\\\u20ac\\\\€"
         assert bytearray(b"\\x00\\n\\\\q\\").decode(alias) == "\\x00\\n\\\\q\\"
         assert ord(str(br"\udc80", alias)) == 0xdc80
+    try:
+        codecs.encode(b"x", "raw-unicode-escape")
+    except TypeError as error:
+        assert str(error) == "raw_unicode_escape_encode() argument 1 must be str, not bytes"
+        assert error.__notes__ == ["encoding with 'raw-unicode-escape' codec failed"]
+    else:
+        raise AssertionError("accepted bytes for a text encoder")
     for wire, start, end, reason in (
         (br"xx\u12QZ", 2, 6, r"truncated \uXXXX escape"),
         (br"\\\U0001", 2, 8, r"truncated \UXXXXXXXX escape"),
