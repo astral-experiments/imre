@@ -1501,6 +1501,15 @@ def main():
         )
         compare("-B", shadow_script, extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
 
+        tokenize_script = root / "tokenize_entry.py"
+        tokenize_script.write_text(
+            "from io import StringIO\n"
+            "from tokenize import generate_tokens\n"
+            "for t in generate_tokens(StringIO('x += 1 # note').readline):\n"
+            "    print(t.string, t.exact_type)\n"
+        )
+        compare("-B", tokenize_script)
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
@@ -2952,6 +2961,7 @@ def report(text):
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
+            "boxed_tokenize.py",
             "boxed_colorize.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
