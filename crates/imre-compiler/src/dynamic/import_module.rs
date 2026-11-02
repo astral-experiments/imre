@@ -277,7 +277,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         )),
         "_frozen_importlib" | "importlib._bootstrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            let file = if name == "_frozen_importlib" { "_frozen_importlib.py" } else { "importlib/_bootstrap.py" };
+            let file = if name == "_frozen_importlib" {
+                "_frozen_importlib.py"
+            } else {
+                "importlib/_bootstrap.py"
+            };
             Some((file, SOURCE.get_or_init(|| {
                 const UPSTREAM: &str = include_str!(
                     "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap.py"

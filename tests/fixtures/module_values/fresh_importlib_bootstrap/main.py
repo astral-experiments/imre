@@ -77,4 +77,3 @@ with fresh_imports("_frozen_importlib", "importlib._bootstrap"):
         raise AssertionError("disabled core bootstrap was imported")
 
 print("fresh bootstrap providers ok")
-
