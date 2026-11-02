@@ -141,10 +141,10 @@ pub(super) unsafe fn spawn(
     // SAFETY: the original command and configuration are still rooted.
     unsafe { validate_command_shape(cmd, config) }
         .map_err(|e| popen::error_after_handles(pending, false, e))?;
-    // SAFETY: the caller roots the command until both launch APIs finish validation.
     let direct = redirects.direct.unwrap_or_else(|| {
         allow_spawn
             && uses_posix_spawn(
+                // SAFETY: the caller roots the command and any explicit executable.
                 unsafe { has_directory(cmd, config) },
                 !config.cwd.is_null(),
                 modes,

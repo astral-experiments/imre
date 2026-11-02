@@ -157,7 +157,8 @@ impl Lookahead {
             .map_err(|e| e.to_string())?
         {
             captures.set_pattern(Some(PatternID::ZERO));
-            for (slot, group) in captures.slots_mut().chunks_exact_mut(2).zip(found.iter()) {
+            let (slots, _) = captures.slots_mut().as_chunks_mut::<2>();
+            for (slot, group) in slots.iter_mut().zip(found.iter()) {
                 if let Some(m) = group {
                     slot[0] = NonMaxUsize::new(m.start());
                     slot[1] = NonMaxUsize::new(m.end());
