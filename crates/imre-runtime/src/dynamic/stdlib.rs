@@ -465,6 +465,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
             ctx.builtin("enum.Enum.__deepcopy__");
+            ctx.builtin("enum.Enum.__reduce_ex__");
             ctx.builtin(&format!("enum.{name}"))
         }
         (
@@ -2266,6 +2267,19 @@ pub(super) fn call(
         let [member, _] =
             builtins::bind_builtin_arguments("__deepcopy__", args, kwargs, ["self", "memo"], 2)?;
         return Ok(member.unwrap());
+    }
+    if name == "enum.Enum.__reduce_ex__" {
+        let [member, _] =
+            builtins::bind_builtin_arguments("__reduce_ex__", args, kwargs, ["self", "proto"], 2)?;
+        let member = member.unwrap();
+        let class = ctx.lookup_attr(member, "__class__")?;
+        // Both lookups may run Python; keep the first result live through the second.
+        let mark = ctx.heap.temporary_mark();
+        ctx.heap.keep(class);
+        let value = ctx.lookup_attr(member, "_value_");
+        ctx.heap.release_temporaries_since(mark);
+        let arguments = ctx.alloc(Value::Tuple(vec![value?]));
+        return Ok(ctx.alloc(Value::Tuple(vec![class, arguments])));
     }
     if name == "enum._simple_enum" {
         return ctx.enum_decorator(args, kwargs);

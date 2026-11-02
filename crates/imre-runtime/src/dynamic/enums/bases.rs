@@ -35,7 +35,7 @@ impl Context {
         };
         self.bind(scope, "__format__", format);
         if kind == "enum.Enum" {
-            for name in ["__copy__", "__deepcopy__"] {
+            for name in ["__copy__", "__deepcopy__", "__reduce_ex__"] {
                 let method = self.builtin(&format!("enum.Enum.{name}"));
                 self.bind(scope, name, method);
             }
