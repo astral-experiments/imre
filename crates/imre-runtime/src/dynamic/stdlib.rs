@@ -677,6 +677,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        #[cfg(unix)]
+        ("os" | "posix", "getuid" | "getgid" | "getgroups") => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         #[cfg(target_os = "linux")]
@@ -702,9 +706,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posix", "_create_environ" | "putenv" | "unsetenv") => {
             ctx.builtin(&format!("posix.{name}"))
         }
-        ("os" | "posix", "getpid" | "getuid" | "getgid" | "getgroups" | "urandom")
-            if cfg!(unix) =>
-        {
+        ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os", "name") => ctx.text("posix"),
