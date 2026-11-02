@@ -27,6 +27,8 @@ impl Member {
 // The implemented members in CPython 3.14.5 type dictionary order, with their clinic metadata.
 const MEMBERS: &[Member] = &[
     Member::new("__repr__", "Return repr(self).", "($self, /)"),
+    Member::new("__eq__", "Return self==value.", "($self, value, /)"),
+    Member::new("__ne__", "Return self!=value.", "($self, value, /)"),
     Member::new("__iter__", "Implement iter(self).", "($self, /)"),
     Member::new(
         "__init__",
@@ -106,6 +108,10 @@ pub(super) fn member(name: &str) -> Option<&'static Member> {
     MEMBERS.iter().find(|entry| entry.name == name)
 }
 
+pub(super) fn owns(name: &str) -> bool {
+    member(name).is_some() || matches!(name, "__new__" | "__hash__" | "maxlen")
+}
+
 /// Expose the immutable native type's own members through the same objects as class lookup.
 pub(super) fn class_dictionary(ctx: &mut Context, class: Id) -> Result<Id> {
     ctx.native_class_dictionary(
@@ -114,7 +120,7 @@ pub(super) fn class_dictionary(ctx: &mut Context, class: Id) -> Result<Id> {
         MEMBERS
             .iter()
             .map(|entry| entry.name)
-            .chain(["__new__", "maxlen"]),
+            .chain(["__new__", "__hash__", "maxlen"]),
     )
 }
 
@@ -181,6 +187,8 @@ pub(super) fn install(ctx: &mut Context) {
         ctx.builtin(&format!("{CLASS}.{}", member.name));
     }
     ctx.builtin("collections.deque.__new__");
+    ctx.builtins
+        .insert("collections.deque.__hash__".into(), NONE);
     let get = ctx.builtin("collections.deque._get_maxlen");
     let descriptor = ctx.alloc(Value::GetSetDescriptor {
         owner: CLASS,
@@ -313,11 +321,12 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
                     answer = Some(equal_op);
                     continue;
                 }
-                let is_deque = matches!(
-                    (ctx.heap.get(a), ctx.heap.get(b)),
-                    (Value::Deque(_), Value::Deque(_))
+                let containers = (
+                    ctx.heap.get(ctx.scalar_value(a)),
+                    ctx.heap.get(ctx.scalar_value(b)),
                 );
-                let unequal = match (ctx.heap.get(a), ctx.heap.get(b)) {
+                let is_deque = matches!(containers, (Value::Deque(_), Value::Deque(_)));
+                let unequal = match containers {
                     (Value::Deque(x), Value::Deque(y)) => x.items.len() != y.items.len(),
                     (Value::List(x), Value::List(y)) | (Value::Tuple(x), Value::Tuple(y)) => {
                         x.len() != y.len()
@@ -692,6 +701,13 @@ pub(super) fn method(
         return index(ctx, storage, rest);
     }
     match (name, rest) {
+        ("__eq__" | "__ne__", [other]) => {
+            if !matches!(ctx.heap.get(ctx.scalar_value(*other)), Value::Deque(_)) {
+                return Ok(super::value::NOT_IMPLEMENTED);
+            }
+            let op = if name == "__eq__" { "==" } else { "!=" };
+            return compare(ctx, op, receiver, *other).map(builtins::boolean);
+        }
         ("__contains__", [item]) => return ctx.contains(*item, storage).map(builtins::boolean),
         ("__getitem__", [index]) => return IndexOp::Get.apply(ctx, storage, *index, true),
         ("__setitem__", [index, value]) => {
@@ -702,7 +718,7 @@ pub(super) fn method(
             extend(ctx, receiver, *item, false)?;
             return Ok(receiver);
         }
-        ("__getitem__" | "__delitem__" | "__iadd__" | "__contains__", _) => {
+        ("__getitem__" | "__delitem__" | "__iadd__" | "__contains__" | "__eq__" | "__ne__", _) => {
             return Err(Error::new(
                 "TypeError",
                 format!("expected 1 argument, got {}", rest.len()),

@@ -285,6 +285,9 @@ def current():
     assert derived.allocated == 1 and duplicate.allocated == 2
     assert duplicate.source is derived and not hasattr(duplicate, "extra")
     assert derived.maxlen == duplicate.maxlen == 2 and list(duplicate) == [1, 2]
+    assert derived == duplicate == deque([1, 2]) and not (duplicate != derived)
+    assert deque.__eq__(derived, [1, 2]) is NotImplemented
+    assert Recorded.__hash__ is None
     assert deque.pop.__get__(derived).__self__ is derived
     assert deque.__iadd__(derived, derived) is derived and list(derived) == [1, 2]
     try:
@@ -302,5 +305,7 @@ def current():
     assert list(derived) == [] and list(deque.__iter__(derived)) == [1, 2]
     assert type(derived.copy()) is EmptyView and len(derived.copy()) == 0
     assert repr(derived) == "EmptyView([])"
+    assert derived == EmptyView([3, 4]) and derived != deque([1, 2])
+    assert derived != EmptyView([1])
 
     print("deque passed")

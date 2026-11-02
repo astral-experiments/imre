@@ -354,7 +354,7 @@ impl Context {
                         | "module"
                         | super::thread_local::CLASS
                         | weakref::REFERENCE_TYPE
-                ) || (kind == super::deque::CLASS && (super::deque::member(name).is_some() || matches!(name, "__new__" | "maxlen")))
+                ) || (kind == super::deque::CLASS && super::deque::owns(name))
                     || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
@@ -2817,6 +2817,7 @@ impl Context {
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if owner == super::deque::CLASS => return Ok(self.text("maximum size of a deque or None if unbounded")),
                     "__doc__" if owner == "int" => {
                         return Ok(
                             self.text(format!("the {field} of a rational number in lowest terms"))
@@ -2945,7 +2946,7 @@ impl Context {
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
-                    _ if class == super::deque::CLASS && (super::deque::member(name).is_some() || matches!(name, "__new__" | "maxlen")) => {
+                    _ if class == super::deque::CLASS && super::deque::owns(name) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}
