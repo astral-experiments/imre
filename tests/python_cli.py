@@ -1830,6 +1830,7 @@ def report(text):
             "boxed_function_call.py",
             "boxed_any_generator.py",
             "boxed_global.py",
+            "boxed_configparser.py",
             "boxed_logging.py",
             "boxed_logging_file.py",
             "boxed_logging_file_error.py",
