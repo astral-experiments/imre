@@ -155,6 +155,7 @@ impl Alphabet {
 
 struct Escapes {
     alphabet: Alphabet,
+    preserve_categories: bool,
     bracketed_word: bool,
 }
 
@@ -413,9 +414,25 @@ pub fn validation_source(
     )
 }
 
+/// Tokenize byte patterns without expanding categories into ordinary literal ranges.
+pub fn locale_byte_source(pattern: &str, verbose: bool, dotall: bool) -> Option<String> {
+    tokenize(
+        pattern,
+        verbose,
+        Alphabet::Bytes,
+        dotall,
+        false,
+        Grammar::LocaleBytes,
+        None,
+    )
+    .ok()
+    .map(|(source, _)| source)
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Grammar {
     Validation,
+    LocaleBytes,
     Standard { multiline: bool },
     Lookahead,
     Backtracking,
@@ -582,6 +599,7 @@ fn tokenize(
     let visiting = warnings.is_some();
     let mut escapes = Escapes {
         alphabet,
+        preserve_categories: grammar == Grammar::LocaleBytes,
         bracketed_word: false,
     };
     let mut modes = vec![(0, alphabet)];
@@ -1533,7 +1551,12 @@ fn escaped(
     let c = input.next().ok_or("incomplete regex escape")?;
     let ascii = escapes.alphabet.ascii();
     if ascii && let Some(class) = ascii_class(c) {
-        output.push_str(class);
+        if escapes.preserve_categories {
+            output.push('\\');
+            output.push(c);
+        } else {
+            output.push_str(class);
+        }
         return Ok(Escape::Class);
     }
     let value = match c {
@@ -1638,6 +1661,7 @@ fn escaped(
 pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usize)> {
     let mut input = Input::new(source.strip_prefix('[')?);
     let mut escapes = Escapes {
+        preserve_categories: false,
         alphabet: if bytes {
             Alphabet::Bytes
         } else {

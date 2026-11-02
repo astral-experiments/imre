@@ -11,6 +11,8 @@ use crate::dynamic::builtins::bind;
 mod assertions;
 mod flags;
 mod group_names;
+#[cfg(target_os = "linux")]
+mod locale;
 mod lookahead;
 mod named_escapes;
 mod progress;
@@ -131,6 +133,10 @@ impl Pattern {
             (Some(a), Some(b)) if a.same_program(b) => {}
             _ => return false,
         }
+        #[cfg(target_os = "linux")]
+        if let (Matcher::Locale(a), Matcher::Locale(b)) = (&self.regex, &other.regex) {
+            return a.same_program(b);
+        }
         if self.engine_source == other.engine_source {
             return true;
         }
@@ -195,11 +201,17 @@ impl Pattern {
 
     /// Describe the matcher and translated program that this Pattern will execute.
     fn debug_program(&self, output: &mut String) {
-        let backend = match &self.regex {
-            Matcher::Standard(_) => "regex-automata meta",
-            Matcher::Lookahead(_) => "fancy-regex",
-            Matcher::Guarded(_) => "progress-aware PikeVM",
-            Matcher::Asserted(_) => "assertion-aware Thompson NFA",
+        let source: &dyn std::fmt::Debug = &self.engine_source;
+        let (backend, program) = match &self.regex {
+            Matcher::Standard(_) => ("regex-automata meta", source),
+            #[cfg(target_os = "linux")]
+            Matcher::Locale(locale) => (
+                "regex-automata meta, LC_CTYPE at search time",
+                locale.program(),
+            ),
+            Matcher::Lookahead(_) => ("fancy-regex", source),
+            Matcher::Guarded(_) => ("progress-aware PikeVM", source),
+            Matcher::Asserted(_) => ("assertion-aware Thompson NFA", source),
         };
         let kind = if self.bytes { "bytes" } else { "str" };
         write!(
@@ -207,7 +219,7 @@ impl Pattern {
             "Imre regex ({backend}, {kind}, flags={:#x}, groups={})\n  program {:?}",
             self.flags,
             self.group_count(),
-            self.engine_source,
+            program,
         )
         .unwrap();
         for (slot, guard) in &self.assertions {
@@ -321,6 +333,10 @@ impl Pattern {
                     .strip_suffix(imre_regex::FINAL_NEWLINE_ANCHOR)
                     .unwrap_or(&self.engine_source);
                 let full = format!(r"(?:{source})\z");
+                #[cfg(target_os = "linux")]
+                if let Matcher::Locale(matcher) = &self.regex {
+                    return Ok(Matcher::Locale(Box::new(matcher.full())));
+                }
                 if let Matcher::Lookahead(matcher) = &self.regex {
                     return matcher
                         .with_source(&full)
@@ -1272,6 +1288,15 @@ fn prepare(
             Ok((source, matcher))
         })
         .or_else(backtrack)?;
+    #[cfg(target_os = "linux")]
+    let regex = if bytes
+        && flags & (LOCALE | IGNORECASE) == LOCALE | IGNORECASE
+        && let Some(locale) = locale::LocaleMatcher::parse(&source, flags, regex.group_info())
+    {
+        Matcher::Locale(Box::new(locale))
+    } else {
+        regex
+    };
     Ok(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },

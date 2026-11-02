@@ -241,6 +241,11 @@ def current():
             locale_ref = re.compile(rb"([a-c]*)\1", re.L | re.I)
             assert locale_ref.fullmatch(b"AbCaBc").group(1) == b"AbC"
             assert locale_ref.fullmatch(b"AbCac") is None
+            # A negated singleton is one literal, while a range or compound set tests each case.
+            for spelling in (b"[^A]", b"[^AA]"):
+                assert re.fullmatch(spelling, b"a", re.L | re.I) is None
+            for spelling in (b"[^AB]", b"[^A-A]", rb"[^AB] (?#\w)", rb"[^AB]  # \w"):
+                assert re.fullmatch(spelling, b"a", re.L | re.I | re.X).span() == (0, 1)
         finally:
             _locale.setlocale(_locale.LC_CTYPE, saved)
 
