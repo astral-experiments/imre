@@ -8,7 +8,7 @@ pub(super) struct Flags {
 }
 
 pub(super) struct DeferredError {
-    pub error: (&'static str, usize),
+    pub error: (String, usize),
     pub prefix: Vec<u8>,
 }
 
@@ -43,6 +43,36 @@ fn delimited(source: &[u8], mut i: usize, delimiter: u8) -> Option<usize> {
     (delimiter == b'\n').then_some(i)
 }
 
+fn original_spelling(source: &[u8], bytes: bool) -> std::borrow::Cow<'_, str> {
+    if bytes && !source.is_ascii() {
+        source
+            .iter()
+            .copied()
+            .map(char::from)
+            .collect::<String>()
+            .into()
+    } else {
+        std::str::from_utf8(source).unwrap().into()
+    }
+}
+
+// Properly ordered ASCII literals need no Python range check. Escapes and non-ASCII
+// endpoints are compared by the class parser after decoding.
+fn suspect_range(source: &[u8]) -> bool {
+    let long_escape = source
+        .windows(2)
+        .any(|p| p[0] == b'\\' && matches!(p[1], b'0'..=b'7' | b'x' | b'u' | b'U'));
+    source.windows(3).enumerate().any(|(i, p)| {
+        p[1] == b'-'
+            && p[2] != b']'
+            && (p[0] > p[2]
+                || !p.is_ascii()
+                || p[2] == b'\\'
+                || (i > 0 && source[i - 1] == b'\\')
+                || long_escape)
+    })
+}
+
 pub(super) fn parse(
     source: &[u8],
     bits: i64,
@@ -53,7 +83,9 @@ pub(super) fn parse(
         skip: 0,
         deferred: None,
     };
-    if !source.windows(2).any(|pair| pair == b"(?") {
+    if !source.windows(2).any(|pair| pair == b"(?")
+        && !(source.contains(&b'[') && suspect_range(source))
+    {
         return Ok(result);
     }
     let position = |i| {
@@ -62,6 +94,12 @@ pub(super) fn parse(
         } else {
             std::str::from_utf8(&source[..i]).unwrap().chars().count()
         }
+    };
+    let deferred = |error: (String, usize), prefix: &[u8], depth: usize| {
+        // Close the prefix's open groups so an earlier syntax error takes precedence.
+        let mut prefix = prefix.to_vec();
+        prefix.extend(std::iter::repeat_n(b')', depth));
+        DeferredError { error, prefix }
     };
     let mut verbose = bits & VERBOSE != 0;
     let mut parents = Vec::new();
@@ -97,9 +135,40 @@ pub(super) fn parse(
             b'[' => {
                 let mut start = i + 1 + usize::from(rest.get(1) == Some(&b'^'));
                 start += usize::from(source.get(start) == Some(&b']'));
-                let Some(end) = delimited(source, start, b']') else {
-                    break;
-                };
+                let end = delimited(source, start, b']').unwrap_or(source.len());
+                let class = &source[i..end];
+                if suspect_range(class) {
+                    let text = original_spelling(class, bytes);
+                    if let Some((msg, at)) = imre_regex::class_range_diagnostic(&text, bytes) {
+                        let bad = deferred(
+                            (msg, position(i) + at),
+                            &source[result.skip..i],
+                            parents.len(),
+                        );
+                        // A backend that rejects the later range cannot supply an AST for
+                        // an earlier duplicate repetition. Diagnose its complete prefix.
+                        let prefix = original_spelling(&bad.prefix, bytes);
+                        if let Some((msg, offset)) =
+                            imre_regex::repeat_diagnostic(&prefix, result.bits & VERBOSE != 0)
+                        {
+                            let start = prefix[..offset].chars().count();
+                            let end = if bytes { start } else { offset };
+                            let prior = &bad.prefix[..end];
+                            // A backend's counted repetitions have different limits. Leave them,
+                            // unsupported syntax and unclosed prefixes to ordinary compilation.
+                            if !prior.contains(&b'{')
+                                && valid_translated_prefix(prior, result.bits, bytes)
+                            {
+                                return Err((msg, position(result.skip) + start));
+                            }
+                        } else if bad.prefix.is_empty()
+                            || valid_translated_prefix(&bad.prefix, result.bits, bytes)
+                        {
+                            result.deferred = Some(bad);
+                        }
+                        break;
+                    }
+                }
                 i = end;
             }
             b')' => {
@@ -172,14 +241,12 @@ pub(super) fn parse(
                             result.skip = i;
                             continue;
                         }
-                        // Check the actual prefix with the ordinary compiler. Closing its open
-                        // groups lets errors earlier than this token retain their precedence.
-                        let mut prefix = source[result.skip..open].to_vec();
-                        prefix.extend(std::iter::repeat_n(b')', parents.len()));
-                        result.deferred = Some(DeferredError {
-                            error: invalid.unwrap_or_else(|| (PLACEMENT, position(open))),
-                            prefix,
-                        });
+                        let (msg, at) = invalid.unwrap_or_else(|| (PLACEMENT, position(open)));
+                        result.deferred = Some(deferred(
+                            (msg.into(), at),
+                            &source[result.skip..open],
+                            parents.len(),
+                        ));
                         break;
                     }
                     if (added | removed) != 0 && source.get(j) == Some(&b':') {

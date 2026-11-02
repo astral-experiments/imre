@@ -763,7 +763,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         return Err(pattern_error_at(
             ctx,
             id,
-            bad.error.0.into(),
+            bad.error.0.clone(),
             Some(bad.error.1),
         ));
     }
@@ -789,7 +789,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         return Err(pattern_error_at(
             ctx,
             id,
-            bad.error.0.into(),
+            bad.error.0,
             Some(bad.error.1),
         ));
     }
@@ -856,9 +856,11 @@ fn valid_prefix(id: Id, prefix: &[u8], flags: i64, bytes: bool, inline_verbose: 
     }
     // A conditional with no other backtracking feature can be valid Python syntax
     // even when there is no native matcher for the truncated expression.
-    if !prefix.windows(3).any(|w| w == b"(?(") {
-        return false;
-    }
+    prefix.windows(3).any(|w| w == b"(?(") && valid_translated_prefix(prefix, flags, bytes)
+}
+
+// The raw regex backend accepts extra syntax such as Unicode property escapes.
+fn valid_translated_prefix(prefix: &[u8], flags: i64, bytes: bool) -> bool {
     let spelling = if bytes {
         byte_pattern(prefix)
     } else {
