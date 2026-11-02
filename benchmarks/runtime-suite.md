@@ -2,7 +2,7 @@
 
 Median elapsed time in milliseconds, including startup, imports and file I/O. Lower is faster. The [README](../README.md#benchmarks) lists all six medians for each runtime.
 
-![Median elapsed times for Rust, Imre and CPython across six workloads, with bars showing Imre’s speedup over CPython.](results/runtime-suite.svg)
+![Six panels comparing median elapsed time for Rust, Imre and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.](results/runtime-suite.svg)
 
 The ranges below are the 25th and 75th percentiles of the same 12 measurements on a shared VM. The last column gives the size of the file each implementation had to reproduce byte for byte.
 
@@ -39,7 +39,7 @@ Run the suite from the repository root on Linux with CPython 3.14+, Clang 18 and
 python3.14 benchmarks/runtime_suite.py --output benchmarks/local/runtime-suite.json
 ```
 
-The runner builds the native executables before timing and selects the first permitted CPU. Pass `--cpu N` to select another one. The recorded run used `--cpu 30 --toolchain ohm`. This command writes the runtime chart used in the README and this guide (`runtime-suite.svg`) and prints both Markdown tables from the committed data.
+The runner builds the native executables before timing and selects the first permitted CPU. Pass `--cpu N` to select another one. The recorded run used `--cpu 30 --toolchain ohm`. This command writes the six workload panels used in the README and this guide (`runtime-suite.svg`) and prints both Markdown tables from the committed data.
 
 ```sh
 uv run --script benchmarks/render_runtime_suite.py benchmarks/results/runtime-suite.json \

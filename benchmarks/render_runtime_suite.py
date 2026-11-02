@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["matplotlib==3.10.8"]
 # ///
-"""Render the benchmark charts and print the README and benchmark-guide tables."""
+"""Render the workload panels and print the README and benchmark-guide tables."""
 
 import argparse
 import gzip
@@ -13,17 +13,19 @@ from pathlib import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch, Rectangle
+from matplotlib.ticker import MaxNLocator
 
+ENGINES = {"rust": "Rust", "imre": "Imre", "cpython": "CPython"}
 PANEL_TITLES = {
     "Inventory (repeated)": "Inventory · repeated",
     "Inventory (distinct)": "Inventory · distinct",
     "Conformance report": "Offline conformance report",
 }
 # Match the benchmark cards in astral-experiments/serc.
-SURFACE, BORDER = "#261230", "#503d60"
+SURFACE, BORDER, RULE = "#261230", "#503d60", "#453250"
 INK, MUTED = "#fbf2fc", "#c4b6d3"
 BAR, ACCENT = "#cdcbfb", "#de5fe9"
-WIDTH = 840
+WIDTH = 920
 
 
 def label(ax, x, y, text, size, *, color=INK, align="left", mono=False):
@@ -39,7 +41,7 @@ def label(ax, x, y, text, size, *, color=INK, align="left", mono=False):
     )
 
 
-def benchmark_card(height, title, subtitle):
+def benchmark_card(height, title, subtitle, metadata):
     fig = plt.figure(figsize=(WIDTH / 96, height / 96), dpi=96)
     ax = fig.add_axes((0, 0, 1, 1), xlim=(0, WIDTH), ylim=(height, 0))
     ax.set_axis_off()
@@ -51,17 +53,31 @@ def benchmark_card(height, title, subtitle):
             boxstyle="round,pad=0,rounding_size=19",
             facecolor=SURFACE,
             edgecolor=BORDER,
-            linewidth=0.8,
+            linewidth=1.2,
             zorder=-1,
         )
     )
-    label(ax, 42, 54, title, 34)
-    label(ax, 43, 88, subtitle, 17, color=MUTED)
+    ax.add_patch(
+        FancyBboxPatch(
+            (48, 41),
+            31,
+            31,
+            boxstyle="round,pad=0,rounding_size=7",
+            facecolor=BAR,
+            edgecolor="none",
+        )
+    )
+    for i, width in enumerate((17, 12, 7)):
+        ax.add_patch(Rectangle((55, 49 + 5 * i), width, 3, color=SURFACE, linewidth=0))
+    label(ax, 91, 57, "IMRE / BENCHMARKS", 13, color=MUTED, mono=True)
+    label(ax, 872, 57, metadata, 13, color=MUTED, align="right", mono=True)
+    label(ax, 46, 114, title, 32)
+    label(ax, 48, 158, subtitle, 16, color=MUTED)
     return fig, ax
 
 
-def bar(ax, x, y, width, color):
-    ax.add_patch(Rectangle((x, y - 4), width, 8, facecolor=color, edgecolor="none"))
+def rule(ax, x0, y0, x1, y1):
+    ax.plot((x0, x1), (y0, y1), color=RULE, linewidth=0.8, zorder=0)
 
 
 def save(fig, path, title):
@@ -82,33 +98,97 @@ def save(fig, path, title):
     path.write_text(svg.replace("'DejaVu Sans'", "Arial, Helvetica, sans-serif"))
 
 
-def workload_chart(rows, path):
-    row_height = 39
-    height = 184 + len(rows) * row_height
+def bars(
+    ax,
+    medians,
+    x,
+    y,
+    width,
+    *,
+    engines=ENGINES,
+    label_width=83,
+    value_format="{:.2f} ms",
+):
+    row_step, bar_height = 29, 10
+    plot_x = x + label_width
+    plot_width = width - label_width - 99
+    ticks = MaxNLocator(nbins=3, steps=(1, 2, 2.5, 5, 10), integer=True).tick_values(
+        0, max(medians.values())
+    )
+    last_y = y + row_step * (len(engines) - 1)
+    for tick in ticks:
+        tick_x = plot_x + plot_width * tick / ticks[-1]
+        rule(ax, tick_x, y - 6, tick_x, last_y + 6)
+        label(
+            ax,
+            tick_x,
+            last_y + 24,
+            f"{tick:,g}",
+            12,
+            color=MUTED,
+            align="center",
+            mono=True,
+        )
+    for i, (engine, name) in enumerate(engines.items()):
+        row_y = y + row_step * i
+        value = medians[engine]
+        color = ACCENT if engine == "imre" else BAR
+        label(ax, x, row_y, name, 14, color=MUTED)
+        ax.add_patch(
+            Rectangle(
+                (plot_x, row_y - bar_height / 2),
+                plot_width * value / ticks[-1],
+                bar_height,
+                facecolor=color,
+                edgecolor="none",
+                zorder=2,
+            )
+        )
+        label(
+            ax,
+            x + width,
+            row_y,
+            value_format.format(value),
+            15,
+            color=color,
+            align="right",
+            mono=True,
+        )
+
+
+def workload_panels(rows, path):
+    row_count = (len(rows) + 1) // 2
+    height = 192 + 180 * row_count + 27
+    runs = len(rows[0][0]["samples_ns"])
     fig, ax = benchmark_card(
-        height, "Runtime by workload", "Median elapsed time in milliseconds"
+        height,
+        "Comparing Imre, Rust and CPython",
+        "Median runtime. Scales vary by workload. Speedups compare Imre with CPython.",
+        f"{runs} runs per engine",
     )
-
-    time_columns = (
-        ("rust", "Rust", 316),
-        ("imre", "Imre", 407),
-        ("cpython", "CPython", 512),
-    )
-    label(ax, 43, 136, "Workload", 15, color=MUTED)
-    for _, name, x in time_columns:
-        label(ax, x, 136, name, 15, color=MUTED, align="right")
-    label(ax, 558, 136, "Imre speedup over CPython", 15, color=MUTED)
-    ax.plot((43, 797), (152, 152), color=BORDER, linewidth=0.6)
-
-    max_speedup = max(speedup for _, _, speedup in rows) or 1
-    for i, (case, medians, speedup) in enumerate(rows):
-        y = 177 + i * row_height
-        label(ax, 43, y, PANEL_TITLES.get(case["name"], case["name"]), 17)
-        for engine, _, x in time_columns:
-            label(ax, x, y, f"{medians[engine]:.2f}", 17, align="right", mono=True)
-        bar(ax, 558, y, 169 * speedup / max_speedup, ACCENT)
-        label(ax, 797, y, f"{speedup:.1f}×", 17, align="right", mono=True)
-    save(fig, path, "Median runtime and Imre speedup over CPython by workload")
+    for i, (case, medians) in enumerate(rows):
+        x, y = 48 + i % 2 * 423, 192 + i // 2 * 180
+        rule(ax, x, y, x + 401, y)
+        label(
+            ax,
+            x + 4,
+            y + 23,
+            PANEL_TITLES.get(case["name"], case["name"]),
+            17,
+        )
+        speedup = medians["cpython"] / medians["imre"]
+        label(
+            ax,
+            x + 397,
+            y + 23,
+            f"{speedup:.1f}× speedup",
+            13,
+            color=ACCENT,
+            align="right",
+        )
+        label(ax, x + 4, y + 47, case["input"], 13, color=MUTED)
+        bars(ax, medians, x + 4, y + 74, 393)
+    save(fig, path, "Median runtime by workload")
 
 
 def frozen_flask_panel(report, path):
@@ -136,22 +216,24 @@ def frozen_flask_panel(report, path):
         medians[engine] = statistics.median(row["RPS"] for row in trials)
 
     fig, ax = benchmark_card(
-        279,
+        408,
         "Frozen Flask throughput",
-        f"Median requests per second with {concurrency} clients",
+        f"{settings['requests']:,} requests per round, split across health checks, HTML greetings and JSON sums.",
+        f"{rounds} rounds · {concurrency} clients",
     )
-    fastest = max(medians.values()) or 1
-    for i, engine in enumerate(sorted(engines, key=medians.__getitem__, reverse=True)):
-        y = 133 + i * 35
-        label(ax, 43, y, engines[engine], 17)
-        bar(
-            ax,
-            225,
-            y,
-            476 * medians[engine] / fastest,
-            ACCENT if engine == "imre" else BAR,
-        )
-        label(ax, 797, y, f"{medians[engine]:,.0f}", 17, align="right", mono=True)
+    rule(ax, 48, 192, 872, 192)
+    label(ax, 52, 217, "Median requests per second", 17)
+    label(ax, 868, 217, "Higher is faster", 13, color=MUTED, align="right")
+    bars(
+        ax,
+        medians,
+        52,
+        251,
+        816,
+        engines=engines,
+        label_width=180,
+        value_format="{:,.0f}",
+    )
     save(fig, path, "Frozen Flask mixed HTTP throughput")
 
 
@@ -195,9 +277,9 @@ def main():
         spreads.append(
             f"| {case['name']} | {' | '.join(intervals)} | {case['report_bytes']:,} |"
         )
-        rows.append((case, medians, speedup))
+        rows.append((case, medians))
 
-    workload_chart(rows, args.output_dir / "runtime-suite.svg")
+    workload_panels(rows, args.output_dir / "runtime-suite.svg")
     if args.flask_results:
         opener = gzip.open if args.flask_results.suffix == ".gz" else open
         with opener(args.flask_results, "rt") as stream:
