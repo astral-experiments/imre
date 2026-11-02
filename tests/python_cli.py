@@ -1916,6 +1916,12 @@ def main():
             "atexit.register(events.append, 'older')\n"
             "atexit.register(Result)\n", "atexit",
         )
+        if os.name == "posix":
+            immediate_exit = Path(__file__).resolve().parent / "fixtures/os_immediate_exit.py"
+            for flags in ((), ("--runtime-imports",)):
+                compare("-IB", immediate_exit, status=37,
+                        native_args=("run", immediate_exit, "--quiet", "--opt-level", "0", *flags),
+                        native_timeout=300)
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
