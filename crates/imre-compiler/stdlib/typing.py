@@ -1,6 +1,7 @@
 """Stream annotations and special forms for the runtime typing module."""
 
 import typing as _typing
+from _collections_abc import MutableMapping as _MutableMapping
 from functools import lru_cache
 from typing import Generic, TypeVar
 
@@ -300,14 +301,15 @@ class _SpecialGenericAlias(_NotIterable):
     """A named typing alias for a builtin collection."""
     __module__ = __name__
 
-    def __init__(self, origin, nparams, *, name):
+    def __init__(self, origin, nparams, *, name, inst=True):
         self.__origin__ = origin
         self._name = name
         self.__qualname__ = name
-        self._inst = False
+        self._inst = inst
         self._nparams = nparams
         self.__slots__ = None
-        self.__doc__ = f"Deprecated alias to {origin.__qualname__}."
+        module = "" if origin.__module__ == "builtins" else origin.__module__ + "."
+        self.__doc__ = f"Deprecated alias to {module}{origin.__qualname__}."
 
     def __repr__(self):
         return "typing." + self._name
@@ -394,7 +396,7 @@ class _TupleType(_SpecialGenericAlias):
         return self.copy_with(tuple(_alias_type_arg(p, message) for p in params))
 
 
-Tuple = _TupleType(tuple, -1, name="Tuple")
+Tuple = _TupleType(tuple, -1, name="Tuple", inst=False)
 Tuple.__doc__ = \
     """Deprecated alias to builtins.tuple.
 
@@ -406,7 +408,9 @@ Tuple.__doc__ = \
 
     To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
     """
-List = _SpecialGenericAlias(list, 1, name="List")
+List = _SpecialGenericAlias(list, 1, name="List", inst=False)
+Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
+MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
 def _substitute_alias_argument(arg, replacements):

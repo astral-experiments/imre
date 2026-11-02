@@ -1526,6 +1526,7 @@ def report(text):
             "boxed_typing_protocol.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
+            "boxed_typing_mapping.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
