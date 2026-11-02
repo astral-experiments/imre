@@ -2,6 +2,15 @@ use num_bigint::{BigInt, Sign};
 
 use super::*;
 
+/// Apply the integer addition slot without invoking a reflected method or coercion.
+pub(super) fn add(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
+    let Ok(rhs) = ctx.as_int(other) else {
+        return Ok(NOT_IMPLEMENTED);
+    };
+    let sum = crate::integer_binary(&ctx.as_int(receiver)?, &rhs, 0)?;
+    Ok(ctx.alloc(Value::Int(sum)))
+}
+
 pub(super) fn bit_length(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (&receiver, args) = args
         .split_first()
