@@ -1751,6 +1751,7 @@ def report(text):
             "boxed_csv.py",
             "boxed_bytes_separators.py",
             "boxed_bytes_fromhex.py",
+            "boxed_binary_endswith.py",
             "boxed_struct.py",
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",

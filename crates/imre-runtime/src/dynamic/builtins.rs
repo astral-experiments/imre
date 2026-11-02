@@ -345,13 +345,15 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
-pub(super) const BYTEARRAY_METHODS: &[&str] =
-    &["__repr__", "append", "clear", "copy", "extend", "reverse"];
+pub(super) const BYTEARRAY_METHODS: &[&str] = &[
+    "__repr__", "append", "clear", "copy", "endswith", "extend", "reverse",
+];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
     "__repr__",
     "decode",
+    "endswith",
     "rfind",
     "rsplit",
     "rstrip",
@@ -1029,7 +1031,9 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
+            "bytearray" if matches!(method, "decode" | "endswith") => {
+                text::method(ctx, owner, method, args, kwargs)
+            }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
                 text::bytearray_method(ctx, name, method, args, kwargs)

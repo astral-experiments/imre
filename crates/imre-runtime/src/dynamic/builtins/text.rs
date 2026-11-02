@@ -1113,7 +1113,7 @@ pub(super) fn method(
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {
             type_error("str.__new__(): not enough arguments")
-        } else if matches!(owner, "str" | "bytes") {
+        } else if matches!(owner, "str" | "bytes" | "bytearray") {
             type_error(format!("unbound method {owner}.{name}() needs an argument"))
         } else {
             type_error("missing string receiver")
@@ -1122,11 +1122,14 @@ pub(super) fn method(
     if name == "__new__" {
         return ctx.new_string(owner, receiver, args, kwargs);
     }
-    let receiver = if owner == "bytes" {
+    let receiver = if owner == "bytes" || (owner == "bytearray" && name == "endswith") {
         let storage = ctx.scalar_value(receiver);
-        if !matches!(ctx.heap.get(storage), Value::Bytes(_)) {
+        if !matches!(
+            (owner, ctx.heap.get(storage)),
+            ("bytes", Value::Bytes(_)) | ("bytearray", Value::ByteArray(_))
+        ) {
             return Err(type_error(format!(
-                "descriptor '{name}' for 'bytes' objects doesn't apply to a '{}' object",
+                "descriptor '{name}' for '{owner}' objects doesn't apply to a '{}' object",
                 ctx.type_name(receiver)
             )));
         }
@@ -1177,7 +1180,9 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "find" | "rfind" | "count") | ("bytes", "rfind" | "startswith")
+        ("str", "find" | "rfind" | "count")
+            | ("bytes", "rfind" | "startswith" | "endswith")
+            | ("bytearray", "endswith")
     ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
@@ -1218,7 +1223,7 @@ pub(super) fn method(
         };
         let start = bound(args.get(1))?;
         let end = bound(args.get(2))?;
-        if owner == "bytes" {
+        if owner != "str" {
             let len = ctx.bytes_like(receiver)?.len() as i64;
             let index = |n: &crate::Int| {
                 let n = n.to_i64().unwrap_or(if n.big().is_negative() {
@@ -1234,22 +1239,32 @@ pub(super) fn method(
             };
             let start = start.as_ref().map_or(0, index) as usize;
             let end = end.as_ref().map_or(len, index).min(len) as usize;
-            if name == "startswith" {
+            if matches!(name, "startswith" | "endswith") {
                 let tuple = ctx.tuple_items(needle)?;
                 let candidates = tuple.as_deref().unwrap_or(&args[..1]);
                 let value = ctx.bytes_like(receiver)?.get(start..end);
                 for &candidate in candidates {
-                    let prefix = ctx.bytes_like(candidate).map_err(|error| {
+                    let affix = match ctx.heap.get(ctx.scalar_value(candidate)) {
+                        Value::Array(array) => Ok(array.as_bytes()),
+                        _ => ctx.bytes_like(candidate),
+                    }
+                    .map_err(|error| {
                         if tuple.is_some() {
                             error
                         } else {
                             type_error(format!(
-                                "startswith first arg must be bytes or a tuple of bytes, not {}",
+                                "{name} first arg must be bytes or a tuple of bytes, not {}",
                                 ctx.type_name(candidate)
                             ))
                         }
                     })?;
-                    if value.is_some_and(|slice| slice.starts_with(prefix)) {
+                    if value.is_some_and(|slice| {
+                        if name == "startswith" {
+                            slice.starts_with(affix)
+                        } else {
+                            slice.ends_with(affix)
+                        }
+                    }) {
                         return Ok(TRUE);
                     }
                 }
@@ -1507,11 +1522,17 @@ pub(super) fn method(
             }
         };
         let part = source.get(byte_at(start)..byte_at(end)).unwrap_or_default();
-        let candidates = match ctx.heap.get(args[0]) {
-            Value::Tuple(values) => values.as_slice(),
-            _ => &args[..1],
-        };
+        let tuple = ctx.tuple_items(args[0])?;
+        let candidates = tuple.as_deref().unwrap_or(&args[..1]);
         for &id in candidates {
+            if ctx.string_storage(id).is_none() {
+                let kind = ctx.type_name(id);
+                return Err(type_error(if tuple.is_some() {
+                    format!("tuple for {name} must only contain str, not {kind:.100}")
+                } else {
+                    format!("{name} first arg must be str or a tuple of str, not {kind:.100}")
+                }));
+            }
             let needle = ctx.str_value(id)?;
             if start <= end
                 && (if name == "startswith" {
