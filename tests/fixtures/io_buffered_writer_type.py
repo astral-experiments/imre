@@ -1,6 +1,7 @@
 import gc
 import io
 import os
+import sys
 import tempfile
 from _io import BufferedWriter as NativeWriter
 
@@ -89,5 +90,17 @@ try:
         raises(OSError, os.fstat, fd)
         with io.FileIO(name) as source:
             assert source.read() == b"pending"
+    initial = sys.modules.pop("_io")
+    try:
+        fresh = __import__("_io")
+        open_file = fresh.open
+        file_type, writer_type = fresh.FileIO, fresh.BufferedWriter
+        fresh.FileIO = fresh.BufferedWriter = None
+        with open_file(path, "wb") as stream:
+            assert type(stream) is writer_type and type(stream.raw) is file_type
+        with open_file(path, "rb", 0) as raw:
+            assert type(raw) is file_type
+    finally:
+        sys.modules["_io"] = initial
 finally:
     os.unlink(path)

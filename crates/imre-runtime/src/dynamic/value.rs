@@ -1059,6 +1059,7 @@ pub(super) enum Value {
         kind: FormatKind,
     },
     IoOpen {
+        file: Id,
         reader: Id,
         writer: Id,
         random: Id,
@@ -1638,11 +1639,12 @@ impl Value {
                 visit.extend(*back);
             }
             Self::IoOpen {
+                file,
                 reader,
                 writer,
                 random,
                 unsupported,
-            } => visit.extend([*reader, *writer, *random, *unsupported]),
+            } => visit.extend([*file, *reader, *writer, *random, *unsupported]),
             Self::IoMethod {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),

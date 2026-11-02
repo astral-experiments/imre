@@ -5488,11 +5488,12 @@ impl Context {
             }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::IoOpen {
+                file,
                 reader,
                 writer,
                 random,
                 unsupported,
-            } => stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)
+            } => stdlib::io::open_from_module(self, file, reader, writer, random, &args, &kwargs)
                 .map_err(|error| stdlib::io::qualify_error(self, error, Some(unsupported))),
             Value::IoMethod {
                 owner,

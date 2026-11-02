@@ -402,6 +402,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         ctx.builtin("open")
     } else {
         let callable = ctx.alloc(Value::IoOpen {
+            file,
             reader,
             writer,
             random,
@@ -748,6 +749,7 @@ pub(super) fn lines(
 /// Open a file using the native buffered classes captured by a fresh low-level module.
 pub(in super::super) fn open_from_module(
     ctx: &mut Context,
+    raw_class: Id,
     reader: Id,
     writer: Id,
     random: Id,
@@ -757,7 +759,7 @@ pub(in super::super) fn open_from_module(
     let Some((_, arguments)) = args.split_first() else {
         return Err(Error::new("TypeError", "_io.open needs its module"));
     };
-    let file = file_io::open_with_writer(ctx, arguments, kwargs, Some(writer))?;
+    let file = file_io::open_with_classes(ctx, arguments, kwargs, Some((raw_class, writer)))?;
     let class = match ctx.heap.get(file).native_io_class_name() {
         Some("_io.BufferedRandom") => random,
         Some("_io.BufferedReader") => reader,

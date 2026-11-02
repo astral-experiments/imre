@@ -312,14 +312,14 @@ pub(in crate::dynamic) fn open(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    open_with_writer(ctx, args, kwargs, None)
+    open_with_classes(ctx, args, kwargs, None)
 }
 
-pub(super) fn open_with_writer(
+pub(super) fn open_with_classes(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
-    writer: Option<Id>,
+    raw_and_writer: Option<(Id, Id)>,
 ) -> Result<Id> {
     let [
         file,
@@ -381,7 +381,10 @@ pub(super) fn open_with_writer(
     let opener = opener.filter(|&v| v != NONE);
     if buffering == 0 {
         let raw_mode = raw_open_mode(mode_text);
-        return open_raw(ctx, raw_arg, raw_mode, binary, owns, opener);
+        return open_raw(
+            ctx, raw_arg, raw_mode, binary, owns, opener,
+            raw_and_writer.map(|(raw, _)| raw),
+        );
     }
     let update = mode_text.contains('+');
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
@@ -410,7 +413,10 @@ pub(super) fn open_with_writer(
         let reading = mode_text.contains('r');
         let raw_mode = raw_open_mode(mode_text);
         ctx.module("io")?;
-        let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
+        let (raw_class, writer) = raw_and_writer.unwrap_or_else(|| {
+            (ctx.builtins["_io.FileIO"], ctx.builtins["_io.BufferedWriter"])
+        });
+        let raw = ctx.instance(raw_class, None);
         initialize_file(
             ctx,
             raw,
@@ -429,7 +435,6 @@ pub(super) fn open_with_writer(
         };
         if default_binary_path && !reading {
             // The writer must flush pending bytes before its owned FileIO is finalized.
-            let writer = writer.unwrap_or(ctx.builtins["_io.BufferedWriter"]);
             let capacity = ctx.int(capacity as i64);
             return ctx
                 .call(writer, vec![raw, capacity], Vec::new())
@@ -531,10 +536,11 @@ fn open_raw(
     binary: bool,
     owns: bool,
     opener: Option<Id>,
+    raw_class: Option<Id>,
 ) -> Result<Id> {
     // CPython creates/truncates the raw file before rejecting unbuffered text.
     ctx.module("io")?;
-    let class = ctx.builtins["_io.FileIO"];
+    let class = raw_class.unwrap_or(ctx.builtins["_io.FileIO"]);
     // The reported mode of w+ is rb+, but the constructor must still create/truncate.
     let mode = ctx.text(raw_mode);
     let file = ctx.call(
