@@ -2305,6 +2305,12 @@ impl Context {
                     }
                 }
             },
+            Value::File(ref handle)
+                if name == "name"
+                    && let Some(fd) = handle.socket_reader_name() =>
+            {
+                return Ok(self.int(i64::from(fd)));
+            }
             Value::File(ref handle) if name == "closed" => {
                 return Ok(if handle.closed() { TRUE } else { FALSE });
             }

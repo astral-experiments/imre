@@ -54,6 +54,16 @@ impl BinaryFile {
             .map_err(|_| Error::new("MemoryError", ""))
     }
 
+    /// SocketIO reports its live descriptor, or -1 once this reader has closed.
+    pub(in crate::dynamic) fn socket_reader_name(&self) -> Option<RawFd> {
+        match self {
+            Self::Reader { slot, socket: true } => {
+                Some(slot.borrow().as_ref().map_or(-1, AsRawFd::as_raw_fd))
+            }
+            _ => None,
+        }
+    }
+
     /// All aliases observe closure through the same buffered stream.
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
