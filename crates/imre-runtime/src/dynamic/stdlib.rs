@@ -604,6 +604,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
             ctx.builtin("posix._path_normpath")
         }
+        ("posixpath", "splitroot") | ("posix", "_path_splitroot_ex") => {
+            ctx.builtin("posix._path_splitroot_ex")
+        }
         ("posix", "environ") => os::environment(ctx),
         ("posix", "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
         ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
@@ -1332,8 +1335,10 @@ pub(super) fn call(
     if let Some(op) = name.strip_prefix("_imre_zipimport.") {
         return zipimport::call(ctx, op, args, kwargs);
     }
-    if matches!(name, "posix.fspath" | "posix._path_normpath")
-        || name.starts_with("_imre_posixpath.")
+    if matches!(
+        name,
+        "posix.fspath" | "posix._path_normpath" | "posix._path_splitroot_ex"
+    ) || name.starts_with("_imre_posixpath.")
     {
         return posixpath::call(ctx, name, args, kwargs);
     }
