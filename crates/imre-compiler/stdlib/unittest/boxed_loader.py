@@ -154,8 +154,31 @@ defaultTestLoader = TestLoader()
 
 def main():
     runner = _MainRunner()
-    runner._start()
-    suite = defaultTestLoader.loadTestsFromModule(__import__("__main__"))
+    names = []
+    patterns = []
+    args = iter(sys.argv[1:])
+    for arg in args:
+        if arg == "--":
+            names.extend(args)
+            break
+        if arg.startswith("-k"):
+            pattern = arg[2:].removeprefix("=") if arg != "-k" else next(args, None)
+            if pattern is None or (arg == "-k" and pattern.startswith("-") and pattern != "-"):
+                print("argument -k: expected one argument", file=sys.stderr)
+                sys.exit(2)
+            # CPython treats a pattern without '*' as a substring of the full test name.
+            patterns.append(pattern if "*" in pattern else "*" + pattern + "*")
+        elif arg.startswith("-") and arg != "-":
+            runner._setOption(arg)
+        else:
+            names.append(arg)
+    if patterns:
+        defaultTestLoader.testNamePatterns = patterns
+    module = __import__("__main__")
+    if names:
+        suite = defaultTestLoader.loadTestsFromNames(names, module)
+    else:
+        suite = defaultTestLoader.loadTestsFromModule(module)
     runner._runSuite(suite)
     runner._finish()
 

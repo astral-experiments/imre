@@ -956,6 +956,26 @@ def check_pickle_reductions(imre, root, run):
         sys.path.pop(0)
 
 
+def check_unittest_main_names(imre, root, run):
+    source = root / "selected_tests.py"
+    source.write_text(
+        "import unittest\n"
+        "class Cases(unittest.TestCase):\n"
+        "    def test_a(self): print('a')\n"
+        "    def test_b(self): print('b')\n"
+        "unittest.main()\n"
+    )
+    executable = root / "selected_tests"
+    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
+    assert built.returncode == 0, built
+    for args, output in [((), "a\nb\n"), (("Cases.test_b", "Cases.test_a"), "b\na\n"),
+                         (("-v", "-k", "test_b", "Cases"), "b\n")]:
+        result = run(executable, *args)
+        assert result.returncode == 0 and result.stdout == output, result
+    missing = run(executable, "-v", "Cases.test_missing")
+    assert missing.returncode == 1 and "_FailedTest" in missing.stderr, missing
+
+
 def check_unittest_file_discovery(imre, root, run):
     entry = root / "discover_after_build.py"
     entry.write_text(
@@ -2174,6 +2194,7 @@ def report(text):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
