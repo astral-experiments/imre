@@ -310,12 +310,14 @@ impl Function<'_, '_> {
                                 self.source,
                                 String::new(),
                                 Body::AnnotationValue(&v.annotation),
+                                false,
                             );
                             let code = self.output.definition(
                                 self.source,
                                 String::new(),
                                 Body::AnnotationThunk(value.clone(), v.annotation.range()),
                                 v.annotation.start(),
+                                false,
                             );
                             self.remember_annotation(v, name.id.as_str(), &value);
                             let name = self.text("__annotate__");
@@ -655,7 +657,7 @@ impl Function<'_, '_> {
                 if params.is_some_and(|p| p.kwarg.is_some()) {
                     flags |= VARKEYWORDS;
                 }
-                if type_params.is_some() || self.prefix.contains(".<locals>.") {
+                if type_params.is_some() || self.in_function {
                     flags |= NESTED;
                 }
                 if !self.prefix.is_empty() && !self.prefix.ends_with(".<locals>.") {
@@ -709,7 +711,7 @@ impl Function<'_, '_> {
             );
             use imre_ast::code_flags::*;
             let mut annotation_flags = OPTIMIZED | NEWLOCALS;
-            if type_params.is_some() || self.prefix.contains(".<locals>.") {
+            if type_params.is_some() || self.in_function {
                 annotation_flags |= NESTED;
             }
             if self.source.string_annotations {
@@ -734,6 +736,7 @@ impl Function<'_, '_> {
                 String::new(),
                 Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
+                false,
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
@@ -828,7 +831,10 @@ impl Function<'_, '_> {
             let value_format = self.integer(1);
             self.op("put", &[&defaults, &format, &value_format]);
         }
-        let code = self.output.definition(self.source, prefix, body, start);
+        let in_function = self.in_function || !matches!(body, Body::Namespace(_));
+        let code = self
+            .output
+            .definition(self.source, prefix, body, start, in_function);
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {
