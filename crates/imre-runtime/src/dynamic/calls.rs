@@ -1864,7 +1864,12 @@ impl Context {
                 "__class__" | "__origin__" => return Ok(super::union::class(self)),
                 "__module__" => return Ok(self.text("typing")),
                 "__name__" | "__qualname__" => return Ok(self.text("Union")),
-                _ => {}
+                _ => {
+                    let class = super::union::class(self);
+                    if let Some(member) = self.own_class_attr(class, name) {
+                        return self.bind_attribute(member, obj, class);
+                    }
+                }
             }
         }
         if let Value::Instance {
@@ -2651,7 +2656,7 @@ impl Context {
             }
             Value::GetSetDescriptor {
                 owner, name: field, ..
-            } if owner == "int"
+            } if matches!(owner, "int" | "typing.Union")
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
@@ -2671,7 +2676,7 @@ impl Context {
                     }
                     "__get__" | "__set__" | "__delete__"
                         if name == "__get__"
-                            || owner == "int"
+                            || matches!(owner, "int" | "typing.Union")
                             || HashState::is_provider_class(owner) =>
                     {
                         let symbol = format!("getset_descriptor.{name}");
