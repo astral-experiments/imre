@@ -1695,6 +1695,7 @@ def report(text):
             "boxed_max.py",
             "boxed_min.py",
             "boxed_generator_delegation.py",
+            "boxed_source_coroutine.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",
             "boxed_slice.py",
