@@ -1826,19 +1826,19 @@ impl Context {
     }
 
     fn module(&mut self, name: &str) -> Result<Id> {
-        self.find_module(name, true)?
+        self.find_module(name)?
             .ok_or_else(|| Self::missing_module(name))
     }
 
     /// Resolve registered and filesystem modules against the current import path.
-    fn find_module(&mut self, mut name: &str, filesystem: bool) -> Result<Option<Id>> {
+    fn find_module(&mut self, mut name: &str) -> Result<Option<Id>> {
         let mut parents = Vec::new();
         let mut module = loop {
             if let Some(id) = self.cached_import(name)? {
                 break Some(id);
             }
             let Some((parent, child)) = name.rsplit_once('.') else {
-                break self.load_module(name, filesystem, None)?;
+                break self.load_module(name, None)?;
             };
             // Each unresolved parent consumes three importlib frames.
             self.check_call_depth(3 * (parents.len() + 1))?;
@@ -1850,18 +1850,13 @@ impl Context {
         };
         for (name, parent, child) in parents.into_iter().rev() {
             let id = module.ok_or_else(|| Self::missing_module(parent))?;
-            module = self.load_module(name, filesystem, Some((id, child)))?;
+            module = self.load_module(name, Some((id, child)))?;
         }
         Ok(module)
     }
 
     /// Run a module initializer after its parent has been resolved.
-    fn load_module(
-        &mut self,
-        name: &str,
-        filesystem: bool,
-        parent: Option<(Id, &str)>,
-    ) -> Result<Option<Id>> {
+    fn load_module(&mut self, name: &str, parent: Option<(Id, &str)>) -> Result<Option<Id>> {
         if let Some(id) = self.cached_import(name)? {
             return Ok(Some(id));
         }
@@ -1910,14 +1905,7 @@ impl Context {
             } else {
                 (self.sys_path, name)
             };
-            self.source_on_path(
-                name,
-                child,
-                search,
-                parent.is_none(),
-                filesystem,
-                &mut locations,
-            )?
+            self.source_on_path(name, child, search, parent.is_none(), &mut locations)?
         };
         if source.is_none() && !stdlib::is_module(name) {
             return Ok(None);
