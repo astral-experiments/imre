@@ -1826,6 +1826,7 @@ def report(text):
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_logging.py",
+            "boxed_logging_formatter.py",
             "boxed_logging_file.py",
             "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
