@@ -787,15 +787,21 @@ impl Context {
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
             }
-            (Value::MemoryView { .. }, Value::Array(array)) => self
-                .bytes_like(a)
-                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
-            (Value::Array(array), Value::MemoryView { .. }) => self
-                .bytes_like(b)
-                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
             (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
-                match (self.bytes_like(a), self.bytes_like(b)) {
-                    (Ok(left), Ok(right)) => left == right,
+                match (self.buffer_storage(a), self.buffer_storage(b)) {
+                    (Ok(Value::Array(a)), Ok(Value::Array(b))) => a.equals_numeric_array(b),
+                    (
+                        Ok(Value::Array(array)),
+                        Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)),
+                    )
+                    | (
+                        Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)),
+                        Ok(Value::Array(array)),
+                    ) => array.equals_unsigned_bytes(bytes),
+                    (
+                        Ok(Value::Bytes(a) | Value::ByteArray(a)),
+                        Ok(Value::Bytes(b) | Value::ByteArray(b)),
+                    ) => a == b,
                     _ => false,
                 }
             }
@@ -4298,7 +4304,16 @@ impl Context {
                         | Value::Array(_)
                 )
             {
-                return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));
+                // A live floating-point view compares its elements even with itself:
+                // a NaN is unequal. Container identity shortcuts still apply separately.
+                let equal = if a == b
+                    && let Ok(Value::Array(array)) = self.buffer_storage(a)
+                {
+                    array.equals_numeric_array(array)
+                } else {
+                    self.equal(a, b)
+                };
+                return Ok(Some(builtins::boolean(equal == (op == "=="))));
             }
         }
         if matches!(op, "==" | "!=")
