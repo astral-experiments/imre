@@ -218,7 +218,7 @@ pub fn lookahead_source(
 }
 
 /// Translate a pattern needing native backtracking, retaining Python capture slots.
-/// Bytes patterns enter this matcher only for validated capture references.
+/// Bytes patterns use this matcher for capture references and forward assertions.
 pub fn backtracking_source(
     pattern: &str,
     verbose: bool,
@@ -375,6 +375,7 @@ fn tokenize(
     // Earlier captures can provide the width of a later lookbehind backreference.
     let needs_lookbehind_width = lookahead && pattern.contains("(?<");
     let mut has_lookaround = false;
+    let mut has_lookbehind = false;
     let mut has_reference = false;
     let mut nullable_repeat = false;
     let mut width = BranchWidth::default();
@@ -450,6 +451,7 @@ fn tokenize(
                         has_lookaround = true;
                         output.push('?');
                         group.scope = if behind {
+                            has_lookbehind = true;
                             output.push('<');
                             Scope::Lookbehind {
                                 first_local_group: groups.len(),
@@ -760,11 +762,15 @@ fn tokenize(
     let casefold = modes.iter().any(|(_, mode)| mode.ignores_case());
     let text_assertions =
         alphabet != Alphabet::Bytes && (has_lookaround || scoped_mode || has_boundary);
+    // Bytes lookbehind has its own bounded matcher. Keep nullable repeats out
+    // of the forward-assertion fallback so a stalled iteration cannot change a capture.
+    let byte_lookahead =
+        alphabet == Alphabet::Bytes && has_lookaround && !has_lookbehind && !nullable_repeat;
     match grammar {
         Grammar::Lookahead if !has_lookaround => {
             return Err("expected a Python lookahead assertion".into());
         }
-        Grammar::Backtracking if !has_reference && !text_assertions => {
+        Grammar::Backtracking if !has_reference && !text_assertions && !byte_lookahead => {
             return Err("pattern does not require backtracking".into());
         }
         // Keep previously supported case-sensitive text assertions on their existing matcher.

@@ -3,6 +3,16 @@ import re
 
 def current():
     for flags in (0, re.L):
+        ahead = re.compile(b"a(?!b).", flags)
+        assert ahead.search(b"abad").span() == (2, 4)
+        assert ahead.fullmatch(b"ab") is None
+        for pattern in (b"^([ab]*?)(?=(b)?)c", b"^([ab]*?)(?!(b))c"):
+            match = re.fullmatch(pattern, b"abc", flags)
+            assert match.groups() == (b"ab", None) and match.span(2) == (-1, -1)
+        peek = re.compile(b"(?=(.)(.))", flags)
+        assert peek.match(b"x\xff\x80", 1, 3).groups() == (b"\xff", b"\x80")
+        assert peek.match(b"x\xff\x80", 1, 2) is None
+
         guard = re.compile(b"(?<!abc)(d.f)", flags)
         assert guard.search(b"abcdefdof", 3, 6) is None
         assert guard.search(b"xbcdefdof", 3, 6).span(1) == (3, 6)
