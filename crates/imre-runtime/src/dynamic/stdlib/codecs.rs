@@ -612,12 +612,18 @@ pub(in crate::dynamic) fn encode_text(
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
         StrEncoder::Registered(codec)
-            if matches!(errors.as_str(), "strict" | "surrogateescape") =>
+            if matches!(
+                errors.as_str(),
+                "strict" | "surrogateescape" | "surrogatepass"
+            ) =>
         {
             ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
         }
         StrEncoder::Registered(codec)
-            if matches!(errors.as_str(), "ignore" | "replace" | "backslashreplace") =>
+            if matches!(
+                errors.as_str(),
+                "ignore" | "replace" | "backslashreplace" | "namereplace" | "xmlcharrefreplace"
+            ) =>
         {
             // Apply the built-in handler to lone surrogates, then encode the scalar result.
             let replaced = ctx.encode_utf8_codepoints(id, false, &errors)?;
