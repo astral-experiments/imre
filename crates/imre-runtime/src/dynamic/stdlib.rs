@@ -64,6 +64,7 @@ pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
 mod zipimport;
+mod zlib;
 
 /// Format a type for CPython diagnostics, including a non-default module and its qualname.
 fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
@@ -628,7 +629,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32" | "crc32" | "error") => ctx.builtin(&format!("zlib.{name}")),
+        ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "error") => ctx.builtin(&format!("zlib.{name}")),
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -1527,6 +1528,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
+    }
+    if let Some(method @ ("compress" | "decompress")) = name.strip_prefix("zlib.") {
+        return zlib::call(ctx, method, args, kwargs);
     }
     if let Some(method @ ("adler32" | "crc32")) = name.strip_prefix("zlib.") {
         return binascii::checksum(ctx, method, args, kwargs);
