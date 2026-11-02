@@ -271,8 +271,8 @@ fn update_from_file(ctx: &mut Context, file: Id, factory: Id, size: Option<Id>) 
         return Ok(digest);
     }
     let native_hash = matches!(ctx.heap.get(digest), Value::Hash(_));
-    if let Some(&class) = ctx.builtins.get("_io.BytesIO")
-        && ctx.heap.get(file).instance_class() == Some(class)
+    if let Some(class) = ctx.heap.get(file).instance_class()
+        && ctx.heap.get(class).io_kind() == Some("BytesIO")
     {
         // A native digest consumes this snapshot synchronously. A Python update
         // callback can observe the exported view and must take the getbuffer path.

@@ -640,6 +640,8 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// Closure cell shared by runtime-source method annotation providers.
+    pub annotation_dict_cell: Option<Id>,
     /// Scratch field dictionary used only while an ordinary class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
@@ -750,6 +752,7 @@ pub(super) enum Value {
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
     LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
+    MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
@@ -831,6 +834,8 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        /// Private layout tag for native I/O class generations.
+        io_kind: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1069,6 +1074,7 @@ impl Value {
                 super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
+            Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1110,7 +1116,7 @@ impl Value {
             }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
-            Self::Cell(_) => "cell",
+            Self::Cell(_) | Self::ClassCell(_) => "cell",
             Self::Generator { .. } => "generator",
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
@@ -1140,6 +1146,13 @@ impl Value {
             Self::PythonFrame { .. } => "frame",
             _ => return None,
         })
+    }
+
+    pub(super) fn io_kind(&self) -> Option<&'static str> {
+        match self {
+            Self::Class { io_kind, .. } => *io_kind,
+            _ => None,
+        }
     }
 
     pub(super) fn instance_class(&self) -> Option<Id> {
@@ -1303,6 +1316,7 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.annotation_dict_cell);
                     visit.extend(class.annotation_scratch);
                     if let Some(sites) = &class.annotation_sites {
                         for &(name, thunk) in sites.values() {
@@ -1530,6 +1544,7 @@ impl Value {
             | Self::Struct { .. }
             | Self::Hash(_)
             | Self::LoggerHandle(_)
+            | Self::MetadataArchive(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
@@ -2129,12 +2144,17 @@ impl Heap {
         previous
     }
 
+    /// An interpreter root (such as packed callback operands) can own weak targets indirectly.
+    pub(super) fn observes_released_roots(&self) -> bool {
+        self.has_weak_values || self.tracks_finalizers()
+    }
+
     pub fn weak_edge_removed(&mut self, value: Id) {
         if self.has_weak_values
             && (self.weak_edge(value)
                 || matches!(
                     self.get(value),
-                    Value::Function { .. } | Value::Cell(Some(_))
+                    Value::Function { .. } | Value::Cell(Some(_)) | Value::ClassCell(Some(_))
                 ))
             && !self.bound_in_active_frame(value)
         {

@@ -223,7 +223,7 @@ impl Context {
         if !kwargs.is_empty() {
             return Err(Error::new("TypeError", "unexpected enum decorator keyword"));
         }
-        let lineage = self.linearized_bases(&[*base])?;
+        let lineage = self.linearized_bases(&[*base], false)?;
         let Value::Class { ancestors, .. } = self.heap.get_mut(*class) else {
             return Err(Error::new("TypeError", "enum decorator requires a class"));
         };

@@ -999,9 +999,6 @@ impl Checker<'_> {
         node: &impl Ranged,
         diagnostic: &str,
     ) -> String {
-        if name == "object" && self.bundled_mock_class(class, "_PatchFactory") {
-            return self.object_runtime_export("unittest.mock.patch.object", node);
-        }
         if matches!(
             name,
             "assertIsInstance"
@@ -1237,6 +1234,25 @@ impl Checker<'_> {
                 self.unittest_assert_raises(call, class, receiver, attribute.attr.as_str())?
         {
             return Ok(context);
+        }
+        if attribute.attr.as_str() == "object" && self.bundled_mock_class(class, "_PatchFactory") {
+            // Class and module references are valid patch operands in the object runtime.
+            for arg in call
+                .arguments
+                .args
+                .iter()
+                .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
+            {
+                if self.class_reference(arg).is_none()
+                    && !matches!(
+                        self.resolve(arg),
+                        Some(Binding::Module(_) | Binding::IntrinsicModule(_))
+                    )
+                {
+                    self.expr(arg)?;
+                }
+            }
+            return Err(self.object_runtime_export("unittest.mock.patch.object", call));
         }
         if attribute.attr.as_str() == "dict"
             && self.bundled_mock_class(class, "_PatchFactory")

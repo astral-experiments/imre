@@ -17,10 +17,11 @@ impl Context {
         arguments: Id,
         keywords: Id,
         mark: usize,
+        scope: Id,
     ) -> Result<Id> {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
-        let result = self.call(callable, args, kwargs)?;
+        let result = self.call_in_scope(scope, callable, args, kwargs)?;
         self.finish_call_operands(mark, result);
         Ok(result)
     }
@@ -345,6 +346,16 @@ impl Context {
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_annotation_environment" => self.class_annotation_environment(a, b),
+            "class_annotation_locals" => {
+                let parent = self.scope_data(a).parent.expect("annotation globals");
+                let local = self.scope("", Some(parent));
+                let Value::Scope(frame) = self.heap.get_mut(local) else {
+                    unreachable!()
+                };
+                frame.exec_locals = Some(b);
+                Ok(local)
+            }
             "class_base_scope" => {
                 if self.scope_data(b).class_body.is_none() {
                     return Ok(a);
@@ -665,6 +676,7 @@ pub(super) fn new_context<S: Into<String>>(
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        exit_callbacks: Vec::new(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
@@ -724,7 +736,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    match ctx.module("__main__") {
+    let status = match ctx.module("__main__") {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
@@ -767,7 +779,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             eprintln!("{error}");
             1
         }
-    }
+    };
+    ctx.workers.join_before_exit_callbacks();
+    atexit::run(&mut ctx);
+    status
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
@@ -911,7 +926,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
-/// Invoke a compiled call using the root mark taken before its operands were evaluated.
+/// Accept calls from native objects generated before lexical call scopes were passed.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_call_at(
     ctx: *mut Context,
@@ -921,12 +936,27 @@ pub(super) unsafe extern "C" fn imre_dyn_call_at(
     mark: usize,
     span: *const [u32; 4],
 ) -> Id {
+    // SAFETY: both entry points accept the same context, operands, mark and optional position.
+    unsafe { imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, NONE) }
+}
+
+/// Invoke a compiled call using the root mark taken before its operands were evaluated.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    args: Id,
+    kwargs: Id,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
     // SAFETY: the generated caller owns the context and supplies a null or static position.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.call_packed(callable, args, kwargs, mark);
+    let result = ctx.call_packed(callable, args, kwargs, mark, scope);
     finish_at(ctx, result, span)
 }
 
@@ -1352,6 +1382,7 @@ impl Context {
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
+                .chain(&self.exit_callbacks)
                 .copied()
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())

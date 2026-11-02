@@ -90,6 +90,26 @@ def check_floats(protocol):
             assert data.endswith(b"G" + bytes.fromhex(bits) + b".")
 
 
+class LabeledTuple(tuple):
+    def __setstate__(self, state):
+        self.label = state["label"]
+        self.restored = True
+
+
+def consume(streams):
+    for stream in streams:
+        obj, label = pickle.loads(stream)
+        assert type(obj) is LabeledTuple and obj == (3, 4)
+        assert obj.restored and obj.label is label and label["back"] is obj
+    for bad in (b".", b"!", b"h\x07.", b"N]b.", b"cbuiltins\nlist\n]\x81."):
+        try:
+            pickle.loads(bad)
+        except pickle.UnpicklingError:
+            pass
+        else:
+            raise AssertionError("accepted invalid pickle")
+
+
 def produce():
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):

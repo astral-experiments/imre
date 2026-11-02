@@ -9,7 +9,7 @@ extern void *__real_malloc(size_t);
 extern void *__real_calloc(size_t, size_t);
 extern void *__real_realloc(void *, size_t);
 extern uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
-extern uint64_t __real_imre_dyn_call_at(void *, uint64_t, uint64_t, uint64_t, size_t, const uint32_t (*)[4]);
+extern uint64_t __real_imre_dyn_scoped_call_at(void *, uint64_t, uint64_t, uint64_t, size_t, const uint32_t (*)[4], uint64_t);
 
 static int reject(size_t size) {
     if (!active || refused || size != 8) return 0;
@@ -35,12 +35,12 @@ uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, siz
     if (kind == 1 && length == sizeof(marker) - 1 && !memcmp(data, marker, length)) armed = 1;
     return result;
 }
-uint64_t __wrap_imre_dyn_call_at(void *ctx, uint64_t callable, uint64_t args,
-                               uint64_t kwargs, size_t mark, const uint32_t (*span)[4]) {
-    if (!armed) return __real_imre_dyn_call_at(ctx, callable, args, kwargs, mark, span);
+uint64_t __wrap_imre_dyn_scoped_call_at(void *ctx, uint64_t callable, uint64_t args,
+                               uint64_t kwargs, size_t mark, const uint32_t (*span)[4], uint64_t scope) {
+    if (!armed) return __real_imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, scope);
     armed = 0;
     active = 1;
-    uint64_t result = __real_imre_dyn_call_at(ctx, callable, args, kwargs, mark, span);
+    uint64_t result = __real_imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, scope);
     active = 0;
     return result;
 }

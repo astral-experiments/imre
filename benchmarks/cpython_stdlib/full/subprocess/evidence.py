@@ -17,6 +17,8 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 # A completed method earns native operation credit only after inspecting what
 # its original assertions (or, in CONTROL, its retry loop) actually observe.
 OPERATIONS = {
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output":
+        "time out during communication, retry on the same child, and check the captured stdout length",
     "test_call_kwargs": "call with a child environment; wait for its exit status",
     "test_call_seq": "call with a sequence; wait for its exit status",
     "test_check_call_zero": "check_call returns the successful child's status",
@@ -197,7 +199,8 @@ def report(args, level, discovered, reference):
                 fixture_variant=variant,
             )
             continue
-        if body["status"] == "body-completed-needs-operation-review":
+        operation = OPERATIONS.get(name, OPERATIONS.get(method))
+        if body["status"] == "body-completed-needs-operation-review" and operation is not None:
             if "ProcessTestCaseNoPoll." in name or name == CONTROL:
                 [trace] = traced[name]
                 if trace["method_sha256"] != body["method_sha256"] or (
@@ -208,7 +211,7 @@ def report(args, level, discovered, reference):
                     )
                 ev["native_parent_selector_syscalls"] = trace["native_parent_syscalls"]
             ev.update(
-                operation=OPERATIONS[method],
+                operation=operation,
                 fixture=body["fixture_execution"],
                 method_sha256=body["method_sha256"],
                 opt_level=level,

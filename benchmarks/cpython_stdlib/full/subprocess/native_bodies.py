@@ -11,7 +11,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_in_fixtures
+from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fixture
 
 # The subprocess operation, method body, and assertions all run in the binary.
 # sys.executable selects a real oracle child for upstream's literal -c programs.
@@ -30,6 +30,7 @@ METHODS = {
         "test_communicate_stdout": "bytes",
         "test_communicate_stderr": "bytes",
         "test_communicate_returns": "bytes",
+        "test_communicate_timeout_large_output": None,
         "test_post_timeout_communicate_sends_input": "int",
     },
 }
@@ -73,6 +74,9 @@ def main():
     for flag in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + flag, type=Path, required=True)
     parser.add_argument("--opt-level", choices=("0", "3"), required=True)
+    parser.add_argument("--case", choices=[f"test.test_subprocess.{cls}.{method}"
+                                           for cls, methods in METHODS.items() for method in methods],
+                        help="Build and run only this registered original under its upstream fixtures.")
     args = parser.parse_args()
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     source = HERE / "upstream/Lib/test/test_subprocess.py"
@@ -86,11 +90,14 @@ def main():
         for cls, methods in METHODS.items():
             for method, scalar in methods.items():
                 key = f"test.test_subprocess.{cls}.{method}"
+                if args.case is not None and key != args.case:
+                    continue
                 directory = Path(tmp, key)
                 directory.mkdir()
                 try:
-                    executions[key] = native_method(tools, directory, source, cls, key,
-                                                    PREAMBLE.replace("TYPE", scalar))
+                    fixture = (PREAMBLE.replace("TYPE", scalar) if scalar is not None else
+                               "import subprocess\nimport sys\n" + testcase_fixture())
+                    executions[key] = native_method(tools, directory, source, cls, key, fixture)
                 except (ValueError, AssertionError, RuntimeError) as exc:
                     if method != "test_post_timeout_communicate_sends_input" or "local may be uninitialized on this path" not in str(exc):
                         raise

@@ -23,7 +23,9 @@ impl Checker<'_> {
             parameter("tzinfo", Type::None, Some(Expr::none())),
             fold,
         ];
-        let args = self.arguments(call, &params, None)?;
+        let args = self
+            .arguments(call, &params, None)
+            .map_err(|error| self.packed_calendar_error(call, 2, error))?;
         Ok(self.ordered_builtin(Builtin::Timed(Op::Clock), Type::ClockTime, args))
     }
 

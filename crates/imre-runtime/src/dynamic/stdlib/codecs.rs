@@ -1,10 +1,11 @@
 //! Box the entries and stateless decoders of the native codec registry.
 use std::collections::HashMap;
 
+mod raw_unicode_escape;
 mod surrogate_utf8;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, CodecInfo, Object, StrEncoder, Utf16Order};
+use crate::objects::{Codec, CodecInfo, DecodeIssue, Object, StrEncoder, Utf16Order};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
@@ -155,7 +156,7 @@ pub(super) fn builtin_handler(
     } else {
         false
     };
-    let Value::Bytes(bytes) = ctx.heap.get(object) else {
+    let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(object)) else {
         return Err(type_error(
             "UnicodeError 'object' attribute must be a bytes",
         ));
@@ -273,6 +274,20 @@ pub(in crate::dynamic) fn encode_text(
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
+        StrEncoder::Registered(codec)
+            if matches!(errors.as_str(), "strict" | "surrogateescape")
+                && !ctx.codec_entries.handlers.contains_key(&errors) =>
+        {
+            ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
+        }
+        StrEncoder::Registered(codec)
+            if matches!(errors.as_str(), "ignore" | "replace" | "backslashreplace") =>
+        {
+            // Apply the built-in handler to lone surrogates, then encode the scalar result.
+            let replaced = ctx.encode_utf8_codepoints(id, false, &errors)?;
+            let text = std::str::from_utf8(&replaced).expect("these handlers produce scalar text");
+            Ok(StrEncoder::Registered(codec).encode_str(text, &errors)?)
+        }
         _ => Err(Error::new(
             "NotImplementedError",
             "encoding non-scalar strings with this codec is unsupported",
@@ -359,14 +374,14 @@ pub(super) fn transform(
             }
         }
     }
+    if name == "decode" {
+        return decode_named(ctx, ctx.scalar_value(input), encoding, errors);
+    }
     let spelling = encoding
         .map(|id| ctx.str_value(id))
         .transpose()?
         .unwrap_or("utf-8");
     let codec = CodecInfo::lookup(spelling)?.codec();
-    if name == "decode" {
-        return decode_bytes(ctx, codec, ctx.scalar_value(input), errors);
-    }
     if ctx.string_storage(input).is_none() {
         let encoder = match codec {
             Codec::Utf8 { .. } => "utf_8",
@@ -383,13 +398,30 @@ pub(super) fn transform(
     Ok(ctx.alloc(Value::Bytes(result)))
 }
 
-/// Regular codecs share the typed implementation. Registered Python callbacks reenter the native heap.
-pub(in crate::dynamic) fn decode_bytes(
+/// Boxed decoding can represent lone surrogates from raw Unicode escapes.
+pub(in crate::dynamic) fn decode_named(
     ctx: &mut Context,
-    codec: Codec,
     input: Id,
+    encoding: Option<Id>,
     errors: Option<Id>,
 ) -> Result<Id> {
+    let spelling = encoding
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("utf-8");
+    if spelling.contains('\0') {
+        return Err(Error::new("ValueError", "embedded null character"));
+    }
+    let key = crate::objects::normalize_codec(spelling)?;
+    if key == "raw_unicode_escape" {
+        let name = error_name(ctx, errors)?.to_owned();
+        return ctx.with_buffer_export(input, |ctx| raw_unicode_escape::decode(ctx, input, &name));
+    }
+    let codec = Codec::by_key(&key, spelling)?;
+    decode_bytes(ctx, codec, input, errors)
+}
+
+fn error_name(ctx: &Context, errors: Option<Id>) -> Result<&str> {
     let name = errors
         .map(|id| ctx.str_value(id))
         .transpose()?
@@ -397,6 +429,17 @@ pub(in crate::dynamic) fn decode_bytes(
     if name.contains('\0') {
         return Err(Error::new("ValueError", "embedded null character"));
     }
+    Ok(name)
+}
+
+/// Regular codecs share the typed implementation. Registered Python callbacks reenter the native heap.
+pub(in crate::dynamic) fn decode_bytes(
+    ctx: &mut Context,
+    codec: Codec,
+    input: Id,
+    errors: Option<Id>,
+) -> Result<Id> {
+    let name = error_name(ctx, errors)?;
     if let Codec::Utf8 { signature } = codec
         && name == "surrogateescape"
     {
@@ -470,8 +513,28 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
     let Some(issue) = crate::objects::utf8_prefix(&mut text, data, 0)? else {
         return Ok(ctx.text(text));
     };
-    let mut points: Vec<u32> = text.chars().map(u32::from).collect();
-    let raised = ctx.decode_error(issue.error(data));
+    let points = text.chars().map(u32::from).collect();
+    let error = issue.error(data);
+    resume_decode(ctx, name, points, error, |points, data, position| {
+        text.clear();
+        let issue = crate::objects::utf8_prefix(&mut text, data, position)?;
+        points
+            .try_reserve(text.len())
+            .map_err(|_| crate::Error::allocation())?;
+        points.extend(text.chars().map(u32::from));
+        Ok(issue)
+    })
+}
+
+/// Resume from the position and possibly changed byte object supplied by the handler.
+fn resume_decode(
+    ctx: &mut Context,
+    name: &str,
+    mut points: Vec<u32>,
+    error: crate::Error,
+    mut prefix: impl FnMut(&mut Vec<u32>, &[u8], usize) -> Result<Option<DecodeIssue>>,
+) -> Result<Id> {
+    let raised = ctx.decode_error(error);
     if raised.decode.is_none() {
         return Err(raised);
     }
@@ -482,10 +545,7 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
     loop {
         let response = ctx.call(callback, vec![exception], Vec::new())?;
         let invalid = || type_error("decoding error handler must return (str, int) tuple");
-        let values = match ctx.heap.get(ctx.scalar_value(response)) {
-            Value::Tuple(values) | Value::NamedTuple { values, .. } => values,
-            _ => return Err(invalid()),
-        };
+        let values = ctx.tuple_items(response)?.ok_or_else(invalid)?;
         let [replacement, newpos] = values.as_slice() else {
             return Err(invalid());
         };
@@ -506,7 +566,7 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
                 )
             })?;
         let input = ctx.lookup_attr(exception, "object")?;
-        let Value::Bytes(data) = ctx.heap.get(input) else {
+        let Value::Bytes(data) = ctx.heap.get(ctx.scalar_value(input)) else {
             return Err(type_error(
                 "UnicodeError 'object' attribute must be a bytes",
             ));
@@ -523,13 +583,7 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
                 format!("position {position} from error handler out of bounds"),
             ));
         }
-        text.clear();
-        let issue = crate::objects::utf8_prefix(&mut text, data, position as usize)?;
-        points
-            .try_reserve(text.len())
-            .map_err(|_| crate::Error::allocation())?;
-        points.extend(text.chars().map(u32::from));
-        let Some(issue) = issue else {
+        let Some(issue) = prefix(&mut points, data, position as usize)? else {
             return Ok(ctx.text_codepoints(points));
         };
         ctx.advance_decode_error(exception, issue.start, issue.end, issue.reason);

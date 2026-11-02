@@ -5,6 +5,9 @@ class Sample(unittest.TestCase):
     def test_one(self):
         pass
 
+    def test_two(self):
+        pass
+
 
 class Loader(unittest.TestLoader):
     pass
@@ -13,6 +16,14 @@ class Loader(unittest.TestLoader):
 class CustomLoader(Loader):
     def loadTestsFromName(self, name, module=None):
         return self.suiteClass([Sample('test_one')])
+
+
+def reverse(left, right):
+    return (right > left) - (right < left)
+
+
+def broken(left, right):
+    raise ValueError('comparison failed')
 
 
 loader = Loader()
@@ -30,4 +41,15 @@ except AttributeError as error:
     assert 'missing' in str(error)
 else:
     raise AssertionError('missing name did not raise its deferred error')
+
+
+loader.sortTestMethodsUsing = reverse
+assert loader.getTestCaseNames(Sample) == ['test_two', 'test_one']
+loader.sortTestMethodsUsing = broken
+try:
+    loader.getTestCaseNames(Sample)
+except ValueError as error:
+    assert str(error) == 'comparison failed'
+else:
+    raise AssertionError('loader discarded comparator error')
 print('named loader checked')

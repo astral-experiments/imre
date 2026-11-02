@@ -2,17 +2,6 @@
 use super::stdlib::{audit, fixed_structseq, traceback};
 use super::{Context, Error, Id, NONE, Result, Value};
 
-fn sys_binding(ctx: &mut Context, name: &str) -> Result<Option<Id>> {
-    let sys = match ctx.threads.system_module {
-        Some(sys) => sys,
-        None => ctx.module("sys")?,
-    };
-    let Value::Module { scope, .. } = *ctx.heap.get(sys) else {
-        unreachable!()
-    };
-    Ok(ctx.scope_name(scope, name))
-}
-
 /// Preserve the original exception and traceback before formatting or calling Python.
 fn exception_fields(ctx: &mut Context, error: Error, supply_frame: bool) -> Result<[Id; 3]> {
     let value = ctx.raised_instance(error);
@@ -46,18 +35,36 @@ fn record(ctx: &mut Context, [class, value, tb]: [Id; 3], message: Id, object: I
 
 /// A hook or an audit veto can run Python, including nested collections and finalizers.
 pub(super) fn deallocator(ctx: &mut Context, error: Error, method: Id) {
-    let Ok(fields) = exception_fields(ctx, error, true) else {
+    report(
+        ctx,
+        error,
+        true,
+        Some(method),
+        "Exception ignored while calling deallocator",
+    );
+}
+
+/// Preserve the exception before formatting the callable or invoking the user's hook.
+pub(super) fn report(
+    ctx: &mut Context,
+    error: Error,
+    supply_frame: bool,
+    callable: Option<Id>,
+    prefix: &str,
+) {
+    let Ok(fields) = exception_fields(ctx, error, supply_frame) else {
         return;
     };
-    let message = match ctx.checked_format(method, true) {
-        Ok(method) => ctx.text(format!(
-            "Exception ignored while calling deallocator {method}"
-        )),
-        Err(_) => NONE,
+    let message = match callable {
+        Some(callable) => match ctx.checked_format(callable, true) {
+            Ok(name) => ctx.text(format!("{prefix} {name}")),
+            Err(_) => NONE,
+        },
+        None => ctx.text(prefix),
     };
     let args = record(ctx, fields, message, NONE);
     ctx.heap.keep(args);
-    let Ok(hook) = sys_binding(ctx, "unraisablehook") else {
+    let Ok(hook) = ctx.sys_binding("unraisablehook") else {
         return;
     };
     let Some(hook) = hook else {
@@ -130,7 +137,7 @@ fn display(ctx: &mut Context, args: Id) -> Result<()> {
     let &[class, value, tb, message, object] = values.as_slice() else {
         unreachable!()
     };
-    let Some(file) = sys_binding(ctx, "stderr")?.filter(|&id| id != NONE) else {
+    let Some(file) = ctx.sys_binding("stderr")?.filter(|&id| id != NONE) else {
         return Ok(());
     };
     ctx.heap.keep(file);
@@ -154,7 +161,8 @@ fn display(ctx: &mut Context, args: Id) -> Result<()> {
     }
     if tb != NONE {
         // PyTraceBack_Print retains the innermost frames, with a default limit of 1000.
-        let limit = sys_binding(ctx, "tracebacklimit")?
+        let limit = ctx
+            .sys_binding("tracebacklimit")?
             .and_then(|id| ctx.as_int(id).ok())
             .map_or(1000, |n| {
                 n.to_i64().unwrap_or_else(|| {

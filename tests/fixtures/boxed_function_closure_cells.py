@@ -12,6 +12,17 @@ def global_lambda(unused):
     return (lambda: marker), ref(unused)
 
 
+def decorated_reader(captured):
+    def keep(fn):
+        return fn
+
+    @keep
+    def read(key=marker, /, *, count=0):
+        return captured, marker, key, count
+
+    return read
+
+
 def make_late():
     def read():
         return payload, marker
@@ -95,6 +106,13 @@ def current():
     reader = globally_bound_reader()
     print(reader.__code__.co_freevars, reader.__closure__, reader())
     print(types.FunctionType(reader.__code__, {"marker": "supplied"})())
+
+    reader = decorated_reader(8)
+    assert reader.__code__.co_freevars == ("captured",)
+    replay = types.FunctionType(reader.__code__, {"marker": "replacement"},
+                                argdefs=reader.__defaults__, closure=reader.__closure__)
+    replay.__kwdefaults__ = reader.__kwdefaults__
+    assert replay() == (8, "replacement", "module", 0)
 
     reader, unused = global_lambda(Payload())
     pressure = []

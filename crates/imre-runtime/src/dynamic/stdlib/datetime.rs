@@ -1,7 +1,12 @@
 //! Calendar values used by HTTP response dates and timed cookie signatures.
+use num_bigint::{BigInt, Sign};
+use num_traits::Euclid;
+
 use super::*;
 use crate::dynamic::builtins::bind;
 use crate::objects::{Calendar, CalendarNumber};
+
+mod reduction;
 
 const FIELDS: [&str; 8] = [
     "year",
@@ -36,8 +41,11 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &FIELDS[..3],
             &[
                 "__format__",
+                "__reduce__",
                 "__repr__",
                 "__str__",
+                "ctime",
+                "isoweekday",
                 "toordinal",
                 "weekday",
                 "timetuple",
@@ -46,12 +54,25 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.datetime" => (
             "datetime.datetime",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
-            &["__repr__", "__str__", "timetuple"],
+            &[
+                "__reduce__",
+                "__reduce_ex__",
+                "__repr__",
+                "__str__",
+                "ctime",
+                "timetuple",
+            ],
         ),
         "datetime.time" => (
             "datetime.time",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
-            &["__format__", "__repr__", "__str__"],
+            &[
+                "__format__",
+                "__reduce__",
+                "__reduce_ex__",
+                "__repr__",
+                "__str__",
+            ],
         ),
         "datetime.timedelta" => (
             "datetime.timedelta",
@@ -59,6 +80,13 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &[
                 "__bool__",
                 "__neg__",
+                "__mul__",
+                "__rmul__",
+                "__truediv__",
+                "__rtruediv__",
+                "__floordiv__",
+                "__rfloordiv__",
+                "__reduce__",
                 "__repr__",
                 "__str__",
                 "total_seconds",
@@ -89,6 +117,7 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
     if class == "datetime.datetime" {
         ctx.builtin("datetime.date");
     }
+    ctx.builtin("object.__reduce_ex__");
     ctx.builtin(&format!("{class}.__new__"));
     for method in members.methods {
         ctx.builtin(&format!("{class}.{method}"));
@@ -208,12 +237,188 @@ fn field_type_error(ctx: &Context, owner: &str, field: &str, receiver: Id) -> Er
     )
 }
 
+fn delta_component(ctx: &mut Context, value: Id) -> Result<i32> {
+    ctx.index_integer(value)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+/// Split a custom numeric result with divmod and validate the normalized remainder.
+fn split_delta_component(ctx: &mut Context, value: Id, unit: i32) -> Result<(Id, i32)> {
+    let divisor = ctx.int(i64::from(unit));
+    let result = ctx.divmod(value, divisor)?;
+    let tuple = ctx.tuple_items(result)?.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "divmod() returned non-tuple (type {})",
+                ctx.type_name(result)
+            ),
+        )
+    })?;
+    let [quotient, remainder] = tuple.as_slice() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("divmod() returned a tuple of size {}", tuple.len()),
+        ));
+    };
+    let remainder = delta_component(ctx, *remainder)?;
+    if !(0..unit).contains(&remainder) {
+        return Err(Error::new(
+            "TypeError",
+            "divmod() returned a value out of range",
+        ));
+    }
+    Ok((*quotient, remainder))
+}
+
+/// Convert the microseconds returned by integer multiplication or floor division.
+fn result_microseconds(ctx: &mut Context, result: Id) -> Result<crate::Int> {
+    if let Value::Int(n) = ctx.heap.get(result) {
+        Ok(n.clone())
+    } else {
+        let (seconds, micros) = split_delta_component(ctx, result, 1_000_000)?;
+        let (days, seconds) = split_delta_component(ctx, seconds, 86_400)?;
+        let days = delta_component(ctx, days)?;
+        let total =
+            (i128::from(days) * 86_400 + i128::from(seconds)) * 1_000_000 + i128::from(micros);
+        Ok(crate::Int::new(total.into()))
+    }
+}
+
+/// Divide integer payloads exactly and resolve half-microsecond ties toward the even result.
+fn nearest_quotient(ctx: &Context, numerator: Id, denominator: Id) -> Result<crate::Int> {
+    let as_integer = |id| {
+        ctx.as_int(id)
+            .map_err(|_| Error::new("TypeError", "non-integer arguments in division"))
+    };
+    let (a, b) = (as_integer(numerator)?, as_integer(denominator)?);
+    let (a, b) = (a.big(), b.big());
+    if b.sign() == Sign::NoSign {
+        return Err(Error::new("ZeroDivisionError", "division by zero"));
+    }
+    let (mut quotient, remainder) = a.magnitude().div_rem_euclid(b.magnitude());
+    let twice = remainder << 1;
+    if &twice > b.magnitude() || (&twice == b.magnitude() && quotient.bit(0)) {
+        quotient += 1u8;
+    }
+    Ok(crate::Int::new(BigInt::from_biguint(
+        a.sign() * b.sign(),
+        quotient,
+    )))
+}
+
+fn scale_delta(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let name = method.rsplit('.').next().unwrap();
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{name}' of 'datetime.timedelta' object needs an argument"),
+        ));
+    };
+    let duration = calendar(ctx, receiver, "timedelta").ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{name}' requires a 'datetime.timedelta' object but received a '{}'",
+                ctx.type_name(receiver)
+            ),
+        )
+    })?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("wrapper {name}() takes no keyword arguments"),
+        ));
+    }
+    let &[factor] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("expected 1 argument, got {}", args.len()),
+        ));
+    };
+    let us = ctx.alloc(Value::Int(crate::Int::new(
+        duration.delta_microseconds().into(),
+    )));
+    let op = match name {
+        "__truediv__" | "__rtruediv__" => "/",
+        "__floordiv__" | "__rfloordiv__" => "//",
+        _ => "*",
+    };
+    let reflected_division = matches!(name, "__rtruediv__" | "__rfloordiv__");
+    if op != "*"
+        && let Some(other) = calendar(ctx, factor, "timedelta")
+    {
+        let other = ctx.alloc(Value::Int(crate::Int::new(
+            other.delta_microseconds().into(),
+        )));
+        return if reflected_division {
+            ctx.binary(op, other, us)
+        } else {
+            ctx.binary(op, us, other)
+        };
+    }
+    let micros = match ctx.heap.get(ctx.scalar_value(factor)) {
+        _ if reflected_division => return Ok(crate::dynamic::value::NOT_IMPLEMENTED),
+        Value::Int(_) | Value::Bool(_) if op == "/" => nearest_quotient(ctx, us, factor)?,
+        Value::Int(_) | Value::Bool(_) => {
+            let result = if op == "//" {
+                ctx.binary("//", us, factor)?
+            } else {
+                ctx.binary("*", factor, us)?
+            };
+            result_microseconds(ctx, result)?
+        }
+        Value::Float(_) if op != "//" => {
+            let ratio = ctx.lookup_attr(factor, "as_integer_ratio")?;
+            let pair = ctx.call(ratio, Vec::new(), Vec::new())?;
+            let tuple = ctx.tuple_items(pair)?.ok_or_else(|| {
+                Error::new("TypeError", format!(
+                    "unexpected return type from as_integer_ratio(): expected tuple, not '{:.200}'",
+                    ctx.type_name(pair)
+                ))
+            })?;
+            let &[numerator, denominator] = tuple.as_slice() else {
+                return Err(Error::new(
+                    "ValueError",
+                    "as_integer_ratio() must return a 2-tuple",
+                ));
+            };
+            let (scale, divisor) = if op == "/" {
+                (denominator, numerator)
+            } else {
+                (numerator, denominator)
+            };
+            let scaled = ctx.binary("*", us, scale)?;
+            nearest_quotient(ctx, scaled, divisor)?
+        }
+        _ => return Ok(crate::dynamic::value::NOT_IMPLEMENTED),
+    };
+    Ok(store(
+        ctx,
+        Calendar::from_delta_microseconds(&micros)?,
+        NONE,
+    ))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     method: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some((kind, operation @ ("__reduce__" | "__reduce_ex__"))) = method.split_once('.') {
+        return reduction::reduce(ctx, kind, operation, args, kwargs);
+    }
+    if let Some(value) = reduction::from_state(ctx, method, args)? {
+        return Ok(value);
+    }
     if let Some(kind @ ("date" | "datetime" | "time" | "timedelta")) =
         method.strip_suffix(".__new__")
     {
@@ -227,6 +432,12 @@ pub(super) fn call(
     }
     match method {
         "time" => time(ctx, args, kwargs),
+        "timedelta.__mul__"
+        | "timedelta.__rmul__"
+        | "timedelta.__truediv__"
+        | "timedelta.__rtruediv__"
+        | "timedelta.__floordiv__"
+        | "timedelta.__rfloordiv__" => scale_delta(ctx, method, args, kwargs),
         "datetime.combine" => {
             let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
             let day = required(day, "combine()", "date", 1)?;
@@ -450,6 +661,9 @@ pub(super) fn call(
         | "date.timetuple"
         | "date.toordinal"
         | "datetime.toordinal"
+        | "date.ctime"
+        | "datetime.ctime"
+        | "date.isoweekday"
         | "date.weekday"
         | "datetime.weekday"
         | "timedelta.total_seconds" => {
@@ -510,6 +724,14 @@ pub(super) fn call(
                 }
                 "total_seconds" => ctx.alloc(Value::Float(value.seconds())),
                 "toordinal" => ctx.int(value.ordinal()),
+                "ctime" => {
+                    let mut fields = value.timetuple();
+                    if class == "date" {
+                        fields[3..6].fill(0);
+                    }
+                    ctx.text(super::time::ctime_text(fields, 4))
+                }
+                "isoweekday" => ctx.int((value.ordinal() - 1) % 7 + 1),
                 "weekday" => ctx.int((value.ordinal() - 1) % 7),
                 "timetuple" => {
                     let mut fields = value.timetuple();
