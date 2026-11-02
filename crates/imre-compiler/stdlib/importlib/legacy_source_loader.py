@@ -104,7 +104,7 @@ def _prefer_bundled_spec(finder, spec, name, path, target):
     # PathFinder has exhausted regular modules on the application path. The
     # adjacent bundled finder supplies Python sources from the virtual stdlib.
     if (spec is not None and _bootstrap_external is not None
-            and finder is _bootstrap_external.PathFinder and spec.loader is None
+            and finder is _bootstrap_external._registered_path_finder and spec.loader is None
             and spec.submodule_search_locations is not None):
         bundled = _BundledImporter.find_spec(name, path, target)
         if bundled is not None:

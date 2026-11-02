@@ -2,6 +2,10 @@
 from _imre_importlib import registered_path, registered_path_spec
 
 
+# Keep the identity installed in sys.meta_path when callers rebind the public export.
+_registered_path_finder = PathFinder
+
+
 class _RegisteredFileFinder(FileFinder):
     def __init__(self, path, registry_path):
         super().__init__(path, (SourceFileLoader, SOURCE_SUFFIXES))
