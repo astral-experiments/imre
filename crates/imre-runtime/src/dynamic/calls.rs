@@ -131,6 +131,14 @@ fn non_callable_error(name: &str) -> Error {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if let Some(symbol) = builtins::base_exception_method(name) {
+            if matches!(self.heap.get(class), Value::Native(kind) if builtins::is_exception(kind)) {
+                return self.builtins.get(symbol).copied();
+            }
+            if let Some(mro) = self.published_mro(class) {
+                return mro.iter().find_map(|&base| self.own_class_attr(base, name));
+            }
+        }
         if name == "__hash__" {
             if matches!(self.heap.get(class), Value::Native(_)) {
                 return self.own_class_attr(class, name);
@@ -198,8 +206,11 @@ impl Context {
                 Some(NONE)
             }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
-                "add_note" => self.builtins.get("BaseException.add_note").copied(),
-                "with_traceback" => self.builtins.get("BaseException.with_traceback").copied(),
+                name if kind == "BaseException"
+                    && let Some(symbol) = builtins::base_exception_method(name) =>
+                {
+                    self.builtins.get(symbol).copied()
+                }
                 "__new__" => self
                     .builtins
                     .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
@@ -2924,7 +2935,7 @@ impl Context {
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
-                if let Some(method) = self.own_class_attr(obj, name) {
+                if let Some(method) = self.class_attr(obj, name) {
                     return Ok(method);
                 }
             }

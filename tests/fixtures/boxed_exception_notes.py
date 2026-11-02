@@ -66,3 +66,15 @@ def current():
     preseeded.__dict__["__notes__"] = notes
     preseeded.add_note(note)
     assert notes[-1] is note
+
+    class Mixin(BaseException):
+        def add_note(self, text):
+            return text
+
+    class Mixed(ValueError, Mixin):
+        def inherited(self, text):
+            return super().add_note(text)
+
+    mixed = Mixed()
+    assert mixed.add_note(note) is note and mixed.inherited(note) is note
+    assert not hasattr(mixed, "__notes__")
