@@ -1,6 +1,7 @@
 """Stream annotations and special forms for the runtime typing module."""
 
 import typing as _typing
+from _collections_abc import MutableMapping as _MutableMapping
 from functools import lru_cache
 from typing import Generic, TypeVar
 
@@ -260,8 +261,8 @@ def Optional(self, parameters):
     return _typing.Union[arg, type(None)]
 
 
-def _alias_type_arg(arg):
-    arg = _type_check(arg, "Parameters to generic types must be types.")
+def _alias_type_arg(arg, message="Parameters to generic types must be types."):
+    arg = _type_check(arg, message)
     if isinstance(arg, str):
         raise NotImplementedError("string alias arguments require typing.ForwardRef")
     return type(None) if arg is None else arg
@@ -300,14 +301,15 @@ class _SpecialGenericAlias(_NotIterable):
     """A named typing alias for a builtin collection."""
     __module__ = __name__
 
-    def __init__(self, origin, nparams, *, name):
+    def __init__(self, origin, nparams, *, name, inst=True):
         self.__origin__ = origin
         self._name = name
         self.__qualname__ = name
-        self._inst = False
+        self._inst = inst
         self._nparams = nparams
         self.__slots__ = None
-        self.__doc__ = f"Deprecated alias to {origin.__qualname__}."
+        module = "" if origin.__module__ == "builtins" else origin.__module__ + "."
+        self.__doc__ = f"Deprecated alias to {module}{origin.__qualname__}."
 
     def __repr__(self):
         return "typing." + self._name
@@ -382,7 +384,33 @@ class _SpecialGenericAlias(_NotIterable):
         return _typing.Union[other, self]
 
 
-List = _SpecialGenericAlias(list, 1, name="List")
+class _TupleType(_SpecialGenericAlias):
+    __module__ = __name__
+
+    def _getitem(self, params):
+        if not isinstance(params, tuple):
+            params = (params,)
+        message = "Tuple[t0, t1, ...]: each t must be a type."
+        if len(params) >= 2 and params[-1] is ...:
+            message = "Tuple[t, ...]: t must be a type."
+        return self.copy_with(tuple(_alias_type_arg(p, message) for p in params))
+
+
+Tuple = _TupleType(tuple, -1, name="Tuple", inst=False)
+Tuple.__doc__ = \
+    """Deprecated alias to builtins.tuple.
+
+    Tuple[X, Y] is the cross-product type of X and Y.
+
+    Example: Tuple[T1, T2] is a tuple of two elements corresponding
+    to type variables T1 and T2.  Tuple[int, float, str] is a tuple
+    of an int, a float and a string.
+
+    To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
+    """
+List = _SpecialGenericAlias(list, 1, name="List", inst=False)
+Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
+MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
 def _substitute_alias_argument(arg, replacements):
@@ -406,6 +434,8 @@ def _specialize_named_alias_uncached(alias, args):
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
+    if alias._name == "Tuple" and any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
+        raise NotImplementedError("specializing a variadic typing.Tuple requires parameter-pack substitution")
     args = tuple(_alias_type_arg(arg) for arg in args)
     if len(args) != len(parameters):
         which = "few" if len(args) < len(parameters) else "many"
