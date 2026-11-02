@@ -4,7 +4,7 @@ use std::collections::HashMap;
 mod surrogate_utf8;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, CodecInfo, Object};
+use crate::objects::{Codec, CodecInfo, Object, StrEncoder, Utf16Order};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
@@ -263,21 +263,68 @@ pub(in crate::dynamic) fn encode_text(
         .map(|id| ctx.str_value(id))
         .transpose()?
         .unwrap_or("strict");
+    let encoder = StrEncoder::lookup(encoding, errors)?;
     if let Ok(text) = ctx.str_value(id) {
-        return Ok(crate::objects::Codec::encode_str(text, encoding, errors)?);
+        return Ok(encoder.encode_str(text, errors)?);
     }
-    if encoding.contains('\0') || errors.contains('\0') {
-        return Err(Error::new("ValueError", "embedded null character"));
-    }
-    let crate::objects::Codec::Utf8 { signature } = crate::objects::Codec::lookup(encoding)? else {
-        return Err(Error::new(
+    let errors = errors.to_owned();
+    match encoder {
+        StrEncoder::Utf16(order) => encode_utf16_codepoints(ctx, id, order, &errors),
+        StrEncoder::Registered(Codec::Utf8 { signature }) => {
+            ctx.encode_utf8_codepoints(id, signature, &errors)
+        }
+        _ => Err(Error::new(
             "NotImplementedError",
             "encoding non-scalar strings with this codec is unsupported",
-        ));
-    };
-    // Encoding can allocate a Python exception, so release the borrow of the heap.
-    let errors = errors.to_owned();
-    ctx.encode_utf8_codepoints(id, signature, &errors)
+        )),
+    }
+}
+
+/// UTF-16 reports one surrogate at a time, even for consecutive high and low surrogates.
+fn encode_utf16_codepoints(
+    ctx: &mut Context,
+    id: Id,
+    order: Utf16Order,
+    errors: &str,
+) -> Result<Vec<u8>> {
+    let points = ctx.string_codepoints(id)?;
+    let mut bytes = Vec::new();
+    for (i, &point) in points.iter().enumerate() {
+        if let Some(ch) = char::from_u32(point) {
+            order.append(&mut bytes, ch.encode_utf16(&mut [0; 2]).iter().copied())?;
+            continue;
+        }
+        if ctx.codec_entries.handlers.contains_key(errors) {
+            return Err(Error::new(
+                "NotImplementedError",
+                "custom UTF-16 encoding error handlers are unsupported",
+            ));
+        }
+        match errors {
+            "strict" | "surrogateescape" => {
+                return Err(ctx.string_encoding_error(
+                    id,
+                    order.name(),
+                    "surrogates not allowed",
+                    point,
+                    i..i + 1,
+                ));
+            }
+            "ignore" => (),
+            "replace" => order.append(&mut bytes, [u16::from(b'?')])?,
+            "surrogatepass" => order.append(&mut bytes, [point as u16])?,
+            "backslashreplace" | "namereplace" => order.append(
+                &mut bytes,
+                compact_str::format_compact!("\\u{point:04x}").encode_utf16(),
+            )?,
+            "xmlcharrefreplace" => order.append(
+                &mut bytes,
+                compact_str::format_compact!("&#{point};").encode_utf16(),
+            )?,
+            _ => return Err(crate::objects::unknown_handler(errors).into()),
+        }
+    }
+    Ok(bytes)
 }
 
 /// codecs.encode/decode use the registered codec directly, bypassing methods on the input.

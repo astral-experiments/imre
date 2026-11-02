@@ -7,6 +7,7 @@ class EchoDecoder(codecs.IncrementalDecoder):
 
 
 def current():
+    utf16_encoders()
     decoder = codecs.IncrementalDecoder(errors="replace")
     assert decoder.errors == "replace"
     assert decoder.getstate() == (b"", 0)
@@ -171,3 +172,23 @@ def current():
         b"\xff".decode("utf8", "test.strict_alias")
     except UnicodeDecodeError as e:
         print(e is seen[0], str(e))
+
+
+def utf16_encoders():
+    for name, canonical in (('unicodelittleunmarked', 'utf-16-le'), ('utf_16be', 'utf-16-be')):
+        text = '🙂\ud800\udcffZ'
+        try:
+            text.encode(name)
+        except UnicodeEncodeError as exc:
+            assert exc.object is text
+            assert (exc.encoding, exc.start, exc.end, exc.reason) == (canonical, 1, 2, 'surrogates not allowed')
+        else:
+            raise AssertionError('expected a surrogate encoding error')
+        assert text.encode(name, 'ignore') == '🙂Z'.encode(name)
+        assert text.encode(name, 'replace') == '🙂??Z'.encode(name)
+        assert text.encode(name, 'backslashreplace') == r'🙂\ud800\udcffZ'.encode(name)
+        assert text.encode(name, 'namereplace') == text.encode(name, 'backslashreplace')
+        assert text.encode(name, 'xmlcharrefreplace') == '🙂&#55296;&#56575;Z'.encode(name)
+    assert '\ud800\udcff'.encode('utf-16-le', 'surrogatepass') == b'\x00\xd8\xff\xdc'
+    assert '\ud800\udcff'.encode('utf-16-be', 'surrogatepass') == b'\xd8\x00\xdc\xff'
+    assert 'ü'.encode('utf-16-le', 'unused handler') == b'\xfc\x00'
