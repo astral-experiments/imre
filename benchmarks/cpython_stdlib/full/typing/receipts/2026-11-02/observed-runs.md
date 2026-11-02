@@ -36,3 +36,7 @@ The direct static compiler and filesystem unittest discovery are separate entry 
 The coordinator's verified 129 distinct original ID/occurrence pairs supersede the former unidentified 107. All sixteen named original cases above are additional keys, yielding 145 distinct pairs. Each passed stock and both native optimization levels. Ordinary and boxed evidence and the tested source revisions remain separate in the linked receipts. [Original-key join](join-against-129.json)
 
 The two original AllTests methods, ordinals 1 and 2, both errored at ordinary O0/O3. Both reference the missing typing.__all__. Three additional ParamSpec doctest bodies passed stock and O0 on f10db8a. This 145-key snapshot excludes all five. [AllTests original events](alltests-c7295770.tgz) · [ParamSpec O0 events](param-docs-f10db8a-o0.tgz)
+
+The three ParamSpec doctests later passed ordinary and boxed O0/O3. Six additional, separately named CollectionsAbcTests passed on stock and ordinary O0/O3 at 1791943e. The worker join against the supplied 129 now contains 154 distinct keys. The coordinator’s separate 14 are outside this join. [ParamSpec four-mode callbacks](param-docs-f10db8a-four-cells.tgz) · [Original set and frozenset callbacks](sets-1791943-paired.tgz)
+
+An eight-class candidate completed the unchanged module’s own load_tests hook and discovered seven genuine doctest IDs after full import. This hook-only observer ran no test bodies. [Post-import discovery and source verification](post-import-hook-10dd4e8.tgz)
