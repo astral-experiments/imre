@@ -40,6 +40,7 @@ mod thread_rlock;
 mod thread_worker;
 mod typing;
 mod union;
+mod unraisable;
 mod value;
 mod weakref;
 mod wrapper_descriptor;
@@ -2108,7 +2109,13 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
-                for name in ["audit", "addaudithook", "_getframe", "_getframemodulename"] {
+                for name in [
+                    "audit",
+                    "addaudithook",
+                    "_getframe",
+                    "_getframemodulename",
+                    "unraisablehook",
+                ] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,
@@ -2116,6 +2123,12 @@ impl Context {
                         explicit: false,
                     });
                     self.bind(scope, name, function);
+                    if name == "unraisablehook" {
+                        self.bind(scope, "__unraisablehook__", function);
+                        if self.threads.system_module.is_none() {
+                            self.threads.default_unraisable_hook = Some(function);
+                        }
+                    }
                 }
                 for (name, original, stderr) in [
                     ("stdout", "__stdout__", false),

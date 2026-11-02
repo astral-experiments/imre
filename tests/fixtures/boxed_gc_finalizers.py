@@ -1,4 +1,5 @@
 import gc
+import sys
 from weakref import ref
 
 
@@ -95,7 +96,33 @@ def detach_owner(receivers, depth):
     return witness
 
 
+def check_unraisable():
+    failures = []
+    problem = ValueError("in the destructor")
+
+    class Rejected:
+        def __del__(self):
+            raise problem
+
+    before = sys.unraisablehook
+    try:
+        sys.unraisablehook = failures.append
+        obj = Rejected()
+        del obj
+        gc.collect()
+        event, = failures
+        assert type(type(event)) is type and isinstance(event, tuple)
+        assert event.exc_type is ValueError and event.exc_value is problem
+        assert event.exc_traceback is problem.__traceback__
+        assert event.object is None
+        assert event.err_msg == f"Exception ignored while calling deallocator {Rejected.__del__!r}"
+        assert tuple(event) == (ValueError, problem, event.exc_traceback, event.err_msg, None)
+    finally:
+        sys.unraisablehook = before
+
+
 def current():
+    check_unraisable()
     # Keep another pending finalizer reachable while cyclic and acyclic owners die.
     held = [Owner()]
     witness = ref(held[0])

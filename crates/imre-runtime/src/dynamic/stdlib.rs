@@ -51,7 +51,7 @@ mod select;
 pub(super) mod signal;
 mod socket;
 mod structure;
-mod traceback;
+pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
 mod zipimport;
@@ -1064,6 +1064,9 @@ pub(super) fn call(
         let argument = ctx.int(i64::from(depth));
         audit::event(ctx, name, &[argument])?;
         return Ok(ctx.heap.caller_module_at(depth.max(0) as usize).unwrap_or(NONE));
+    }
+    if name == "sys.unraisablehook" {
+        return super::unraisable::default_hook(ctx, args, kwargs);
     }
     if name == "sys._getframe" {
         if !kwargs.is_empty() {
