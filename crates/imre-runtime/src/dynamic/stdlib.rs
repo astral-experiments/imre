@@ -733,7 +733,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_path_names"
             | "get_scheme_names"
             | "get_platform"
-            | "get_config_var"
             | "get_default_scheme"
             | "get_preferred_scheme",
         )
@@ -2292,7 +2291,6 @@ pub(super) fn call(
         "traceback.format_exception" => return traceback::format(ctx, args, kwargs),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
-        | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
         | "os.confstr"
         | "os.path.dirname"
@@ -2431,14 +2429,6 @@ pub(super) fn call(
                     ("machine", data[4]),
                 ],
             )
-        }
-        "sysconfig.get_config_var" => {
-            let value = layout(ctx)?.config_var(ctx.str_value(argument(args, 0)?)?);
-            match value {
-                serde_json::Value::String(s) => ctx.text(s),
-                serde_json::Value::Number(n) => ctx.int(n.as_i64().unwrap()),
-                _ => NONE,
-            }
         }
         "sysconfig.get_path_names" => tuple_text(ctx, system::PATH_NAMES),
         "sysconfig.get_scheme_names" => tuple_text(ctx, system::SCHEME_NAMES),

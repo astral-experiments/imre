@@ -75,6 +75,17 @@ def check_command_stdin(imre, run):
 
 
 def check_sysconfig_build(imre, root, run):
+    by_name = (
+        "import _imp, importlib, sys\n"
+        "mod = importlib.import_module(sys.argv[1])\n"
+        "assert mod.get_config_var('EXT_SUFFIX') in _imp.extension_suffixes()\n"
+        "assert mod.get_config_vars() is mod.get_config_vars()\n"
+    )
+    flags = "\x1f".join(["--runtime-imports", "--no-cache", "--opt-level", "0"])
+    for executable in (sys.executable, imre):
+        result = run(executable, "-B", "-c", by_name, "sysconfig",
+                     extra={"IMRE_ENCODED_FLAGS": flags}, timeout=180)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"", b""), result
     fixture = Path(__file__).with_name("fixtures") / "boxed_sysconfig_build.py"
     project = root / "build-tree"
     modules = project / "Modules"

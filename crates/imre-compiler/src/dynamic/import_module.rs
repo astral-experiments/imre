@@ -169,9 +169,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/annotationlib.py"),
         )),
         "functools" => Some(("functools.py", include_str!("../../stdlib/functools.py"))),
-        "sysconfig" if cfg!(target_os = "linux") => {
-            Some(("sysconfig.py", include_str!("../../stdlib/sysconfig.py")))
-        }
+        "sysconfig" => Some((
+            "sysconfig.py",
+            if cfg!(target_os = "linux") {
+                concat!(
+                    include_str!("../../stdlib/sysconfig.py"),
+                    "\n",
+                    include_str!("../../stdlib/sysconfig_vars.py")
+                )
+            } else {
+                include_str!("../../stdlib/sysconfig_vars.py")
+            },
+        )),
         "hashlib" => Some(("hashlib.py", include_str!("../../stdlib/hashlib.py"))),
         // CPython 3.14.5 pathlib and its glob and NT path dependencies. See stdlib/docstrings/LICENSE.
         "pathlib" => Some((
