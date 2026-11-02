@@ -937,11 +937,17 @@ impl Context {
 
     /// Report an ordering operation declined by both operands.
     fn unsupported_order(&self, op: &str, a: Id, b: Id) -> Error {
+        let module = |id| match self.heap.get(id) {
+            Value::Calendar { .. } => "datetime.",
+            _ => "",
+        };
         Error::new(
             "TypeError",
             format!(
-                "'{op}' not supported between instances of '{}' and '{}'",
+                "'{op}' not supported between instances of '{}{}' and '{}{}'",
+                module(a),
                 self.type_name(a),
+                module(b),
                 self.type_name(b)
             ),
         )
@@ -994,9 +1000,9 @@ impl Context {
             }
             (Value::Float(x), Value::Float(y)) => Ok(x.partial_cmp(y)),
             (Value::Calendar { value: a, .. }, Value::Calendar { value: b, .. })
-                if a.class() == "time" && b.class() == "time" =>
+                if a.class() == b.class() && a.class() != "timezone" =>
             {
-                Ok(Some(a.clock_order(b)?))
+                Ok(Some(a.order(b, op)?))
             }
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => int_float(a, *f),
             (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
