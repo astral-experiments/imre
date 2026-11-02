@@ -6097,6 +6097,9 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.unshadowed_builtin(expression, "hex") {
+            return Err(self.scoped_builtin_error("hex", expression));
+        }
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
         }
@@ -6316,6 +6319,9 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::Fnmatch(ir::FnmatchOperation::Match { normcase }) => {
                     return Ok(fnmatch::function(self.types, normcase));
+                }
+                Intrinsic::BuiltinsHex => {
+                    return Err(self.scoped_builtin_error("builtins.hex", expression));
                 }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
@@ -8256,6 +8262,9 @@ impl<'a> Checker<'a> {
             return Ok(method);
         }
 
+        if self.unshadowed_builtin(&call.func, "hex") {
+            return Err(self.scoped_builtin_error("hex", call));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
@@ -8978,6 +8987,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::BuiltinsHex)) => {
+                return Err(self.scoped_builtin_error("builtins.hex", call));
             }
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
