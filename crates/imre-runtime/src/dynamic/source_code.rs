@@ -37,7 +37,7 @@ enum Instruction {
         module: String,
         alias: Option<String>,
     },
-    From(String, Vec<(String, String)>),
+    From(String, u32, Vec<(String, String)>),
     Define(Definition),
     ClassStart,
     ClassEnd,
@@ -422,7 +422,7 @@ impl Program {
                         strings.heap.code_name(alias);
                     }
                 }
-                Instruction::From(module, bindings) => {
+                Instruction::From(module, _, bindings) => {
                     strings.heap.code_name(module);
                     for (name, alias) in bindings {
                         strings.heap.code_name(name);
@@ -661,11 +661,8 @@ impl Program {
                     continue;
                 }
                 Stmt::Assert(s) => Instruction::Assert(s),
-                Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
-                    let module = s
-                        .module
-                        .as_ref()
-                        .ok_or_else(|| unsupported("relative import"))?;
+                Stmt::ImportFrom(s) if !s.is_lazy => {
+                    let module = s.module.as_ref().map_or("", |module| module.as_str());
                     let mut names = vec![];
                     for alias in &s.names {
                         if alias.name.as_str() == "*" {
@@ -675,7 +672,7 @@ impl Program {
                         self.locals.insert(local.clone());
                         names.push((alias.name.to_string(), local));
                     }
-                    Instruction::From(module.to_string(), names)
+                    Instruction::From(module.to_owned(), s.level, names)
                 }
                 Stmt::FunctionDef(s) if !s.is_async && s.type_params.is_none() && !function => {
                     if self.class_attributes.is_some()
@@ -2070,6 +2067,7 @@ impl Context {
         scope: Id,
         module: &str,
         names: Option<&[(String, String)]>,
+        level: u32,
     ) -> Result<Id> {
         let mut root = scope;
         while let Some(parent) = self.scope_data(root).parent {
@@ -2096,7 +2094,7 @@ impl Context {
         } else {
             NONE
         };
-        let zero = self.int(0);
+        let level = self.int(i64::from(level));
         let locals = if self.code_object(owner).parameters == NONE {
             self.scope_data(scope).exec_locals.unwrap_or(globals)
         } else {
@@ -2104,7 +2102,7 @@ impl Context {
         };
         self.call(
             importer,
-            vec![modname, globals, locals, fromlist, zero],
+            vec![modname, globals, locals, fromlist, level],
             Vec::new(),
         )
     }
@@ -2354,7 +2352,7 @@ impl Context {
                 }));
             }
             Instruction::Import { module, alias } => {
-                let mut imported = self.import_source_module(owner, scope, module, None)?;
+                let mut imported = self.import_source_module(owner, scope, module, None, 0)?;
                 let mut parts = module.split('.');
                 let first = parts.next().expect("nonempty module name");
                 if alias.is_some() {
@@ -2365,8 +2363,8 @@ impl Context {
                 }
                 self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
             }
-            Instruction::From(module, names) => {
-                let m = self.import_source_module(owner, scope, module, Some(names))?;
+            Instruction::From(module, level, names) => {
+                let m = self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
                     let name = self.text(name);
                     let v = self.op("from", m, name, NONE)?;
