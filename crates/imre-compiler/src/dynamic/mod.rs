@@ -626,6 +626,7 @@ pub(crate) fn compile(
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
     for name in [
         "__hello__",
+        "_tokenize",
         "ast",
         "codecs",
         "genericpath",

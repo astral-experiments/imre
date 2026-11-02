@@ -64,6 +64,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
+        "_tokenize" => Some(("_tokenize.py", include_str!("../stdlib/_tokenize.py"))),
         "__hello__" => Some(("__hello__.py", include_str!("../stdlib/__hello__.py"))),
         "ast" => Some(("ast.py", include_str!("../stdlib/ast.py"))),
         "stat" => {
