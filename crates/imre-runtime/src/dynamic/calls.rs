@@ -4842,7 +4842,9 @@ impl Context {
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return Ok(());
         };
-        if !matches!(self.heap.get(class), Value::Class { .. }) {
+        if !matches!(self.heap.get(class), Value::Class { .. })
+            && self.builtins.get(stdlib::datetime::TZINFO) != Some(&class)
+        {
             return Ok(());
         }
         let layout = self.instance_layout(class, name);
