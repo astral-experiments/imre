@@ -303,6 +303,19 @@ impl Context {
         self.setup_module_annotations(scope, code.string_annotations())
     }
 
+    pub(in crate::dynamic) fn mark_module_annotation(
+        &mut self,
+        scope: Id,
+        index: Id,
+    ) -> Result<()> {
+        let active = self.module_annotation_name(scope, "__conditional_annotations__")?;
+        let set = self.scalar_value(active);
+        if !matches!(self.heap.get(set), Value::Set { frozen: false, .. }) {
+            return Err(Error::new("TypeError", "expected a set"));
+        }
+        builtins::set_add(self, set, index)
+    }
+
     /// Initialize an annotated module's storage before executing its suite.
     pub(in crate::dynamic) fn setup_module_annotations(
         &mut self,

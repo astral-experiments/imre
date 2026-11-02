@@ -2557,6 +2557,7 @@ def report(text):
             "boxed_annotationlib_refs.py",
             "boxed_class_annotation_sites.py",
             "boxed_future_module_annotations.py",
+            "boxed_deferred_module_annotations.py",
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
