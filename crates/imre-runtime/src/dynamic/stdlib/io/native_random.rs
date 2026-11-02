@@ -5,7 +5,7 @@ use crate::dynamic::stdlib::{builtins, tempfile};
 const OWNER: &str = "BufferedRandom";
 pub(super) const METHODS: &[&str] = &[
     "__init__", "raw", "name", "mode", "closed", "readable", "writable", "seekable", "fileno",
-    "isatty", "read", "read1", "readinto", "readline", "write", "seek", "tell", "flush", "close",
+    "isatty", "peek", "read", "read1", "readinto", "readline", "write", "seek", "tell", "flush", "close",
     "truncate",
 ];
 
@@ -28,12 +28,12 @@ pub(super) fn call(
     if let Value::BufferedRandom(file, path) = ctx.heap.get(receiver) {
         let file = file.clone();
         match name {
-            "read1" => {
+            "read1" | "peek" => {
                 super::argument_count(OWNER, name, args.len())?;
                 if !kwargs.is_empty() {
                     return Err(Error::new(
                         "TypeError",
-                        "BufferedRandom.read1() takes no keyword arguments",
+                        format!("BufferedRandom.{name}() takes no keyword arguments"),
                     ));
                 }
                 let size = args
@@ -41,7 +41,11 @@ pub(super) fn call(
                     .map(|&v| descriptor_buffer::ssize(ctx, v))
                     .transpose()?
                     .and_then(|n| usize::try_from(n).ok());
-                let data = file.borrow_mut().random_read_once(size)?;
+                let data = if name == "peek" {
+                    file.borrow_mut().random_peek()?
+                } else {
+                    file.borrow_mut().random_read_once(size)?
+                };
                 return Ok(ctx.alloc(Value::Bytes(data)));
             }
             "closed" => return Ok(builtins::boolean(file.borrow().closed())),
@@ -60,7 +64,7 @@ pub(super) fn call(
         return tempfile::method(ctx, name, &operands, kwargs);
     }
     match name {
-        "read" | "read1" | "readinto" | "readline" => {
+        "peek" | "read" | "read1" | "readinto" | "readline" => {
             native_reader::call(ctx, OWNER, receiver, name, args, kwargs)
         }
         _ => native_writer::call(ctx, OWNER, receiver, name, args, kwargs),

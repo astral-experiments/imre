@@ -80,7 +80,7 @@ pub(in crate::dynamic) fn prepare_writer_shutdown(ctx: &Context) {
 
 const RANDOM_RAW_METHODS: &[&str] = &[
     "close", "flush", "readable", "writable", "seekable", "isatty", "fileno", "tell", "seek",
-    "read", "readall", "readinto", "write", "truncate",
+    "read", "readall", "readinto", "write",
 ];
 
 fn native_raw(ctx: &Context, raw: Id, methods: &[&str], owner: &str) -> Result<Rc<RawFile>> {
@@ -504,7 +504,14 @@ impl BufferedFd {
             return Ok(());
         }
         let (owner, methods): (_, &[&str]) = if self.reading && self.writing {
-            ("BufferedRandom", RANDOM_RAW_METHODS)
+            let methods: &[&str] = match name {
+                // These operations synchronize the cursor. truncate and its subsequent
+                // tell are looked up on the live raw object after synchronization.
+                "truncate" | "flush" => &["write", "seek"],
+                "close" => &["write", "seek", "flush", "close"],
+                _ => RANDOM_RAW_METHODS,
+            };
+            ("BufferedRandom", methods)
         } else if self.reading {
             (
                 "BufferedReader",
@@ -755,7 +762,10 @@ impl BufferedFd {
             "peek" => {
                 let data = match buffer {
                     Buffer::Reader(reader) => crate::objects::peek_bytes(reader)?,
-                    Buffer::Random(reader) => crate::objects::peek_bytes(reader)?,
+                    Buffer::Random(reader) => {
+                        self.check_reentry(ctx)?;
+                        reader.peek()?
+                    }
                     Buffer::Pipe(pipe) => pipe.peek()?,
                     Buffer::Writer(_) => unreachable!("peek requires a buffered reader"),
                 };

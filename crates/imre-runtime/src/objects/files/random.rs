@@ -20,6 +20,14 @@ pub(crate) struct Random<F = File> {
 }
 
 impl FileState {
+    pub(crate) fn random_peek(&mut self) -> Result<Bytes> {
+        self.check_random_reentry()?;
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "peek of closed file"));
+        };
+        file.peek()
+    }
+
     /// Return buffered bytes or make one read through the retained anonymous file.
     pub(crate) fn random_read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
         self.check_random_reentry()?;
@@ -213,6 +221,12 @@ impl<F: Read + Write + Seek> Random<F> {
             offset += n;
         }
         Ok(offset)
+    }
+
+    /// BufferedRandom synchronizes pending writes and refills from its logical cursor.
+    pub(crate) fn peek(&mut self) -> Result<Bytes> {
+        self.flush().map_err(errno_error)?;
+        super::peek_bytes(self)
     }
 
     pub(crate) fn capacity(&self) -> usize {

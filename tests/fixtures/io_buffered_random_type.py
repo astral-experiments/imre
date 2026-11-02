@@ -62,6 +62,7 @@ try:
         assert type(tf) is r
         tf.writelines([b"a\n",b"c\n"])
         tf.seek(0)
+        assert tf.peek(0) == b"a\nc\n" and tf.tell() == 0
         assert list(tf) == [b"a\n",b"c\n"]
         assert r.truncate(tf,2) == 2
     with io.FileIO(path, "r") as read:
@@ -77,6 +78,23 @@ try:
     try: r.read(object())
     except TypeError as e: assert "BufferedRandom" in str(e)
     else: raise AssertionError("wrong receiver accepted")
+    with io.FileIO(path, "w+") as raw:
+        raw.write(b"abcdef")
+        raw.seek(0)
+        with r(raw, 3) as stream:
+            assert stream.read(1) == b"a" and raw.tell() == 3
+            assert stream.peek(99) == b"bcd"
+            assert stream.tell() == 1 and raw.tell() == 4
+            assert stream.write(b"Z") == 1 and stream.peek(0) == b"cde"
+            assert stream.tell() == 2 and raw.tell() == 5
+            raw_truncate = raw.truncate
+            calls = []
+            def truncate(size):
+                calls.append((size, raw.tell()))
+                return raw_truncate(size)
+            raw.truncate = truncate
+            assert stream.truncate(2) == 2 and calls == [(2, 2)]
+        assert raw.closed
     oldio = sys.modules.pop("_io")
     try:
         freshio = __import__("_io")

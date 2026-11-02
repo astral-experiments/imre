@@ -508,7 +508,7 @@ fn unsupported_transfer(
 
 fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
     let message = match name {
-        "read" | "read1" | "readline" | "readlines" | "truncate" if n > 1 => {
+        "read" | "read1" | "readline" | "readlines" | "peek" | "truncate" if n > 1 => {
             format!("{name} expected at most 1 argument, got {n}")
         }
         "seek" if n == 0 => "seek expected at least 1 argument, got 0".into(),
@@ -516,7 +516,7 @@ fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
         "write" | "readinto" | "writelines" if n != 1 => {
             format!("{owner}.{name}() takes exactly one argument ({n} given)")
         }
-        "read" | "read1" | "readline" | "readlines" | "writelines" | "seek" | "write"
+        "read" | "read1" | "readline" | "readlines" | "peek" | "writelines" | "seek" | "write"
         | "readinto" | "truncate" | "__exit__" => {
             return Ok(());
         }
