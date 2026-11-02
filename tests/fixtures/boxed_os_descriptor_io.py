@@ -1,4 +1,5 @@
 import errno
+import io
 import posix
 import sys
 
@@ -60,6 +61,7 @@ def current():
         raise AssertionError("fstat accepted a negative descriptor")
     assert os.read is posix.read and os.write is posix.write
     assert read is posix.read and write is posix.write
+    assert os.readinto is posix.readinto
     if sys.platform == "linux" and sys.maxsize == 2**63 - 1:
         try:
             os.read(-1, sys.maxsize - 33)
@@ -97,6 +99,36 @@ def current():
                 pass
             else:
                 raise AssertionError("empty pipe was readable")
+
+            target = bytearray(b"xxxx")
+            expect_errno(os.readinto, (reader, target), errno.EAGAIN)
+            expect_errno(os.readinto, (-1, bytearray()), errno.EBADF)
+            assert os.write(writer, b"abc") == 3
+            view = memoryview(target)
+            assert os.readinto(Index(reader), view) == 3 and target == b"abcx"
+            assert bytes(view) == target
+            view.release()
+            for invalid in (view, memoryview(b"x")):
+                try:
+                    os.readinto(reader, invalid)
+                except TypeError as error:
+                    assert str(error) == "readinto() argument 2 must be read-write bytes-like object, not memoryview"
+                else:
+                    raise AssertionError("read into a released or readonly view")
+
+            with io.BytesIO(b"abcde") as stream:
+                original = stream.getvalue()
+                with stream.getbuffer() as full, full[1:4] as middle:
+                    assert os.write(writer, b"XY") == 2
+                    try:
+                        os.readinto(reader, full[::2])
+                    except TypeError:
+                        pass
+                    else:
+                        raise AssertionError("accepted a strided destination")
+                    assert os.readinto(reader, middle) == 2
+                    assert bytes(full) == b"aXYde" and original == b"abcde"
+                assert stream.getvalue() == b"aXYde"
 
             # A write larger than the pipe must return its actual short count.
             chunk = b"\x01\xff" * 2048

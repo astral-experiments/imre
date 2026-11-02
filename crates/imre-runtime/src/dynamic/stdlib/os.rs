@@ -361,6 +361,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "ftruncate"
             | "pipe"
             | "read"
+            | "readinto"
             | "write"
             | "close"
             | "get_blocking"
@@ -670,6 +671,34 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     }
 }
 
+/// Read into the writable export, keeping its extent fixed while EINTR handlers run.
+fn read_into(ctx: &mut Context, fd: i32, object: Id) -> Result<Id> {
+    let span = match ctx.heap.get(object) {
+        Value::MemoryView { owner: None, .. } => None,
+        _ => ctx.writable_byte_span(object)?,
+    };
+    let Some((storage, range)) = span else {
+        let kind = if object == NONE {
+            "None"
+        } else {
+            ctx.type_name(object)
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("readinto() argument 2 must be read-write bytes-like object, not {kind}"),
+        ));
+    };
+    ctx.with_buffer_export(object, |ctx| {
+        ctx.with_buffer_export(storage, |ctx| loop {
+            let bytes = ctx.writable_storage_bytes(storage)?;
+            if let Some(count) = native::try_read_into(fd, &mut bytes[range.clone()])? {
+                return Ok(ctx.int(count as i64));
+            }
+            ctx.dispatch_signals()?;
+        })
+    })
+}
+
 /// Run the shared descriptor operation after binding its Python arguments.
 pub(super) fn descriptor(
     ctx: &mut Context,
@@ -876,7 +905,7 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
-    if matches!(name, "read" | "write") {
+    if matches!(name, "read" | "readinto" | "write") {
         let [fd, data] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -888,6 +917,8 @@ pub(super) fn descriptor(
             let length = ssize_t(ctx, *data)?;
             let bytes = native::read(fd, length, || ctx.dispatch_signals())?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
+        } else if name == "readinto" {
+            read_into(ctx, fd, *data)
         } else {
             // Keep the exporter alive and its size fixed while a handler runs.
             // Reborrow on retry so in-place changes made by the handler are visible.
