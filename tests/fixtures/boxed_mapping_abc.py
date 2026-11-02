@@ -68,8 +68,32 @@ def hashable_classes():
         raise AssertionError("instantiated abstract Hashable")
 
 
+def dynamic_collection_classes():
+    from abc import ABCMeta
+    from collections.abc import Awaitable, Buffer, Coroutine, Sequence
+
+    for base, required in (
+        (Awaitable, "__await__"), (Buffer, "__buffer__"), (Coroutine, "throw"),
+        (Mapping, "__getitem__"), (Sequence, "__len__"), (Set, "__iter__"),
+    ):
+        assert type(base) is ABCMeta
+        methods = dict.fromkeys(base.__abstractmethods__, lambda self, *args: 0)
+        complete = type("Complete", (base,), methods)
+        assert type(complete) is ABCMeta and type(complete()) is complete
+        del methods[required]
+        incomplete = type("Incomplete", (base,), methods)
+        assert incomplete.__abstractmethods__ == frozenset({required})
+        try:
+            incomplete()
+        except TypeError as error:
+            assert required in str(error)
+        else:
+            raise AssertionError("instantiated an abstract collection")
+
+
 def current():
     hashable_classes()
+    dynamic_collection_classes()
     from collections.abc import Collection, Container, Iterable, Sized
 
     class Protocol:
