@@ -235,6 +235,7 @@ fn option(
         call,
         &[
             "type", "nargs", "help", "action", "default", "const", "required", "choices", "dest",
+            "metavar",
         ],
         module,
     )?;
@@ -367,6 +368,21 @@ fn option(
         aliases.into_iter().map(str::to_owned).collect::<Vec<_>>()
     };
     let zero = action != "store";
+    let metavar = match kw.get("metavar") {
+        None => None,
+        Some(value) if positional || !matches!(action, "store" | "store_const") => {
+            return Err(module.error(
+                value,
+                "static argparse supports metavar on store and store_const options",
+            ));
+        }
+        Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(value) => {
+            let label = literal(value, module)?;
+            // _StoreConstAction accepts metavar but does not pass it to Action.
+            (action == "store").then_some(label)
+        }
+    };
     if zero
         && (positional
             || kw.contains_key("type")
@@ -607,7 +623,7 @@ fn option(
     if !template(
         help.unwrap_or_default(),
         &[
-            "prog", "dest", "type", "default", "const", "choices", "required", "nargs",
+            "prog", "dest", "type", "default", "const", "choices", "required", "nargs", "metavar",
         ],
     ) {
         return Err(module.error(call, "unsupported argparse help substitution"));
@@ -662,13 +678,20 @@ fn option(
     } else {
         None
     };
+    // An explicit metavar defers integer choice formatting until it is actually needed.
+    if metavar.is_some() && choice_digits.is_some() {
+        return Err(module.error(
+            call,
+            "static argparse cannot defer digit-limited choices with a custom metavar",
+        ));
+    }
     Ok((
         OptionField {
             name: dest.clone(),
             annotation: flag.clone(),
             ty: if optional { types.optional(ty) } else { ty },
             option: json!({ "flag": flag_name, "dest": dest, "positional": positional, "aliases": aliases, "action": action, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
-            "choices": choices, "range":range, "has_choices": kw.contains_key("choices"), "int_default": int_default || element == Type::Int && numeric_kw("default", element),
+            "choices": choices, "metavar": metavar, "range":range, "has_choices": kw.contains_key("choices"), "int_default": int_default || element == Type::Int && numeric_kw("default", element),
             "int_constant": int_constant || element == Type::Int && numeric_kw("const", element),
             "float_default": element == Type::Float && numeric_kw("default", element),
             "float_constant": element == Type::Float && numeric_kw("const", element), "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
