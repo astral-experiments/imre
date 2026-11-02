@@ -52,8 +52,8 @@ impl Checker<'_> {
                 .map(|node| self.integer_index(node))
                 .collect::<Result<Vec<_>, _>>()?;
             let args = match args.as_slice() {
-                [stop] => vec![pipelines::integer(0), stop.clone(), pipelines::integer(1)],
-                [start, stop] => vec![start.clone(), stop.clone(), pipelines::integer(1)],
+                [stop] => vec![Expr::integer(0), stop.clone(), Expr::integer(1)],
+                [start, stop] => vec![start.clone(), stop.clone(), Expr::integer(1)],
                 [_, _, _] => args,
                 _ => {
                     return Err(error(
@@ -135,7 +135,7 @@ impl Checker<'_> {
                 values.push(value);
             }
             let repeat = match call.arguments.keywords.as_ref() {
-                [] => pipelines::integer(1),
+                [] => Expr::integer(1),
                 [kw] if kw
                     .arg
                     .as_ref()
@@ -216,7 +216,7 @@ impl Checker<'_> {
             name: name.to_owned(),
             ty: Type::Int,
             kind: ParameterKind::PositionalOrKeyword,
-            default: Some(pipelines::integer(value)),
+            default: Some(Expr::integer(value)),
             sign_only: false,
         });
         let args = self.arguments_with(call, &params, None, |checker, _, node| {
@@ -346,7 +346,7 @@ impl Checker<'_> {
                                 ty: Type::Int,
                                 kind: ExprKind::Scope {
                                     body: vec![Statement::Expr(value)],
-                                    value: Box::new(pipelines::integer(-1)),
+                                    value: Box::new(Expr::integer(-1)),
                                     clear: Vec::new(),
                                 },
                             },
@@ -395,7 +395,7 @@ impl Checker<'_> {
         let default = if let Some(default) = default {
             self.integer_index(default)?
         } else {
-            pipelines::integer(0)
+            Expr::integer(0)
         };
         Ok(Expr {
             ty: Type::Int,

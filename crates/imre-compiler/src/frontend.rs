@@ -3978,10 +3978,7 @@ impl<'a> Checker<'a> {
         Ok(Some(Iteration::Container {
             iterable: self.expr(source)?,
             items: false,
-            start: Some(Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int("0".into()),
-            }),
+            start: Some(Expr::integer(0)),
         }))
     }
 
@@ -4156,13 +4153,7 @@ impl<'a> Checker<'a> {
         let mut owned_items = Vec::new();
         let mut cleanup = vec![captured];
         let (item, test) = if let Some(cursor) = cursor {
-            output.push(Statement::Assign(
-                cursor,
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Int("0".into()),
-                },
-            ));
+            output.push(Statement::Assign(cursor, Expr::integer(0)));
             cleanup.push(cursor);
             (
                 Expr {
@@ -4304,10 +4295,7 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Binary(
                         Binary::Add,
                         Box::new(self.local(slot)),
-                        Box::new(Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("1".into()),
-                        }),
+                        Box::new(Expr::integer(1)),
                     ),
                 },
             ));
@@ -6158,7 +6146,7 @@ impl<'a> Checker<'a> {
                 self.resolve(&attr.value)
         {
             match attr.attr.as_str() {
-                "value" => return Ok(pipelines::integer(number)),
+                "value" => return Ok(Expr::integer(number)),
                 "name" => {
                     return Ok(unpacking::string(
                         ["VALUE", "VALUE_WITH_FAKE_GLOBALS", "FORWARDREF", "STRING"]
@@ -6241,10 +6229,7 @@ impl<'a> Checker<'a> {
             | Intrinsic::AnnotationFormat(level),
         )) = self.resolve(expression)
         {
-            return Ok(Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int(level.to_string()),
-            });
+            return Ok(Expr::integer(level));
         }
         if let Some(prefix) = self.cache_config(expression) {
             return Ok(cache_paths::op(
@@ -6290,7 +6275,7 @@ impl<'a> Checker<'a> {
             {
                 return Ok(Expr {
                     ty: self.types.element(ty).unwrap(),
-                    kind: ExprKind::Builtin(Builtin::ListGet, vec![storage, pipelines::integer(0)]),
+                    kind: ExprKind::Builtin(Builtin::ListGet, vec![storage, Expr::integer(0)]),
                 });
             }
             return Ok(storage);
@@ -6302,10 +6287,7 @@ impl<'a> Checker<'a> {
             return Ok(Expr::boolean(true));
         }
         if let Some(Binding::Intrinsic(Intrinsic::AccessMode(mode))) = self.resolve(expression) {
-            return Ok(Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int(mode.to_string()),
-            });
+            return Ok(Expr::integer(mode));
         }
         if let Some(Binding::Intrinsic(symbol @ (Intrinsic::Argv | Intrinsic::OrigArgv))) =
             self.resolve(expression)
@@ -6430,7 +6412,7 @@ impl<'a> Checker<'a> {
                     return Ok(logging_records::op(
                         ir::LogRecordOperation::Flag,
                         Type::Bool,
-                        vec![logging::number(mask)],
+                        vec![Expr::integer(mask)],
                     ));
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
@@ -6450,7 +6432,7 @@ impl<'a> Checker<'a> {
                 Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
                 Intrinsic::SysThreadInfo => return Ok(self.sys_thread_info()),
                 Intrinsic::SysHexversion => {
-                    return Ok(crate::version::integer(crate::version::hex(
+                    return Ok(Expr::integer(crate::version::hex(
                         crate::version::components(false),
                     )));
                 }
@@ -6701,10 +6683,7 @@ impl<'a> Checker<'a> {
                             ExprKind::Binary(
                                 Binary::BitXor,
                                 Box::new(value),
-                                Box::new(Expr {
-                                    ty: Type::Int,
-                                    kind: ExprKind::Int("-1".into()),
-                                }),
+                                Box::new(Expr::integer(-1)),
                             ),
                         )
                     }
@@ -9838,10 +9817,7 @@ impl<'a> Checker<'a> {
                     let offset = self.expr_expected(offset, Type::Int)?;
                     let whence = match rest {
                         [whence] => self.expr_expected(whence, Type::Int)?,
-                        _ => Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("0".into()),
-                        },
+                        _ => Expr::integer(0),
                     };
                     return Ok(Expr {
                         ty: Type::Int,

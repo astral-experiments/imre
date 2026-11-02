@@ -353,7 +353,7 @@ impl Checker<'_> {
                     } else {
                         Builtin::ListGet
                     },
-                    vec![input.clone(), pipelines::integer(index)],
+                    vec![input.clone(), Expr::integer(index)],
                 ),
             };
             path.iter().fold(item, |item, &(field, ty)| Expr {
@@ -367,8 +367,8 @@ impl Checker<'_> {
         };
         let slot = self.hidden(Type::Int);
         let size = self.local(slot);
-        let one = pipelines::integer(1);
-        let two = pipelines::integer(2);
+        let one = Expr::integer(1);
+        let two = Expr::integer(2);
         let pair = choose(
             pipelines::compare(Compare::Equal, project(0), project(1)),
             one.clone(),

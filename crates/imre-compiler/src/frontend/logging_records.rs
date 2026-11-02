@@ -50,7 +50,7 @@ impl Checker<'_> {
                 Expr::none(),
                 Expr::none(),
                 text(""),
-                logging::number(0),
+                Expr::integer(0),
                 text(""),
                 args,
                 Expr::none(),

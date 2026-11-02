@@ -68,13 +68,6 @@ impl Pattern {
     }
 }
 
-fn integer(value: impl ToString) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
-}
-
 fn not(value: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
@@ -650,7 +643,7 @@ impl Checker<'_> {
                 } else {
                     Compare::Equal
                 },
-                integer(fixed),
+                Expr::integer(fixed),
             ),
         ));
         for (index, child) in sequence.patterns.iter().enumerate() {
@@ -661,7 +654,7 @@ impl Checker<'_> {
                         let bound = |value: Option<i64>| Expr {
                             ty: self.types.optional(Type::Int),
                             kind: match value {
-                                Some(value) => ExprKind::Present(Box::new(integer(value))),
+                                Some(value) => ExprKind::Present(Box::new(Expr::integer(value))),
                                 None => ExprKind::Absent(Box::new(Expr::none())),
                             },
                         };
@@ -726,7 +719,7 @@ impl Checker<'_> {
                 builtin(
                     element,
                     Builtin::ListGet,
-                    vec![value.clone(), integer(position)],
+                    vec![value.clone(), Expr::integer(position)],
                 )
             } else {
                 let fields = fields.as_ref().unwrap();
@@ -1065,7 +1058,7 @@ impl Checker<'_> {
 /// values beyond machine integers; shortest decimal formatting would lose that.
 fn mapping_key(value: Expr) -> Expr {
     if let ExprKind::Bool(value) = value.kind {
-        return integer(usize::from(value));
+        return Expr::integer(usize::from(value));
     }
     let number = match &value.kind {
         ExprKind::Float(value) => *value,
@@ -1076,7 +1069,7 @@ fn mapping_key(value: Expr) -> Expr {
         _ => return value,
     };
     if number.is_finite() && number.fract() == 0.0 {
-        integer(if number == 0.0 {
+        Expr::integer(if number == 0.0 {
             "0".to_owned()
         } else {
             format!("{number:.0}")

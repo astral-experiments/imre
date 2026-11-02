@@ -12,10 +12,7 @@ fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
 impl Checker<'_> {
     /// Resolve the bytes buffer before invoking the seed's integer index protocol.
     pub(super) fn adler32(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let one = Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int("1".into()),
-        };
+        let one = Expr::integer(1);
         let params = [
             ParameterKind::PositionalOnly.parameter("data", Type::Bytes, None),
             ParameterKind::PositionalOnly.parameter("value", Type::Int, Some(one)),
@@ -218,10 +215,7 @@ impl Checker<'_> {
             ty: Type::Int,
             kind: ExprKind::Builtin(Builtin::Len, vec![alphabet.clone()]),
         };
-        let two = Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int("2".into()),
-        };
+        let two = Expr::integer(2);
         let correct_length = Expr {
             ty: Type::Bool,
             kind: ExprKind::Compare(vec![length, two], vec![Compare::Equal]),

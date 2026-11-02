@@ -932,7 +932,7 @@ impl Checker<'_> {
         let slot = self.hidden(Type::Int);
         let local = self.local(slot);
         let nonnegative =
-            pipelines::compare(Compare::GreaterEqual, local.clone(), pipelines::integer(0));
+            pipelines::compare(Compare::GreaterEqual, local.clone(), Expr::integer(0));
         let digits = digits(local);
         let prefixed = unpacking::concat(unpacking::string(sign), digits.clone());
         Expr {

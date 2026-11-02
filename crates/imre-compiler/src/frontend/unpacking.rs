@@ -3,14 +3,6 @@
 
 use super::*;
 
-/// Builds a checked-count constant without introducing a source-level binding.
-fn integer(value: impl ToString) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
-}
-
 /// Calls an existing typed primitive from compiler-generated unpacking code.
 fn builtin(ty: Type, kind: Builtin, args: Vec<Expr>) -> Expr {
     Expr {
@@ -334,7 +326,7 @@ impl Checker<'_> {
                     return Ok(Statement::Expr(logging_records::op(
                         ir::LogRecordOperation::SetFlag,
                         Type::None,
-                        vec![logging::number(mask), value],
+                        vec![Expr::integer(mask), value],
                     )));
                 }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
@@ -490,7 +482,7 @@ impl Checker<'_> {
                 {
                     let cell = self.cmp_field(receiver, frame, 1);
                     let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
-                    return Ok(Statement::SetItem(cell, pipelines::integer(0), value));
+                    return Ok(Statement::SetItem(cell, Expr::integer(0), value));
                 }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;
@@ -817,14 +809,14 @@ impl Checker<'_> {
                     string(")"),
                 );
                 body.push(Statement::If(
-                    comparison(self.local(length), Compare::Less, integer(fixed)),
+                    comparison(self.local(length), Compare::Less, Expr::integer(fixed)),
                     vec![unpack_error(message)],
                     Vec::new(),
                 ));
             }
             if star.is_none() {
                 body.push(Statement::If(
-                    comparison(self.local(length), Compare::Greater, integer(fixed)),
+                    comparison(self.local(length), Compare::Greater, Expr::integer(fixed)),
                     vec![unpack_error(string(format!(
                         "too many values to unpack (expected {fixed})"
                     )))],
@@ -871,7 +863,7 @@ impl Checker<'_> {
                 builtin(
                     element.unwrap(),
                     kind,
-                    vec![self.local(captured), integer(position)],
+                    vec![self.local(captured), Expr::integer(position)],
                 )
             };
             let slot = self.hidden(item.ty);
@@ -950,7 +942,7 @@ impl Checker<'_> {
         let bound = |value: Option<i64>| Expr {
             ty: self.types.optional(Type::Int),
             kind: match value {
-                Some(value) => ExprKind::Present(Box::new(integer(value))),
+                Some(value) => ExprKind::Present(Box::new(Expr::integer(value))),
                 None => ExprKind::Absent(Box::new(Expr::none())),
             },
         };

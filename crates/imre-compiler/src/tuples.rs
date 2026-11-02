@@ -664,10 +664,7 @@ mod tests {
                             ty: Type::Str,
                             kind: ExprKind::Str("first expression".into()),
                         },
-                        Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("7".into()),
-                        },
+                        Expr::integer(7),
                     ],
                     order: vec![1, 0],
                 },
