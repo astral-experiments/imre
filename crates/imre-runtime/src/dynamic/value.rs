@@ -2684,6 +2684,11 @@ impl Heap {
         })
     }
 
+    /// The first activation is a sentinel outside the Python frame stack.
+    pub(super) fn python_depth(&self) -> usize {
+        self.frames.len() - 1
+    }
+
     pub fn current_code(&self) -> Id {
         self.frames.last().unwrap().code
     }

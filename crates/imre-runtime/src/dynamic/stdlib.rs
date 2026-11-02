@@ -918,7 +918,7 @@ fn urlsafe_input(ctx: &mut Context, text: Id) -> Result<(Id, bool)> {
     Ok((data, false))
 }
 
-fn frame_depth(ctx: &mut Context, value: Id) -> Result<i32> {
+fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
@@ -1160,7 +1160,7 @@ pub(super) fn call(
             1,
         )?;
         let depth = match depth {
-            Some(value) => frame_depth(ctx, value)?,
+            Some(value) => index_c_int(ctx, value)?,
             None => 0,
         };
         let argument = ctx.int(i64::from(depth));
@@ -1177,6 +1177,24 @@ pub(super) fn call(
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
     }
+    if name == "sys.getrecursionlimit" {
+        if !kwargs.is_empty() {
+            return Err(Error::new("TypeError", "sys.getrecursionlimit() takes no keyword arguments"));
+        }
+        if !args[1..].is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("sys.getrecursionlimit() takes no arguments ({} given)", args.len() - 1),
+            ));
+        }
+        return Ok(ctx.int(i64::from(crate::sys::recursion_limit())));
+    }
+    if name == "sys.setrecursionlimit" {
+        let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
+        let limit = index_c_int(ctx, value)?;
+        crate::sys::set_recursion_limit(limit, ctx.heap.python_depth())?;
+        return Ok(NONE);
+    }
     if name == "sys._getframe" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1186,7 +1204,7 @@ pub(super) fn call(
         }
         let depth = match &args[1..] {
             [] => 0,
-            [value] => frame_depth(ctx, *value)?,
+            [value] => index_c_int(ctx, *value)?,
             extra => {
                 return Err(Error::new(
                     "TypeError",
