@@ -296,7 +296,6 @@ impl Context {
                 self.builtins.get("type.mro").copied()
             }
             Value::Native(kind) if kind == "object" => match name {
-                "__init__" | "__lt__" => self.builtins.get(&format!("object.{name}")).copied(),
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
                 "__ne__" => self.builtins.get("object.__ne__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
@@ -1026,7 +1025,7 @@ impl Context {
             (Some(member), None) => self.bind_attribute(member, object, class),
             (None, None)
                 if matches!(name, "__getattribute__" | "__delattr__")
-                    || (name == "__str__"
+                    || (matches!(name, "__str__" | "__init__" | "__lt__")
                         && self.allocation_base(class) == Some(self.builtin("object"))) =>
             {
                 let method = self.builtin(&format!("object.{name}"));
@@ -4048,6 +4047,11 @@ impl Context {
                 }
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
+                }
+                if matches!(name, "__init__" | "__lt__")
+                    && self.allocation_base(obj) == Some(self.builtin("object"))
+                {
+                    return Ok(self.builtin(&format!("object.{name}")));
                 }
                 if name == "__init__" && self.has_base(obj, "type") {
                     return Ok(self.builtin("type.__init__"));

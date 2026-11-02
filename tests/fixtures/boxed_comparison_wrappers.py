@@ -16,6 +16,13 @@ def current():
     assert object.__lt__(obj, obj) is NotImplemented
     assert obj.__lt__(1) is NotImplemented
 
+    class WithNew:
+        def __new__(cls, arg):
+            return object.__new__(cls)
+
+    assert WithNew.__init__ is object.__init__
+    assert WithNew(1).__init__() is None
+
     class Number(int):
         def __int__(self):
             raise AssertionError
