@@ -29,6 +29,55 @@ try:
             raise AssertionError("writer initialization accepted a non-writable raw")
         assert raw.closed and not rejected.closed and rejected.calls == 2
 
+    events = []
+    def record(event):
+        events.append((event.exc_type, event.exc_value.args, event.err_msg,
+                       event.object, event.exc_traceback is not None))
+
+    class Invalidated(RejectSecondCheck):
+        def writable(self):
+            allowed = super().writable()
+            if not allowed:
+                os.close(raw.fileno())
+            return allowed
+
+    saved_hook = sys.unraisablehook
+    sys.unraisablehook = record
+    try:
+        with io.FileIO(src, "r") as raw, Invalidated(dst, "w") as rejected:
+            try:
+                NativePair(raw, rejected, 2)
+            except io.UnsupportedOperation as exc:
+                assert str(exc) == "File or stream is not writable." and exc.__context__ is None
+            else:
+                raise AssertionError("failed writer initialization returned a pair")
+            assert raw.closed and not rejected.closed and len(events) == 1
+            kind, args, message, obj, traceback = events[0]
+            assert kind is OSError and args[0] == 9  # EBADF from closing the reader.
+            assert message.startswith("Exception ignored while finalizing file <_io.BufferedReader")
+            assert obj is None and traceback
+        gc.collect()
+        assert len(events) == 1
+
+        class BadClose(io.IOBase):
+            def close(self):
+                raise RuntimeError("close failed")
+            def __repr__(self):
+                return "bad stream"
+        stream = BadClose()
+        io.IOBase.__del__(stream)
+        io.IOBase.close(stream)
+        assert events[1:] == [(RuntimeError, ("close failed",),
+                               "Exception ignored while finalizing file bad stream", None, True)]
+    finally:
+        sys.unraisablehook = saved_hook
+
+    class WithNew(NativePair):
+        def __new__(cls, *args, **kwargs):
+            return super().__new__(cls)
+    with WithNew(io.FileIO(src, "r"), io.FileIO(dst, "w"), tag=True) as pair:
+        assert pair.read(1) == b"a"
+
     with io.BufferedReader(io.FileIO(src, "r"), 2) as reader:
         assert reader.peek(0) == b"ab" and reader.read(1) == b"a"
         assert io.BufferedReader.peek(reader, 99) == b"b" and reader.raw.tell() == 2

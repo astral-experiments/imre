@@ -810,9 +810,8 @@ pub(in super::super) fn call(
                 .lookup_attr(receiver, "close")
                 .and_then(|f| ctx.call(f, Vec::new(), Vec::new()))
             {
-                eprintln!(
-                    "Exception ignored while finalizing file {}: {error}",
-                    ctx.repr(receiver)
+                super::super::unraisable::report(
+                    ctx, error, true, Some(receiver), "Exception ignored while finalizing file",
                 );
             }
         }

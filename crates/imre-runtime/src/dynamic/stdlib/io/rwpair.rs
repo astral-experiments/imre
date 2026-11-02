@@ -98,14 +98,13 @@ fn initialize(ctx: &mut Context, owner: Id, receiver: Id, args: &[Id]) -> Result
                 ctx.heap.keep(id);
             }
             let reader = pair.reader.take();
-            if let Some(reader) = reader {
-                ctx.heap.keep(reader);
-            }
             pair.writer = None;
             store(ctx, receiver, pair);
-            // Construction owns the private reader. Release its raw file before returning
-            // the writer's exception, as clearing the last reader reference does in CPython.
-            let _ = forward(ctx, reader, "close", &[]);
+            // The pair owns this private reader. Run its ordinary, once-only file
+            // finalizer just as clearing the last C reference does during rollback.
+            if let Some(reader) = reader {
+                ctx.dispatch_finalizer(reader);
+            }
             Err(error)
         }
     }
@@ -130,7 +129,16 @@ pub(super) fn call(
         name,
         "read" | "read1" | "peek" | "readinto" | "readinto1" | "write"
     );
-    if !kwargs.is_empty() {
+    if !kwargs.is_empty()
+        && !(name == "__init__"
+            && ctx
+                .heap
+                .get(receiver)
+                .instance_class()
+                .is_some_and(|class| {
+                    ctx.class_attr(class, "__new__") != ctx.class_attr(owner, "__new__")
+                }))
+    {
         let prefix = if name == "__init__" {
             "BufferedRWPair".into()
         } else if transfer {
