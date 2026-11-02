@@ -268,20 +268,6 @@ class FileHandler(StreamHandler):
                 StreamHandler.close(self)
 
 
-class NullHandler(Handler):
-    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
-        pass
-
-    def emit(self, record: LogRecord | None) -> None:
-        pass
-
-    def createLock(self) -> None:
-        self.lock = None
-
-    def _at_fork_reinit(self) -> None:
-        pass
-
-
 class BufferingFormatter:
     linefmt: Formatter
 
