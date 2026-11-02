@@ -799,13 +799,18 @@ pub unsafe extern "C" fn imre_calendar_shift(
         _ => unreachable!(),
     }))
 }
+/// Negating the minimum representable day is valid, but a fractional maximum day can overflow.
+fn negate_delta(value: &Object) -> Result<crate::ObjectOwner, Error> {
+    let micros = validate_delta(&BigInt::from(-delta(value)))?;
+    try_owner(Value::Delta(micros))
+}
+
 /// # Safety
 /// The argument is a rooted exact timedelta; the result is separately owned.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_negate(d: *const Object) -> *const Object {
     // SAFETY: the caller roots the exact timedelta until its microseconds have been read.
-    let n = delta(unsafe { object(d) });
-    rc_result(validate_delta(&BigInt::from(-n)).map(|n| owner(Value::Delta(n))))
+    rc_result(negate_delta(unsafe { object(d) }))
 }
 /// # Safety
 /// The receiver is a rooted datetime or timedelta; the field index is statically validated.
