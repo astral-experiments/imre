@@ -74,9 +74,18 @@ def check_arguments(owner, witness):
 
 
 def current():
+    # Keep another pending finalizer reachable while cyclic and acyclic owners die.
+    held = [Owner()]
+    witness = ref(held[0])
     exercise(True, False)
     exercise(True, True)
     exercise(False, False)
+    assert witness() is held[0]
+    held.clear()
+    assert events == ["finalize"] and witness() is saved[0]
+    saved.clear()
+    assert witness() is None
+    events.clear()
     # The first argument stays live while the second releases an unrelated target.
     check_arguments(Owner(), clear_weak_target())
     assert events == ["weak", "finalize"]
