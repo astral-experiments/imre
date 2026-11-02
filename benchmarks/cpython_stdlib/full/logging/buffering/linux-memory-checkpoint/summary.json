@@ -1,0 +1,186 @@
+{
+  "phase": "baseline",
+  "imre_head": "16be958b8b891fc88628dae57b6e4f6b1d7fdc7c",
+  "scope": "memory",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_sha256": "30a3da42f5c021f375b20dbd966cd558864aff054a669f243c0cef1fac79ffd6",
+  "source_sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563",
+  "entry_sha256": "1732e198020be602188c1dfc9fd1ce6dfe762f830b333f274aaa292417a6bfd7",
+  "freeze_sha256": "c80b41462fa579aa80c4c1eb7c3cc6fdc67bb5f893235e83a7223d9ef7b4ac39",
+  "builds": {
+    "O0": {
+      "receipt_sha256": "54494c7ede2a3c2366b6d3d37489ad969d2e179e830ff4aea0b4733084ce8a45",
+      "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-16be958b8b89-O0",
+      "executable_sha256": "db6d3ce435aebcf8598523fe8a3587652f58d01a30f35894ef768ab31a48498e"
+    },
+    "O3": {
+      "receipt_sha256": "a78b27ecf40c6d71c5b9726136cd8fc519b6a7b23bb39f5ec1182be40aa8712c",
+      "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-16be958b8b89-O3",
+      "executable_sha256": "65e029bb61d8d70f04cdc8c8b4c4ced4b422bf647ff86b514abd259c4642c286"
+    }
+  },
+  "tools": {
+    "compiler": {
+      "sha256": "a8eea14447407dd1cb9c3310abf24fd48aa4431ad404889ba045770d6a3c9dc8",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-16be958b8b891fc88628dae57b6e4f6b1d7fdc7c/imre"
+    },
+    "runtime": {
+      "sha256": "4278af2865a46e283cec3f8f04dd112f7fea415b0afcd5496cba2e2f11fad676",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-16be958b8b891fc88628dae57b6e4f6b1d7fdc7c/libimre_runtime.a"
+    },
+    "clang": {
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-16be958b8b891fc88628dae57b6e4f6b1d7fdc7c/imre-toolchain/bin/clang"
+    }
+  },
+  "canonical": 272,
+  "selected_unique": 4,
+  "unrun": 268,
+  "paired_unique": 2,
+  "unpaired_unique": [
+    "test.test_logging.MemoryHandlerTest.test_race_between_set_target_and_flush",
+    "test.test_logging.MemoryHandlerTest.test_shutdown_flush_on_close"
+  ],
+  "paired_by_prior_evidence": {
+    "no-named-paired-proof; union-unresolved": 2
+  },
+  "credit": "Net addition is pending the coordinator history join.",
+  "groups": {
+    "memory": {
+      "selected": 4,
+      "paired": [
+        "test.test_logging.MemoryHandlerTest.test_flush",
+        "test.test_logging.MemoryHandlerTest.test_flush_on_close"
+      ],
+      "unpaired": [
+        "test.test_logging.MemoryHandlerTest.test_race_between_set_target_and_flush",
+        "test.test_logging.MemoryHandlerTest.test_shutdown_flush_on_close"
+      ]
+    }
+  },
+  "processes": {
+    "memory": {
+      "stock": {
+        "discovered": 272,
+        "registered": 4,
+        "inventory_matches_stock": true,
+        "starts": 4,
+        "stops": 4,
+        "actual_exit": 0,
+        "total": [
+          4,
+          0,
+          0,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 4,
+          "FAIL": 0,
+          "ERROR": 0,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 0,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 0,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/stock/memory/suite.json",
+        "receipt_sha256": "1e6f3807f0ac8788756157829bcd464ec3c9697d2c463420368cf14c81691fd6",
+        "executable": "/workspace/scratch/imre-resources/cpython/python",
+        "executable_sha256": "30a3da42f5c021f375b20dbd966cd558864aff054a669f243c0cef1fac79ffd6",
+        "stdout_sha256": "accab6893263134b87d6602647042040daf68bf7fc4326ccac1ade9dd0237603",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "O0": {
+        "discovered": 272,
+        "registered": 4,
+        "inventory_matches_stock": true,
+        "starts": 4,
+        "stops": 4,
+        "actual_exit": 1,
+        "total": [
+          4,
+          1,
+          2,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 2,
+          "FAIL": 1,
+          "ERROR": 2,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 3,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 4,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/baseline/16be958b8b891fc88628dae57b6e4f6b1d7fdc7c/O0/memory/suite.json",
+        "receipt_sha256": "02e290d25b89e5209f0269e0fd7da59a438b499a39a2990fd04b50c361362ad4",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-16be958b8b89-O0",
+        "executable_sha256": "db6d3ce435aebcf8598523fe8a3587652f58d01a30f35894ef768ab31a48498e",
+        "stdout_sha256": "258fbc31e3b87c3800bec236a9a476220245953b294702712e3bb293c554c3a7",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/baseline/16be958b8b891fc88628dae57b6e4f6b1d7fdc7c/O0/build.json",
+        "build_sha256": "54494c7ede2a3c2366b6d3d37489ad969d2e179e830ff4aea0b4733084ce8a45",
+        "freeze_sha256": "c80b41462fa579aa80c4c1eb7c3cc6fdc67bb5f893235e83a7223d9ef7b4ac39"
+      },
+      "O3": {
+        "discovered": 272,
+        "registered": 4,
+        "inventory_matches_stock": true,
+        "starts": 4,
+        "stops": 4,
+        "actual_exit": 1,
+        "total": [
+          4,
+          1,
+          2,
+          0
+        ],
+        "callback_counts": {
+          "PASS": 2,
+          "FAIL": 1,
+          "ERROR": 2,
+          "SKIP": 0,
+          "XFAIL": 0,
+          "XPASS": 0,
+          "SUBPASS": 0,
+          "SUBERROR": 0,
+          "TRACE": 3,
+          "TRACE_UNAVAILABLE": 0,
+          "CHAIN": 4,
+          "CHAIN_UNAVAILABLE": 0
+        },
+        "external": [],
+        "complete": true,
+        "issues": [],
+        "receipt": "matrix/baseline/16be958b8b891fc88628dae57b6e4f6b1d7fdc7c/O3/memory/suite.json",
+        "receipt_sha256": "b92058ac7ca0fbf0cfb60505b1319f3c2feeabd032e77c72f4deb18643fcfe62",
+        "executable": "/dev/shm/imre-logging-filters-matrix/bin/buffering-16be958b8b89-O3",
+        "executable_sha256": "65e029bb61d8d70f04cdc8c8b4c4ced4b422bf647ff86b514abd259c4642c286",
+        "stdout_sha256": "258fbc31e3b87c3800bec236a9a476220245953b294702712e3bb293c554c3a7",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "build": "matrix/baseline/16be958b8b891fc88628dae57b6e4f6b1d7fdc7c/O3/build.json",
+        "build_sha256": "a78b27ecf40c6d71c5b9726136cd8fc519b6a7b23bb39f5ec1182be40aa8712c",
+        "freeze_sha256": "c80b41462fa579aa80c4c1eb7c3cc6fdc67bb5f893235e83a7223d9ef7b4ac39"
+      }
+    }
+  },
+  "source_ledger_sha256": "6bddbd58f57a55300750e70aee851e1a22eddd00819a0e3a430906f13dc628bf",
+  "selected_ledger_sha256": "d583ffcd212d855164da5000ed3433e8f542de57bb51f3a62975d841b278e208",
+  "all_272_sha256": "8f3818212a6e5a2e57f547e397baf7f9c7c8f47a89f8b597603a7999a775ec70",
+  "selected_sha256": "206e539f7e51c5ee596bbac69512c35245ef0d23bfbfdd2680a9dc39bd78e185"
+}
