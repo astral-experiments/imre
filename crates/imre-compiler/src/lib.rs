@@ -966,6 +966,9 @@ mod tests {
 
     #[test]
     fn sealed_imports_work_without_filesystem_modules() {
+        #[cfg(unix)]
+        super::check("import _signal\n").unwrap();
+
         let source = r#"
 import sys as process
 from typing import TextIO as Stream
