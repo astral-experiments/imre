@@ -4,6 +4,7 @@ import builtins as _builtins
 import functools
 import sys as _sys
 import typing as _typing
+from _collections_abc import Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from collections import defaultdict as _defaultdict
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
@@ -1531,6 +1532,7 @@ DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
 Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
+Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
 
 
 def _substitute_alias_argument(arg, replacements):
