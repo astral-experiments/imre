@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::objects::ZipArchive;
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, os_error};
+use super::{Context, Error, Id, NONE, Result, Value, os_error};
 
 /// Supply filesystem operations and header dedenting to the shared distribution lookup.
 pub(super) fn call(
@@ -50,12 +50,6 @@ pub(super) fn call(
                 .collect::<Result<_>>()?;
             Ok(ctx.alloc(Value::List(names)))
         }
-        "exists" => Ok(if std::path::Path::new(text).exists() {
-            TRUE
-        } else {
-            FALSE
-        }),
-        "read_text" => Ok(ctx.text(crate::objects::read_path_text(text)?.to_string())),
         "dedent" => Ok(ctx.text(crate::objects::dedent(text).to_string())),
         _ => unreachable!(),
     }

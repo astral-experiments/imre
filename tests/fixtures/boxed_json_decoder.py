@@ -1,8 +1,95 @@
+def scanstrings():
+    import json
+    from _json import scanstring
+    assert type(scanstring).__name__ == "builtin_function_or_method"
+    assert (scanstring.__module__, scanstring.__qualname__) == ("_json", "scanstring")
+    import importlib
+    import sys
+    accelerator = sys.modules['_json']
+    try:
+        del sys.modules['_json']
+        fresh = importlib.import_module('_json')
+        assert fresh is not accelerator
+        assert scanstring.__self__ is accelerator and fresh.scanstring.__self__ is fresh
+        assert fresh.scanstring is not scanstring
+        assert fresh.scanstring('"new"', 1) == ('new', 5)
+        assert scanstring('"old"', 1) == ('old', 5)
+    finally:
+        sys.modules['_json'] = accelerator
+    assert json.decoder.scanstring is scanstring
+    assert scanstring('é"\\ud800\\udc00x"!', 2) == (chr(0x10000) + 'x', 16)
+    assert scanstring('"a\nb"', 1, False) == ('a\nb', 5)
+    unpaired = '"' + chr(0xd800) + '\\udc00"'
+    assert scanstring(unpaired, 1) == (chr(0xd800) + chr(0xdc00), len(unpaired))
+    malformed = 'é"\\x"'
+    try:
+        scanstring(malformed, 2)
+    except json.JSONDecodeError as error:
+        assert error.doc is malformed and error.pos == 2 and error.msg == 'Invalid \\escape'
+    else:
+        raise AssertionError('accepted invalid escape')
+
+
+def surrogate_documents():
+    import json
+
+    high, low = chr(0xd83d), chr(0xdc0d)
+    assert json.loads('"'+high+low+'"') == high+low
+    assert json.loads(r'"\ud83d\udc0d"') == chr(0x1f40d)
+    assert json.loads('"'+high+r'\udc0d"') == high+low
+    assert json.loads(r'"\ud83d'+low+'"') == high+low
+    assert json.loads(br'"\ud83d"') == high
+    doc = '[{"'+high+'":1},{"\\ud83d":2,"'+high+'":3},{"\\u0061":"ø"}]'
+    a, b, c = json.loads(doc)
+    assert (a, b, c) == ({high:1}, {high:3}, {'a':'ø'})
+    assert next(iter(a)) is next(iter(b))
+    bom = '\ufeff"'+high+'"'
+    try:
+        json.loads(bom)
+    except json.JSONDecodeError as error:
+        assert error.doc is bom and (error.pos, error.lineno, error.colno) == (0, 1, 1)
+        assert error.msg == 'Unexpected UTF-8 BOM (decode using utf-8-sig)'
+    else:
+        raise AssertionError('leading BOM was accepted')
+    prefix = '["'+high+'😀",\n'
+    malformed = prefix+'?]'
+    try:
+        json.loads(malformed)
+    except json.JSONDecodeError as error:
+        assert error.doc is malformed and error.msg == 'Expecting value'
+        assert (error.pos, error.lineno, error.colno) == (len(prefix),2,1)
+    else:
+        raise AssertionError('invalid value was accepted')
+
+
+def cached_decoder(package):
+    cache = package._default_decoder
+    calls = []
+    marker = object()
+
+    def decode(doc):
+        assert type(doc) is str
+        calls.append(doc)
+        return marker
+
+    cache.decode = decode
+    try:
+        text = '"é"'
+        assert package.loads(text) is marker
+        assert package.loads(text.encode()) is marker
+        assert package.loads(bytearray(b'\xfe\xff\x00"\x00\xe9\x00"')) is marker
+        assert calls == [text, text, text] and calls[0] is text
+    finally:
+        del cache.decode
+
+
 def current():
     import importlib
     import json
     import sys
 
+    scanstrings()
+    surrogate_documents()
     names = ('json', 'json.decoder', 'json.scanner', 'json.encoder', '_json')
     saved = {name: sys.modules[name] for name in names if name in sys.modules}
     try:
@@ -19,6 +106,7 @@ def current():
     assert fresh.scanner.make_scanner.__module__ == 'json.scanner'
     assert fresh.decoder.scanstring.__module__ == 'json.decoder'
     for package in (json, fresh):
+        cached_decoder(package)
         assert package.JSONDecoder is package.decoder.JSONDecoder
         assert package.JSONDecodeError is package.decoder.JSONDecodeError
         assert package.JSONDecoder().decode('["é", 2]') == ['é', 2]
@@ -34,6 +122,14 @@ def current():
                 assert error.args == ('Expecting value: line 2 column 6 (char 7)',)
             else:
                 raise AssertionError('accepted malformed JSON')
+    document = '"' + chr(0xd800) + '\\q"'
+    try:
+        fresh.loads(document)
+    except fresh.JSONDecodeError as error:
+        assert error.doc is document and error.pos == 3
+        assert error.msg == "Invalid \\escape: 'q'"
+    else:
+        raise AssertionError('accepted invalid escape after surrogate')
     # The decoder uses its own globals after the package attribute is rebound.
     fresh.decoder = None
     try:

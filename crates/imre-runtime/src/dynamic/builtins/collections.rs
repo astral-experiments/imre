@@ -1,5 +1,5 @@
 use super::super::calls::MappingOperation;
-use super::super::value::DictViewKind;
+use super::super::value::{DictViewKind, NOT_IMPLEMENTED};
 use super::*;
 use num_traits::Signed;
 
@@ -299,7 +299,7 @@ pub(in super::super) fn update(
                 // PySequence_Fast replaces TypeError only while obtaining the iterator.
                 let iterator = ctx.iterator(pair).map_err(|error| {
                     let class = ctx.builtin("TypeError");
-                    if ctx.error_matches(&error.kind, class) {
+                    if ctx.raised_error_matches(&error, class) {
                         type_error("object is not iterable")
                     } else {
                         error
@@ -340,6 +340,7 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
         | Value::Deque(_)
         | Value::List(_)
         | Value::ByteArray(_)
+        | Value::Array(_)
         | Value::Context(_)
         | Value::ContextToken { .. }
         | Value::Set { frozen: false, .. }
@@ -384,12 +385,14 @@ pub(in super::super) fn remove_dict_item_hashed(
     let Some(index) = ctx.find_dictionary_key(dict, key, hash)?.1 else {
         return Ok(None);
     };
-    Ok(Some(remove_dict_entry(ctx, dict, index)?.1))
+    Ok(Some(remove_table_entry(ctx, dict, index)?.1))
 }
 
-fn remove_dict_entry(ctx: &mut Context, dict: Id, index: usize) -> Result<(Id, Id)> {
-    let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
-        unreachable!("dictionary payload")
+fn remove_table_entry(ctx: &mut Context, receiver: Id, index: usize) -> Result<(Id, Id)> {
+    let (Value::Dict(entries) | Value::DefaultDict { entries, .. } | Value::Set { entries, .. }) =
+        ctx.heap.get_mut(receiver)
+    else {
+        unreachable!("dictionary or set payload")
     };
     let (key, value) = entries.remove(index)?;
     ctx.heap.weak_edge_removed(key);
@@ -431,14 +434,44 @@ pub(in super::super) fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result
 pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
     let target = ctx.scalar_value(target);
     let storage = ctx.scalar_value(source);
-    if matches!(ctx.heap.get(storage), Value::Set { .. }) {
-        return merge_set(ctx, target, storage);
+    if matches!(ctx.heap.get(storage), Value::Set { .. })
+        || matches!(ctx.heap.get(source), Value::Dict(_))
+    {
+        return merge_set_entries(ctx, target, storage);
     }
+    let roots = ctx.heap.temporary_mark();
     let iterator = ctx.iterator(source)?;
-    while let Some(item) = ctx.next_item(iterator)? {
-        set_add(ctx, target, item)?;
+    ctx.heap.keep(iterator);
+    let step = ctx.heap.temporary_mark();
+    let mut failed_key = None;
+    let updated: Result<()> = (|| {
+        while let Some(key) = ctx.next_item(iterator)? {
+            ctx.heap.keep(key);
+            failed_key = Some(key);
+            set_add(ctx, target, key)?;
+            failed_key = None;
+            // An equal key stays out of the result and can finalize before the next yield.
+            ctx.discard_truth(step);
+        }
+        Ok(())
+    })();
+
+    ctx.heap.release_temporaries_since(roots);
+    if let Err(error) = &updated {
+        for id in error.roots() {
+            ctx.heap.keep(id);
+        }
     }
-    Ok(())
+    // CPython releases the iterator before a key whose insertion failed.
+    let key_mark = ctx.heap.temporary_mark();
+    if let Some(key) = failed_key {
+        ctx.heap.keep(key);
+    }
+    let iterator_mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(iterator);
+    ctx.discard_truth(iterator_mark);
+    ctx.discard_truth(key_mark);
+    updated
 }
 
 fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
@@ -447,12 +480,42 @@ fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
         return ctx.order_sets("<=", receiver, storage);
     }
 
-    // CPython intersects the iterable with the receiver, stopping once all
-    // members match. An empty receiver still consumes and hashes each item.
+    let roots = ctx.heap.temporary_mark();
+    let found = intersect_iterable(ctx, receiver, other)?;
+    let subset = ctx.stored_entries(found).len() == ctx.stored_entries(receiver).len();
+    ctx.discard_truth(roots);
+    Ok(boolean(subset))
+}
+
+/// Intersect left to right, releasing each intermediate result before the next operand.
+fn set_intersection(ctx: &mut Context, receiver: Id, operands: &[Id]) -> Result<Id> {
+    if operands.is_empty() {
+        return ctx.set_binary("&", receiver, receiver, false);
+    }
+    let roots = ctx.heap.temporary_mark();
+    let mut result = receiver;
+    for &other in operands {
+        let storage = ctx.scalar_value(other);
+        result = if matches!(ctx.heap.get(storage), Value::Set { .. }) {
+            ctx.set_binary("&", result, storage, false)?
+        } else {
+            intersect_iterable(ctx, result, other)?
+        };
+        let collect = ctx.heap.discard_truth_operands(roots, ctx.modules);
+        ctx.heap.keep(result);
+        if collect {
+            ctx.collect_unreachable();
+        }
+    }
+    Ok(result)
+}
+
+/// Hash each yielded key once and stop on a match that completes the intersection.
+fn intersect_iterable(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     let roots = ctx.heap.temporary_mark();
     let found = ctx.alloc(Value::Set {
         entries: Default::default(),
-        frozen: false,
+        frozen: matches!(ctx.heap.get(receiver), Value::Set { frozen: true, .. }),
     });
     let iterator = ctx.iterator(other)?;
     ctx.heap.keep(iterator);
@@ -499,21 +562,20 @@ fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     let iterator_mark = ctx.heap.temporary_mark();
     ctx.heap.keep(iterator);
     ctx.discard_truth(iterator_mark);
-    let subset =
-        scan.map(|()| ctx.stored_entries(found).len() == ctx.stored_entries(receiver).len());
-    ctx.discard_truth(found_mark);
-    ctx.discard_truth(key_mark);
-    subset.map(boolean)
+    if scan.is_err() {
+        ctx.discard_truth(found_mark);
+        ctx.discard_truth(key_mark);
+    }
+    scan.map(|()| found)
 }
 
-fn merge_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
+fn merge_set_entries(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
     if target == source {
         return Ok(());
     }
-    if matches!(ctx.heap.get(target), Value::Set { entries, .. } if entries.is_empty()) {
-        let Value::Set { entries, .. } = ctx.heap.get(source) else {
-            unreachable!()
-        };
+    if matches!(ctx.heap.get(target), Value::Set { entries, .. } if entries.is_empty())
+        && let Value::Set { entries, .. } = ctx.heap.get(source)
+    {
         let copy = entries.try_clone()?;
         let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
             unreachable!()
@@ -675,6 +737,8 @@ pub(super) fn method(
             | "list.__init__"
             | "list.__repr__"
             | "tuple.__repr__"
+            | "list.__len__"
+            | "tuple.__len__"
             | "set.__repr__"
             | "frozenset.__repr__"
     ) {
@@ -683,21 +747,22 @@ pub(super) fn method(
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
-    if let Some(method) = name.strip_prefix("list.")
-        && LIST_METHODS.contains(&method)
+    if let Some((owner, method)) = name.split_once('.')
+        && ((owner == "list" && LIST_METHODS.contains(&method))
+            || matches!(name, "tuple.count" | "tuple.index"))
     {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(
                 "unbound method {name}() needs an argument"
             )));
         };
-        let receiver = ctx.scalar_value(receiver);
-        if !matches!(ctx.heap.get(receiver), Value::List(_)) {
+        if !ctx.builtin_slot_accepts(receiver, owner) {
             return Err(type_error(format!(
-                "descriptor '{method}' for 'list' objects doesn't apply to a '{}' object",
+                "descriptor '{method}' for '{owner}' objects doesn't apply to a '{}' object",
                 ctx.type_name(receiver)
             )));
         }
+        let receiver = ctx.scalar_value(receiver);
         let one_arg = || {
             if !kwargs.is_empty() {
                 return Err(type_error(format!("{name}() takes no keyword arguments")));
@@ -711,6 +776,7 @@ pub(super) fn method(
             }
         };
         return match method {
+            "__getitem__" => ctx.sequence_subscript(receiver, one_arg()?),
             "append" => {
                 let value = one_arg()?;
                 let items = list_items_mut(ctx, receiver)?;
@@ -720,7 +786,7 @@ pub(super) fn method(
                 items.push(value);
                 Ok(NONE)
             }
-            "index" => list_index(ctx, receiver, args, kwargs),
+            "index" => sequence_index(ctx, owner, receiver, args, kwargs),
             "extend" => {
                 list_extend(ctx, receiver, one_arg()?)?;
                 Ok(NONE)
@@ -729,14 +795,14 @@ pub(super) fn method(
                 let value = one_arg()?;
                 let mut count = 0;
                 let mut start = 0;
-                while let Some(i) = find_list_item(ctx, receiver, value, start..i64::MAX)? {
+                while let Some(i) = find_sequence_item(ctx, receiver, value, start..i64::MAX)? {
                     count += 1;
                     start = i + 1;
                 }
                 Ok(ctx.int(count))
             }
             "remove" => {
-                let i = find_list_item(ctx, receiver, one_arg()?, 0..i64::MAX)?
+                let i = find_sequence_item(ctx, receiver, one_arg()?, 0..i64::MAX)?
                     .ok_or_else(|| Error::new("ValueError", "list.remove(x): x not in list"))?
                     as usize;
                 let items = list_items_mut(ctx, receiver)?;
@@ -801,6 +867,10 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__or__"
+            | "dict.__ror__"
+            | "dict.__ior__"
+            | "dict.__eq__"
             | "dict.__repr__"
             | "dict.__len__"
             | "dict.__iter__"
@@ -814,19 +884,28 @@ pub(super) fn method(
                 "descriptor '{method}' of 'dict' object needs an argument"
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
-            None if matches!(name, "set.difference_update" | "set.update")
-                || name.ends_with(".issubset") =>
+            None if matches!(
+                name,
+                "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
+            ) || name.ends_with(".issubset")
+                || name.ends_with(".intersection")
+                || name.ends_with(".difference")
+                || name.ends_with(".union") =>
             {
                 type_error(format!("unbound method {name}() needs an argument"))
             }
             None => type_error("missing collection receiver"),
         })?;
-    let receiver = if let Some(kind) = name.strip_suffix(".issubset") {
+    let receiver = if let Some((
+        kind,
+        method @ ("difference" | "intersection" | "issubset" | "union"),
+    )) = name.split_once('.')
+    {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen, .. } if *frozen == (kind == "frozenset"))
         {
             return Err(type_error(format!(
-                "descriptor 'issubset' for '{kind}' objects doesn't apply to a '{}' object",
+                "descriptor '{method}' for '{kind}' objects doesn't apply to a '{}' object",
                 ctx.type_name(object)
             )));
         }
@@ -844,7 +923,10 @@ pub(super) fn method(
                 ))
             }
         })?
-    } else if matches!(name, "set.difference_update" | "set.update") {
+    } else if matches!(
+        name,
+        "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
+    ) {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
             return Err(type_error(format!(
@@ -870,6 +952,50 @@ pub(super) fn method(
         let representation = ctx.checked_container_slot_repr(object, receiver)?;
         return Ok(ctx.text(representation));
     }
+    if matches!(name, "dict.__or__" | "dict.__ror__" | "dict.__ior__") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "wrapper {}() takes no keyword arguments",
+                &name[5..]
+            )));
+        }
+        let [other] = args else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
+        };
+        if name == "dict.__ior__" {
+            update(ctx, receiver, Some(*other), &[])?;
+            return Ok(object);
+        }
+        let Some(other_storage) = ctx.dict_storage(*other) else {
+            return Ok(NOT_IMPLEMENTED);
+        };
+        let (left, storage, right) = if name == "dict.__ror__" {
+            (*other, other_storage, object)
+        } else {
+            (object, receiver, *other)
+        };
+        let merged = copy_dict(ctx, left, storage)?;
+        update(ctx, merged, Some(right), &[])?;
+        return Ok(merged);
+    }
+    if name == "dict.__eq__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __eq__() takes no keyword arguments"));
+        }
+        let [other] = args else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
+        };
+        return match ctx.dict_storage(*other) {
+            Some(right) => Ok(boolean(ctx.checked_equal(receiver, right)?)),
+            None => Ok(NOT_IMPLEMENTED),
+        };
+    }
     if name == "dict.__delitem__" {
         if !kwargs.is_empty() {
             return Err(type_error(
@@ -891,11 +1017,19 @@ pub(super) fn method(
         name,
         "dict.pop"
             | "dict.popitem"
+            | "set.difference"
+            | "frozenset.difference"
+            | "set.intersection"
+            | "frozenset.intersection"
+            | "set.union"
+            | "frozenset.union"
             | "set.issubset"
             | "frozenset.issubset"
             | "set.issuperset"
             | "frozenset.issuperset"
             | "set.discard"
+            | "set.pop"
+            | "set.remove"
             | "set.difference_update"
             | "set.update"
             | "frozenset.copy"
@@ -921,7 +1055,7 @@ pub(super) fn method(
                 let message = ctx.text("popitem(): dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
             };
-            let (key, value) = remove_dict_entry(ctx, receiver, last)?;
+            let (key, value) = remove_table_entry(ctx, receiver, last)?;
             Ok(ctx.alloc(Value::Tuple(vec![key, value])))
         }
         "dict.copy" => {
@@ -1063,36 +1197,55 @@ pub(super) fn method(
             }
             Ok(TRUE)
         }
+        "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
+        "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
         "set.difference_update" => {
             for &source in args {
                 ctx.set_difference_update(receiver, source)?;
             }
             Ok(NONE)
         }
-        "set.discard" => {
-            arity(name, args, 1, 1)?;
-            if !matches!(ctx.heap.get(receiver), Value::Set { frozen: false, .. }) {
-                return Err(type_error("descriptor 'discard' requires a 'set' object"));
+        "set.pop" => {
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "set.pop() takes no arguments ({} given)",
+                    args.len()
+                )));
             }
-            let key = if let Value::Set {
-                entries,
-                frozen: false,
-            } = ctx.heap.get(args[0])
-            {
-                ctx.alloc(Value::Set {
-                    entries: entries.clone(),
-                    frozen: true,
-                })
-            } else {
-                args[0]
+            let Some(last) = ctx.stored_entries(receiver).len().checked_sub(1) else {
+                let message = ctx.text("pop from an empty set");
+                return Err(ctx.lookup_error("KeyError", message));
             };
-            if let Some(index) = ctx.find_dictionary_key(receiver, key, None)?.1 {
-                let Value::Set { entries, .. } = ctx.heap.get_mut(receiver) else {
-                    unreachable!()
-                };
-                let (key, value) = entries.remove(index)?;
-                ctx.heap.weak_edge_removed(key);
-                ctx.heap.weak_edge_removed(value);
+            Ok(remove_table_entry(ctx, receiver, last)?.0)
+        }
+        "set.discard" | "set.remove" => {
+            let key = super::one_positional_arg(name, args, kwargs)?;
+            let index = match ctx.find_dictionary_key(receiver, key, None) {
+                Ok((_, index)) => index,
+                Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+                    let Value::Set {
+                        frozen: false,
+                        entries,
+                    } = ctx.heap.get(ctx.scalar_value(key))
+                    else {
+                        return Err(error);
+                    };
+                    // Retry a mutable set key with its equivalent frozenset's hash.
+                    // Equality callbacks and KeyError still receive the original key.
+                    let entries = entries.try_clone()?;
+                    let frozen = ctx.alloc(Value::Set {
+                        entries,
+                        frozen: true,
+                    });
+                    let hash = ctx.dictionary_hash(frozen)?;
+                    ctx.find_dictionary_key(receiver, key, Some(hash))?.1
+                }
+                Err(error) => return Err(error),
+            };
+            if let Some(index) = index {
+                remove_table_entry(ctx, receiver, index)?;
+            } else if name == "set.remove" {
+                return Err(ctx.lookup_error("KeyError", key));
             }
             Ok(NONE)
         }
@@ -1100,6 +1253,19 @@ pub(super) fn method(
             arity(name, args, 1, 1)?;
             set_add(ctx, receiver, args[0])?;
             Ok(NONE)
+        }
+        "set.union" | "frozenset.union" => {
+            let result = ctx.alloc(Value::Set {
+                entries: Default::default(),
+                frozen: name == "frozenset.union",
+            });
+            update_set(ctx, result, receiver)?;
+            for &source in args {
+                if source != object {
+                    update_set(ctx, result, source)?;
+                }
+            }
+            Ok(result)
         }
         "set.update" => {
             for &input in args {
@@ -1111,10 +1277,18 @@ pub(super) fn method(
     }
 }
 
-/// Compare against the live list; __index__ and __eq__ can both change its contents.
-fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+/// Convert slice bounds before searching the underlying list or tuple.
+fn sequence_index(
+    ctx: &mut Context,
+    owner: &str,
+    receiver: Id,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
     if !kwargs.is_empty() {
-        return Err(type_error("list.index() takes no keyword arguments"));
+        return Err(type_error(format!(
+            "{owner}.index() takes no keyword arguments"
+        )));
     }
     let Some((&needle, bounds)) = args.split_first() else {
         return Err(type_error("index expected at least 1 argument, got 0"));
@@ -1138,33 +1312,22 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             }
         });
     }
-    let Value::List(items) = ctx.heap.get(receiver) else {
-        unreachable!()
-    };
-    let [start, stop] = limits.map(|i| {
-        if i < 0 {
-            (items.len() as i64 + i).max(0)
-        } else {
-            i
-        }
-    });
-    find_list_item(ctx, receiver, needle, start..stop)?
+    let (length, _) = ctx.sequence_at(receiver, 0).unwrap();
+    let [start, stop] = limits.map(|i| if i < 0 { (length as i64 + i).max(0) } else { i });
+    find_sequence_item(ctx, receiver, needle, start..stop)?
         .map(|i| ctx.int(i))
-        .ok_or_else(|| Error::new("ValueError", "list.index(x): x not in list"))
+        .ok_or_else(|| Error::new("ValueError", format!("{owner}.index(x): x not in {owner}")))
 }
 
-/// Locate the next match in a live list. Equality callbacks may resize or clear it.
-fn find_list_item(
+/// Search by identity or rich equality, re-reading storage if a callback mutates a list.
+fn find_sequence_item(
     ctx: &mut Context,
     receiver: Id,
     needle: Id,
     positions: std::ops::Range<i64>,
 ) -> Result<Option<i64>> {
     for i in positions {
-        let Value::List(items) = ctx.heap.get(receiver) else {
-            unreachable!()
-        };
-        let Some(&item) = items.get(i as usize) else {
+        let Some((_, Some(item))) = ctx.sequence_at(receiver, i as usize) else {
             break;
         };
         if item != needle {
@@ -1242,7 +1405,8 @@ pub(super) fn builtin_slot(
         )));
     }
     let storage = ctx.scalar_value(object);
-    if matches!(method, "__add__" | "__iadd__") {
+    let set_op = set_operator(method);
+    if matches!(method, "__add__" | "__iadd__") || set_op.is_some() {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1260,18 +1424,73 @@ pub(super) fn builtin_slot(
         if method == "__add__" {
             return ctx.concat_list(storage, *value);
         }
+        if let Some(op) = set_op {
+            let other = ctx.scalar_value(*value);
+            if !matches!(ctx.heap.get(other), Value::Set { .. }) {
+                return Ok(NOT_IMPLEMENTED);
+            }
+            let (left, right) = if method.starts_with("__r") {
+                (other, storage)
+            } else {
+                (storage, other)
+            };
+            let inplace = method.starts_with("__i");
+            let result = ctx.set_binary(op, left, right, inplace)?;
+            return Ok(if inplace { object } else { result });
+        }
         list_extend(ctx, storage, *value)?;
         return Ok(object);
     }
-    if method == "__repr__" {
+    if matches!(
+        method,
+        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__" | "__len__"
+    ) {
         if !kwargs.is_empty() {
-            return Err(type_error("wrapper __repr__() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "wrapper {method}() takes no keyword arguments"
+            )));
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__len__" {
+            let length = match ctx.heap.get(storage) {
+                Value::List(items)
+                | Value::Tuple(items)
+                | Value::NamedTuple { values: items, .. } => items.len(),
+                Value::Instance { class, .. } => ctx
+                    .namedtuple_fields(*class)
+                    .expect("validated tuple receiver")
+                    .len(),
+                _ => unreachable!("validated list or tuple receiver"),
+            };
+            return Ok(ctx.int(length as i64));
+        }
+        if method == "__abs__" {
+            return super::absolute_value(ctx, object);
+        }
+        if method == "__int__" {
+            return integer::truncate_real(ctx, object);
+        }
+        if method == "__float__" {
+            if let Value::Float(number) = *ctx.heap.get(storage) {
+                return Ok(if storage == object {
+                    object
+                } else {
+                    ctx.alloc(Value::Float(number))
+                });
+            }
+            let number = crate::floats::int_to_float(&ctx.as_int(storage)?)?;
+            return Ok(ctx.alloc(Value::Float(number)));
+        }
+        if method == "__index__" {
+            return Ok(integer::exact_value(ctx, object));
+        }
+        if method == "__str__" {
+            return Ok(storage);
         }
         let text = match ctx.heap.get(storage) {
             Value::Bool(value) if owner == "int" => u8::from(*value).to_string(),

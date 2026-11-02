@@ -1,0 +1,49 @@
+122 test.test_re.ReTests.test_pattern_compare_bytes, occurrence 1
+
+stock  5607950ef232dad16d75c0cf53101d9649d89115  CPython 3.14.5 Linux x86-64
+Actual process exit 0. Upstream test_re.py lines 2338–2353; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304; runtime (stock executable); executed ELF c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304.
+Complete raw stdout (raw/stock/reference/pattern-original/run.stdout, SHA-256 08f7f8015f3401e38367717a1c17b056585bb602c00a06c1980bf4bfcd1a5d40)
+SELECT test.test_re.ReTests.test_pattern_compare_bytes
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/stock/reference/pattern-original/run.stderr, SHA-256 34801038a1ee3cb7ac646709cf0443ccdba17eeb50241432b6ba9788bccaf064)
+test_pattern_compare_bytes (test.test_re.ReTests.test_pattern_compare_bytes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK
+
+O0  fd73f631466c6d440fd2b84838ffa2d9fc329fa8  dev-debug0
+Actual process exit 0. Upstream test_re.py lines 2338–2353; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler 3c2f5160341cf997e6eb6055495eee681c3f5267dd4b8a599b6887af4d4677af; runtime 595b13879d01ebac8b2cb556847c27aa5d64055a84463b3a643c23fd840de0df; executed ELF fe211defcb247bd3f1a1090f75ffbb8bb0f25d48e67604f9de77e3120c0d1c09.
+Complete raw stdout (raw/patternpublic/O0/pattern-original/run.stdout, SHA-256 08f7f8015f3401e38367717a1c17b056585bb602c00a06c1980bf4bfcd1a5d40)
+SELECT test.test_re.ReTests.test_pattern_compare_bytes
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/patternpublic/O0/pattern-original/run.stderr, SHA-256 8cdbc46cfeaf83b7e878c3521a59653cda4799caf683525b4fbe9cffa18716d3)
+test_pattern_compare_bytes (test.test_re.ReTests.test_pattern_compare_bytes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.728s
+
+OK
+
+O3  fd73f631466c6d440fd2b84838ffa2d9fc329fa8  dev-debug0
+Actual process exit 0. Upstream test_re.py lines 2338–2353; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler 3c2f5160341cf997e6eb6055495eee681c3f5267dd4b8a599b6887af4d4677af; runtime 595b13879d01ebac8b2cb556847c27aa5d64055a84463b3a643c23fd840de0df; executed ELF 450c826828d006db81ef8dd0cd606dbc6adfecc89de83ea8c2749b8d2b753570.
+Complete raw stdout (raw/patternpublic/O3/pattern-original/run.stdout, SHA-256 08f7f8015f3401e38367717a1c17b056585bb602c00a06c1980bf4bfcd1a5d40)
+SELECT test.test_re.ReTests.test_pattern_compare_bytes
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/patternpublic/O3/pattern-original/run.stderr, SHA-256 75356862f43934e45952048f914deb3c2075e139485156f416b6ed3bed32ffad)
+test_pattern_compare_bytes (test.test_re.ReTests.test_pattern_compare_bytes) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.908s
+
+OK

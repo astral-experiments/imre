@@ -1,5 +1,7 @@
 import logging
 import sys
+import warnings
+from logging import *
 
 
 class Stream:
@@ -16,6 +18,10 @@ class Stream:
 
 
 def current():
+    print(logging.__all__)
+    for name in logging.__all__:
+        assert globals()[name] is getattr(logging, name)
+    assert "root" not in globals()
     check_root_records()
     assert logging.StreamHandler().stream is sys.stderr
     stream = Stream()
@@ -32,6 +38,21 @@ def current():
     assert child.level == logging.NOTSET and child.getEffectiveLevel() == logging.INFO
 
     handler = logging.StreamHandler(stream)
+    assert repr(handler) == "<StreamHandler (NOTSET)>"
+    stream.name = 2
+    assert repr(handler) == "<StreamHandler 2 (NOTSET)>"
+
+    class RenamingStream:
+        @property
+        def name(self):
+            logging.str = lambda name: "after lookup"
+            return "before lookup"
+
+    try:
+        assert repr(logging.StreamHandler(RenamingStream())) == "<StreamHandler after lookup (NOTSET)>"
+    finally:
+        del logging.str
+
     handler.name = "access-stream"
     assert logging.getHandlerByName("access-stream") is handler
     handler.name = "renamed-stream"
@@ -114,7 +135,17 @@ def check_root_records():
     logging.basicConfig(handlers=[handler], format="%(levelname)s %(message)s")
     try:
         logging.warning("less is %(less)s", {"less": "more"})
-        assert stream.writes == ["WARNING less is more\n"]
+        logging.info("below the default threshold")
+        logging.critical("disk %s", "full")
+        logging.log(logging.ERROR, "status %d", 7)
+        assert stream.writes == ["WARNING less is more\n", "CRITICAL disk full\n", "ERROR status 7\n"]
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            fatal("disk %s", "full")
+            warn("limit %d", 7)
+        assert stream.writes[-2:] == ["CRITICAL disk full\n", "WARNING limit 7\n"]
+        assert len(seen) == 1 and seen[0].category is DeprecationWarning
+        assert seen[0].filename == __file__
         try:
             raise ValueError("root failure")
         except ValueError:

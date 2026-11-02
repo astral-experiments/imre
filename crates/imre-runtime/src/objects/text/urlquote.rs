@@ -118,24 +118,6 @@ unsafe fn quote(
     finish(result, std::ptr::null())
 }
 
-/// Quote text or octets, sharing the codec and safe-set rules with runtime imports.
-pub(crate) fn quote_component(
-    source: UrlInput<'_>,
-    safe: &[u8],
-    encoding: Option<&str>,
-    errors: Option<&str>,
-    plus: bool,
-) -> Result<String> {
-    quote_with_owner(
-        source,
-        safe,
-        encoding,
-        errors,
-        plus,
-        super::try_owned_string,
-    )
-}
-
 fn quote_with_owner(
     source: UrlInput<'_>,
     safe: &[u8],

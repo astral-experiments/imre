@@ -1,6 +1,19 @@
 def current():
     print(f'{2.675:.2f}', f'{-0.0:+.0%}', f'{True: .1f}', f'{-3:.2%}')
     print(f'{float("inf"):+f}', f'{float("nan"):.2%}')
+    assert f"{2.5:03.0f}" == "002" and f"{3.5:03.0f}" == "004"
+    assert "{:03.0f}".format(-0.0) == "-00" and format(True, "4.0f") == "   1"
+    assert format(-1234, "03.0f") == "-1234"
+    assert format(0.125, "08.0%") == "0000012%"
+    assert format(float("inf"), "+07.0f") == "+000inf"
+    assert format(float("nan"), " 07.0f") == " 000nan"
+    for number in (1.5, 1 << 2000):
+        try:
+            format(number, "1" * 30 + "f")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted an overflowing field width")
     try:
         print(f'{1 << 2000:.1f}')
     except OverflowError:
@@ -60,6 +73,15 @@ def current():
             print(str(exc))
         else:
             raise AssertionError("accepted invalid as_integer_ratio call")
+
+    for allocate in (int.__new__, float.__new__):
+        for args in ((), (dict,), (1,)):
+            try:
+                allocate(*args)
+            except TypeError as error:
+                print(str(error))
+            else:
+                raise AssertionError("accepted invalid scalar constructor arguments")
 
     weight = Weight("1.5")
     assert type(weight) is Weight and isinstance(weight, float)

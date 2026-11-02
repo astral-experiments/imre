@@ -142,9 +142,10 @@ are read-only; mutation, per-line objects, byte inputs, and metadata-only parsin
 are outside this surface.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
-`for key, group` loop, the first statement must assign `list(group)` to a separate
-local. That list can be stored or mutated. The grouper name must be fresh and its
-only supported use is this immediate conversion.
+`for key, group` loop, the first statement can iterate over the group with
+`for member in group`, or assign `list(group)` to a separate local. The inner
+loop pulls members on demand. The materialized list can be stored or mutated.
+The grouper name must be fresh and can only be used by that first statement.
 
 ```python
 from itertools import groupby
@@ -441,8 +442,13 @@ greedy or lazy repetition. `\s` and `\S` use Python's Unicode whitespace.
 Verbose patterns ignore ASCII layout and comments outside character classes.
 Use `\A` or `^` for the start and `\Z` or `\z` for the strict end of the
 string. A terminal `$` also matches just before a final newline.
-The checker rejects dynamic patterns, bytes, additional flags,
-backreferences, lookaround, interior `$`, word shorthands, and repetitions
+Supported literal text lookaheads and fixed-width lookbehinds use the boxed matcher.
+Lookbehind alternatives must consume the same number of characters, and
+references inside a lookbehind can only use captures closed before it. Case-sensitive patterns on this path can
+refer to a closed capture by number or name. A conditional can also test
+a numbered capture defined later in the pattern.
+The fixed matcher rejects dynamic patterns, bytes, additional flags,
+backreferences, lookbehind, interior `$`, word shorthands, and repetitions
 whose capture or empty-match behavior falls outside this dialect.
 
 ## Bounded unions and codec primitives
@@ -989,7 +995,7 @@ Imre compiles before launch and cannot switch a running frame into a JIT.
 
 `sys.exit()` raises `SystemExit` through the ordinary exception and `finally` paths. It accepts an optional `None`, boolean, integer or string. An uncaught string prints to stderr and exits with status 1. An omitted or `None` code exits with status 0. A caught `SystemExit.code` preserves the scalar for printing, truth tests, equality, and type tests.
 
-`os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Imre's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`. Imre accepts an empty environment name through `execve`, as does CPython's fork/exec path. CPython's `posix_spawn` path raises `ValueError` for that name.
+`os.environ[key] = value` assigns a string in the current process. On POSIX, `os.environb[key] = value` accepts bytes. A string subscript reads the current value from `os.environ`. Deleting a subscript from either mapping removes the variable. New child processes inherit these changes. Both mappings support `clear()` and `update()` with a dictionary of matching key and value types. The text mapping also accepts keyword entries after the optional dictionary. Entries are assigned in order, so a failed update preserves earlier assignments. `os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Imre's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`. Imre accepts an empty environment name through `execve`, as does CPython's fork/exec path. CPython's `posix_spawn` path raises `ValueError` for that name.
 
 The optional `timeout` keyword accepts signed integer literals or expressions of exact type `float | None` in seconds. `None` waits without a deadline. A deadline expiry kills and reaps the direct child, closes the capture pipes, and raises catch-only `subprocess.TimeoutExpired`, which matches `SubprocessError` and `Exception`. Its read-only fields include `cmd: list[str]` and `stdout`, `output`, and `stderr: bytes | None`. The exception retains the original integer or float for its message and `.timeout` field. A program can read `.timeout` when all its deadline sites agree on a numeric type. Partial captures remain bytes even in text mode, so incomplete UTF-8 is preserved. During pipe capture, an observed empty stream is `b""`; a stream not observed before the deadline is `None`. If both pipes close and waiting for the child itself expires, all capture fields are `None`, even after earlier reads, matching CPython. The runtime does not wait indefinitely for descendants holding inherited pipes. This API terminates the direct child and does not manage a process group.
 
@@ -1488,6 +1494,10 @@ runtime, and native link inputs are still current. Program arguments and the out
 path can change between invocations.
 
 The Linux releases use the private Clang and LLD 18 in `imre-toolchain/bin`.
+With that toolchain beside a source-built compiler,
+`python3 scripts/build-bundled-providers.py PATH/TO/imre` builds the O0 and O3
+stdlib archives used for matching boxed modules, with source compilation as the
+fallback.
 Imre passes the bundled startup objects and libraries to Clang when linking for
 the host. Executables use the host's glibc. On x86-64 Debian and Ubuntu, a source
 build checks for `/usr/bin/ld.lld-18` and otherwise uses the system GNU linker.

@@ -1,9 +1,13 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 # os reads these constants while the two modules import each other.
 curdir = "."
+defpath = "/bin:/usr/bin"
 extsep = "."
+sep = "/"
+altsep = None
 
 import os
+import stat
 from _imre_posixpath import (
     extension_start, relative_parts as _relative_parts, realpath_loop as _realpath_loop,
     realpath_parent as _realpath_parent, realpath_parts as _realpath_parts,
@@ -103,6 +107,35 @@ def splitext(p):
     return p, p[:0]
 
 
+def ismount(path):
+    """Test whether a path is a mount point"""
+    try:
+        s1 = os.lstat(path)
+    except (OSError, ValueError):
+        # It doesn't exist -- so not a mount point. :-)
+        return False
+    else:
+        # A symlink can never be a mount point
+        if stat.S_ISLNK(s1.st_mode):
+            return False
+
+    path = os.fspath(path)
+    if isinstance(path, bytes):
+        parent = join(path, b'..')
+    else:
+        parent = join(path, '..')
+    try:
+        s2 = os.lstat(parent)
+    except OSError:
+        parent = realpath(parent)
+        try:
+            s2 = os.lstat(parent)
+        except OSError:
+            return False
+
+    # path/.. on a different device as path or the same i-node as path
+    return s1.st_dev != s2.st_dev or s1.st_ino == s2.st_ino
+
 def abspath(path):
     """Return a normalized absolute path."""
     path = os.fspath(path)
@@ -130,6 +163,46 @@ def relpath(path, start=None):
     if isinstance(start, bytes) != use_bytes:
         raise TypeError("Can't mix strings and bytes in path components")
     return _relative_parts(abspath(path), start)
+
+
+# From CPython 3.14.5 Lib/posixpath.py. See stdlib/docstrings/LICENSE.
+def commonpath(paths):
+    """Given a sequence of path names, returns the longest common sub-path."""
+
+    paths = tuple(map(os.fspath, paths))
+
+    if not paths:
+        raise ValueError('commonpath() arg is an empty sequence')
+
+    if isinstance(paths[0], bytes):
+        sep = b'/'
+        curdir = b'.'
+    else:
+        sep = '/'
+        curdir = '.'
+
+    try:
+        split_paths = [path.split(sep) for path in paths]
+
+        try:
+            isabs, = {p.startswith(sep) for p in paths}
+        except ValueError:
+            raise ValueError("Can't mix absolute and relative paths") from None
+
+        split_paths = [[c for c in s if c and c != curdir] for s in split_paths]
+        s1 = min(split_paths)
+        s2 = max(split_paths)
+        common = s1
+        for i, c in enumerate(s1):
+            if c != s2[i]:
+                common = s1[:i]
+                break
+
+        prefix = sep if isabs else sep[:0]
+        return prefix + sep.join(common)
+    except (TypeError, AttributeError):
+        _check_arg_types('commonpath', *paths)
+        raise
 
 
 # Component traversal and symlink cache follow CPython 3.14.5 Lib/posixpath.py.

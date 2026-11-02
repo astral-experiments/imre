@@ -17,6 +17,64 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "device_encoding": """
+        import locale
+        import os
+        import sys
+
+        class Descriptor:
+            number: int
+            calls: int
+
+            def __init__(self, number: int) -> None:
+                self.number = number
+                self.calls = 0
+
+            def __index__(self) -> int:
+                self.calls += 1
+                return self.number
+
+        master, slave = os.openpty()
+        try:
+            fd = Descriptor(slave)
+            expected = "utf-8" if sys.flags.utf8_mode else locale.getencoding()
+            assert os.device_encoding(fd=fd) == expected
+            assert fd.calls == 1
+        finally:
+            os.close(master)
+            os.close(slave)
+        assert os.device_encoding(slave) is None
+    """,
+    "binary_update_path_builtin": """
+        with open("checked-update.bin", "wb+") as stream:
+            stream.write(b"payload")
+            stream.seek(0)
+            print(stream.read())
+    """,
+    "binary_update_fd_builtin": """
+        import os
+        fd = os.open("checked-update.bin", os.O_CREAT | os.O_RDWR, 0o600)
+        with open(fd, "wb+", closefd=False) as stream:
+            stream.write(b"fd")
+        os.lseek(fd, 0, os.SEEK_SET)
+        print(os.read(fd, 2))
+        os.close(fd)
+    """,
+    "named_text_update_builtin": """
+        from pathlib import Path
+
+        def destination() -> Path:
+            print("destination")
+            return Path("typed-update.txt")
+
+        with open(destination(), "w+") as stream:
+            print(stream.write("contents"))
+            stream.seek(0)
+            print(stream.read())
+
+        with open(file="typed-update.txt", mode="+r", encoding="utf-8") as stream:
+            print(stream.read())
+    """,
     "script_search_path": """import sys
 print(sys.path[0])
 sys.path.insert(0, "extra")
@@ -911,7 +969,7 @@ def main() -> None:
                         "--opt-level",
                         level,
                         *flags,
-                        *(["--runtime-imports"] if name == "boxed_zipimport_resources" else []),
+                        *(["--runtime-imports"] if name in {"boxed_zipimport_resources", "named_text_update", "binary_update"} else []),
                     ],
                     temporary,
                 )

@@ -1,5 +1,5 @@
 //! The GIL-enabled process's immutable sys.flags struct sequence.
-use super::{Context, FALSE, Id, TRUE, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 pub(in crate::dynamic) const TYPE: &str = "sys.flags";
 const FIELDS: [&str; 18] = [
@@ -70,6 +70,63 @@ pub(super) fn current(ctx: &mut Context) -> Id {
         values,
         extras,
     })
+}
+
+/// Set the non-binary integer conversion limit and update the live sys.flags sequence.
+pub(super) fn set_int_max_str_digits(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!("set_int_max_str_digits() takes at most 1 argument ({count} given)"),
+        ));
+    }
+    let value = match (args, kwargs) {
+        ([value], []) => *value,
+        ([], [(key, value)]) if key == "maxdigits" => *value,
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                "set_int_max_str_digits() missing required argument 'maxdigits' (pos 1)",
+            ));
+        }
+    };
+    let limit = ctx
+        .index_integer(value)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))?;
+    if limit != 0 && limit < 640 {
+        return Err(Error::new(
+            "ValueError",
+            "maxdigits must be >= 640 or 0 for unlimited",
+        ));
+    }
+    let sys = match ctx.threads.system_module {
+        Some(sys) => sys,
+        None => ctx.module("sys")?,
+    };
+    let flags = ctx.lookup_attr(sys, "flags")?;
+    let field = ctx.int(i64::from(limit));
+    let Value::NamedTuple {
+        class: Some(TYPE),
+        values,
+        ..
+    } = ctx.heap.get_mut(flags)
+    else {
+        return Err(Error::new("TypeError", "expected sys.flags"));
+    };
+    let position = FIELDS
+        .iter()
+        .position(|&name| name == "int_max_str_digits")
+        .unwrap();
+    values[position] = field;
+    crate::integer_text::set_decimal_digit_limit(limit as u32);
+    Ok(NONE)
 }
 
 pub(in crate::dynamic) fn member(ctx: &mut Context, name: &str) -> Option<Id> {

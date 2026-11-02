@@ -1,11 +1,121 @@
+import gc
+import weakref
 from collections import deque
+from types import MappingProxyType
+
+
+def check_ordering():
+    events = []
+
+    class Item:
+        def __eq__(self, other):
+            events.append("eq")
+            return False
+
+        def __lt__(self, other):
+            events.append("lt")
+            return self
+
+        def __bool__(self):
+            events.append("bool")
+            return True
+
+    left, right = deque([Item()]), deque([Item()])
+    assert (left < right) is True and events == ["eq", "lt", "bool"]
+    assert left >= left and not left > left
+    assert deque([1]) <= deque([1, 0]) and deque([1, 0]) > deque([1])
+    assert deque.__lt__(left, []) is NotImplemented
+
+    marker = object()
+
+    class Reflected(deque):
+        def __gt__(self, other):
+            return marker
+
+    assert (left < Reflected()) is marker
+
+
+def check_weakrefs():
+    class Slotted(deque):
+        __slots__ = ()
+
+    for cls in (deque, Slotted):
+        target = cls([1])
+        holder = deque([target])
+        callbacks = []
+        watch = weakref.ref(target, callbacks.append)
+        proxy = weakref.proxy(target)
+        assert watch() is target and str(proxy) == str(target)
+        assert not hasattr(target, "__weakref__")
+        del target
+        gc.collect()
+        assert watch() is holder[0] and not callbacks
+        holder.clear()
+        gc.collect()
+        assert watch() is None and len(callbacks) == 1 and callbacks[0] is watch
+        try:
+            str(proxy)
+        except ReferenceError:
+            pass
+        else:
+            raise AssertionError("dead deque proxy still forwards")
+
+    for obj in ([], iter(deque()), reversed(deque())):
+        try:
+            weakref.ref(obj)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("unexpected weak reference support")
 
 
 def current():
+    check_ordering()
+    check_weakrefs()
     marker = []
     queue = deque((item for item in (marker, "middle", 3)))
     assert type(queue) is deque and isinstance(queue, deque)
     assert deque.__module__ == "collections"
+    assert deque.__reduce_ex__ is object.__reduce_ex__
+    for limit, expected_args in ((None, ()), (0, ((), 0)), (2, ((), 2))):
+        original = deque((None, 3), maxlen=limit)
+        for reduce in (original.__reduce__, lambda: original.__reduce_ex__(5)):
+            cls, args, state, items = reduce()
+            assert cls is deque and args == expected_args and state is None
+            if original:
+                original[0] = marker
+            assert list(items) == list(original)
+    namespace = deque.__dict__
+    assert type(namespace) is MappingProxyType and namespace is not deque.__dict__
+    assert "__name__" not in namespace and "__str__" not in namespace
+    for name in ("__repr__", "__contains__", "append", "__module__"):
+        assert namespace[name] is getattr(deque, name)
+    assert namespace["__repr__"].__objclass__ is deque
+    assert namespace["__contains__"](queue, marker)
+    for name in ("__len__", "append", "__copy__", "__reversed__"):
+        descriptor = namespace[name]
+        assert descriptor.__objclass__ is deque and descriptor.__qualname__ == "deque." + name
+        assert descriptor.__get__(None, deque) is descriptor
+        bound = descriptor.__get__(queue)
+        assert bound.__self__ is queue and bound.__qualname__ == descriptor.__qualname__
+        if name == "__len__":
+            assert type(descriptor).__name__ == "wrapper_descriptor"
+            assert type(bound).__name__ == "method-wrapper" and bound() == 3
+        else:
+            assert type(descriptor).__name__ == "method_descriptor"
+            assert type(bound).__name__ == "builtin_function_or_method"
+        try:
+            descriptor.__get__([])
+        except TypeError as error:
+            assert name in str(error)
+        else:
+            raise AssertionError("bound deque descriptor to a list")
+    try:
+        namespace["append"] = None
+    except TypeError:
+        assert namespace["append"] is deque.append
+    else:
+        raise AssertionError("writable deque namespace")
     assert queue and len(queue) == 3
     assert queue.popleft() is marker and queue.pop() == 3
     assert tuple(queue) == ("middle",) and list(queue) == ["middle"]
@@ -213,4 +323,91 @@ def current():
     assert alias.clear() is None and not alias and alias.maxlen == 3
     alias.append(marker)
     assert alias.__init__(alias) is None and not alias and alias.maxlen is None
+    describe = deque.__repr__
+    assert type(describe).__name__ == "wrapper_descriptor" and describe.__objclass__ is deque
+    assert describe.__doc__ == "Return repr(self)." and describe.__text_signature__ == "($self, /)"
+    assert describe(deque()) == "deque([])"
+    recursive = deque(["tag"], maxlen=2)
+    recursive.append(recursive)
+    assert repr(recursive) == recursive.__repr__() == describe(recursive) == "deque(['tag', [...]], maxlen=2)"
+
+    class ClearsOnRepr:
+        def __repr__(self):
+            recursive.clear()
+            return "cleared"
+
+    recursive.extend([ClearsOnRepr(), "last"])
+    assert describe(recursive) == "deque([cleared, 'last'], maxlen=2)"
+    assert not recursive
+    try:
+        describe([])
+    except TypeError as error:
+        assert str(error) == "descriptor '__repr__' requires a 'collections.deque' object but received a 'list'"
+    else:
+        raise AssertionError("deque repr accepted a list")
+
+    class Recorded(deque):
+        def __new__(cls, *args, **kwargs):
+            result = super().__new__(cls, *args, **kwargs)
+            result.allocated = len(args)
+            return result
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.source = args[0]
+
+    derived = Recorded([marker, 1, 2], maxlen=2)
+    derived.extra = 1
+    duplicate = derived.copy()
+    assert type(duplicate) is Recorded and duplicate is not derived
+    assert derived.allocated == 1 and duplicate.allocated == 2
+    assert duplicate.source is derived and not hasattr(duplicate, "extra")
+    assert derived.maxlen == duplicate.maxlen == 2 and list(duplicate) == [1, 2]
+    assert derived == duplicate == deque([1, 2]) and not (duplicate != derived)
+    assert deque.__eq__(derived, [1, 2]) is NotImplemented
+    assert Recorded.__hash__ is None
+    assert deque.pop.__get__(derived).__self__ is derived
+    assert deque.__iadd__(derived, derived) is derived and list(derived) == [1, 2]
+    try:
+        derived.maxlen = 20
+    except AttributeError:
+        assert derived.maxlen == 2
+    else:
+        raise AssertionError("writable deque maxlen")
+
+    class EmptyView(deque):
+        def __iter__(self):
+            return iter(())
+
+    derived = EmptyView([1, 2])
+    assert list(derived) == [] and list(deque.__iter__(derived)) == [1, 2]
+    assert type(derived.copy()) is EmptyView and len(derived.copy()) == 0
+    assert repr(derived) == "EmptyView([])"
+    assert derived == EmptyView([3, 4]) and derived != deque([1, 2])
+    assert derived != EmptyView([1])
+
+    class Match:
+        def __eq__(self, other):
+            queue[1] = marker
+            return False
+
+    queue = deque([Match(), None, marker])
+    assert queue.count(marker) == 2
+    assert deque.count(EmptyView([1, 2]), 2) == 1
+
+    class MutatingMatch:
+        def __eq__(self, other):
+            queue.clear()
+            return True
+
+    match = MutatingMatch()
+    queue = deque([match])
+    assert queue.count(match) == 1 and len(queue) == 1
+    try:
+        queue.count(marker)
+    except RuntimeError as error:
+        assert str(error) == "deque mutated during iteration" and not queue
+    else:
+        raise AssertionError("count ignored a mutation in its final comparison")
+
     print("deque passed")

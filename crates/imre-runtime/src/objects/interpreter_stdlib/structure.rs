@@ -72,7 +72,7 @@ impl StructFormat {
                     align_of::<std::ffi::c_long>(),
                 ),
                 b'L' | b'l' => (4, 1),
-                b'B' => (1, 1),
+                b'b' | b'B' => (1, 1),
                 b'H' => (2, align_of::<u16>()),
                 b'i' | b'I' => (4, align_of::<u32>()),
                 b'd' => (8, align_of::<f64>()),
@@ -153,7 +153,7 @@ impl StructFormat {
                 u64::from_be_bytes(word)
             };
             result.push(match code {
-                b'i' | b'l' => {
+                b'b' | b'i' | b'l' => {
                     // Move the field's sign bit into bit 63 before the arithmetic shift.
                     let shift = (8 - field.len()) * 8;
                     UnpackedField::Signed(((value << shift) as i64) >> shift)

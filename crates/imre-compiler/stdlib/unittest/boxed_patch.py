@@ -69,12 +69,21 @@ def _get_target(target):
     return lambda: _patch_owner(owner), attribute
 
 
+_missing_option = object()
+
+
 class _patch:
-    def __init__(self, getter, attribute, new, create):
+    def __init__(self, getter, attribute, new, create, *,
+                 side_effect=_missing_option, return_value=_missing_option):
         self.getter = getter
         self.attribute = attribute
         self.new = new
         self.create = create
+        self.mock_kwargs = {}
+        if side_effect is not _missing_option:
+            self.mock_kwargs['side_effect'] = side_effect
+        if return_value is not _missing_option:
+            self.mock_kwargs['return_value'] = return_value
         self.is_started = False
 
     def __enter__(self):
@@ -92,7 +101,11 @@ class _patch:
             self.create = True
         if original is DEFAULT and not self.create:
             raise AttributeError(f"{target} does not have the attribute {name!r}")
-        replacement = MagicMock(name=name) if self.new is DEFAULT else self.new
+        replacement = self.new
+        if replacement is DEFAULT:
+            replacement = MagicMock(name=name, **self.mock_kwargs)
+        elif self.mock_kwargs:
+            raise TypeError("Can't pass kwargs to a mock we aren't creating")
         setattr(target, name, replacement)
         self.target = target
         self.original = original
@@ -124,7 +137,8 @@ class _patch:
                     method = getattr(func, name)
                     # Some boxed builtins are callable without exposing __call__.
                     if hasattr(method, '__call__') or isinstance(method, type(len)):
-                        patcher = _patch(self.getter, self.attribute, self.new, self.create)
+                        patcher = _patch(self.getter, self.attribute, self.new, self.create,
+                                         **self.mock_kwargs)
                         setattr(func, name, patcher(method))
             return func
         if hasattr(func, 'patchings'):
@@ -145,15 +159,15 @@ class _patch:
         return patched
 
 
-def _patch_attribute(self, target, new=DEFAULT, *, create=False):
+def _patch_attribute(self, target, new=DEFAULT, *, create=False, **kwargs):
     getter, attribute = _get_target(target)
-    return _patch(getter, attribute, new, create)
+    return _patch(getter, attribute, new, create, **kwargs)
 
 
-def _patch_object(target, attribute, new=DEFAULT, *, create=False):
+def _patch_object(target, attribute, new=DEFAULT, *, create=False, **kwargs):
     if type(target) is str:
         raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
-    return _patch(lambda: target, attribute, new, create)
+    return _patch(lambda: target, attribute, new, create, **kwargs)
 
 
 class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
@@ -201,3 +215,6 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
 _PatchFactory.__call__ = _patch_attribute
 _PatchFactory.dict = staticmethod(_BoxedDictionaryPatch)
 _PatchFactory.object = staticmethod(_patch_object)
+
+
+patch = _PatchFactory()

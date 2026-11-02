@@ -1,0 +1,183 @@
+{
+  "cpython_version": "3.14.5",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_subprocess_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+  "historical_inventory_revision": "e066f7f6e19fde55d59b910f38320ad625ac9586",
+  "discovered": 353,
+  "native_build": {"revision": "e066f7f6e19fde55d59b910f38320ad625ac9586", "crates_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "artifacts": {"imre": "08614140ebccc7c1459e21992954daf53ebdbbf0853f9f01530f4f41a4a03b40", "libimre_runtime.a": "09d9809124571cc31b710000285ce715fe1c22e033dfe911beb80f5cdc9099ee"}},
+  "native_parent_projection_sha256": "8e1cf873d330d10046a21f11d88edfcfebf6e104a73bf1388b4e1a395ffb52b2",
+  "registered_runner_patch_sha256": "3cea745674d36e98d343fba1268417872dd293636b570c3ec9113cd00262a54e",
+  "native_compile_flags": "--opt-level 0 or 3, --runtime libimre_runtime.a, --clang clang",
+  "reference_interpreter_flags": ["-B"],
+  "registered_driver_flags": ["-sB"],
+  "selected_id_delta": {"new_native_body": [118, 119, 123, 124], "new_native_assertions": [123, 124]},
+  "legend": {
+    "values": "input, stdout, stderr; null is absent or None. During injected EIO, communicate raises before returning output.",
+    "native_pipes": "[endpoints, witnessed successful close returns, witnessed EOF reads, absent at parent exit] on original stdin/stdout/stderr pipes. A zero count leaves an unwitnessed syscall undetermined.",
+    "trace_sha256": "SHA256 over sorted lines \"<sha256>  <filename>\\n\" for events.jsonl, tap.jsonl and fault.jsonl when present.",
+    "retained": "[original stdio fd, pipe device, pipe inode, retained parent fds]",
+    "read_syscall_incomplete": "Original assertion/closure evidence is independent of individual libc read-return observations.",
+    "native_columns": ["cell", "parent", "direct_pids", "direct_images", "leaf_image", "leaf_pids", "waits_raw_0_then_ECHILD", "root_raw", "pipes", "observations", "trace_sha256"],
+    "native_natural_exit": "All native rows ended naturally with outer ECHILD. Each group gives O0 then O3. Wait counts cover method-to-child and launcher-to-leaf.",
+    "positive_EOF_state": "[cell, parent PID, all active readers with POLLHUP and zero FIONREAD at close, events.jsonl SHA256]. This independently observes state at close; it does not measure the original read syscall."
+  },
+  "originals": [
+    {
+      "ordinal": 118,
+      "id": "test.test_subprocess.ProcessTestCase.test_communicate_epipe",
+      "method_sha256": "5394f54904cc3c1159574c0b3bace6dbe0b4bd2e3c7311fa63aa914c7e916a17",
+      "prior": "host-driven-native-operation",
+      "assertion_scope": "The original has no explicit assertion. It completes when communicate handles the failed pipe write.",
+      "pipes": [[0, 1, 2]],
+      "reference_positive": {"cell": "118-wire-reference", "parent": [62371, "i1"], "children": [62373], "values": ["v1", "v2", "v2"], "passed": true, "trace_sha256": "bf02192542545af25ef2fee39235bdbaebf64450ee3792a4f5e3b0dd42f7887e", "waits_raw_0_then_ECHILD": 1, "child_image": "i2", "prior_returncode": null},
+      "reference_negative": {"cell": "118-wire-reference-eio2", "parent": [63965, "i1"], "children": [64002], "values": ["v1", null, null], "passed": false, "trace_sha256": "dadf59a8c7975718f36333fb7e7c2051468776bd3c5bbfc583fcd83e09205604", "waits_raw_0_then_ECHILD": 1, "failure": "OSError EIO"},
+      "native_positive": [
+        ["118-base-O0-wire", [63229, "i3"], [63252], ["i2"], "i2", null, 1, 0, [3, 3, 2, 3], {"completed": true, "prefix_bytes": 0, "write_errno_after_wait": [32, false]}, "a31fddfb76fe49a85673737257bb9cd086f998e8acb0e2135e99e837f6376489"],
+        ["118-base-O3-wire", [63262, "i4"], [63263], ["i2"], "i2", null, 1, 0, [3, 3, 2, 3], {"completed": true, "prefix_bytes": 0, "write_errno_after_wait": [32, false]}, "a261ed43a474f40f75d220dc7c433de7bf7175e3338216eea30b47b3e87e476a"]
+      ],
+      "native_negative": [
+        ["118-base-O0-wire-eio2", [64020, "i3"], [64034], ["i2"], "i2", null, 1, 256, [3, 3, 0, 3], {"completed": false, "prefix_bytes": 0, "write_errno_after_wait": [5, false], "fault_errno": [32, 5]}, "7d64e3129e3a87a4d3ced76dd72067465923b1cf395b96d87d6eebfa2270fd91"],
+        ["118-base-O3-wire-eio2", [64109, "i4"], [64110], ["i2"], "i2", null, 1, 256, [3, 3, 0, 3], {"completed": false, "prefix_bytes": 0, "write_errno_after_wait": [5, false], "fault_errno": [32, 5]}, "b25fc31c91cde56f01a2a92f2cd47bca9af82ecbc4c967d63d71107c9de98f97"]
+      ],
+      "registered": {
+        "roles": {"body": "Imre", "assertions": "none", "fixture_execution": "CPython module/class/instance hooks; native instance in child; registered cleanups executed on the native instance"},
+        "cells": [["118-campaign-O0-entry", "86c151ce7533da76fc7546a57f91856efc9880a489f55a94dbcf25b93a0c78be"], ["118-campaign-O3-entry", "9b6b5bfcb280fa8101edfe12f2e72c498de76ce715da53a731deca036ea7c2f9"]]
+      }
+    },
+    {
+      "ordinal": 119,
+      "id": "test.test_subprocess.ProcessTestCase.test_communicate_epipe_only_stdin",
+      "method_sha256": "2682f8abc8bade4cb384ab45b004ceb8dcd0851b2d7020991cb7157443516251",
+      "prior": "host-driven-native-operation",
+      "assertion_scope": "The original waits for the zero-return child before communicate. It has no explicit assertion.",
+      "pipes": [[0]],
+      "reference_positive": {"cell": "119-wire-reference", "parent": [63105, "i1"], "children": [63107], "values": ["v1", null, null], "passed": true, "trace_sha256": "0669aba041fbc454dfe9389b4ab503840647636579e1b2a37ce17dcd9a970777", "waits_raw_0_then_ECHILD": 1, "child_image": "i2", "prior_returncode": 0},
+      "reference_negative": {"cell": "119-wire-reference-eio2", "parent": [64146, "i1"], "children": [64148], "values": ["v1", null, null], "passed": false, "trace_sha256": "18dd8051ff6b2b14f2474d705b34c24a6aedfa4dbed6dc1f5cec93780d67f8e2", "waits_raw_0_then_ECHILD": 1, "failure": "OSError EIO"},
+      "native_positive": [
+        ["119-base-O0-wire", [63270, "i3"], [63271], ["i2"], "i2", null, 1, 0, [1, 1, 0, 1], {"completed": true, "prefix_bytes": 0, "write_errno_after_wait": [32, true]}, "ccec888bfce796256fdb476cd6b9d4cc99f8112cf5f06290c5627b9f458e5528"],
+        ["119-base-O3-wire", [63288, "i4"], [63311], ["i2"], "i2", null, 1, 0, [1, 1, 0, 1], {"completed": true, "prefix_bytes": 0, "write_errno_after_wait": [32, true]}, "32ccc62b50f0c5aba2601e420e67c76203064a3932171dea7dcdea4d97c5a130"]
+      ],
+      "native_negative": [
+        ["119-base-O0-wire-eio2", [64214, "i3"], [64215], ["i2"], "i2", null, 1, 256, [1, 1, 0, 1], {"completed": false, "prefix_bytes": 0, "write_errno_after_wait": [5, true], "fault_errno": [32, 5]}, "df89b21016a14b90f2d0d8680fa2fe5d876764877c1980110086e516aad6ffcb"],
+        ["119-base-O3-wire-eio2", [64218, "i4"], [64219], ["i2"], "i2", null, 1, 256, [1, 1, 0, 1], {"completed": false, "prefix_bytes": 0, "write_errno_after_wait": [5, true], "fault_errno": [32, 5]}, "b5840aa8e6e4f829936fa0a6378d0e779c48d65794099c0d74f4eff1b30d3f5d"]
+      ],
+      "registered": {
+        "roles": {"body": "Imre", "assertions": "none", "fixture_execution": "CPython module/class/instance hooks; native instance in child; registered cleanups executed on the native instance"},
+        "cells": [["119-campaign-O0-entry", "4d889693b0b4c20d0100e6aa609b101ea1a9777321d7506274cc265f19a1f9b7"], ["119-campaign-O3-entry", "91e8b4b974228df20341abfa0e916c9a4a6d27e62b8ea36c787f8fa79ff7976f"]]
+      }
+    },
+    {
+      "ordinal": 123,
+      "id": "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf",
+      "method_sha256": "1b281105dd700b57eabbd2dfc73a7437b6e7c69b6096288c30b42424a00b2e57",
+      "prior": "host-driven-native-operation",
+      "assertion_scope": "The original compares stdout to the input. Its stderr payload is independently measured.",
+      "pipes": [[0, 1, 2]],
+      "reference_positive": {"cell": "123-wire-reference", "parent": [63159, "i1"], "children": [63161], "values": ["v3", "v3", "v4"], "passed": true, "trace_sha256": "b327b0ac1974ad09460dd7f7a6b3c29c1de3411a68553dfed75569340ee293e8", "waits_raw_0_then_ECHILD": 1, "child_image": "i1"},
+      "reference_negative": {"cell": "123-wire-reference-negative", "parent": [63164, "i1"], "children": [63185], "values": ["v3", "v5", "v4"], "passed": false, "trace_sha256": "9097417481af618b8b6f468a837c42d29d3c8b5fd1cd19f309e0319a9808fe32", "waits_raw_0_then_ECHILD": 1, "failure": "AssertionError"},
+      "native_positive": [
+        ["123-base-O0-wire", [63515, "i3"], [63516], ["i5"], "i6", [63532], 2, 0, [3, 3, 3, 3], {"completed": true}, "10591727c0aa64d29c894cd5a293c28c4b2af00fd7e0654f579b3664bc9195aa"],
+        ["123-base-O3-wire", [63559, "i4"], [63560], ["i5"], "i7", [63666], 2, 0, [3, 3, 3, 3], {"completed": true}, "dc45bee37cfa317af09b885c7055fbc1c78b3690b374cdab3f7e21a420992ddc"]
+      ],
+      "native_negative": [
+        ["123-base-O0-wire-negative", [63535, "i3"], [63536], ["i8", "i5"], "i9", [63540], 2, 256, [3, 3, 3, 3], {"completed": false}, "26519a3c6fcc6b9201c6d80f8c8ab0135982511bfbf385bf1fc32294eade790c"],
+        ["123-base-O3-wire-negative", [63669, "i4"], [63670], ["i8", "i5"], "i10", [63817], 2, 256, [3, 3, 3, 3], {"completed": false}, "2db8dff79edf58046de7e20230ce61d00ffc2c00630a990f93639ed11c2a05f8"]
+      ],
+      "registered": {
+        "roles": {"body": "Imre", "assertions": "Imre", "fixture_execution": "CPython module/class/instance hooks; native instance in child; registered cleanups executed on the native instance"},
+        "cells": [["123-campaign-O0-entry", "40fbbbbd9a1ee5f3d94a5af0685139209450fbd604be4f62ca8ca9d0d1765d69"], ["123-campaign-O3-entry", "c2c14fc4473650c625b2e0fcbb70bfc6df8cce042adf57e0aac6105f9e19d581"]]
+      },
+      "native_wire_positive": {"0": "v3", "1": "v3", "2": "v4"},
+      "native_wire_negative": {"0": "v3", "1": "v5", "2": "v4"}
+    },
+    {
+      "ordinal": 124,
+      "id": "test.test_subprocess.ProcessTestCase.test_communicate_pipe_fd_leak",
+      "method_sha256": "4cf735e05d77bbe959823cc9bc27215bbe87ab5b186e16c4224a724a5801be19",
+      "prior": "host-driven-native-operation",
+      "assertion_scope": "Across seven subsets the original checks .closed on twelve stream objects. The descriptor observer independently checks for retained duplicates.",
+      "pipes": [[2], [1], [1, 2], [0], [0, 2], [0, 1], [0, 1, 2]],
+      "reference_positive": {
+        "cell": "124-wire-reference",
+        "parent": [63137, "i1"],
+        "children": [63139, 63140, 63141, 63142, 63143, 63144, 63145],
+        "values": [[null, null, "v2"], [null, "v2", null], [null, "v2", "v2"], [null, null, null], [null, null, "v2"], [null, "v2", null], [null, "v2", "v2"]],
+        "passed": true,
+        "trace_sha256": "0f28e25427b6d09258bc53d02deafb39cda61f2568a7a27ede5f16540c8d412b",
+        "waits_raw_0_then_ECHILD": 7,
+        "child_image": "i2"
+      },
+      "reference_negative": {
+        "cell": "124-wire-reference-negative",
+        "parent": [63148, "i1"],
+        "children": [63150, 63151, 63152, 63153, 63154, 63155, 63156],
+        "values": [["v6", "v6", "v2"], ["v6", "v2", "v6"], ["v6", "v2", "v2"], ["v6", "v6", "v6"], ["v6", "v6", "v2"], ["v6", "v2", "v6"], ["v6", "v2", "v2"]],
+        "passed": true,
+        "trace_sha256": "2d1edaee3c35d0f55f7bef00103c63f715a53971cbcfdac1dc47c50936858674",
+        "waits_raw_0_then_ECHILD": 7,
+        "failure": null,
+        "retained": [{"child": 63150, "fd": 2, "inode": 570534, "fds": [80]}]
+      },
+      "native_positive": [
+        ["124-base-O0-wire", [63318, "i3"], [63436, 63437, 63438, 63439, 63440, 63441, 63442], ["i2"], "i2", null, 7, 0, [12, 12, 6, 12], {"completed": true, "read_syscall_incomplete": true}, "2fb47de78b4fc8872022f976ab0c7d156415d54a0c1be7fca1b8b625637c60a4"],
+        ["124-base-O3-wire", [63470, "i4"], [63486, 63487, 63488, 63489, 63490, 63491, 63492], ["i2"], "i2", null, 7, 0, [12, 12, 6, 12], {"completed": true, "read_syscall_incomplete": true}, "97ba9cd48e311b0d750ebe6696051b36a2e5d3dd69efc9237fb2debe0ded827d"]
+      ],
+      "native_negative": [
+        ["124-base-O0-wire-negative", [63445, "i3"], [63446, 63447, 63448, 63449, 63450, 63451, 63458], ["i2"], "i2", null, 7, 0, [12, 12, 6, 11], {"completed": true, "retained": [[1, 12, 570331, [80]]], "read_syscall_incomplete": true}, "2c4a29b0647f4372957f9aaa83fec84f6dd9968d7189e86043d27e8788f7e78c"],
+        ["124-base-O3-wire-negative", [63495, "i4"], [63506, 63507, 63508, 63509, 63510, 63511, 63512], ["i2"], "i2", null, 7, 0, [12, 12, 6, 11], {"completed": true, "retained": [[1, 12, 573581, [80]]], "read_syscall_incomplete": true}, "f0dfc83f25eca5663d6717d2fb871b1f8fc1f075685ceab5a1d6dedea849c026"]
+      ],
+      "registered": {
+        "roles": {"body": "Imre", "assertions": "Imre", "fixture_execution": "CPython module/class/instance hooks; native instance in child"},
+        "cells": [["124-campaign-O0-entry", "40d8b2c7796b9f7281519c2e64ce09cc8e289181dfa314fe6ae0ec8632c3c374"], ["124-campaign-O3-entry", "b91124b93177a2bf7d486821d388f329efb24c5e77a65bba63f232801e8f834c"]]
+      },
+      "positive_EOF_state": [["124-base-O0-eof", 65360, 8, "9d7c4f81d8438baafd660278c0d5dd13ebb9261f1d6c8b842c1789011126eb63"], ["124-base-O3-eof", 65370, 8, "d9d1e07e1e12520e825fd3f5e96ae51119093acbe467701959723a63c58a0df0"]]
+    },
+    {
+      "ordinal": 126,
+      "id": "test.test_subprocess.ProcessTestCase.test_communicate_stderr",
+      "method_sha256": "d26e8c51d429ecd45589fb980f2c07805e81349c23d357a7d78b2cf703f882ea",
+      "prior": "native-body-host-fixture",
+      "assertion_scope": "Both original assertions already ran natively at O0 and O3. This repeat adds zero IDs.",
+      "pipes": [[2]],
+      "reference_positive": {"cell": "126-wire-reference", "parent": [63188, "i1"], "children": [63190], "values": [null, null, "v7"], "passed": true, "trace_sha256": "095b68dab03e059664f3c30b7a7e07872ba001ff0b8e9651e3fe94777ea13e07", "waits_raw_0_then_ECHILD": 1, "child_image": "i1"},
+      "reference_negative": {"cell": "126-wire-reference-negative", "parent": [63193, "i1"], "children": [63195], "values": ["v6", "v6", "v2"], "passed": false, "trace_sha256": "34f6e1c8453bec4a73f9d0e62018555cb4fa628681f8c924483ab1484dd5ff73", "waits_raw_0_then_ECHILD": 1, "failure": "AssertionError"},
+      "native_positive": [
+        ["126-base-O0-wire", [63838, "i3"], [63859], ["i5"], "i11", [63894], 2, 0, [1, 1, 0, 1], {"completed": true, "read_syscall_incomplete": true}, "cc020082f64eaf2e314b615d6cb1001a1459e56cb2fa81162fe78b3088e59a8f"],
+        ["126-base-O3-wire", [64005, "i4"], [64009], ["i5"], "i12", [64017], 2, 0, [1, 1, 0, 1], {"completed": true, "read_syscall_incomplete": true}, "795c0e2218220f748fe9289617d4525f0990e562d2f938769c6d80f045de14ac"]
+      ],
+      "native_negative": [
+        ["126-base-O0-wire-negative", [63908, "i3"], [63916], ["i8", "i5"], "i13", [63960], 2, 256, [1, 1, 0, 1], {"completed": false, "read_syscall_incomplete": true}, "e8b85665461a4f77cf0e07d43da5acb3e5b9b42f10c7f89d43d12053512d70ff"],
+        ["126-base-O3-wire-negative", [64072, "i4"], [64073], ["i8", "i5"], "i14", [64107], 2, 256, [1, 1, 0, 1], {"completed": false, "read_syscall_incomplete": true}, "ca392c66d941550defb982055eee463685fcd7a31048eca8479c51da4ecb96d6"]
+      ],
+      "native_wire_positive": {"2 leaf write": "v7"},
+      "native_wire_negative": {"2 leaf write": "v2"},
+      "positive_EOF_state": [["126-base-O0-eof", 65380, 1, "dcbaf509b7508b99aebc0a95620d34f26740cbd66d6c463dbba24eda121229b2"], ["126-base-O3-eof", 65429, 1, "1e91b43e2f9cef3a6d85cc9270007947953e5543df209953a3389ff9db62d40d"]]
+    }
+  ],
+  "api_values": {
+    "v1": {"type": "bytes", "nbytes": 1048576, "sha256": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"},
+    "v2": {"type": "bytes", "nbytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+    "v3": {"type": "bytes", "nbytes": 4194305, "sha256": "acd560a1e1d523c090ab93aed616d154b7b5e8206a153cced729d83f2c7dcfc3"},
+    "v4": {"type": "bytes", "nbytes": 4194305, "sha256": "8d3d3c04baadfd31cbebf771836900097b5f36cc142b74e40747c7b372beab8b"},
+    "v5": {"type": "bytes", "nbytes": 4194305, "sha256": "7279353cd8d336705bd9342d36e9a53063d9632e9d865cf036314c2e5117139a"},
+    "v6": {"type": "NoneType", "is_none": true},
+    "v7": {"type": "bytes", "nbytes": 9, "sha256": "b0fef621727ff82a7d334d9f1f047dc662ed0e27e05aa8fd1aefd19b0fff312c"}
+  },
+  "executed_images": {
+    "i1": {"image": "python3.14", "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"},
+    "i2": {"image": "true", "sha256": "b381cc8c55ec524b9fa92897f0882e855357468b4a763519cec47e05994d61ff"},
+    "i3": {"image": "family-O0", "sha256": "7cefa490f47436a48b313869dd8a0c7e440447a3a890c46c2ab5fd18b8e5c0f7"},
+    "i4": {"image": "family-O3", "sha256": "c2ad265fa24486a458ace1f5c7ac4acbb0b2ed8cef3410b9b12f9380849eaf44"},
+    "i5": {"image": "imre", "sha256": "08614140ebccc7c1459e21992954daf53ebdbbf0853f9f01530f4f41a4a03b40"},
+    "i6": {"image": ".imre-run-fd-4", "sha256": "8d09b11d0e38bda4da29dc4fba66133c9350a0683c8496cdbcfb916089b258f3"},
+    "i7": {"image": ".imre-run-fd-4", "sha256": "be3520270f6126bcea0c50dd36b71c70dd183d07116a23051d36132c5924f704"},
+    "i8": {"image": "wrong-child", "sha256": "cbd823a1d17b428931571d3c93f675fea248cb520397b5bca1f7d3fec270d532"},
+    "i9": {"image": ".imre-run-fd-4", "sha256": "f09779b41c36da4fb896509c47147827c9fa2de54aadf83c296bce001f4cdf3c"},
+    "i10": {"image": ".imre-run-fd-4", "sha256": "e0f3bcbaf218c16810243b077a5cab1601fc8e9609437ff95593123b70a7a20c"},
+    "i11": {"image": ".imre-run-fd-4", "sha256": "c74325b8274509992fd981a697434b9f5555002f1c1fa27d03e295e4b6bbfe93"},
+    "i12": {"image": ".imre-run-fd-4", "sha256": "19701093784759ecd9d3cc61d666f3d5908670625830d69dfedd5934ce5c1902"},
+    "i13": {"image": ".imre-run-fd-4", "sha256": "4869ea3c2b94426fa0ef5b5809c30b3d388a2f3530b9d0368070aa68a4900277"},
+    "i14": {"image": ".imre-run-fd-4", "sha256": "6d1ddfb86aabc5f3328856096ad6ed05e320688928b625c727d603125afcd5b2"}
+  },
+  "inconclusive_controls": {"initial_EIO_injector": "The first 118/119 controls observed EPIPE but did not apply EIO. The eio2 cells identify the targeted EPIPE-to-EIO substitution.", "supplemental_strace": "Four 124/126 readtrace wrappers stopped before method launch because ptrace was denied. Each native lane lists unobserved operations."}
+}

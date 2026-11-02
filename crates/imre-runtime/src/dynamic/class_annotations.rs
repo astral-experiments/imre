@@ -56,37 +56,12 @@ impl Context {
                 "annotation outside an executing class body",
             ));
         };
-        namespace.annotation_sites.get_or_insert_with(Default::default)
+        namespace
+            .annotation_sites
+            .get_or_insert_with(Default::default)
             .insert(offset, (name, thunk));
         self.put_item(scratch, name, NONE)?;
         Ok(NONE)
-    }
-
-    /// Method annotation functions close over the same cell containing the live class namespace.
-    pub(super) fn class_annotation_dict_cell(&mut self, scope: Id) -> Id {
-        if let Some(cell) = self
-            .scope_data(scope)
-            .class_namespace
-            .as_ref()
-            .and_then(|c| c.annotation_dict_cell)
-        {
-            cell
-        } else {
-            let proxy = self.class_dictionary(scope);
-            let Value::MappingProxy(dict) = *self.heap.get(proxy) else {
-                unreachable!()
-            };
-            let cell = self.alloc(Value::Cell(Some(dict)));
-            let Value::Scope(frame) = self.heap.get_mut(scope) else {
-                unreachable!()
-            };
-            frame
-                .class_namespace
-                .as_mut()
-                .expect("class dictionary")
-                .annotation_dict_cell = Some(cell);
-            cell
-        }
     }
 
     /// Keep declaration inputs alive across type creation, but remove the
@@ -109,7 +84,11 @@ impl Context {
         let key = self.heap.code_name("__annotations__");
         self.remove_binding(scope, "__annotations__", key)?;
         self.enable_class_annotation_provider(scope);
-        let fields = if fields == NONE { self.dict(Vec::new()) } else { fields };
+        let fields = if fields == NONE {
+            self.dict(Vec::new())
+        } else {
+            fields
+        };
         Ok((fields, annotate))
     }
 

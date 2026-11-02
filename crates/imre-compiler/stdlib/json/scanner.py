@@ -25,6 +25,22 @@ def py_make_scanner(context):
     object_pairs_hook = context.object_pairs_hook
     memo = context.memo
 
+    _scan_once = _make_scan_once(parse_object, parse_array, parse_string, match_number,
+                                 strict, parse_float, parse_int, parse_constant,
+                                 object_hook, object_pairs_hook, memo)
+
+    def scan_once(string, idx):
+        try:
+            return _scan_once(string, idx)
+        finally:
+            memo.clear()
+
+    return scan_once
+
+
+def _make_scan_once(parse_object, parse_array, parse_string, match_number,
+                    strict, parse_float, parse_int, parse_constant,
+                    object_hook, object_pairs_hook, memo):
     def _scan_once(string, idx):
         try:
             nextchar = string[idx]
@@ -62,12 +78,7 @@ def py_make_scanner(context):
         else:
             raise StopIteration(idx)
 
-    def scan_once(string, idx):
-        try:
-            return _scan_once(string, idx)
-        finally:
-            memo.clear()
+    return _scan_once
 
-    return scan_once
 
 make_scanner = c_make_scanner or py_make_scanner

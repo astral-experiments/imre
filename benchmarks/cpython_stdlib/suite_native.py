@@ -511,11 +511,12 @@ def testcase_fixture(equality=None):
 
 
 def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, operation=None,
-                  assertions="imre", on_child_error=None, cleanups=False, extra_env=None):
+                  assertions="imre", on_child_error=None, cleanups=False, extra_env=None, fixture_args=None):
     """Build a complete method and run it under host fixtures.
 
     cleanups drains callbacks on the native instance that registered them.
     extra_env applies only to the native execution and its descendants.
+    fixture_args supplies program arguments after the upstream fixture hooks run.
     on_child_error observes the raw child result before the runner reports its failure.
     """
     method = case_id.rsplit(".", 1)[1]
@@ -530,12 +531,13 @@ def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, o
 
     def execute(case, original):
         env = {**os.environ, **extra_env} if extra_env is not None else None
-        result = subprocess.run([binary], capture_output=True, text=True, timeout=60, env=env)
+        argv = [binary, *fixture_args()] if fixture_args is not None else [binary]
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env)
         if result.returncode or result.stderr or result.stdout != f"completed {case_id}\n":
             if on_child_error is not None:
                 on_child_error(result)
             raise AssertionError(f"native exit {result.returncode}: {result.stdout!r} {result.stderr!r}")
-        record = {"execution": "native-body", "body": "Imre", "assertions": "Imre",
+        record = {"execution": "native-body", "body": "Imre", "assertions": "Imre" if assertions == "imre" else assertions,
                   "fixture_execution": "CPython module/class/instance hooks; native instance in child",
                   "method_sha256": hashlib.sha256(body).hexdigest()}
         if cleanups:

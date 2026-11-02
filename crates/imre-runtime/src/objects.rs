@@ -21,7 +21,7 @@ mod bytes;
 pub(crate) use bytes::DecodeIssue;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
-    bytes_contains, bytes_contains_int, concat_bytes, owned_input as owned_bytes_input,
+    bytes_contains, bytes_contains_int, concat_bytes,
     repeat_bytes, split_bytes, strip_bytes,
 };
 pub(crate) mod cache_paths;
@@ -31,8 +31,8 @@ mod chainmap;
 mod charmaps;
 mod codecs;
 pub(crate) use codecs::{
-    Codec, CodecInfo, StrEncoder, Utf16Order, decoding_error, normalize as normalize_codec,
-    unknown_handler, utf8_prefix,
+    Codec, CodecInfo, FixedUnicode, StrEncoder, Utf16Order, decoding_error,
+    normalize as normalize_codec, unknown_handler, utf8_prefix,
 };
 mod contexts;
 mod contextvars;
@@ -46,14 +46,14 @@ mod difflib;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
-pub(crate) use files::read_path_text;
+pub(crate) use files::peek_bytes;
 mod text_file;
 pub(crate) use text_file::{MemoryText, TextFile};
 pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::{SharedHash, State as HashState};
+pub(crate) use hashlib::{State as HashState, hex_text as hash_hex, hex_with_separator};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
@@ -63,9 +63,9 @@ mod join_buffer;
 mod joined_lines;
 mod json;
 pub(crate) use json::{
-    DecodedJson, Indent as JsonIndent, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
-    write_codepoints as write_json_codepoints, write_fragment as write_json_fragment,
-    write_string as write_json_string,
+    DecodedJson, Indent as JsonIndent, JsonNumber, JsonTokenError, decode_json_tokens_at,
+    string_end as json_string_end, write_codepoints as write_json_codepoints,
+    write_fragment as write_json_fragment, write_string as write_json_string,
 };
 mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};
@@ -73,19 +73,20 @@ pub(crate) mod locks;
 pub(crate) mod logging;
 pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
 mod mappings;
-pub(crate) use mappings::IntKey;
 mod module_specs;
 mod namespaces;
 pub(crate) mod os;
 pub(crate) use os::os_separator;
 mod patchset;
 mod paths;
-pub(crate) use paths::{directory_entries, exists, is_file, path_utf8};
+pub(crate) use paths::{directory_entries, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::{BoxedPipe, BoxedPopen, initial_environment};
+pub(crate) use processes::{
+    BoxedPipe, BoxedPopen, CStrings, change_environment, initial_environment,
+};
 mod random;
-pub(crate) use random::{choice_index, imre_random_float, random_below};
+pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;
@@ -101,14 +102,15 @@ mod string_enums;
 mod structs;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use text::{dedent, hexadecimal};
+pub(crate) use text::{codepoint_search_window, dedent, hexadecimal, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
-pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
+pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
     ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_islower, python_isspace, python_istitle, python_isupper, split_parts,
+    python_isidentifier, python_islower, python_isspace, python_istitle, python_isupper,
+    split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};
@@ -122,7 +124,7 @@ mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::{FileState, errno_error, open_file, open_raw_file};
+pub(crate) use files::{FileState, Memory, Random, errno_error, open_file, open_raw_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
@@ -445,35 +447,6 @@ pub unsafe extern "C" fn imre_seq_take_index_proven(value: *const Object, at: us
         object(value)
             .0
             .with_mut(|storage| std::mem::take(&mut storage.concrete_sequence_mut().values[at]))
-    }
-}
-
-/// Borrows one concrete sequence word after its current bounds were proved.
-/// Zero remains an ordinary scalar or absent value, never an error sentinel.
-///
-/// # Safety
-/// `value` must be a non-null rooted exact sequence, and `at` a decoded native index
-/// strictly below its current length. No mutable storage access may overlap the
-/// call. Consume or acquire the returned word with its exact declared type before
-/// removing or replacing that element. This does not acquire a reference, and
-/// neither a storage reference nor a growable buffer pointer escapes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_seq_borrow_index_proven(value: *const Object, at: usize) -> usize {
-    // SAFETY: SequenceGetInBounds supplies a non-null exact sequence and proves
-    // its current bounds. Its two emission paths either acquire the result
-    // immediately or keep an unchanged caller root. Neither a storage reference
-    // nor a pointer into the movable buffer escapes this nonreentrant read.
-    unsafe {
-        (&*value).0.with(|storage| {
-            let Storage::Sequence(values) = storage else {
-                // Exact kind is part of the same caller proof as the index.
-                std::hint::unreachable_unchecked()
-            };
-            finish(
-                values.resolved().map(|rows| *rows.values.get_unchecked(at)),
-                0,
-            )
-        })
     }
 }
 
@@ -2387,7 +2360,6 @@ mod tests {
                 }
                 let view = imre_seq_data_readonly(sequence);
                 for (index, &word) in words.iter().enumerate() {
-                    assert_eq!(imre_seq_borrow_index_proven(sequence, index), word);
                     assert_eq!(view.add(index).read(), word);
                 }
                 imre_object_release(sequence);
@@ -2451,7 +2423,7 @@ mod tests {
             let sequence = imre_seq_new(6);
             imre_seq_append(sequence, record as usize, 6);
             imre_record_release(record);
-            let saved = imre_seq_borrow_index_proven(sequence, 0) as *const usize;
+            let saved = imre_seq_data_readonly(sequence).read() as *const usize;
             imre_record_retain(saved);
             imre_record_release(imre_seq_pop(sequence) as *const usize);
             imre_object_release(sequence);

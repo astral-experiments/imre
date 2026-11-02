@@ -31,6 +31,7 @@ def current():
     shadow.Examples = Examples
     assert not list(doctest.DocTestSuite(shadow))
     suite = doctest.DocTestSuite(module, extraglobs={"seed": 40})
+    assert type(suite) is doctest._DocTestSuite and isinstance(suite, unittest.TestSuite)
     assert [case.id() for case in suite] == [__name__, __name__ + ".Examples.nested", __name__ + ".__test__.extra"]
     globs = next(iter(suite))._dt_test.globs
     globs["seed"] = 41

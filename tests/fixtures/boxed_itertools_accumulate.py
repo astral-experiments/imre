@@ -84,6 +84,52 @@ def current():
     accumulate.__init__(it)
     assert list(it) == [11, 13]
     assert not hasattr(accumulate(()), '_accumulate_state')
+    for protocol in (0, 1, 2, 5):
+        cursor = accumulate(())
+        for reducer in (cursor.__reduce_ex__, lambda p: object.__reduce_ex__(cursor, p)):
+            try:
+                reducer(protocol)
+            except TypeError as exc:
+                name = 'accumulate' if protocol < 2 else 'itertools.accumulate'
+                assert str(exc) == f"cannot pickle '{name}' object"
+            else:
+                raise AssertionError('exposed an incomplete reconstruction tuple')
+
+    class Bare(accumulate):
+        pass
+
+    child = Bare([2, 3])
+    rebuild, (cls, base, state) = object.__reduce__(child)
+    assert rebuild.__name__ == '_reconstructor' and cls is Bare and base is accumulate
+    assert type(state) is accumulate and list(state) == [2, 7]
+    class Own(accumulate):
+        def __new__(cls, iterable):
+            return super().__new__(cls, iterable)
+
+    for cls, typename, owner in ((accumulate, 'itertools.accumulate', 'itertools.accumulate'),
+                                 (Bare, 'Bare', 'Bare'), (Own, 'Own', 'itertools.accumulate')):
+        try:
+            object.__new__(cls)
+        except TypeError as exc:
+            assert str(exc) == f'object.__new__({typename}) is not safe, use {owner}.__new__()'
+        else:
+            raise AssertionError('created an uninitialized accumulate subclass')
+    try:
+        object.__reduce_ex__(Bare([]), 2)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('lost native cursor state')
+
+    class WithArgs(accumulate):
+        def __getnewargs_ex__(self):
+            return (([2, 3],), {'initial': 7})
+
+    rebuild, args, state, items, pairs = object.__reduce_ex__(WithArgs([]), 5)
+    assert rebuild.__name__ == '__newobj_ex__'
+    assert args == (WithArgs, ([2, 3],), {'initial': 7})
+    assert state is None and items is None and pairs is None
+
     print('accumulate')
 
 

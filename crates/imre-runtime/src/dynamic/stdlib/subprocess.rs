@@ -1,5 +1,5 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
-use super::{Context, Error, Id, NONE, Result, Value, builtins, io, os, posixpath};
+use super::{Context, Error, FALSE, Id, NONE, Result, Value, builtins, io, os, posixpath};
 use crate::objects::BoxedPopen;
 
 pub(super) fn function(name: &str) -> bool {
@@ -18,9 +18,13 @@ pub(super) fn function(name: &str) -> bool {
     )
 }
 
-fn path(ctx: &mut Context, value: Id) -> Result<Vec<u8>> {
+fn path(ctx: &mut Context, value: Id, defer_nul: bool) -> Result<Vec<u8>> {
     let value = posixpath::fspath(ctx, value)?;
-    Ok(os::c_path(ctx, value, "embedded null byte")?.into_bytes())
+    if defer_nul {
+        os::encoded_path(ctx, value)
+    } else {
+        Ok(os::c_path(ctx, value, "embedded null byte")?.into_bytes())
+    }
 }
 
 /// Recognize the POSIX sentinels before calling a file object's fileno().
@@ -65,7 +69,7 @@ fn redirect(ctx: &mut Context, stream: Id, index: usize) -> Result<(u32, Option<
 
 type Environment = Vec<(Vec<u8>, Vec<u8>)>;
 
-fn environment(ctx: &mut Context, mapping: Id) -> Result<Option<Environment>> {
+fn environment(ctx: &mut Context, mapping: Id, fork: bool) -> Result<Option<Environment>> {
     if mapping == NONE {
         return Ok(None);
     }
@@ -81,8 +85,14 @@ fn environment(ctx: &mut Context, mapping: Id) -> Result<Option<Environment>> {
         ctx.heap.reserve_temporaries(2)?;
         ctx.heap.keep(pair[0]);
         ctx.heap.keep(pair[1]);
-        let key = path(ctx, pair[0])?;
-        let value = path(ctx, pair[1])?;
+        let key = path(ctx, pair[0], fork)?;
+        if fork && key.contains(&b'=') {
+            return Err(Error::new(
+                "ValueError",
+                "illegal environment variable name",
+            ));
+        }
+        let value = path(ctx, pair[1], fork)?;
         entries
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
@@ -94,6 +104,7 @@ fn environment(ctx: &mut Context, mapping: Id) -> Result<Option<Environment>> {
 fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let &[
         args,
+        executable,
         stdin,
         stdout,
         stderr,
@@ -103,6 +114,12 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         env,
         bufsize,
         pipesize,
+        encoding,
+        errors,
+        shell,
+        start_new_session,
+        umask,
+        pass_fds,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -112,21 +129,118 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         redirect(ctx, stdout, 1)?,
         redirect(ctx, stderr, 2)?,
     ];
-    let scalar = matches!(
+    if (encoding != NONE || errors != NONE) && streams.iter().any(|(mode, _)| *mode == 1) {
+        // CPython opens text wrappers before the child can execute.
+        io::text_options(ctx, encoding, errors, NONE)?;
+    }
+    let pipesize = ctx.as_int(pipesize)?;
+    // Child settings can run Python during both spawn selection and fork conversion.
+    let default_fds = matches!(ctx.heap.get(pass_fds), Value::Tuple(fds) if fds.is_empty());
+    let default_umask = matches!(ctx.heap.get(umask), Value::Int(n) if n.as_small() == Some(-1));
+    let pipe_count = streams.iter().filter(|(mode, _)| *mode == 1).count();
+    let pipe_options = pipe_count != 0 && ctx.as_int(bufsize)?.as_small() != Some(-1);
+    let handles = (executable != NONE
+        || start_new_session != FALSE
+        || !default_umask
+        || !default_fds
+        || pipe_options)
+        .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
+        .transpose()?;
+    // Popen opens the parent pipe wrappers before _execute_child examines child settings.
+    if pipe_options && os::c_int(ctx, bufsize)? == 1 {
+        for _ in 0..pipe_count {
+            let warnings = ctx.module("warnings")?;
+            let warn = ctx.lookup_attr(warnings, "warn")?;
+            let message = ctx.text("line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used");
+            let category = ctx.builtin("RuntimeWarning");
+            ctx.call(warn, vec![message, category], Vec::new())?;
+        }
+    }
+    let shell = ctx.truth(shell)?;
+    let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(args)),
-        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::DirEntry(_)
-    ) || ctx
-        .slot(args, "__fspath__")
-        .is_some_and(|slot| slot != NONE);
-    let items = if scalar { vec![args] } else { ctx.items(args)? };
-    let Some(&program) = items.first() else {
-        return Err(Error::new("IndexError", "list index out of range"));
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+    );
+    let path_like = !spelling
+        && (matches!(ctx.heap.get(args), Value::DirEntry(_))
+            || ctx
+                .slot(args, "__fspath__")
+                .is_some_and(|slot| slot != NONE));
+    if shell && path_like {
+        return Err(Error::new(
+            "TypeError",
+            "path-like args is not allowed when shell is true",
+        ));
+    }
+    let mut items = if spelling || path_like {
+        vec![args]
+    } else {
+        ctx.items(args)?
     };
+    // Truth-testing a shell override can mutate the original argument container.
     ctx.heap.reserve_temporaries(items.len())?;
     for &item in &items {
         ctx.heap.keep(item);
     }
-    let env = environment(ctx, env)?;
+    if shell {
+        // Preserve the shell's argv[0] until argv and executable are converted separately.
+        let shell_program = if executable != NONE && ctx.truth(executable)? {
+            executable
+        } else {
+            ctx.text(BoxedPopen::default_shell())
+        };
+        let option = ctx.text("-c");
+        items
+            .try_reserve(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        items.splice(..0, [shell_program, option]);
+    }
+    let program = if executable == NONE {
+        *items
+            .first()
+            .ok_or_else(|| Error::new("IndexError", "list index out of range"))?
+    } else {
+        executable
+    };
+    // CPython's dirname probe can call __fspath__ before the actual executable conversion.
+    let probed_directory = if handles.is_some() && BoxedPopen::probes_executable() {
+        let probe = posixpath::fspath(ctx, program)?;
+        match ctx.heap.get(ctx.scalar_value(probe)) {
+            Value::Str(s) => s.contains('/'),
+            Value::SurrogateStr(s) => s.contains(&u32::from('/')),
+            Value::Bytes(s) => s.contains(&b'/'),
+            _ => unreachable!("fspath returns str or bytes"),
+        }
+    } else {
+        false
+    };
+    let mut direct = match handles.as_ref() {
+        Some(handles) if probed_directory => {
+            let close_fds = ctx.truth(close_fds)?;
+            // CPython tests pass_fds before cwd, redirected handles and session settings.
+            let passing_fds = !default_fds
+                && (!close_fds || BoxedPopen::spawn_closes_fds())
+                && ctx.truth(pass_fds)?;
+            Some(
+                !passing_fds
+                    && handles.uses_posix_spawn(probed_directory, cwd != NONE, close_fds, &streams)
+                    && !ctx.truth(start_new_session)?,
+            )
+        }
+        Some(_) => Some(false),
+        None => None,
+    };
+    if direct == Some(true) && !default_umask {
+        let zero = ctx.int(0);
+        let negative = ctx.binary("<", umask, zero)?;
+        direct = Some(ctx.truth(negative)?);
+    }
+    // Fork snapshots environ before encoding the executable; posix_spawn packs it after argv.
+    let mut child_env = if direct == Some(true) {
+        None
+    } else {
+        environment(ctx, env, direct == Some(false))?
+    };
     let mut argv = Vec::new();
     argv.try_reserve_exact(items.len())
         .map_err(|_| Error::new("MemoryError", ""))?;
@@ -134,43 +248,81 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let resolved_program = posixpath::fspath(ctx, program)?;
     ctx.heap.reserve_temporaries(1)?;
     ctx.heap.keep(resolved_program);
-    argv.push(os::c_path(ctx, resolved_program, "embedded null byte")?.into_bytes());
-    for arg in &items[1..] {
-        argv.push(path(ctx, *arg)?);
+    // Fork validates NULs in C after converting its integer arguments.
+    let program_bytes = if direct == Some(false) {
+        os::encoded_path(ctx, resolved_program)?
+    } else {
+        os::c_path(ctx, resolved_program, "embedded null byte")?.into_bytes()
+    };
+    let search_path = if direct == Some(false) && !program_bytes.contains(&b'/') {
+        let subprocess = ctx.module("subprocess")?;
+        let lookup = ctx.lookup_attr(subprocess, "_exec_search_path")?;
+        let paths = ctx.call(lookup, vec![env], Vec::new())?;
+        Some(path(ctx, paths, true)?)
+    } else {
+        None
+    };
+    let normalized = if !default_fds && direct != Some(true) {
+        let subprocess = ctx.module("subprocess")?;
+        let normalize = ctx.lookup_attr(subprocess, "_fork_fds")?;
+        let fds = ctx.call(normalize, vec![pass_fds], Vec::new())?;
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(fds);
+        Some(fds)
+    } else {
+        None
+    };
+    let (close_fds, restore_signals) = if direct == Some(true) {
+        // _posix_spawn builds signal defaults before its closefrom file action.
+        let restore = ctx.truth(restore_signals)?;
+        (ctx.truth(close_fds)?, restore)
+    } else {
+        (ctx.truth(close_fds)?, ctx.truth(restore_signals)?)
+    };
+    let new_session = direct != Some(true) && ctx.truth(start_new_session)?;
+    let umask = if default_umask || direct == Some(true) {
+        -1
+    } else {
+        os::c_int(ctx, umask)?
+    };
+    // fork_exec parses its umask before checking the normalized descriptor sequence.
+    let mut keep = Vec::new();
+    if let Some(fds) = normalized {
+        for fd in ctx.items(fds)? {
+            BoxedPopen::push_pass_fd(&mut keep, &ctx.as_int(fd)?)?;
+        }
     }
-    let directory = (cwd != NONE).then(|| path(ctx, cwd)).transpose()?;
-    let mut warning_error = None;
+    // On the prepared path, argv[0] is converted independently of the executable.
+    let (alternate, arguments) = if handles.is_some() {
+        (Some(program_bytes), items.as_slice())
+    } else {
+        argv.push(program_bytes);
+        (None, &items[1..])
+    };
+    for arg in arguments {
+        argv.push(path(ctx, *arg, false)?);
+    }
+    if direct == Some(true) {
+        child_env = environment(ctx, env, false)?;
+    }
+    let directory = (cwd != NONE).then(|| path(ctx, cwd, false)).transpose()?;
     let child = BoxedPopen::launch(
         argv,
+        alternate,
+        direct,
+        search_path,
         streams,
-        ctx.truth(close_fds)?,
-        ctx.truth(restore_signals)?,
+        handles,
+        close_fds,
+        restore_signals,
         directory,
-        env,
+        child_env,
         ctx.as_int(bufsize)?,
-        ctx.as_int(pipesize)?,
-        &mut || {
-            let result = (|| -> Result<()> {
-                let warnings = ctx.module("warnings")?;
-                let warn = ctx.lookup_attr(warnings, "warn")?;
-                let message = ctx.text("line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used");
-                let category = ctx.builtin("RuntimeWarning");
-                ctx.call(warn, vec![message, category], Vec::new())?;
-                Ok(())
-            })();
-            result.map_err(|error| {
-                // Unwind the native pipe owners first, then propagate the original Python exception.
-                warning_error = Some(error);
-                crate::Error::new(
-                    crate::objects::exceptions::Kind::RuntimeWarning,
-                    "binary pipe buffering",
-                )
-            })
-        },
+        pipesize,
+        new_session,
+        umask,
+        keep,
     );
-    if let Some(error) = warning_error {
-        return Err(error);
-    }
     match child {
         Ok(child) => Ok(ctx.alloc(Value::ProcessHandle(child))),
         Err(failure) => {
@@ -243,7 +395,7 @@ pub(super) fn call(
             .status(ctx.truth(poll)?)?
             .map_or(NONE, |n| ctx.int(i64::from(n)))),
         ("wait", &[seconds]) => Ok(child
-            .wait(timeout(ctx, seconds)?)?
+            .wait(timeout(ctx, seconds)?, || ctx.dispatch_signals())?
             .map_or(NONE, |n| ctx.int(i64::from(n)))),
         ("signal", &[number]) => {
             let number = ctx
@@ -264,18 +416,15 @@ pub(super) fn call(
             } else {
                 ctx.bytes_like(input)?
             };
-            let exchange = child.communicate(input, seconds, use_select)?;
+            let pending = child.begin_communication(input, seconds, use_select)?;
+            let exchange = child.finish_communication(pending, || ctx.dispatch_signals())?;
             let [stdout, stderr] = exchange
                 .streams
                 .map(|stream| stream.map_or(NONE, |data| ctx.alloc(Value::Bytes(data))));
-            let budget = exchange
-                .wait_budget
-                .map_or(NONE, |n| ctx.alloc(Value::Float(n)));
             Ok(ctx.alloc(Value::Tuple(vec![
                 stdout,
                 stderr,
                 builtins::boolean(exchange.timed_out),
-                budget,
             ])))
         }
         ("close_wait", []) => {

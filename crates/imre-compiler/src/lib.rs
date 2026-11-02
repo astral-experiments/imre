@@ -29,6 +29,13 @@ mod types;
 mod verify;
 mod version;
 mod watch;
+mod zip_entry;
+pub use zip_entry::is_zip_path;
+
+/// Emits native provider IR for packaging alongside the Linux toolchain.
+pub fn write_bundled_provider_ir(directory: &std::path::Path) -> Result<(), String> {
+    dynamic::provider_pack::write(directory)
+}
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -53,11 +60,15 @@ pub struct CommandFlags {
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,
+    pub unbuffered: bool,
     /// A missing override lets the runtime select the mode from the startup locale.
     pub utf8_mode: Option<bool>,
     pub warn_default_encoding: bool,
     /// Warning options supplied on the command line.
     pub warnoptions: Vec<String>,
+    /// Ordered command-line operands used to construct sys._xoptions.
+    pub xoptions: Vec<String>,
+    pub faulthandler: bool,
 }
 
 /// The in-memory entry and launcher used by a Python-style `-c` invocation.
@@ -71,6 +82,10 @@ pub struct PythonCommand {
 pub struct CompileOptions {
     /// Compile the supplied command without creating a script in the caller's working directory.
     pub command: Option<PythonCommand>,
+    /// Canonical import name requested by the interpreter's `-m` entry.
+    pub module_entry: Option<String>,
+    /// Run __main__ from the command-line import path, retaining the operand as argv[0].
+    pub path_entry: bool,
     /// Flags and executable for a file launched through the Python command line.
     pub script_startup: Option<(CommandFlags, String)>,
     /// A file describing the branches to include in a closed executable.
@@ -81,6 +96,8 @@ pub struct CompileOptions {
     pub runtime_imports: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
+    /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
+    pub bundled_provider_archive: Option<PathBuf>,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
 }
@@ -220,6 +237,47 @@ fn check_file_with(
     object_fallback(path, module_root, options, filesystem, typed, |_| ())
 }
 
+fn named_bytecode(path: &Path) -> bool {
+    path.as_os_str().as_encoded_bytes().ends_with(b".pyc")
+}
+
+/// Inspect only the required prefix of a named bytecode operand, which may be a pipe.
+fn read_bytecode_prefix(mut file: std::fs::File) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut prefix = Vec::with_capacity(37);
+    file.by_ref().take(4).read_to_end(&mut prefix)?;
+    if prefix == imre_ast::PYC_MAGIC_NUMBER_TOKEN.to_le_bytes() {
+        file.by_ref().take(13).read_to_end(&mut prefix)?;
+        if prefix.get(16).is_some_and(|tag| tag & 0x7f == b'c') {
+            file.take(20).read_to_end(&mut prefix)?;
+        }
+    }
+    Ok(prefix)
+}
+
+/// Classify a direct interpreter operand before decoding its contents as Python source.
+fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
+    let magic = imre_ast::PYC_MAGIC_NUMBER_TOKEN.to_le_bytes();
+    if !named_bytecode(path) && !bytes.starts_with(&magic[..2]) {
+        return None;
+    }
+    if bytes.len() < 4 {
+        return Some("EOFError: EOF read where not expected");
+    }
+    if bytes[..4] != magic {
+        return Some("RuntimeError: Bad magic number in .pyc file");
+    }
+    if bytes.len() < 16 {
+        return Some("EOFError: EOF read where not expected");
+    }
+    // The interpreter skips three header words, then expects a marshalled code record.
+    // Its first fields are five 32-bit integers, and the tag may carry the reference bit.
+    if bytes.len() < 16 + 1 + 5 * 4 || bytes[16] & 0x7f != b'c' {
+        return Some("RuntimeError: Bad code object in .pyc file");
+    }
+    Some("NotImplementedError: native marshal cannot load CPython code objects")
+}
+
 /// Compile runtime import paths with native object operations when static lowering cannot resolve them.
 fn object_fallback<T>(
     path: &Path,
@@ -229,6 +287,19 @@ fn object_fallback<T>(
     lower: impl FnOnce(&mut modules::SourceGraph) -> Result<T, String>,
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
+    if options.module_entry.is_some() {
+        return dynamic::compile(
+            path,
+            module_root,
+            options,
+            true,
+            None,
+            Default::default(),
+            || Ok(()),
+        )?
+        .map(boxed)
+        .ok_or_else(|| "could not compile the module entry".to_owned());
+    }
     let (error, graph) = match options.load_graph(path, module_root, filesystem) {
         Ok(mut graph) => match lower(&mut graph) {
             Ok(value) => return Ok(value),
@@ -270,11 +341,26 @@ fn object_fallback<T>(
     let check_returns = || {
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
+            let entry = &graph.modules[graph.entry];
+            let all_calls = graph.check_decorated_method_calls.get()
+                || !entry.optional_imports.is_empty()
+                || !graph.needs_object_runtime.get()
+                    && graph.object_builtin_errors.borrow().contains(&error);
+            let checked_calls = if all_calls {
+                analysis::FallbackCalls::All
+            } else if entry.has_entry_guard() {
+                analysis::FallbackCalls::Entry(graph.entry)
+            } else {
+                analysis::FallbackCalls::None
+            };
             graph.session.diagnostic_copy()?.check_fallback_contracts(
                 skipped.as_deref(),
                 &overloads,
-                !graph.needs_object_runtime.get()
-                    && graph.object_builtin_errors.borrow().contains(&error),
+                checked_calls,
+                graph
+                    .modules
+                    .iter()
+                    .position(|module| module.is_bundled("socketserver")),
             )?;
         }
         Ok(())
@@ -881,6 +967,9 @@ mod tests {
 
     #[test]
     fn sealed_imports_work_without_filesystem_modules() {
+        #[cfg(unix)]
+        super::check("import _signal\n").unwrap();
+
         let source = r#"
 import sys as process
 from typing import TextIO as Stream

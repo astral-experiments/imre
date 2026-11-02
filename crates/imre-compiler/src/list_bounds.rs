@@ -4,8 +4,7 @@
 //! invalidates them. Call parameters gain facts only when every syntactic call
 //! site supplies a known interval without intervening argument effects.
 
-use crate::ir::{Builtin, CallArgs, Expr, ExprKind, Module, Statement, Type, walk_expressions};
-use crate::list_specialization::mark_writes;
+use crate::ir::{self, Builtin, CallArgs, Expr, ExprKind, Module, Statement, Type};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Bounds {
@@ -229,18 +228,13 @@ impl Analysis<'_> {
         state: &mut State,
     ) {
         let mut header = state.clone();
-        let mut written = vec![false; state.len()];
-        mark_region_writes(body, &mut written);
-        if let Some(test) = test.as_deref() {
-            mark_region_writes(&[Statement::Expr(test.clone())], &mut written);
-        }
         if !block_readonly(body) || test.as_deref().is_some_and(|test| !readonly(test)) {
             header.fill(None);
         } else {
-            for (fact, written) in header.iter_mut().zip(written) {
-                if written {
-                    *fact = None;
-                }
+            let mut invalidate = |slot: usize, _: Option<&Expr>| header[slot] = None;
+            ir::walk_writes(body, &mut invalidate);
+            if let Some(test) = test.as_deref() {
+                ir::walk_expression_writes(test, invalidate);
             }
         }
         if let Some(test) = test {
@@ -499,23 +493,10 @@ pub(crate) fn block_readonly(body: &[Statement]) -> bool {
     })
 }
 
-fn mark_region_writes(body: &[Statement], written: &mut [bool]) {
-    mark_writes(body, written);
-    walk_expressions(body, &mut |value| match &value.kind {
-        ExprKind::Scope { body, clear, .. } => {
-            mark_writes(body, written);
-            for &slot in clear {
-                written[slot] = true;
-            }
-        }
-        ExprKind::Bind(slot, _) => written[*slot] = true,
-        _ => {}
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::walk_expressions;
 
     fn lower(source: &str) -> Module {
         let graph = crate::modules::SourceGraph::single(source).unwrap();

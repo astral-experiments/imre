@@ -1,0 +1,735 @@
+{
+  "comparison": "stock vs independent native processes, ordinary and --runtime-imports kept separate",
+  "driver_sources": {
+    "driver.py": "import sys\nimport from_client\nimport module_client\nimport original_case\n\nif sys.argv[2] == \"from\":\n    from_client.current()\nelif sys.argv[2] == \"module\":\n    module_client.current()\nelif sys.argv[2] == \"original\":\n    original_case.current()\nelse:\n    raise AssertionError(\"unknown probe\")\n",
+    "from_client.py": "import sys\nimport io\nimport typing\nfrom typing import reveal_type\n\nclass FromWitness:\n    pass\n\nobj = FromWitness()\n\ndef current():\n    if sys.argv[1] == 'core':\n        assert reveal_type(obj) is obj\n        print('identity')\n\n    if sys.argv[1] == 'metadata':\n        fn = reveal_type\n        other = typing.reveal_type\n        assert fn is other\n        params = fn.__type_params__\n        assert len(params) == 1\n        t = params[0]\n        assert isinstance(t, typing.TypeVar)\n        assert t.__name__ == 'T'\n        assert t is not typing.T\n        assert t.__infer_variance__ is True\n        assert fn.__annotations__ == {'obj': t, 'return': t}\n        print('metadata')\n\n    if sys.argv[1] == 'arguments':\n\n        try:\n            reveal_type(obj=obj)\n        except TypeError:\n            print('positional-only')\n        else:\n            raise AssertionError(\"accepted keyword obj\")\n\n    if sys.argv[1] == 'redirect':\n\n\n        captured = io.StringIO()\n        saved = sys.stderr\n        try:\n            sys.stderr = captured\n            assert reveal_type(obj) is obj\n            assert captured.getvalue() == \"Runtime type is 'FromWitness'\\n\"\n        finally:\n            sys.stderr = saved\n        print('redirected')\n\n    if sys.argv[1] == 'broken':\n\n\n        failure = RuntimeError(\"write failed\")\n\n        class BrokenStream:\n            def write(self, text):\n                raise failure\n\n        saved = sys.stderr\n        try:\n            sys.stderr = BrokenStream()\n            try:\n                reveal_type(obj)\n            except RuntimeError as error:\n                assert error is failure\n            else:\n                raise AssertionError(\"lost stderr write failure\")\n        finally:\n            sys.stderr = saved\n        print('propagated')\n\n    if sys.argv[1] == 'negative':\n        assert reveal_type(obj) is not obj\n",
+    "module_client.py": "import sys\nimport io\nimport typing\n\nclass ModuleWitness:\n    pass\n\nobj = ModuleWitness()\n\ndef current():\n    if sys.argv[1] == 'core':\n        assert typing.reveal_type(obj) is obj\n        print('identity')\n\n    if sys.argv[1] == 'metadata':\n        fn = typing.reveal_type\n        other = typing.reveal_type\n        assert fn is other\n        params = fn.__type_params__\n        assert len(params) == 1\n        t = params[0]\n        assert isinstance(t, typing.TypeVar)\n        assert t.__name__ == 'T'\n        assert t is not typing.T\n        assert t.__infer_variance__ is True\n        assert fn.__annotations__ == {'obj': t, 'return': t}\n        print('metadata')\n\n    if sys.argv[1] == 'arguments':\n\n        try:\n            typing.reveal_type(obj=obj)\n        except TypeError:\n            print('positional-only')\n        else:\n            raise AssertionError(\"accepted keyword obj\")\n\n    if sys.argv[1] == 'redirect':\n\n\n        captured = io.StringIO()\n        saved = sys.stderr\n        try:\n            sys.stderr = captured\n            assert typing.reveal_type(obj) is obj\n            assert captured.getvalue() == \"Runtime type is 'ModuleWitness'\\n\"\n        finally:\n            sys.stderr = saved\n        print('redirected')\n\n    if sys.argv[1] == 'broken':\n\n\n        failure = RuntimeError(\"write failed\")\n\n        class BrokenStream:\n            def write(self, text):\n                raise failure\n\n        saved = sys.stderr\n        try:\n            sys.stderr = BrokenStream()\n            try:\n                typing.reveal_type(obj)\n            except RuntimeError as error:\n                assert error is failure\n            else:\n                raise AssertionError(\"lost stderr write failure\")\n        finally:\n            sys.stderr = saved\n        print('propagated')\n\n    if sys.argv[1] == 'negative':\n        assert typing.reveal_type(obj) is not obj\n",
+    "original_case.py": "import unittest\nfrom test.test_typing import RevealTypeTests\n\nclass Result(unittest.TestResult):\n    def startTest(self, test):\n        print('START',test.id(),flush=True)\n        super().startTest(test)\n    def addSuccess(self, test):\n        print('PASS',test.id(),flush=True)\n        super().addSuccess(test)\n    def addSkip(self, test, reason):\n        print('SKIP',test.id(),repr(reason),flush=True)\n        super().addSkip(test,reason)\n    def addFailure(self, test, err):\n        print('FAIL',test.id(),repr(err[1]),flush=True)\n        super().addFailure(test,err)\n    def addError(self, test, err):\n        print('ERROR',test.id(),repr(err[1]),flush=True)\n        super().addError(test,err)\ndef current():\n    case=RevealTypeTests(\"test_reveal_type\")\n    result=Result()\n    case.run(result)\n    assert result.testsRun==1 and result.wasSuccessful() and len(result.skipped)==0\n"
+  },
+  "hostname": "a0f7c43eb913",
+  "imre_revision": "fe7af98cf2bd7c9cb6d6385bf7aac07971c0d5f7",
+  "observations": [
+    {
+      "check": "core",
+      "form": "from",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "core",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 0.326,
+        "stderr": "Runtime type is 'FromWitness'\n",
+        "stdout": "identity\n"
+      }
+    },
+    {
+      "check": "metadata",
+      "form": "from",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "metadata",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 0.272,
+        "stderr": "",
+        "stdout": "metadata\n"
+      }
+    },
+    {
+      "check": "arguments",
+      "form": "from",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "arguments",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 0.262,
+        "stderr": "",
+        "stdout": "positional-only\n"
+      }
+    },
+    {
+      "check": "redirect",
+      "form": "from",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "redirect",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 0.441,
+        "stderr": "",
+        "stdout": "redirected\n"
+      }
+    },
+    {
+      "check": "broken",
+      "form": "from",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "broken",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 0.262,
+        "stderr": "",
+        "stdout": "propagated\n"
+      }
+    },
+    {
+      "check": "negative",
+      "form": "from",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "negative",
+          "from"
+        ],
+        "returncode": 1,
+        "seconds": 0.287,
+        "stderr": "Runtime type is 'FromWitness'\nTraceback (most recent call last):\n  File \"/workspace/scratch/controls/final-stage/driver.py\", line 7, in <module>\n    from_client.current()\n    ~~~~~~~~~~~~~~~~~~~^^\n  File \"/workspace/scratch/controls/final-stage/from_client.py\", line 75, in current\n    assert reveal_type(obj) is not obj\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+        "stdout": ""
+      }
+    },
+    {
+      "check": "core",
+      "form": "module",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "core",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 0.307,
+        "stderr": "Runtime type is 'ModuleWitness'\n",
+        "stdout": "identity\n"
+      }
+    },
+    {
+      "check": "metadata",
+      "form": "module",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "metadata",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 0.345,
+        "stderr": "",
+        "stdout": "metadata\n"
+      }
+    },
+    {
+      "check": "arguments",
+      "form": "module",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "arguments",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 0.252,
+        "stderr": "",
+        "stdout": "positional-only\n"
+      }
+    },
+    {
+      "check": "redirect",
+      "form": "module",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "redirect",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 0.265,
+        "stderr": "",
+        "stdout": "redirected\n"
+      }
+    },
+    {
+      "check": "broken",
+      "form": "module",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "broken",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 0.305,
+        "stderr": "",
+        "stdout": "propagated\n"
+      }
+    },
+    {
+      "check": "negative",
+      "form": "module",
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "negative",
+          "module"
+        ],
+        "returncode": 1,
+        "seconds": 0.267,
+        "stderr": "Runtime type is 'ModuleWitness'\nTraceback (most recent call last):\n  File \"/workspace/scratch/controls/final-stage/driver.py\", line 9, in <module>\n    module_client.current()\n    ~~~~~~~~~~~~~~~~~~~~~^^\n  File \"/workspace/scratch/controls/final-stage/module_client.py\", line 74, in current\n    assert typing.reveal_type(obj) is not obj\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+        "stdout": ""
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "from",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "core",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 19.513,
+        "stderr": "Runtime type is 'FromWitness'\n",
+        "stdout": "identity\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "metadata",
+      "form": "from",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "metadata",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 22.026,
+        "stderr": "",
+        "stdout": "metadata\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "arguments",
+      "form": "from",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "arguments",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 11.125,
+        "stderr": "",
+        "stdout": "positional-only\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "redirect",
+      "form": "from",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "redirect",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 25.323,
+        "stderr": "",
+        "stdout": "redirected\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "broken",
+      "form": "from",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "broken",
+          "from"
+        ],
+        "returncode": 0,
+        "seconds": 14.621,
+        "stderr": "",
+        "stdout": "propagated\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "negative",
+      "form": "from",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "negative",
+          "from"
+        ],
+        "returncode": 1,
+        "seconds": 13.923,
+        "stderr": "Runtime type is 'FromWitness'\nTraceback (most recent call last):\n  File \"/workspace/scratch/controls/final-stage/driver.py\", line 7\n  File \"/workspace/scratch/controls/final-stage/from_client.py\", line 75\nAssertionError\n",
+        "stdout": ""
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "module",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "core",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 27.885,
+        "stderr": "Runtime type is 'ModuleWitness'\n",
+        "stdout": "identity\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "metadata",
+      "form": "module",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "metadata",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 24.888,
+        "stderr": "",
+        "stdout": "metadata\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "arguments",
+      "form": "module",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "arguments",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 19.166,
+        "stderr": "",
+        "stdout": "positional-only\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "redirect",
+      "form": "module",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "redirect",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 28.277,
+        "stderr": "",
+        "stdout": "redirected\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "broken",
+      "form": "module",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "broken",
+          "module"
+        ],
+        "returncode": 0,
+        "seconds": 10.44,
+        "stderr": "",
+        "stdout": "propagated\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/public-fe7af98c/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/public-fe7af98c/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 80.092,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/public-fe7af98c/ordinary0/program in 80.05 s\n",
+        "stdout": ""
+      },
+      "check": "negative",
+      "form": "module",
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/public-fe7af98c/ordinary0/program",
+          "negative",
+          "module"
+        ],
+        "returncode": 1,
+        "seconds": 17.008,
+        "stderr": "Runtime type is 'ModuleWitness'\nTraceback (most recent call last):\n  File \"/workspace/scratch/controls/final-stage/driver.py\", line 9\n  File \"/workspace/scratch/controls/final-stage/module_client.py\", line 74\nAssertionError\n",
+        "stdout": ""
+      }
+    }
+  ],
+  "scope": "independent controls; no original unittest occurrences",
+  "upstream_cpython": "5607950ef232dad16d75c0cf53101d9649d89115"
+}

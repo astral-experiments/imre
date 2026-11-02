@@ -155,7 +155,7 @@ impl Checker<'_> {
         }
         let param = |name: &str| Parameter {
             name: name.into(),
-            kind: if matches!(op, Close | Dup2) {
+            kind: if matches!(op, Close | DeviceEncoding | Dup2) {
                 ParameterKind::PositionalOrKeyword
             } else {
                 ParameterKind::PositionalOnly
@@ -164,7 +164,7 @@ impl Checker<'_> {
             default: None,
             sign_only: false,
         };
-        let mut params = if op == Pipe {
+        let mut params = if matches!(op, Pipe | OpenPty) {
             vec![]
         } else {
             vec![param("fd")]
@@ -183,6 +183,9 @@ impl Checker<'_> {
         }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             let mut value = checker.expr(arg)?;
+            if op == DeviceEncoding {
+                return checker.index_word(value, arg, false);
+            }
             if (op == SetBlocking && index == 1) || (op == Dup2 && index == 2) {
                 value = checker.truth_value(value);
             }
@@ -199,8 +202,9 @@ impl Checker<'_> {
             Close | SetBlocking | SetInheritable | Unlink | Remove => Type::None,
             TransferFd | Write | Open | Seek | Dup | Dup2 => Type::Int,
             Read => Type::Bytes,
-            Pipe | Pipe2 => self.types.tuple(vec![Type::Int, Type::Int]),
+            Pipe | Pipe2 | OpenPty => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
+            DeviceEncoding => self.types.optional(Type::Str),
         };
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
     }

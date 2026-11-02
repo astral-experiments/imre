@@ -224,6 +224,79 @@ impl Utf16Order {
         }
     }
 
+    pub(crate) fn from_sign(order: i32) -> Self {
+        if order < 0 || order == 0 && cfg!(target_endian = "little") {
+            Self::Little
+        } else {
+            Self::Big
+        }
+    }
+
+    pub(crate) fn unit(self, bytes: [u8; 2]) -> u16 {
+        match self {
+            Self::Little => u16::from_le_bytes(bytes),
+            Self::Big => u16::from_be_bytes(bytes),
+        }
+    }
+
+    /// Decode complete units, leaving the trailing partial unit or surrogate pair to the caller.
+    pub(crate) fn decode_prefix(
+        self,
+        points: &mut Vec<u32>,
+        bytes: &[u8],
+        mut offset: usize,
+        final_chunk: bool,
+    ) -> Result<(usize, Option<DecodeIssue>)> {
+        points
+            .try_reserve((bytes.len() - offset).div_ceil(2))
+            .map_err(|_| Error::allocation())?;
+        while offset < bytes.len() {
+            let rest = &bytes[offset..];
+            let (reason, end) = if let Some((first, rest)) = rest.split_first_chunk::<2>() {
+                let first = self.unit(*first);
+                match first {
+                    0xd800..=0xdbff => {
+                        if let Some(second) = rest.first_chunk::<2>() {
+                            let second = self.unit(*second);
+                            if (0xdc00..=0xdfff).contains(&second) {
+                                let high = u32::from(first - 0xd800);
+                                let low = u32::from(second - 0xdc00);
+                                points.push(0x10000 + (high << 10) + low);
+                                offset += 4;
+                                continue;
+                            }
+                            ("illegal UTF-16 surrogate", offset + 2)
+                        } else if final_chunk {
+                            ("unexpected end of data", bytes.len())
+                        } else {
+                            break;
+                        }
+                    }
+                    0xdc00..=0xdfff => ("illegal encoding", offset + 2),
+                    _ => {
+                        points.push(u32::from(first));
+                        offset += 2;
+                        continue;
+                    }
+                }
+            } else if final_chunk {
+                ("truncated data", bytes.len())
+            } else {
+                break;
+            };
+            return Ok((
+                offset,
+                Some(DecodeIssue {
+                    encoding: self.name(),
+                    start: offset,
+                    end,
+                    reason,
+                }),
+            ));
+        }
+        Ok((offset, None))
+    }
+
     pub(crate) fn append(
         self,
         bytes: &mut Vec<u8>,
@@ -240,22 +313,130 @@ impl Utf16Order {
     }
 }
 
+/// Explicit byte order never inserts a BOM. U+FEFF in the input encodes normally.
+#[derive(Clone, Copy)]
+pub(crate) enum FixedUnicode {
+    Utf16(Utf16Order),
+    Utf32Le,
+    Utf32Be,
+}
+
+impl FixedUnicode {
+    pub(crate) fn by_key(key: &str) -> Option<Self> {
+        match key {
+            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => {
+                Some(Self::Utf16(Utf16Order::Little))
+            }
+            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Some(Self::Utf16(Utf16Order::Big)),
+            "utf_32_le" | "utf_32le" => Some(Self::Utf32Le),
+            "utf_32_be" | "utf_32be" => Some(Self::Utf32Be),
+            _ => None,
+        }
+    }
+
+    /// The unsuffixed stateless codecs use native order and prefix one BOM.
+    pub(crate) fn encoding(key: &str) -> Option<(Self, bool)> {
+        match key {
+            "utf16" | "u16" | "utf_16" => Some((Self::Utf16(Utf16Order::from_sign(0)), true)),
+            "utf32" | "u32" | "utf_32" => Some((
+                if cfg!(target_endian = "little") {
+                    Self::Utf32Le
+                } else {
+                    Self::Utf32Be
+                },
+                true,
+            )),
+            _ => Self::by_key(key).map(|format| (format, false)),
+        }
+    }
+
+    pub(crate) fn width(self) -> usize {
+        match self {
+            Self::Utf16(_) => 2,
+            Self::Utf32Le | Self::Utf32Be => 4,
+        }
+    }
+
+    pub(crate) fn byte_order(self) -> i32 {
+        match self {
+            Self::Utf16(Utf16Order::Little) | Self::Utf32Le => -1,
+            Self::Utf16(Utf16Order::Big) | Self::Utf32Be => 1,
+        }
+    }
+
+    pub(crate) fn with_order(self, order: i32) -> Self {
+        let order = Utf16Order::from_sign(order);
+        match self {
+            Self::Utf16(_) => Self::Utf16(order),
+            _ if matches!(order, Utf16Order::Little) => Self::Utf32Le,
+            _ => Self::Utf32Be,
+        }
+    }
+
+    pub(crate) fn codec_name(self, signature: bool) -> &'static str {
+        if !signature {
+            return self.name();
+        }
+        match self {
+            Self::Utf16(_) => "utf-16",
+            Self::Utf32Le | Self::Utf32Be => "utf-32",
+        }
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Utf16(order) => order.name(),
+            Self::Utf32Le => "utf-32-le",
+            Self::Utf32Be => "utf-32-be",
+        }
+    }
+
+    pub(crate) fn append(
+        self,
+        bytes: &mut Vec<u8>,
+        points: impl IntoIterator<Item = u32>,
+    ) -> Result<()> {
+        for point in points {
+            match self {
+                Self::Utf16(order) => {
+                    // A lone surrogate requested by surrogatepass is already one code unit.
+                    let mut units = [point as u16, 0];
+                    let length =
+                        char::from_u32(point).map_or(1, |ch| ch.encode_utf16(&mut units).len());
+                    order.append(bytes, units[..length].iter().copied())?;
+                }
+                Self::Utf32Le | Self::Utf32Be => {
+                    let word = if matches!(self, Self::Utf32Le) {
+                        point.to_le_bytes()
+                    } else {
+                        point.to_be_bytes()
+                    };
+                    bytes.try_reserve(4).map_err(|_| Error::allocation())?;
+                    bytes.extend_from_slice(&word);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// str.encode also supports stateless encoders without a full codec registry entry.
 #[derive(Clone, Copy)]
 pub(crate) enum StrEncoder {
     Registered(Codec),
-    Utf16(Utf16Order),
+    Wide {
+        format: FixedUnicode,
+        signature: bool,
+    },
 }
 
 impl StrEncoder {
     pub(crate) fn lookup(encoding: &str, errors: &str) -> Result<Self> {
         let key = encode_key(encoding, errors)?;
-        match key.as_str() {
-            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => {
-                Ok(Self::Utf16(Utf16Order::Little))
-            }
-            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Ok(Self::Utf16(Utf16Order::Big)),
-            _ => Ok(Self::Registered(Codec::by_key(&key, encoding)?)),
+        if let Some((format, signature)) = FixedUnicode::encoding(&key) {
+            Ok(Self::Wide { format, signature })
+        } else {
+            Ok(Self::Registered(Codec::by_key(&key, encoding)?))
         }
     }
 
@@ -267,9 +448,15 @@ impl StrEncoder {
     ) -> Result<Cow<'a, [u8]>> {
         match self {
             Self::Registered(codec) => codec.encode(text, Some(errors), original),
-            Self::Utf16(order) => {
+            Self::Wide { format, signature } => {
                 let mut bytes = Vec::new();
-                order.append(&mut bytes, text.encode_utf16())?;
+                format.append(
+                    &mut bytes,
+                    signature
+                        .then_some(0xfeff)
+                        .into_iter()
+                        .chain(text.chars().map(u32::from)),
+                )?;
                 Ok(Cow::Owned(bytes))
             }
         }

@@ -113,54 +113,9 @@ pub(crate) fn written(function: &Function) -> Vec<bool> {
 }
 
 fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
-    let mut written = function.expression_rebound();
-    ir::walk_statements(&function.body, &mut |statement| match statement {
-        Statement::Assign(slot, value) => written[*slot] |= !permitted(value),
-        Statement::Clear(slot) => written[*slot] = true,
-        Statement::Move(target, source) => {
-            written[*target] = true;
-            written[*source] = true;
-        }
-        Statement::Scope { clear, .. } => {
-            for &slot in clear {
-                written[slot] = true;
-            }
-        }
-        Statement::For {
-            target,
-            cursor,
-            stop,
-            step,
-            ..
-        } => {
-            for &slot in [target, cursor, stop, step] {
-                written[slot] = true;
-            }
-        }
-        Statement::IterNext {
-            key, value, ready, ..
-        } => {
-            written[*key] = true;
-            written[*ready] = true;
-            if let Some(slot) = value {
-                written[*slot] = true;
-            }
-        }
-        Statement::Try { handlers, .. } => {
-            for handler in handlers {
-                if let Some(slot) = handler.name {
-                    written[slot] = true;
-                }
-            }
-        }
-        _ => {}
-    });
-    ir::walk_expressions(&function.body, &mut |expression| {
-        if let ExprKind::Scope { clear, .. } = &expression.kind {
-            for &slot in clear {
-                written[slot] = true;
-            }
-        }
+    let mut written = vec![false; function.locals.len()];
+    ir::walk_writes(&function.body, |slot, value| {
+        written[slot] |= !value.is_some_and(&permitted);
     });
     written
 }
@@ -870,7 +825,7 @@ def scan(left: list[Row], right: list[Row]) -> int:
         );
         let body = emitted_body(&module, id);
         assert!(body.contains("call ptr @imre_seq_data_readonly"), "{body}");
-        assert!(body.contains("call i64 @imre_seq_borrow_index_proven"));
+        assert!(body.contains("call i64 @imre_seq_borrow_index_proven_fast("));
         assert!(!body.contains("call void @imre_record_retain"), "{body}");
         assert!(!body.contains("call void @imre_record_release"), "{body}");
     }
@@ -1061,7 +1016,7 @@ def total(rows: list[Row], fail: bool) -> int:
         );
         // The read after the branches cannot reuse either branch's SSA pointer.
         assert_eq!(
-            body.matches("call i64 @imre_seq_borrow_index_proven")
+            body.matches("call i64 @imre_seq_borrow_index_proven_fast(")
                 .count(),
             1,
             "{body}"
@@ -1141,7 +1096,7 @@ def total(rows: list[Row], fail: bool) -> int:
             let (_, read_guard) = body.rsplit_once("icmp eq ptr").unwrap();
             let cached = read_guard.find("getelementptr inbounds i64").unwrap();
             let fallback = read_guard
-                .find("call i64 @imre_seq_borrow_index_proven")
+                .find("call i64 @imre_seq_borrow_index_proven_fast(")
                 .unwrap();
             let merged = read_guard.find("phi i64").unwrap();
             assert!(cached < fallback && fallback < merged, "{body}");
@@ -1160,7 +1115,7 @@ def total(rows: list[Row], fail: bool) -> int:
         let body = emitted_body(&module, 1);
         assert!(!body.contains("call ptr @imre_seq_data_readonly"), "{body}");
         assert!(
-            body.contains("call i64 @imre_seq_borrow_index_proven"),
+            body.contains("call i64 @imre_seq_borrow_index_proven_fast("),
             "{body}"
         );
     }

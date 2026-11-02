@@ -5,8 +5,6 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
-
 mod structure;
 pub(crate) use structure::{StructFormat, UnpackedField};
 
@@ -84,19 +82,6 @@ impl InterpreterLayout {
                 .join(suffix.replace("{py_version_short}", &self.version))
         };
         path.into_os_string().into_string().ok()
-    }
-
-    pub(crate) fn config_var(&self, name: &str) -> Value {
-        match name {
-            "prefix" | "exec_prefix" | "base" | "platbase" | "installed_base"
-            | "installed_platbase" => Value::from(self.prefix.to_str()),
-            "py_version_short" => Value::from(self.version.as_str()),
-            "implementation" => Value::from("Imre"),
-            "implementation_lower" => Value::from("imre"),
-            "Py_GIL_DISABLED" | "Py_DEBUG" => Value::from(0),
-            "EXT_SUFFIX" => Value::from(".imre.a"),
-            _ => Value::Null,
-        }
     }
 }
 
@@ -238,7 +223,7 @@ mod tests {
                 layout.path("posix_prefix", "platlib", true).as_deref(),
                 Some("/opt/example/lib/imre3.12/site-packages")
             );
-            assert_eq!(layout.config_var("base"), "/opt/example");
+            assert_eq!(layout.prefix, Path::new("/opt/example"));
         }
     }
 

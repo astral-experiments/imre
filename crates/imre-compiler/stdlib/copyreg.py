@@ -59,15 +59,19 @@ _new_type = type(int.__new__)
 
 def _reduce_ex(self, proto):
     assert proto < 2
-    cls = self.__class__
-    for base in cls.__mro__:
-        if hasattr(base, '__flags__') and not base.__flags__ & _HEAPTYPE:
-            break
-        new = base.__new__
-        if isinstance(new, _new_type) and new.__self__ is base:
-            break
-    else:
-        base = object # not really reachable
+    return _reduce_ex_with_base(self, proto, self.__class__, None)
+
+
+def _reduce_ex_with_base(self, proto, cls, base):
+    if base is None:
+        for base in cls.__mro__:
+            if hasattr(base, '__flags__') and not base.__flags__ & _HEAPTYPE:
+                break
+            new = base.__new__
+            if isinstance(new, _new_type) and new.__self__ is base:
+                break
+        else:
+            base = object # not really reachable
     if base is object:
         state = None
     else:
@@ -108,6 +112,32 @@ def __newobj_ex__(cls, args, kwargs):
     keyword-only arguments to be pickled correctly.
     """
     return cls.__new__(cls, *args, **kwargs)
+
+def _reduce_newobj(self, arguments, extended):
+    """Build the binary-protocol reduction from the bound new-argument hook."""
+    kwargs = None
+    if extended:
+        if not isinstance(arguments, tuple):
+            raise TypeError(f"__getnewargs_ex__ should return a tuple, not {type(arguments).__name__!r}")
+        # Inspect the tuple payload without invoking subclass iteration or length hooks.
+        arguments = tuple.__getitem__(arguments, slice(None))
+        if len(arguments) != 2:
+            raise ValueError(f"__getnewargs_ex__ should return a tuple of length 2, not {len(arguments)}")
+        args, kwargs = arguments
+        if not isinstance(args, tuple):
+            raise TypeError(f"first item of the tuple returned by __getnewargs_ex__ must be a tuple, not {type(args).__name__!r}")
+        if not isinstance(kwargs, dict):
+            raise TypeError(f"second item of the tuple returned by __getnewargs_ex__ must be a dict, not {type(kwargs).__name__!r}")
+    else:
+        args = arguments
+        if not isinstance(args, tuple):
+            raise TypeError(f"__getnewargs__ should return a tuple, not {type(args).__name__!r}")
+    cls = type(self)
+    if kwargs is not None and dict.__len__(kwargs):
+        return __newobj_ex__, (cls, args, kwargs), self.__getstate__(), None, None
+    args = tuple.__getitem__(args, slice(None))
+    return __newobj__, (cls, *args), self.__getstate__(), None, None
+
 
 def _has_type_dict(cls):
     # Native types with no exposed class namespace declare no Python slots.

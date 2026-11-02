@@ -50,7 +50,13 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
                 .find(|alg| alg.starts_with("sha3_") && alg.eq_ignore_ascii_case(name))
                 .unwrap_or(name);
             let provider = HashState::provider(name)?;
-            super::attribute(ctx, "hashlib", provider.name)?
+            if let Some(class) = HashState::public_constructor(provider.name) {
+                ctx.builtin(class)
+            } else if provider.name == "md5" {
+                ctx.builtin("hashlib.md5")
+            } else {
+                super::attribute(ctx, "hashlib", provider.name)?
+            }
         }
         Value::Module { .. } => ctx.lookup_attr(digest, "new")?,
         _ => digest,
@@ -130,31 +136,72 @@ pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     }
 }
 
-pub(super) fn compare(ctx: &Context, args: &[Id]) -> Result<Id> {
-    let (left, right) = (
-        ctx.heap.get(argument(args, 0)?),
-        ctx.heap.get(argument(args, 1)?),
-    );
-    let equal = match (left, right) {
-        (Value::Bytes(a) | Value::ByteArray(a), Value::Bytes(b) | Value::ByteArray(b)) => {
-            compare_bytes(a, b)
-        }
-        (Value::Str(a), Value::Str(b)) => {
-            compare_text(a, b).map_err(|message| Error::new("TypeError", message))?
-        }
-        (Value::Str(_), Value::Bytes(_) | Value::ByteArray(_))
-        | (Value::Bytes(_) | Value::ByteArray(_), Value::Str(_)) => {
+/// A saved comparison function keeps its originating extension module alive across reimports.
+pub(super) fn bind_compare(ctx: &mut Context, module: Id, scope: Id, symbol: &str) {
+    let callable = ctx.builtin(symbol);
+    let function = ctx.alloc(Value::Method {
+        callable,
+        receiver: module,
+        explicit: false,
+    });
+    ctx.bind(scope, symbol.rsplit('.').next().unwrap(), function);
+}
+
+pub(super) fn compare(
+    ctx: &Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    // The module-bound native method supplies its own receiver.
+    let args = &args[1..];
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    let &[left, right] = args else {
+        let function = name.rsplit('.').next().unwrap();
+        return Err(Error::new(
+            "TypeError",
+            format!("{function} expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let equal = if let (Some(a), Some(b)) = (ctx.string_storage(left), ctx.string_storage(right)) {
+        let (Value::Str(left), Value::Str(right)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
             return Err(Error::new(
                 "TypeError",
-                "a bytes-like object is required, not 'str'",
+                "comparing strings with non-ASCII characters is not supported",
             ));
-        }
-        _ => {
+        };
+        compare_text(left, right).map_err(|message| Error::new("TypeError", message))?
+    } else {
+        let supports_buffer = |id| {
+            matches!(
+                ctx.heap.get(ctx.scalar_value(id)),
+                Value::Bytes(_)
+                    | Value::ByteArray(_)
+                    | Value::Array(_)
+                    | Value::MemoryView { .. }
+                    | Value::BytesIoBuffer { .. }
+            )
+        };
+        if !supports_buffer(left) && !supports_buffer(right) {
             return Err(Error::new(
                 "TypeError",
-                "compare_digest requires two byte buffers or ASCII strings",
+                format!(
+                    "unsupported operand types(s) or combination of types: '{:.100}' and '{:.100}'",
+                    ctx.type_name(left),
+                    ctx.type_name(right)
+                ),
             ));
         }
+        ctx.check_buffer_exporter(left)?;
+        let left = ctx.native_buffer_bytes(left)?;
+        ctx.check_buffer_exporter(right)?;
+        let right = ctx.native_buffer_bytes(right)?;
+        compare_bytes(left, right)
     };
     Ok(if equal { TRUE } else { FALSE })
 }

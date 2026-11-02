@@ -52,7 +52,7 @@ pub(crate) fn file_encoding(name: Option<&str>) -> Cow<'_, str> {
 /// Return the locale codeset even when UTF-8 mode overrides the default file encoding.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_locale_encoding() -> *const crate::Str {
-    crate::StrOwner::into_raw(crate::StrOwner::new(crate::Str::new(&file_encoding(Some(
+    crate::StrOwner::into_raw(crate::StrOwner::new(crate::Str::new(file_encoding(Some(
         "locale",
     )))))
 }
@@ -116,8 +116,11 @@ pub(super) fn initialize(isolated: bool, utf8: Option<bool>) {
             // SAFETY: both interpreter entry points initialize before running user code
             // or starting threads. Do not mutate the environment from lazy settings reads.
             unsafe { std::env::set_var("LC_CTYPE", name) };
-            // CPython reapplies the environment for all categories after coercion.
-            with_process_locale(|| unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) });
+            with_process_locale(|| {
+                // SAFETY: the locale lock serializes this startup update, and the
+                // static empty C string selects the environment for all categories.
+                unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) };
+            });
         }
     });
 }
@@ -218,25 +221,50 @@ fn current_codeset() -> String {
     // SAFETY: the caller holds the process-locale lock while copying libc's storage.
     let name = unsafe { libc::nl_langinfo(libc::CODESET) };
     if name.is_null() {
-        return "UTF-8".to_owned();
+        return "utf-8".to_owned();
     }
     // SAFETY: the non-null NUL-terminated encoding name remains valid under the lock.
     let name = unsafe { CStr::from_ptr(name) };
     if name.to_bytes().is_empty() {
-        "UTF-8".to_owned()
+        "utf-8".to_owned()
     } else {
         name.to_string_lossy().into_owned()
     }
 }
 
+/// Consume libc's errno message while the active locale and message storage are stable.
+pub(crate) fn with_errno_message<T>(
+    code: i32,
+    consume: impl FnOnce(&CStr) -> crate::Result<T>,
+) -> crate::Result<T> {
+    with_process_locale(|| {
+        // SAFETY: strerror accepts any C int and returns a borrowed, terminated message or null.
+        let message = unsafe { libc::strerror(code) };
+        if message.is_null() {
+            return Err(crate::Error::new(
+                crate::Kind::ValueError,
+                "strerror() argument out of range",
+            ));
+        }
+        // SAFETY: consume borrows the message only for the duration of this locked call.
+        consume(unsafe { CStr::from_ptr(message) })
+    })
+}
+
+/// Decode the errno message using the active locale and CPython's surrogateescape policy.
+pub(crate) fn strerror(code: i32) -> crate::Result<Vec<u32>> {
+    with_errno_message(code, |message| decode_locale_points(message, true))
+}
+
 /// Decode a C string using the active character locale, while holding the locale lock.
-fn decode_locale(value: &CStr) -> crate::Result<String> {
+fn decode_locale_points(value: &CStr, surrogateescape: bool) -> crate::Result<Vec<u32>> {
     unsafe extern "C" {
         fn imre_decode_locale_name(
             name: *const libc::c_char,
             length: usize,
             points: *mut u32,
             count: *mut usize,
+            surrogateescape: libc::c_int,
         ) -> usize;
     }
     let bytes = value.to_bytes();
@@ -245,15 +273,17 @@ fn decode_locale(value: &CStr) -> crate::Result<String> {
     // SAFETY: name is NUL-terminated; each decoded scalar uses at least one input
     // byte. The C helper owns its mbstate_t and validates scalars under the locale lock.
     let start = unsafe {
-        imre_decode_locale_name(value.as_ptr(), bytes.len(), points.as_mut_ptr(), &mut count)
+        imre_decode_locale_name(
+            value.as_ptr(),
+            bytes.len(),
+            points.as_mut_ptr(),
+            &mut count,
+            i32::from(surrogateescape),
+        )
     };
     if start == bytes.len() {
-        return Ok(points[..count]
-            .iter()
-            .map(|&point| {
-                char::from_u32(point).expect("the locale decoder emits Unicode scalar values")
-            })
-            .collect());
+        points.truncate(count);
+        return Ok(points);
     }
     let byte = bytes[start];
     Err(crate::Error::unicode_decode(
@@ -265,6 +295,13 @@ fn decode_locale(value: &CStr) -> crate::Result<String> {
             "'locale' codec can't decode byte 0x{byte:02x} in position {start}: decoding error"
         ),
     ))
+}
+
+fn decode_locale(value: &CStr) -> crate::Result<String> {
+    Ok(decode_locale_points(value, false)?
+        .into_iter()
+        .map(|point| char::from_u32(point).expect("strict locale decoder emits scalar values"))
+        .collect())
 }
 
 /// Copy and decode the selected category before another change can invalidate its name.

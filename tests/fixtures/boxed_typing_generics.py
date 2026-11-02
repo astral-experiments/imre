@@ -1,6 +1,9 @@
 from sys import path
 from types import GenericAlias
 import typing as t
+
+rendered_spec = t.ParamSpec("P")
+assert repr((rendered_spec, rendered_spec.args, rendered_spec.kwargs)) == "(~P, P.args, P.kwargs)"
 from typing import BinaryIO, KT, TextIO, VT
 from typing import T as typing_T
 
@@ -14,12 +17,46 @@ print(TextIO.__bases__ == (t.IO,), BinaryIO.__orig_bases__ == (t.IO[bytes],))
 print(t.IO.__parameters__ == (t.AnyStr,), TextIO.__parameters__, BinaryIO.__parameters__)
 V = t.TypeVar("V")
 T = t.TypeVar("T", bound=str, covariant=True)
+assert t.TypeVar("Forward", bound="Accessor").__bound__.__forward_arg__ == "Accessor"
+try:
+    t.TypeVar("Invalid", int, bound=(1, 2))
+except TypeError as error:
+    assert str(error) == "Bound must be a type. Got (1, 2)."
+else:
+    raise AssertionError("invalid TypeVar bound was accepted")
 print(K.__name__, K.__module__, K.__bound__ is None, K.__constraints__)
 print(K is t.TypeVar("K"), T.__bound__ is str, T.__covariant__, t.TYPE_CHECKING)
 
 
 class Accessor(t.Generic[T]):
     pass
+
+
+class Slotted(t.Generic[T]):
+    __slots__ = ("value",)
+
+
+assert "__slots__" not in vars(t.Generic)
+for obj in (Slotted(), Slotted[int]()):
+    obj.value = 7
+    assert obj.value == 7 and not hasattr(obj, "__dict__")
+assert hasattr(Accessor[int](), "__dict__")
+
+
+# Parameterizations share class attributes through their common origin.
+Accessor[int].marker = object()
+assert Accessor[str].marker is Accessor.marker
+try:
+    del Accessor[int].marker
+except AttributeError:
+    pass
+else:
+    raise AssertionError("the attribute belongs to the origin")
+assert Accessor[int].marker is Accessor.marker
+del Accessor.marker
+Accessor[int].copy_with = "origin attribute"
+assert Accessor.copy_with == "origin attribute"
+assert Accessor[int].copy_with((str,)) == Accessor[str]
 
 
 class DictMixin(dict[K, V]):
@@ -322,8 +359,50 @@ assert box.__bases__ == (t.Generic,) and box.__orig_bases__ == (t.Generic[item],
 assert box.__parameters__ == (item,) and t.get_args(box[int]) == (int,)
 
 
+def fresh_variadic_class():
+    class Variadic[Item, *Items, **Signature]:
+        def parameters(self):
+            return Item, Items, Signature
+
+    return Variadic
+
+
+variadic = fresh_variadic_class()
+item, pack, signature = variadic.__type_params__
+assert type(pack) is t.TypeVarTuple and type(signature) is t.ParamSpec
+assert variadic.__parameters__ == variadic().parameters() == (item, pack, signature)
+assert all(left is not right for left, right in zip(variadic.__type_params__, fresh_variadic_class().__type_params__))
+assert (pack.__name__, signature.__name__) == ("Items", "Signature")
+assert pack.__module__ == signature.__module__ == "typing"
+assert signature.__infer_variance__ and signature.__bound__ is None
+assert pack.__default__ is signature.__default__ is t.NoDefault
+assert pack.evaluate_default is signature.evaluate_default is None
+assert t.get_origin(signature.args) is t.get_origin(signature.kwargs) is signature
+original, = variadic.__orig_bases__
+assert t.get_origin(original) is t.Generic
+first, unpacked, last = t.get_args(original)
+assert first is item and last is signature
+assert t.get_origin(unpacked) is t.Unpack and t.get_args(unpacked) == (pack,)
+assert t.TypeVarTuple("Manual").evaluate_default(1) is t.NoDefault
+
+
 class Hidden[__P]:
     value = __P
 
 
 assert Hidden.value is Hidden.__type_params__[0] and Hidden.value.__name__ == "__P"
+
+
+P = t.ParamSpec("P", bound="Hidden", default=(int, str))
+assert P.__module__ == __name__ and P.__bound__.__forward_arg__ == "Hidden"
+assert P.has_default() and P.__default__ == (int, str)
+assert P.args.__origin__ is P and P.kwargs.__origin__ is P
+assert P.args == t.ParamSpecArgs(P) and P.kwargs == t.ParamSpecKwargs(P)
+assert P.args is not P.args and P.args != P.kwargs
+assert P != t.ParamSpec("P") and repr(P.args) == "P.args"
+try:
+    P.args.__origin__ = None
+except AttributeError as error:
+    assert str(error) == "readonly attribute"
+else:
+    raise AssertionError("ParamSpecArgs origin was writable")

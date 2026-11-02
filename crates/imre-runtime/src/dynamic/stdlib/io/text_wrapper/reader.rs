@@ -1,23 +1,27 @@
-use super::{Codec, Context, Id, Result};
+use super::{Codec, Context, Cookie, Error, Id, NATIVE_ORDER, Result, StreamCodec};
+use std::rc::Rc;
+
+#[derive(Clone)]
+pub(super) struct Snapshot {
+    pub flags: i32,
+    pub input: Rc<Vec<u8>>,
+}
 
 /// Keep incomplete encoding sequences and CRLF pairs across arbitrary binary read boundaries.
 pub(super) struct Reader {
     text: String,
     cursor: usize,
-    tail: Vec<u8>,
+    chunk_start: usize,
+    // CPython distinguishes no decoded chunk from an empty chunk at sized-read EOF.
+    pub(super) decoded_chunk_nonempty: Option<bool>,
+    pub(super) tail: Vec<u8>,
     cr: bool,
-    beginning: bool,
-    seen: u8,
-    // Most UTF-8 characters have the same size in the input and in our text buffer.
-    // Keep only positions at which those sizes differ or the newline decoder has state.
-    boundaries: Vec<Boundary>,
-    mapped: bool,
-}
-
-struct Boundary {
-    end: usize,
-    extra_bytes: i8,
-    decoder_state: bool,
+    pub(super) beginning: bool,
+    pub(super) order: i32,
+    pub(super) seen: u8,
+    pub(super) snapshot: Option<Snapshot>,
+    seek_seed: bool,
+    pub(super) bytes_per_char: f64,
 }
 
 impl Default for Reader {
@@ -31,59 +35,252 @@ impl Reader {
         Self {
             text: String::new(),
             cursor: 0,
+            chunk_start: 0,
+            decoded_chunk_nonempty: None,
             tail: Vec::new(),
             cr: false,
             beginning,
+            order: 0,
             seen: 0,
-            boundaries: Vec::new(),
-            mapped: true,
+            snapshot: None,
+            seek_seed: false,
+            bytes_per_char: 0.0,
         }
     }
+
+    pub(super) fn reset_decoder(&mut self) {
+        self.tail.clear();
+        self.cr = false;
+        self.seen = 0;
+        self.order = 0;
+        self.beginning = true;
+    }
+
+    pub(super) fn after_read_all(&mut self) {
+        // A full read clears decoded_chars only when there was a saved snapshot.
+        let retained = self
+            .snapshot
+            .is_none()
+            .then_some(self.decoded_chunk_nonempty)
+            .flatten();
+        self.discard();
+        self.decoded_chunk_nonempty = retained;
+    }
+
+    pub(super) fn after_write(&mut self) {
+        // An unseekable stream can still have unread decoded characters after a write.
+        if self.snapshot.is_some() {
+            self.discard();
+        }
+        self.reset_decoder();
+    }
+
     pub(super) fn discard(&mut self) {
         self.text.clear();
         self.cursor = 0;
+        self.chunk_start = 0;
+        self.decoded_chunk_nonempty = None;
         self.tail.clear();
         self.cr = false;
-        self.boundaries.clear();
-        self.mapped = true;
+        self.clear_snapshot();
     }
-    pub(super) fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
-        let rest = &self.text[self.cursor..];
-        if self
-            .boundaries
-            .iter()
-            .any(|b| b.end == self.cursor && b.decoder_state)
-            || rest.is_empty() && self.cr
-            || !rest.is_empty() && !self.mapped
-        {
-            return Err(super::Error::new(
-                "NotImplementedError",
-                "native text position needs a decoder snapshot",
-            ));
-        }
-        if rest.is_empty() && self.tail.is_empty() {
-            return Ok(end);
-        }
-        let extra: i64 = self
-            .boundaries
-            .iter()
-            .filter(|b| b.end > self.cursor)
-            .map(|b| i64::from(b.extra_bytes))
-            .sum();
-        let raw = ctx.as_integer(end)?;
-        Ok(ctx.int(raw - (rest.len() + self.tail.len() + usize::from(self.cr)) as i64 - extra))
+
+    pub(super) fn clear_snapshot(&mut self) {
+        self.snapshot = None;
+        self.seek_seed = false;
     }
+
+    pub(super) fn flags(&self, codec: StreamCodec, newline: Option<&str>) -> i32 {
+        let flags = match codec {
+            StreamCodec::Wide { bom: true, .. } if self.beginning => 2,
+            StreamCodec::Wide { bom: true, .. } => i32::from(self.order == -NATIVE_ORDER),
+            StreamCodec::Registered(Codec::Utf8 { signature: true }) => i32::from(self.beginning),
+            _ => 0,
+        };
+        if matches!(newline, None | Some("")) {
+            (flags << 1) | i32::from(self.cr)
+        } else {
+            flags
+        }
+    }
+
+    pub(super) fn set_state(&mut self, cookie: Cookie, codec: StreamCodec, newline: Option<&str>) {
+        if cookie.start == 0 && cookie.flags == 0 {
+            self.reset_decoder();
+            return;
+        }
+        let universal = matches!(newline, None | Some(""));
+        let flags = cookie.flags >> u32::from(universal);
+        self.tail.clear();
+        self.cr = universal && cookie.flags & 1 != 0;
+        self.beginning = match codec {
+            StreamCodec::Wide { bom: true, .. } => !matches!(flags, 0 | 1),
+            StreamCodec::Registered(Codec::Utf8 { signature: true }) => flags != 0,
+            _ => false,
+        };
+        self.order = if self.beginning {
+            0
+        } else if flags == 1 {
+            -NATIVE_ORDER
+        } else {
+            NATIVE_ORDER
+        };
+    }
+
+    pub(super) fn after_seek(&mut self, cookie: Cookie, codec: StreamCodec, newline: Option<&str>) {
+        self.discard();
+        self.set_state(cookie, codec, newline);
+        if cookie.skip == 0 {
+            self.snapshot = Some(Snapshot {
+                flags: cookie.flags,
+                input: Rc::default(),
+            });
+            self.seek_seed = true;
+        }
+    }
+
+    pub(super) fn capture(
+        &self,
+        codec: StreamCodec,
+        newline: Option<&str>,
+        telling: bool,
+    ) -> Result<Option<Snapshot>> {
+        if !telling && !self.seek_seed {
+            return Ok(None);
+        }
+        let mut input = Vec::new();
+        input
+            .try_reserve_exact(self.tail.len())
+            .map_err(|_| crate::Error::allocation())?;
+        input.extend_from_slice(&self.tail);
+        Ok(Some(Snapshot {
+            flags: self.flags(codec, newline),
+            input: Rc::new(input),
+        }))
+    }
+
+    pub(super) fn record(
+        &mut self,
+        snapshot: Option<Snapshot>,
+        bytes: usize,
+        chars: usize,
+        telling: bool,
+    ) {
+        self.bytes_per_char = if chars == 0 {
+            0.0
+        } else {
+            bytes as f64 / chars as f64
+        };
+        // After an absolute seek the saved input is empty. Keep actual read-ahead bytes
+        // during iteration so reconstruction can never index beyond that empty input.
+        if let Some(snapshot) = snapshot {
+            self.snapshot = Some(snapshot);
+        }
+        if telling {
+            self.seek_seed = false;
+        }
+    }
+
+    pub(super) fn seek_input(&mut self, flags: i32, data: &[u8]) -> Result<()> {
+        let mut input = Vec::new();
+        input
+            .try_reserve_exact(data.len())
+            .map_err(|_| crate::Error::allocation())?;
+        input.extend_from_slice(data);
+        self.snapshot = Some(Snapshot {
+            flags,
+            input: Rc::new(input),
+        });
+        self.seek_seed = data.is_empty();
+        Ok(())
+    }
+
+    /// Sized reads estimate the byte count from the previous successful decoder refill.
+    pub(super) fn read_size(&self, minimum: usize, requested: usize) -> usize {
+        let buffered = self.text[self.cursor..].chars().count();
+        let remaining = requested.saturating_sub(buffered);
+        let estimate = self.bytes_per_char.max(1.0) * remaining as f64;
+        if estimate >= i64::MAX as f64 {
+            return minimum;
+        }
+        minimum.max(estimate as usize)
+    }
+
+    pub(super) fn used_in_chunk(&self) -> usize {
+        self.text[self.chunk_start..self.cursor.max(self.chunk_start)]
+            .chars()
+            .count()
+    }
+
+    pub(super) fn skip_chars(&mut self, count: usize) -> Result<()> {
+        self.cursor = self
+            .text
+            .char_indices()
+            .map(|(byte, _)| byte)
+            .chain(std::iter::once(self.text.len()))
+            .nth(count)
+            .ok_or_else(|| Error::new("OSError", "can't restore logical file position"))?;
+        Ok(())
+    }
+
+    pub(super) fn consume_chunk(&mut self) {
+        self.cursor = self.text.len();
+    }
+
+    pub(super) fn save_tail(&mut self, tail: &[u8]) -> Result<()> {
+        self.tail
+            .try_reserve(tail.len().saturating_sub(self.tail.len()))
+            .map_err(|_| crate::Error::allocation())?;
+        self.tail.clear();
+        self.tail.extend_from_slice(tail);
+        Ok(())
+    }
+
     pub(super) fn chunk(
         &mut self,
         bytes: &[u8],
-        codec: Codec,
+        codec: StreamCodec,
         end: bool,
-    ) -> Result<(Codec, Vec<u8>)> {
+    ) -> Result<(StreamCodec, Vec<u8>)> {
+        if let StreamCodec::Wide { format, bom } = codec {
+            let mut raw = Vec::new();
+            raw.try_reserve(
+                self.tail
+                    .len()
+                    .checked_add(bytes.len())
+                    .ok_or_else(crate::Error::allocation)?,
+            )
+            .map_err(|_| crate::Error::allocation())?;
+            raw.extend_from_slice(&self.tail);
+            raw.extend_from_slice(bytes);
+            let codec = if bom && !self.beginning {
+                StreamCodec::Wide {
+                    format: format.with_order(self.order),
+                    bom: false,
+                }
+            } else {
+                codec
+            };
+            return Ok((codec, raw));
+        }
         let mut raw = std::mem::take(&mut self.tail);
         raw.try_reserve(bytes.len())
             .map_err(|_| crate::Error::allocation())?;
         raw.extend_from_slice(bytes);
-        let utf8 = matches!(codec, Codec::Utf8 { .. });
+        let utf8 = matches!(codec, StreamCodec::Registered(Codec::Utf8 { .. }));
+        let signature = matches!(
+            codec,
+            StreamCodec::Registered(Codec::Utf8 { signature: true })
+        );
+        // UTF-8-SIG defers even final input while it is still a proper prefix of the BOM.
+        if signature && self.beginning && raw.len() < 3 && b"\xef\xbb\xbf".starts_with(&raw) {
+            self.tail = raw;
+            return Ok((codec, Vec::new()));
+        }
+        let first = self.beginning;
+        if !raw.is_empty() {
+            self.beginning = false;
+        }
         if utf8
             && !end
             && !raw.is_empty()
@@ -94,83 +291,37 @@ impl Reader {
         {
             self.tail = raw.split_off(start);
         }
-        let codec = if !self.beginning && matches!(codec, Codec::Utf8 { signature: true }) {
-            Codec::Utf8 { signature: false }
+        let codec = if !first
+            && matches!(
+                codec,
+                StreamCodec::Registered(Codec::Utf8 { signature: true })
+            ) {
+            StreamCodec::Registered(Codec::Utf8 { signature: false })
         } else {
             codec
         };
-        if !raw.is_empty() {
-            self.beginning = false;
-        }
         Ok((codec, raw))
-    }
-
-    fn push(&mut self, c: char, raw_width: usize, decoder_state: bool) {
-        self.text.push(c);
-        let extra_bytes = raw_width as i8 - c.len_utf8() as i8;
-        if extra_bytes != 0 || decoder_state {
-            self.boundaries.push(Boundary {
-                end: self.text.len(),
-                extra_bytes,
-                decoder_state,
-            });
-        }
     }
 
     pub(super) fn append(
         &mut self,
         decoded: &str,
-        raw: &[u8],
-        codec: Codec,
         newline: Option<&str>,
         end: bool,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         if self.cursor != 0 {
             self.text.drain(..self.cursor);
-            self.boundaries.retain_mut(|b| {
-                if b.end <= self.cursor {
-                    return false;
-                }
-                b.end -= self.cursor;
-                true
-            });
             self.cursor = 0;
         }
-        if self.text.is_empty() {
-            self.mapped = true;
-        }
-        let aligned = raw == decoded.as_bytes()
-            || matches!(codec, Codec::Utf8 { signature: true })
-                && raw.strip_prefix(b"\xef\xbb\xbf") == Some(decoded.as_bytes());
-        let single_byte = !aligned
-            && (matches!(codec, Codec::Latin1)
-                || matches!(codec, Codec::CodePage(_))
-                    && codec
-                        .decode(raw, None)
-                        .is_ok_and(|strict| strict == decoded));
-        let universal = matches!(newline, None | Some(""));
-        let pending = usize::from(self.cr);
+        self.chunk_start = self.text.len();
         let length = decoded
             .len()
-            .checked_add(pending)
+            .checked_add(usize::from(self.cr))
             .ok_or_else(crate::Error::allocation)?;
         self.text
             .try_reserve(length)
             .map_err(|_| crate::Error::allocation())?;
-        let boundaries = if universal || single_byte {
-            decoded
-                .chars()
-                .filter(|&c| universal && c == '\r' || single_byte && !c.is_ascii())
-                .count()
-                + pending
-        } else {
-            0
-        };
-        self.boundaries
-            .try_reserve(boundaries)
-            .map_err(|_| crate::Error::allocation())?;
-        self.mapped &= aligned || single_byte;
-        if universal {
+        if matches!(newline, None | Some("")) {
             let translate = newline.is_none();
             for c in decoded.chars() {
                 if self.cr {
@@ -178,13 +329,13 @@ impl Reader {
                     if c == '\n' {
                         self.seen |= 4;
                         if !translate {
-                            self.push('\r', 1, true);
+                            self.text.push('\r');
                         }
-                        self.push('\n', if translate { 2 } else { 1 }, false);
+                        self.text.push('\n');
                         continue;
                     }
                     self.seen |= 1;
-                    self.push(if translate { '\n' } else { '\r' }, 1, true);
+                    self.text.push(if translate { '\n' } else { '\r' });
                 }
                 if c == '\r' {
                     self.cr = true;
@@ -192,22 +343,18 @@ impl Reader {
                     if c == '\n' {
                         self.seen |= 2;
                     }
-                    self.push(c, if single_byte { 1 } else { c.len_utf8() }, false);
+                    self.text.push(c);
                 }
             }
             if end && self.cr {
                 self.seen |= 1;
-                self.push(if translate { '\n' } else { '\r' }, 1, true);
+                self.text.push(if translate { '\n' } else { '\r' });
                 self.cr = false;
-            }
-        } else if single_byte {
-            for c in decoded.chars() {
-                self.push(c, 1, false);
             }
         } else {
             self.text.push_str(decoded);
         }
-        Ok(())
+        Ok(self.text[self.chunk_start..].chars().count())
     }
     pub(super) fn take(
         &mut self,

@@ -15,7 +15,7 @@ thread_local! {
 pub extern "C" fn imre_recursion_enter() {
     let depth = DEPTH.get() + 1;
     DEPTH.set(depth);
-    if depth > LIMIT.load(Ordering::Relaxed) as u32 {
+    if depth > recursion_limit() as u32 {
         Error::new(Kind::RecursionError, "maximum recursion depth exceeded").raise();
     }
 }
@@ -80,10 +80,33 @@ fn c_int(value: &Int) -> Option<i32> {
     }
 }
 
+pub(crate) fn recursion_limit() -> i32 {
+    LIMIT.load(Ordering::Relaxed)
+}
+
+pub(crate) fn set_recursion_limit(limit: i32, depth: usize) -> Result<(), Error> {
+    if limit < 1 {
+        return Err(Error::new(
+            Kind::ValueError,
+            "recursion limit must be greater or equal than 1",
+        ));
+    }
+    if depth >= limit as usize {
+        return Err(Error::new(
+            Kind::RecursionError,
+            format!(
+                "cannot set the recursion limit to {limit} at the recursion depth {depth}: the limit is too low"
+            ),
+        ));
+    }
+    LIMIT.store(limit, Ordering::Relaxed);
+    Ok(())
+}
+
 /// Return the limit observed by the running interpreter.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_getrecursionlimit() -> usize {
-    Int::from_usize(LIMIT.load(Ordering::Relaxed) as usize).into_raw()
+    Int::from_usize(recursion_limit() as usize).into_raw()
 }
 
 /// Change the limit only when the current thread is still below it.
@@ -100,21 +123,9 @@ pub unsafe extern "C" fn imre_sys_setrecursionlimit(raw: usize) {
             "Python int too large to convert to C int",
         )
         .raise(),
-        Some(limit) if limit < 1 => {
-            Error::new(
-                Kind::ValueError,
-                "recursion limit must be greater or equal than 1",
-            )
-            .raise();
-        }
         Some(limit) => {
-            let depth = DEPTH.get();
-            if depth >= limit as u32 {
-                Error::new(Kind::RecursionError, format!(
-                    "cannot set the recursion limit to {limit} at the recursion depth {depth}: the limit is too low"
-                )).raise();
-            } else {
-                LIMIT.store(limit, Ordering::Relaxed);
+            if let Err(error) = set_recursion_limit(limit, DEPTH.get() as usize) {
+                error.raise();
             }
         }
     }

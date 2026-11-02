@@ -1,4 +1,5 @@
 import logging
+import pickle
 
 
 def current():
@@ -35,6 +36,15 @@ def current():
         separate = logging.Manager(logging.RootLogger(logging.ERROR))
         assert separate.getLogger("jobs").parent is separate.root
         assert separate.loggerDict["jobs"] is not parent
+
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            assert pickle.loads(pickle.dumps(child, protocol)) is child
+        try:
+            pickle.dumps(separate.getLogger("jobs"))
+        except pickle.PicklingError as exc:
+            assert str(exc) == "logger cannot be pickled"
+        else:
+            raise AssertionError("pickled a different manager's logger")
     finally:
         registry.clear()
         registry.update(saved)

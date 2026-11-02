@@ -1,12 +1,16 @@
 """OrderedDict backed by the runtime's ordered dictionary storage."""
 
 from _collections import (
+    _ordered_dict_clear,
+    _ordered_dict_delitem,
     _ordered_dict_equal,
+    _ordered_dict_setitem,
     _ordered_dict_move_to_end,
     _ordered_dict_pop,
     _ordered_dict_popitem,
     _ordered_dict_repr,
     _ordered_dict_setdefault,
+    _ordered_dict_sizeof,
     _ordered_dict_view,
 )
 
@@ -14,8 +18,72 @@ from _collections import (
 _ordered_dict_missing = object()
 
 
+def _ordered_dict_receiver(receiver, method):
+    if not issubclass(type(receiver), OrderedDict):
+        raise TypeError(f"descriptor '{method}' requires a 'collections.OrderedDict' object "
+                        f"but received a '{type(receiver).__name__}'")
+
+
+def _ordered_dict_update(target, other):
+    if type(other) is dict:
+        pairs = list(other.items())
+    else:
+        keys = getattr(other, "keys", _ordered_dict_missing)
+        if keys is not _ordered_dict_missing:
+            for key in keys():
+                target[key] = other[key]
+            return
+        items = getattr(other, "items", _ordered_dict_missing)
+        pairs = other if items is _ordered_dict_missing else items()
+    for key, value in pairs:
+        target[key] = value
+
+
+def _ordered_dict_update_args(target, args, kwargs, method):
+    _ordered_dict_receiver(target, method)
+    if len(args) > 1:
+        if method == "update":
+            raise TypeError(f"update() takes at most 1 positional argument ({len(args)} given)")
+        raise TypeError(f"expected at most 1 argument, got {len(args)}")
+    if args:
+        _ordered_dict_update(target, args[0])
+    if kwargs:
+        _ordered_dict_update(target, kwargs)
+
+
+def _ordered_dict_union(left, right):
+    if not issubclass(type(left), dict) or not issubclass(type(right), dict):
+        return NotImplemented
+    cls = type(left) if issubclass(type(left), OrderedDict) else type(right)
+    result = cls(left)
+    _ordered_dict_update(result, right)
+    return result
+
+
 class OrderedDict(dict):
     __module__ = "collections"
+
+    def __init__(self, /, *args, **kwargs):
+        _ordered_dict_update_args(self, args, kwargs, "__init__")
+
+    def update(self, /, *args, **kwargs):
+        _ordered_dict_update_args(self, args, kwargs, "update")
+
+    def __sizeof__(self, /):
+        _ordered_dict_receiver(self, "__sizeof__")
+        return _ordered_dict_sizeof(self)
+
+    def __setitem__(self, key, value, /):
+        _ordered_dict_receiver(self, "__setitem__")
+        _ordered_dict_setitem(self, key, value)
+
+    def __delitem__(self, key, /):
+        _ordered_dict_receiver(self, "__delitem__")
+        _ordered_dict_delitem(self, key)
+
+    def clear(self, /):
+        _ordered_dict_receiver(self, "clear")
+        _ordered_dict_clear(self)
 
     def __iter__(self):
         return iter(_ordered_dict_view(self, "keys"))
@@ -42,6 +110,19 @@ class OrderedDict(dict):
         equal = self.__eq__(other)
         return NotImplemented if equal is NotImplemented else not equal
 
+    def __or__(self, other, /):
+        _ordered_dict_receiver(self, "__or__")
+        return _ordered_dict_union(self, other)
+
+    def __ror__(self, other, /):
+        _ordered_dict_receiver(self, "__ror__")
+        return _ordered_dict_union(other, self)
+
+    def __ior__(self, other, /):
+        _ordered_dict_receiver(self, "__ior__")
+        _ordered_dict_update(self, other)
+        return self
+
     def move_to_end(self, /, key, last=True):
         return _ordered_dict_move_to_end(self, key, last)
 
@@ -60,6 +141,9 @@ class OrderedDict(dict):
 
     def popitem(self, /, last=True):
         return _ordered_dict_popitem(self, last)
+
+    def __reduce__(self, /):
+        return type(self), (), self.__getstate__(), None, iter(self.items())
 
     def copy(self):
         return type(self)(self)

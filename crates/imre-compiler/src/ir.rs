@@ -925,6 +925,7 @@ pub(crate) enum LinecacheOperation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RandomOperation {
+    Shuffle,
     Seed,
     Float,
     Bits,
@@ -1058,7 +1059,7 @@ pub(crate) enum Builtin {
     SysPlatform,
     SysThreadInfo,
     SysThreadText {
-        version: bool,
+        field: u32,
     },
     SysImplementation,
     SysStdlibModuleNames,
@@ -1160,6 +1161,8 @@ pub(crate) enum Builtin {
     BoxValue,
     ObjectRecordProject(usize),
     ObjectStreamProject,
+    ObjectTextProject,
+    ObjectIsExactTuple,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
@@ -1376,6 +1379,13 @@ pub(crate) enum Builtin {
     SysGetFrameModuleName,
     SysGetRecursionLimit,
     SysContextAwareWarnings,
+    /// Native source metadata for a Python function or module, before its first statement.
+    FaultFrame {
+        file: String,
+        name: String,
+        line: u32,
+    },
+    FaultLine(u32),
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,
@@ -1594,6 +1604,7 @@ pub(crate) enum Builtin {
     DictTryGet(Type),
     /// Removes a key or raises KeyError; an optional third operand is an exact default.
     DictPop,
+    DictPopItem,
     /// Transfers the removed value into an optional result, or returns the supplied default.
     DictTryPop(Type),
     /// Arguments are key then dictionary, matching membership evaluation order.
@@ -2160,10 +2171,12 @@ pub(crate) enum FdOperation {
     Close,
     Dup,
     Isatty,
+    DeviceEncoding,
     GetBlocking,
     SetBlocking,
     GetInheritable,
     SetInheritable,
+    OpenPty,
 }
 
 /// Filesystem copy operations using the same ordered pair of path operands.
@@ -2292,9 +2305,27 @@ pub(crate) enum ProcessOperation {
     Semaphore,
     Acquire,
     Release,
-    EnvironCopy,
+    EnvironCopy {
+        bytes: bool,
+    },
+    EnvironClear,
+    EnvironUpdate {
+        bytes: bool,
+    },
     EnvironGet,
-    GetCwd,
+    EnvironKeys,
+    EnvironIndex {
+        bytes: bool,
+    },
+    EnvironDelete {
+        bytes: bool,
+    },
+    EnvironSet {
+        bytes: bool,
+    },
+    GetCwd {
+        bytes: bool,
+    },
     Fd(FdOperation),
     Credential(&'static str),
     CredentialId {
@@ -2349,6 +2380,8 @@ impl IoBase {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    /// An exact builtin string, excluding nominal string subclasses.
+    ExactText,
     ContextVar,
     ContextToken,
     IoBase(IoBase),
@@ -2373,6 +2406,7 @@ impl InstanceType {
             Self::ContextVar => matches!(ty, Type::ContextVar(_)),
             Self::ContextToken => matches!(ty, Type::ContextToken(_)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool | Type::IntEnum(_)),
+            Self::ExactText => matches!(ty, Type::Str | Type::StrLiteral(_)),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
@@ -2515,6 +2549,15 @@ pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(
     });
 }
 
+/// Includes loops in eager expression scopes when deciding whether a suite can be cloned.
+pub(crate) fn contains_loop(body: &[Statement]) -> bool {
+    let mut found = false;
+    walk_statements(body, &mut |statement| {
+        found |= matches!(statement, Statement::For { .. } | Statement::While(..));
+    });
+    found
+}
+
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
 pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
@@ -2566,6 +2609,74 @@ pub(crate) fn walk_expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Ex
     } else {
         children(value, |child| walk_expression(child, visit));
     }
+}
+
+/// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
+pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Option<&Expr>)) {
+    statement_writes(body, &mut visit);
+    walk_expressions(body, &mut |value| scoped_writes(value, &mut visit));
+}
+
+/// Visits writes during operand evaluation, including assignments in eager scopes.
+pub(crate) fn walk_expression_writes(value: &Expr, mut visit: impl FnMut(usize, Option<&Expr>)) {
+    walk_expression(value, &mut |value| scoped_writes(value, &mut visit));
+}
+
+/// The expression walker handles nested operands. Each scope contributes its own suite and cleanup.
+fn scoped_writes(value: &Expr, visit: &mut impl FnMut(usize, Option<&Expr>)) {
+    match &value.kind {
+        ExprKind::Scope { body, clear, .. } => {
+            statement_writes(body, visit);
+            for &slot in clear {
+                visit(slot, None);
+            }
+        }
+        ExprKind::Bind(slot, _) => visit(*slot, None),
+        _ => {}
+    }
+}
+
+/// Visits writes in statement-owned suites. Expression scopes are separate roots.
+fn statement_writes(body: &[Statement], visit: &mut impl FnMut(usize, Option<&Expr>)) {
+    walk_block(body, &mut |statement| match statement {
+        Statement::Assign(slot, value) => visit(*slot, Some(value)),
+        Statement::Clear(slot) => visit(*slot, None),
+        Statement::Move(target, source) => {
+            visit(*target, None);
+            visit(*source, None);
+        }
+        Statement::Scope { clear, .. } => {
+            for &slot in clear {
+                visit(slot, None);
+            }
+        }
+        Statement::For {
+            target,
+            cursor,
+            stop,
+            step,
+            ..
+        } => {
+            for &slot in [target, cursor, stop, step] {
+                visit(slot, None);
+            }
+        }
+        Statement::Try { handlers, .. } => {
+            for handler in handlers {
+                if let Some(slot) = handler.name {
+                    visit(slot, None);
+                }
+            }
+        }
+        Statement::IterNext {
+            key, value, ready, ..
+        } => {
+            for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
+                visit(slot, None);
+            }
+        }
+        _ => {}
+    });
 }
 
 /// Visits one expression's operands. Scoped statements are handled by the caller.
@@ -2763,21 +2874,40 @@ pub(crate) fn statement_children_mut(
     }
 }
 
+/// Visits original statements child-first, including those in expression scopes.
+/// A replacement installed by the visitor is not revisited.
+pub(crate) fn rewrite_statements(body: &mut [Statement], visit: &mut impl FnMut(&mut Statement)) {
+    walk_mut(body, &mut |_| {}, visit);
+}
+
 /// Rewrites every checked expression, including expressions inside eager scopes.
 pub(crate) fn walk_expressions_mut(body: &mut [Statement], visit: &mut impl FnMut(&mut Expr)) {
-    fn expression(value: &mut Expr, visit: &mut impl FnMut(&mut Expr)) {
-        visit(value);
+    walk_mut(body, visit, &mut |_| {});
+}
+
+fn walk_mut(
+    body: &mut [Statement],
+    enter_expr: &mut impl FnMut(&mut Expr),
+    leave_stmt: &mut impl FnMut(&mut Statement),
+) {
+    fn expression(
+        value: &mut Expr,
+        enter_expr: &mut impl FnMut(&mut Expr),
+        leave_stmt: &mut impl FnMut(&mut Statement),
+    ) {
+        enter_expr(value);
         if let ExprKind::Scope { body, value, .. } = &mut value.kind {
-            walk_expressions_mut(body, visit);
-            expression(value, visit);
+            walk_mut(body, enter_expr, leave_stmt);
+            expression(value, enter_expr, leave_stmt);
         } else {
-            children_mut(value, |child| expression(child, visit));
+            children_mut(value, |child| expression(child, enter_expr, leave_stmt));
         }
     }
     for statement in body {
         statement_children_mut(statement, |child| match child {
-            ChildMut::Expression(value) => expression(value, visit),
-            ChildMut::Suite(body) => walk_expressions_mut(body, visit),
+            ChildMut::Expression(value) => expression(value, enter_expr, leave_stmt),
+            ChildMut::Suite(body) => walk_mut(body, enter_expr, leave_stmt),
         });
+        leave_stmt(statement);
     }
 }
