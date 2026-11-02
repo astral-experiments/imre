@@ -92,10 +92,14 @@ def dynamic_collection_classes():
 
 
 def callable_classes():
+    import typing
     from abc import ABCMeta
     from typing import Callable as TypingCallable, get_origin
     from collections.abc import Callable
 
+    before = set(vars(typing))
+    assert issubclass(type(lambda: None), TypingCallable)
+    assert set(vars(typing)) == before
     assert get_origin(TypingCallable) is Callable
     assert type(Callable) is ABCMeta and Callable.__abstractmethods__ == frozenset({"__call__"})
 
@@ -144,6 +148,16 @@ def callable_classes():
     for item in (lambda: 1, len, list.append, [].append, Concrete().__call__, type, staticmethod(len)):
         assert isinstance(item, Callable) and issubclass(type(item), Callable)
     assert issubclass(Masked, Callable) and isinstance(Masked(), Callable)
+    from typing import List, Type
+    assert issubclass(TypingCallable, TypingCallable) and issubclass(Type, TypingCallable)
+    assert not issubclass(List, TypingCallable)
+    try:
+        issubclass(TypingCallable[..., int], TypingCallable)
+    except TypeError as exc:
+        assert str(exc) == "Subscripted generics cannot be used with class and instance checks"
+    else:
+        raise AssertionError("accepted a parameterized typing alias")
+
     assert Callable.register(InstanceOnly) is InstanceOnly
     assert isinstance(value, TypingCallable) and issubclass(InstanceOnly, Callable)
     try:
