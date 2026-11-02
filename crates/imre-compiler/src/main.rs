@@ -106,6 +106,7 @@ fn run() -> Result<ExitCode, String> {
     } else if command.as_encoded_bytes().starts_with(b"-")
         || Path::new(&command).is_file()
         || Path::new(&command).is_dir()
+        || imre_compiler::is_zip_path(Path::new(&command))
         || Path::new(&command)
             .extension()
             .is_some_and(|ext| ext == "py")
@@ -125,6 +126,7 @@ fn run() -> Result<ExitCode, String> {
         };
         if let python_command::Invocation::Script { path, .. } = &invocation
             && let Err(error) = std::fs::metadata(path)
+            && !imre_compiler::is_zip_path(path)
         {
             eprintln!("imre: can't open file '{}': {error}", path.display());
             return Ok(ExitCode::from(2));
