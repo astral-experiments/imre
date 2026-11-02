@@ -1,3 +1,4 @@
+import copy
 import pickle
 import re
 
@@ -66,4 +67,17 @@ def current():
         assert restored == p and restored is not p
         assert restored.fullmatch(b'Ab').groups() == (b'b',)
         assert restored.fullmatch(b'bb') is None
+    for obj in (p, p.match(bytearray(b'Ab'))):
+        cls = type(obj)
+        assert copy.copy(obj) is copy.deepcopy(obj) is obj
+        assert cls.__copy__.__objclass__ is cls and cls.__copy__(obj) is obj
+        assert obj.__copy__.__qualname__ == cls.__name__ + ".__copy__"
+        assert cls.__deepcopy__.__get__(obj, cls)(None) is obj
+        assert copy.deepcopy(obj, {id(obj): p}) is p
+        try:
+            cls.__copy__(0)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError('copy descriptor accepted a wrong receiver')
     print('pattern cache and comparison passed')

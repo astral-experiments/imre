@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::{
     Context, builtins,
-    value::{Error, FALSE, Id, NONE, Result, TRUE, Value},
+    value::{self, Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 use crate::objects::interpreter_stdlib as system;
 
@@ -2382,6 +2382,22 @@ pub(super) fn call(
     }
     if let Some(method @ ("sub" | "subn")) = name.strip_prefix("pattern.") {
         return regex::pattern_sub(ctx, method, args, kwargs);
+    }
+    if let Some((owner @ (value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE), method)) =
+        name.rsplit_once('.')
+        && value::REGEX_COPY_METHODS.contains(&method)
+    {
+        let (receiver, rest) = builtins::method_receiver_args(ctx, owner, method, args, kwargs)?;
+        let qualified = name.strip_prefix("re.").unwrap();
+        if method == "__deepcopy__" {
+            builtins::one_positional_arg(qualified, rest, &[])?;
+        } else if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{qualified}() takes no arguments ({} given)", rest.len()),
+            ));
+        }
+        return Ok(receiver);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
