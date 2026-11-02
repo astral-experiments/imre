@@ -3627,9 +3627,17 @@ impl SourceGraph {
         let entry = fs
             .canonicalize(path)
             .map_err(|err| format!("{}: {err}", path.display()))?;
-        let source = fs
-            .read_to_string(&entry)
-            .map_err(|err| format!("{}: {err}", path.display()))?;
+        let bytes = if crate::named_bytecode(path) {
+            std::fs::File::open(&entry).and_then(crate::read_bytecode_prefix)
+        } else {
+            fs.read(&entry)
+        }
+        .map_err(|err| format!("{}: {err}", path.display()))?;
+        if let Some(error) = crate::bytecode_script_error(path, &bytes) {
+            return Err(error.into());
+        }
+        let source = String::from_utf8(bytes)
+            .map_err(|_| format!("{}: stream did not contain valid UTF-8", path.display()))?;
         let root = entry
             .parent()
             .ok_or("script has no parent directory")?
