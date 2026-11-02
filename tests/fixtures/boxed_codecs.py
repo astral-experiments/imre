@@ -84,10 +84,11 @@ def check_escape_decode():
             raise AssertionError("expected invalid escape to raise")
 
 
-def check_endian_boms():
-    from codecs import BOM_UTF16_BE, BOM_UTF16_LE, BOM_UTF32_BE, BOM_UTF32_LE
+def check_boms():
+    from codecs import BOM_UTF8, BOM_UTF16_BE, BOM_UTF16_LE, BOM_UTF32_BE, BOM_UTF32_LE
 
     for name, mark, expected in (
+        ("BOM_UTF8", BOM_UTF8, b"\xef\xbb\xbf"),
         ("BOM_UTF16_BE", BOM_UTF16_BE, b"\xfe\xff"),
         ("BOM_UTF16_LE", BOM_UTF16_LE, b"\xff\xfe"),
         ("BOM_UTF32_BE", BOM_UTF32_BE, b"\x00\x00\xfe\xff"),
@@ -101,7 +102,7 @@ def current():
     check_escape_decode()
     utf16_encoders()
     check_raw_unicode_escape()
-    check_endian_boms()
+    check_boms()
     decoder = codecs.IncrementalDecoder(errors="replace")
     assert decoder.errors == "replace"
     assert decoder.getstate() == (b"", 0)
