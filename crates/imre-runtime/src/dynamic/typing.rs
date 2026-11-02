@@ -1492,13 +1492,17 @@ pub(super) fn call(
             if !matches!(ctx.heap.get(*left), Value::ParamSpecMarker(kind, _) if kind.class() == owner)
             {
                 let actual = match ctx.heap.get(*left) {
-                    Value::ParamSpec(_) | Value::ParamSpecMarker(_, _) | Value::TypeVar(_)
+                    Value::ParamSpec(_)
+                    | Value::ParamSpecMarker(_, _)
+                    | Value::TypeVar(_)
                     | Value::TypeVarTuple { .. } => ctx.builtin_type_name(*left).unwrap(),
                     _ => ctx.type_name(*left),
                 };
                 return Err(Error::new(
                     "TypeError",
-                    format!("descriptor '{method}' requires a '{owner}' object but received a '{actual}'"),
+                    format!(
+                        "descriptor '{method}' requires a '{owner}' object but received a '{actual}'"
+                    ),
                 ));
             }
             let op = if method == "__eq__" { "==" } else { "!=" };
@@ -1850,7 +1854,10 @@ impl Context {
 
     /// Identify the marker substituted by typing.NamedTuple.__mro_entries__.
     pub(super) fn namedtuple_base(&self, bases: &[Id]) -> Option<Id> {
-        self.builtins.get("typing.NamedTuple").copied().filter(|marker| bases.contains(marker))
+        self.builtins
+            .get("typing.NamedTuple")
+            .copied()
+            .filter(|marker| bases.contains(marker))
     }
 
     /// Freeze the fields of a new declaration and replace its marker with the actual tuple base.
@@ -1863,7 +1870,10 @@ impl Context {
     ) -> Result<Option<std::rc::Rc<[String]>>> {
         if let Some(marker) = self.namedtuple_base(bases) {
             let generic = self.classes.get("typing.Generic").copied();
-            if bases.iter().any(|&base| base != marker && Some(base) != generic) {
+            if bases
+                .iter()
+                .any(|&base| base != marker && Some(base) != generic)
+            {
                 return Err(Error::new(
                     "TypeError",
                     "can only inherit from a NamedTuple type and Generic",
@@ -1903,17 +1913,30 @@ impl Context {
                 if let Some(value) = self.scope_name(scope, field) {
                     defaults.push(value);
                 } else if !defaults.is_empty() {
-                    return Err(Error::new("TypeError", format!("non-default field {field} cannot follow default fields")));
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("non-default field {field} cannot follow default fields"),
+                    ));
                 }
             }
             super::namedtuple::validate_fields(name, &named_fields, false)?;
             if let Some(namespace) = namespace {
                 // The factory installs user members one at a time after creating its tuple type.
-                let entries = self.dict_entries(namespace).expect("NamedTuple declaration").to_vec();
+                let entries = self
+                    .dict_entries(namespace)
+                    .expect("NamedTuple declaration")
+                    .to_vec();
                 for (key, _) in entries {
                     if let Ok(attr) = self.str_value(key)
-                        && !matches!(attr, "__module__" | "__name__" | "__annotations__" |
-                            "__annotate__" | "__annotate_func__" | "__annotations_cache__")
+                        && !matches!(
+                            attr,
+                            "__module__"
+                                | "__name__"
+                                | "__annotations__"
+                                | "__annotate__"
+                                | "__annotate_func__"
+                                | "__annotations_cache__"
+                        )
                     {
                         let attr = attr.to_owned();
                         self.remove_binding(scope, &attr, key)?;
@@ -1923,13 +1946,18 @@ impl Context {
             if generic.is_some_and(|g| bases.contains(&g))
                 && self.scope_name(scope, "__class_getitem__").is_none()
             {
-                let getitem = self.module_value("typing", "_namedtuple_generic_getitem")
-                    .ok_or_else(|| Error::new("RuntimeError", "missing NamedTuple subscription hook"))?;
+                let getitem = self
+                    .module_value("typing", "_namedtuple_generic_getitem")
+                    .ok_or_else(|| {
+                        Error::new("RuntimeError", "missing NamedTuple subscription hook")
+                    })?;
                 self.bind_local(scope, "__class_getitem__", getitem);
             }
-            let fields = super::namedtuple::bind_field_metadata(self, scope, &named_fields, &defaults);
+            let fields =
+                super::namedtuple::bind_field_metadata(self, scope, &named_fields, &defaults);
             let defaults = self.alloc(Value::Tuple(defaults));
-            let new = super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
+            let new =
+                super::namedtuple::bind_new(self, scope, name, &named_fields, Some(defaults))?;
             if let Some(annotate) = provider {
                 self.bind_local(scope, "__annotate_func__", annotate);
                 self.set_attr(new, "__annotate__", annotate)?;
@@ -1980,13 +2008,17 @@ impl Context {
         namedtuple_namespace: Option<Id>,
     ) -> Result<Id> {
         let mut bases = self.validate_class_bases(bases, layout)?;
-        let declared_fields = self.namedtuple_layout(&name, &mut bases, scope, namedtuple_namespace)?;
+        let declared_fields =
+            self.namedtuple_layout(&name, &mut bases, scope, namedtuple_namespace)?;
         let ancestors = self.linearized_bases(&bases, false)?;
         let layout_base = self.member_layout_base(&bases)?;
         let slots = self.declared_slot_names(self.scope_name(scope, "__slots__"), layout_base)?;
         let class = self.allocate_prepared_class(name, scope, bases, ancestors, layout, slots)?;
         if let Some(fields) = declared_fields {
-            let Value::Class { namedtuple_fields, .. } = self.heap.get_mut(class) else {
+            let Value::Class {
+                namedtuple_fields, ..
+            } = self.heap.get_mut(class)
+            else {
                 unreachable!()
             };
             *namedtuple_fields = Some(fields);
@@ -2140,10 +2172,14 @@ impl Context {
         } else {
             Vec::new()
         };
-        let namedtuple_fields = ancestors.iter().find_map(|&base| match self.heap.get(base) {
-            Value::Class { namedtuple_fields, .. } => namedtuple_fields.clone(),
-            _ => None,
-        });
+        let namedtuple_fields = ancestors
+            .iter()
+            .find_map(|&base| match self.heap.get(base) {
+                Value::Class {
+                    namedtuple_fields, ..
+                } => namedtuple_fields.clone(),
+                _ => None,
+            });
         // type.__new__ wraps plain functions only, before the class becomes observable.
         for name in ["__init_subclass__", "__class_getitem__"] {
             if let Some(function) = self.namespace_binding(self.scope_data(scope), name)
@@ -2169,8 +2205,12 @@ impl Context {
         let bases = self.alloc(Value::Tuple(bases));
         let mro = self.alloc(Value::Tuple(mro));
         // A class-body __eq__ suppresses inherited hashing at type creation.
-        if self.namespace_binding(self.scope_data(scope), "__eq__").is_some()
-            && self.namespace_binding(self.scope_data(scope), "__hash__").is_none()
+        if self
+            .namespace_binding(self.scope_data(scope), "__eq__")
+            .is_some()
+            && self
+                .namespace_binding(self.scope_data(scope), "__hash__")
+                .is_none()
         {
             self.bind_local(scope, "__hash__", NONE);
         }

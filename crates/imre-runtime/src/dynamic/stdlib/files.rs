@@ -295,7 +295,11 @@ pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
 pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
     if let Some((storage, _)) = ctx.writable_byte_span(object)? {
         // Some paths validate before delegating. Keep a callback's byte window intact.
-        return Ok(if ctx.raw_read_window(object).is_some() { object } else { storage });
+        return Ok(if ctx.raw_read_window(object).is_some() {
+            object
+        } else {
+            storage
+        });
     }
     let kind = if object == NONE {
         "None"
@@ -310,7 +314,9 @@ pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
 
 pub(super) fn readinto_bytes(ctx: &mut Context, object: Id) -> Result<&mut [u8]> {
     let object = readinto_target(ctx, object)?;
-    let (target, range) = ctx.writable_byte_span(object)?.expect("validated writable buffer");
+    let (target, range) = ctx
+        .writable_byte_span(object)?
+        .expect("validated writable buffer");
     let bytes = match ctx.heap.get_mut(target) {
         Value::ByteArray(data) => data.as_mut_slice(),
         Value::Array(array) => array.as_bytes_mut()?,
@@ -588,9 +594,7 @@ pub(super) fn whence_argument(ctx: &mut Context, value: Option<Id>) -> Result<i3
             .index_integer(value)?
             .to_i64()
             .and_then(|n| i32::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new("OverflowError", "Python int too large to convert to C int")
-            }),
+            .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int")),
     }
 }
 

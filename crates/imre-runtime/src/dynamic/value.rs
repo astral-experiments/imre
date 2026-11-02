@@ -3,8 +3,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::{Arc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 
 use super::Context;
 
@@ -1557,8 +1557,12 @@ impl Value {
                         visit.extend(reader.raw.get());
                         visit.push(reader.buffer);
                     }
-                    Some(super::stdlib::io::MemoryStream::UninitializedReader(raw)) => visit.extend(raw),
-                    Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => visit.extend(writer.raw.get()),
+                    Some(super::stdlib::io::MemoryStream::UninitializedReader(raw)) => {
+                        visit.extend(raw)
+                    }
+                    Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => {
+                        visit.extend(writer.raw.get())
+                    }
                     Some(super::stdlib::io::MemoryStream::Pair(pair)) => {
                         visit.extend(pair.reader);
                         visit.extend(pair.writer);
@@ -3353,9 +3357,14 @@ impl Heap {
     ) {
         // A weakref callback can drop an unrelated owner. Keep its graph intact
         // for Python dispatch when this sweep releases temporary callback roots.
-        self.mark(globals.chain(
-            self.ordinary_finalizers.iter().copied().filter(|id| Some(*id) != releasing),
-        ));
+        self.mark(
+            globals.chain(
+                self.ordinary_finalizers
+                    .iter()
+                    .copied()
+                    .filter(|id| Some(*id) != releasing),
+            ),
+        );
         self.identify_cycles(cycles);
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
@@ -3532,7 +3541,11 @@ impl Heap {
         Ok(callbacks)
     }
 
-    fn clear_weak_targets(&mut self, cyclic: Option<&[usize]>, dealloc: Option<Id>) -> WeakCallbacks {
+    fn clear_weak_targets(
+        &mut self,
+        cyclic: Option<&[usize]>,
+        dealloc: Option<Id>,
+    ) -> WeakCallbacks {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
@@ -3792,14 +3805,29 @@ mod tests {
         let owner = heap.alloc(Value::List(vec![child]));
         heap.register_finalizer(child);
         heap.release_temporaries_since(mark);
-        assert!(!heap.released_last_finalizer_ref(child, [owner].into_iter()).unwrap());
+        assert!(
+            !heap
+                .released_last_finalizer_ref(child, [owner].into_iter())
+                .unwrap()
+        );
         heap.register_finalizer(owner);
-        assert!(!heap.released_last_finalizer_ref(child, [].into_iter()).unwrap());
+        assert!(
+            !heap
+                .released_last_finalizer_ref(child, [].into_iter())
+                .unwrap()
+        );
         heap.take_finalizer(owner, false);
         *heap.get_mut(owner) = Value::List(vec![owner, child]);
-        assert!(!heap.released_last_finalizer_ref(child, [].into_iter()).unwrap());
+        assert!(
+            !heap
+                .released_last_finalizer_ref(child, [].into_iter())
+                .unwrap()
+        );
         *heap.get_mut(owner) = Value::List(Vec::new());
-        assert!(heap.released_last_finalizer_ref(child, [].into_iter()).unwrap());
+        assert!(
+            heap.released_last_finalizer_ref(child, [].into_iter())
+                .unwrap()
+        );
     }
 
     #[test]

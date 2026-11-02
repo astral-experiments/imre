@@ -48,9 +48,14 @@ impl<'a> Visitor<'a> for ClosureNames {
                 self.incomplete = true;
                 if self.include_nested_reads {
                     // A name used only by a nested function can be free in this function too.
-                    let mut child = Self { include_nested_reads: true, ..Self::default() };
+                    let mut child = Self {
+                        include_nested_reads: true,
+                        ..Self::default()
+                    };
                     child.visit_body(&f.body);
-                    child.locals.extend(f.parameters.iter().map(|param| param.name().to_string()));
+                    child
+                        .locals
+                        .extend(f.parameters.iter().map(|param| param.name().to_string()));
                     self.reads.extend(child.nonlocals);
                     self.reads.extend(child.reads.into_iter().filter(|name| {
                         !child.locals.contains(name) && !child.globals.contains(name)
@@ -717,12 +722,18 @@ impl Function<'_, '_> {
             signature["code_flags"] = json!(flags);
         }
         if let Body::Namespace(stmts) = &body {
-            signature["needs_class_cell"] =
-                json!(imre_ast::class_cell::needed(stmts, self.source.string_annotations));
-            signature["needs_dict_cell"] =
-                json!(imre_ast::class_cell::dict_needed(stmts, self.source.string_annotations));
-            signature["static_attributes"] =
-                json!(imre_ast::class_attributes::static_attributes(stmts, &self.source.private_names));
+            signature["needs_class_cell"] = json!(imre_ast::class_cell::needed(
+                stmts,
+                self.source.string_annotations
+            ));
+            signature["needs_dict_cell"] = json!(imre_ast::class_cell::dict_needed(
+                stmts,
+                self.source.string_annotations
+            ));
+            signature["static_attributes"] = json!(imre_ast::class_attributes::static_attributes(
+                stmts,
+                &self.source.private_names
+            ));
         }
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);

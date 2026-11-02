@@ -135,8 +135,17 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 "list" => (
                     super::LIST_METHODS,
                     &[
-                        "__class_getitem__", "__contains__", "__delitem__", "__getitem__", "__imul__",
-                        "__iter__", "__len__", "__mul__", "__reversed__", "__rmul__", "__setitem__",
+                        "__class_getitem__",
+                        "__contains__",
+                        "__delitem__",
+                        "__getitem__",
+                        "__imul__",
+                        "__iter__",
+                        "__len__",
+                        "__mul__",
+                        "__reversed__",
+                        "__rmul__",
+                        "__setitem__",
                     ],
                 ),
                 _ => {
@@ -146,10 +155,21 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                             .split_ascii_whitespace()
                             .map(str::to_owned),
                     );
-                    (&[], &[
-                        "__add__", "__contains__", "__getitem__", "__getnewargs__", "__iter__",
-                        "__len__", "__mod__", "__mul__", "__rmod__", "__rmul__",
-                    ])
+                    (
+                        &[],
+                        &[
+                            "__add__",
+                            "__contains__",
+                            "__getitem__",
+                            "__getnewargs__",
+                            "__iter__",
+                            "__len__",
+                            "__mod__",
+                            "__mul__",
+                            "__rmod__",
+                            "__rmul__",
+                        ],
+                    )
                 }
             };
             names.extend(methods.iter().chain(slots).map(|&name| name.to_owned()));
@@ -171,7 +191,8 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     ["__firstlineno__", "__static_attributes__", "__module__"].map(str::to_owned),
                 );
             }
-            if let Some(annotations) = ctx.namespace_binding(ctx.scope_data(scope_id), "__annotations__")
+            if let Some(annotations) =
+                ctx.namespace_binding(ctx.scope_data(scope_id), "__annotations__")
                 && ctx
                     .dict_entries(annotations)
                     .is_none_or(|entries| !entries.is_empty())
@@ -208,7 +229,10 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         }
         Value::Native(_) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
             class_names(ctx, ctx.builtins["object"], names)?;
-            for &(key, _) in ctx.dict_entries(dictionary).expect("native class dictionary") {
+            for &(key, _) in ctx
+                .dict_entries(dictionary)
+                .expect("native class dictionary")
+            {
                 names.insert(ctx.str_value(key)?.to_owned());
             }
         }

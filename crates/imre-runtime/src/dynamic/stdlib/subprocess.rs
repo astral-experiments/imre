@@ -160,7 +160,9 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
             ctx.text(BoxedPopen::default_shell())
         };
         let option = ctx.text("-c");
-        items.try_reserve(2).map_err(|_| Error::new("MemoryError", ""))?;
+        items
+            .try_reserve(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
         items.splice(..0, [shell_program, option]);
     }
     let program = if executable == NONE {

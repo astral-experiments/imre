@@ -7662,10 +7662,17 @@ impl<'a> Checker<'a> {
                 }
                 if matches!(
                     (self.resolve(&attribute.value), attribute.attr.as_str()),
-                    (Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })), "_encoded_counterpart")
-                    | (Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: true })), "_decoded_counterpart")
+                    (
+                        Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })),
+                        "_encoded_counterpart"
+                    ) | (
+                        Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: true })),
+                        "_decoded_counterpart"
+                    )
                 ) {
-                    return Err(self.scoped_builtin_error("urllib.parse result counterpart", attribute));
+                    return Err(
+                        self.scoped_builtin_error("urllib.parse result counterpart", attribute)
+                    );
                 }
                 if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
@@ -10926,11 +10933,14 @@ impl<'a> Checker<'a> {
             {
                 (Builtin::HashType, Type::BuiltinClass)
             }
-            name @ ("type" | "id") if args.len() == 1
-                && self.types.is_url_split_result(args[0].ty)
-                && self.unshadowed_builtin(&call.func, name) =>
+            name @ ("type" | "id")
+                if args.len() == 1
+                    && self.types.is_url_split_result(args[0].ty)
+                    && self.unshadowed_builtin(&call.func, name) =>
             {
-                return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", call));
+                return Err(
+                    self.scoped_builtin_error("urllib.parse.urlsplit result identity", call)
+                );
             }
             "id" if args.len() == 1
                 && args[0].ty == Type::Hash

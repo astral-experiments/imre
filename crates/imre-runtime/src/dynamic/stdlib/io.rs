@@ -12,10 +12,10 @@ mod native_random;
 mod native_reader;
 mod native_writer;
 mod rwpair;
-pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
+pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 mod bytes_io;
 mod bytes_writer;
 pub(in crate::dynamic) use bytes_writer::has_pending_callback_write;
@@ -365,7 +365,13 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         unreachable!()
     };
     *io_kind = Some(NativeClass::Pair { reader, writer });
-    let random = class(ctx, module, "BufferedRandom", buffered, native_random::METHODS);
+    let random = class(
+        ctx,
+        module,
+        "BufferedRandom",
+        buffered,
+        native_random::METHODS,
+    );
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     let text = class(
         ctx,
@@ -435,7 +441,12 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
 
 /// The native classes are immutable; Python I/O ABCs and user subclasses remain mutable.
 pub(in super::super) fn check_class_write(ctx: &Context, object: Id, attr: &str) -> Result<()> {
-    if let Value::Class { io_kind: Some(_), name, .. } = ctx.heap.get(object) {
+    if let Value::Class {
+        io_kind: Some(_),
+        name,
+        ..
+    } = ctx.heap.get(object)
+    {
         return Err(Error::new(
             "TypeError",
             format!("cannot set '{attr}' attribute of immutable type '_io.{name}'"),
@@ -809,7 +820,10 @@ pub(in super::super) fn call(
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
             (
-                Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")),
+                Some(
+                    class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair"
+                    | "BufferedRandom"),
+                ),
                 "__init__",
             ) => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
@@ -833,7 +847,10 @@ pub(in super::super) fn call(
         let actual = ctx.type_name(receiver);
         let message = match (descriptor, name) {
             (
-                Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")),
+                Some(
+                    class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair"
+                    | "BufferedRandom"),
+                ),
                 "__init__",
             ) => {
                 format!(
@@ -862,8 +879,12 @@ pub(in super::super) fn call(
             return text_wrapper::next(ctx, receiver, receiver_class == owner, rest, kwargs);
         }
         Some("BufferedRandom") => return native_random::call(ctx, receiver, name, rest, kwargs),
-        Some("BufferedReader") => return native_reader::call(ctx, "BufferedReader", receiver, name, rest, kwargs),
-        Some("BufferedWriter") => return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs),
+        Some("BufferedReader") => {
+            return native_reader::call(ctx, "BufferedReader", receiver, name, rest, kwargs);
+        }
+        Some("BufferedWriter") => {
+            return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs);
+        }
         Some("BufferedRWPair") => return rwpair::call(ctx, owner, receiver, name, rest, kwargs),
         _ => {}
     }
@@ -896,7 +917,11 @@ pub(in super::super) fn call(
                 .and_then(|f| ctx.call(f, Vec::new(), Vec::new()))
             {
                 super::super::unraisable::report(
-                    ctx, error, true, Some(receiver), "Exception ignored while finalizing file",
+                    ctx,
+                    error,
+                    true,
+                    Some(receiver),
+                    "Exception ignored while finalizing file",
                 );
             }
         }
