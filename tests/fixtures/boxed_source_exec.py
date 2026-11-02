@@ -572,6 +572,51 @@ def source_listcomp():
     assert local["item"] == "outside" and "group" not in local
 
 
+def source_dictcomp():
+    import weakref
+
+    events = []
+
+    class Key:
+        def __hash__(self):
+            events.append("hash")
+            return 0
+
+        def __eq__(self, other):
+            return isinstance(other, Key)
+
+    keys = [Key(), Key()]
+
+    def key(i):
+        events.append(("key", i))
+        return keys[i]
+
+    def value(i):
+        events.append(("value", i))
+        return i
+
+    local = {"groups": [None, [0, 1]], "i": "outside"}
+    result = eval("{key(i): value(i) for group in groups if group for i in group}",
+                  {"key": key, "value": value}, local)
+    assert events == [("key", 0), ("value", 0), "hash", ("key", 1), ("value", 1), "hash"]
+    assert list(result.values()) == [1] and next(iter(result)) is keys[0]
+    assert local["i"] == "outside" and "group" not in local
+
+    refs = []
+
+    def tracked_value():
+        item = Key()
+        refs.append(weakref.ref(item))
+        return item
+
+    try:
+        eval("{k: tracked_value() for k in (0, [], 'too late')}", {"tracked_value": tracked_value})
+    except TypeError:
+        assert len(refs) == 2 and refs[0]() is None and refs[1]() is None
+    else:
+        raise AssertionError("unhashable key accepted")
+
+
 def source_setcomp():
     namespace = {}
     exec("""
@@ -950,6 +995,7 @@ def current():
     source_genexpr()
     source_listcomp()
     source_setcomp()
+    source_dictcomp()
     source_match()
     check_scope_directives()
     relative_import_hooks()
