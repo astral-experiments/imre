@@ -2782,7 +2782,6 @@ pub(super) fn call(
                 receiver,
                 name.trim_start_matches("file."),
                 &args[1..],
-                kwargs,
             );
         }
         "match.groups" | "match.groupdict" => {
