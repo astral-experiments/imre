@@ -835,7 +835,12 @@ impl Match {
         let Some(span) = self.spans[index] else {
             return Ok((-1, -1));
         };
-        if self.pattern(ctx).bytes || matches!(ctx.heap.get(ctx.scalar_value(self.subject)), Value::SurrogateStr(_)) {
+        if self.pattern(ctx).bytes
+            || matches!(
+                ctx.heap.get(ctx.scalar_value(self.subject)),
+                Value::SurrogateStr(_)
+            )
+        {
             return Ok((span.start as i64, span.end as i64));
         }
         let text = ctx.str_value(self.subject)?;
@@ -966,7 +971,10 @@ pub(super) fn search(
     };
     let projection = match ctx.heap.get(ctx.scalar_value(string)) {
         Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
-            ctx.str_value(pattern.source).ok(), &pattern.regex, method, points,
+            ctx.str_value(pattern.source).ok(),
+            &pattern.regex,
+            method,
+            points,
         )?),
         _ => None,
     };
@@ -1030,18 +1038,29 @@ pub(super) fn search(
         Ok(matcher) => matcher,
         Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
     };
-    let anchored = if method == "search" { Anchored::No } else { Anchored::Yes };
-    let input = Input::new(&text[..end]).range(start..end).anchored(anchored);
+    let anchored = if method == "search" {
+        Anchored::No
+    } else {
+        Anchored::Yes
+    };
+    let input = Input::new(&text[..end])
+        .range(start..end)
+        .anchored(anchored);
     let mut captures = matcher.create_captures();
-    matcher.captures(input, &mut captures)
+    matcher
+        .captures(input, &mut captures)
         .map_err(|message| Error::new("RuntimeError", message))?;
     if !captures.is_match() {
         return Ok(NONE);
     }
-    let spans = group_spans(&captures).map(|span|
-        span.map(|s| projection.as_ref().map_or(s, |p| p.original(s)))
-    ).collect();
-    Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match { pattern: receiver, subject: string, spans }))))
+    let spans = group_spans(&captures)
+        .map(|span| span.map(|s| projection.as_ref().map_or(s, |p| p.original(s))))
+        .collect();
+    Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
+        pattern: receiver,
+        subject: string,
+        spans,
+    }))))
 }
 
 pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
@@ -1078,7 +1097,10 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     match name {
         "re.match" => search(ctx, "match", args, &[]),
         "re.fullmatch" => search(ctx, "fullmatch", args, &[]),
-        _ => Err(Error::new("AttributeError", format!("no regex operation {name}"))),
+        _ => Err(Error::new(
+            "AttributeError",
+            format!("no regex operation {name}"),
+        )),
     }
 }
 
