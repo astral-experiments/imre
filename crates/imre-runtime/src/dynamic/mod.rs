@@ -1746,20 +1746,8 @@ impl Context {
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
-            "int" => &[
-                "__add__",
-                "bit_length",
-                "from_bytes",
-                "to_bytes",
-                "__format__",
-                "__repr__",
-            ],
-            "float" => &[
-                "__format__",
-                "__getformat__",
-                "as_integer_ratio",
-                "__repr__",
-            ],
+            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"],
+            "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
