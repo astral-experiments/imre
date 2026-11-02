@@ -2776,8 +2776,8 @@ impl Context {
                     "_cycle_next",
                     "_starmap_allocate",
                     "_starmap_next",
-                    "_filterfalse_allocate",
-                    "_filterfalse_state",
+                    "_predicate_allocate",
+                    "_predicate_state",
                     "_chain_allocate",
                     "_chain_next",
                     "_chain_set",
@@ -3260,12 +3260,19 @@ impl Context {
                 && self.config["bundled_root"]
                     .as_str()
                     .is_some_and(|root| path == std::path::Path::new(root).join("itertools.py"))
-                && let Some(class) = self.scope_name(scope, "starmap")
-                && let Value::Class { scope, .. } = *self.heap.get(class)
-                && let Value::Scope(frame) = self.heap.get_mut(scope)
-                && let Some(layout) = &mut frame.class_namespace
             {
-                layout.itertools_layout = Some("itertools.starmap");
+                for (name, owner) in [
+                    ("starmap", "itertools.starmap"),
+                    ("takewhile", "itertools.takewhile"),
+                ] {
+                    if let Some(class) = self.scope_name(scope, name)
+                        && let Value::Class { scope, .. } = *self.heap.get(class)
+                        && let Value::Scope(frame) = self.heap.get_mut(scope)
+                        && let Some(layout) = &mut frame.class_namespace
+                    {
+                        layout.itertools_layout = Some(owner);
+                    }
+                }
             }
             if name == "itertools"
                 && let Some(owner) = self.scope_name(scope, "batched")

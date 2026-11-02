@@ -2582,6 +2582,7 @@ impl IntrinsicModule {
             }
             (Self::Itertools, "batched") => Intrinsic::ObjectRuntimeExport("itertools.batched"),
             (Self::Itertools, "count") => Intrinsic::Count,
+            (Self::Itertools, "takewhile") => Intrinsic::ObjectRuntimeExport("itertools.takewhile"),
             (Self::Itertools, "filterfalse") => {
                 Intrinsic::ObjectRuntimeExport("itertools.filterfalse")
             }
