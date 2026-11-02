@@ -271,6 +271,9 @@ impl Checker<'_> {
         check_string(literal, self.source)?;
         let spelling = literal.value.to_str();
         let pattern = crate::fixed_regex::translate(spelling, verbose).map_err(|message| {
+            if message == crate::fixed_regex::NEEDS_CLASS_WARNING {
+                return self.object_builtin_error("regex class warning", literal);
+            }
             if boxed_lookahead(spelling, verbose) {
                 return self.object_builtin_error("regex lookahead", literal);
             }

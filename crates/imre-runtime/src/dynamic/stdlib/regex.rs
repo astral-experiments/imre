@@ -722,6 +722,86 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     }
 }
 
+fn pattern_spelling<'a>(
+    ctx: &'a Context,
+    id: Id,
+    projections: &'a Option<(String, String)>,
+) -> Result<&'a [u8]> {
+    if let Some((_, encoded)) = projections {
+        Ok(encoded.as_bytes())
+    } else if let Value::Bytes(value) = ctx.heap.get(ctx.scalar_value(id)) {
+        Ok(value.as_slice())
+    } else {
+        Ok(ctx.str_value(id)?.as_bytes())
+    }
+}
+
+fn warn_class(ctx: &mut Context, kind: &str, position: usize) -> Result<()> {
+    // Python wrappers such as _compile_cached and sub add internal re frames.
+    let mut level = 1;
+    while let Some((_, scope)) = ctx.heap.warning_frame(level) {
+        let globals = ctx.module_globals(scope)?;
+        if ctx
+            .dict_named_item(globals, "__name__")
+            .and_then(|id| ctx.str_value(id).ok())
+            != Some("re")
+        {
+            break;
+        }
+        level += 1;
+    }
+    ctx.emit_builtin_warning(
+        crate::objects::exceptions::Kind::FutureWarning,
+        &format!("Possible {kind} at position {position}"),
+        level,
+    )
+}
+
+fn may_warn_class(source: &[u8]) -> bool {
+    source.contains(&b'[')
+        && source
+            .windows(2)
+            .any(|p| matches!(p, b"[[" | b"--" | b"&&" | b"||" | b"~~"))
+}
+
+fn quote_class_members(
+    source: &str,
+    flags: i64,
+    bytes: bool,
+    mut warn: impl FnMut(&str, usize) -> Result<()>,
+) -> Result<Option<String>> {
+    let mut emitted = Ok(());
+    let mut warned = false;
+    let literals = imre_regex::visit_class_warnings(
+        source,
+        flags & VERBOSE != 0,
+        alphabet(bytes, bytes || flags & ASCII != 0, flags),
+        flags & DOTALL != 0,
+        flags::scoped_verbose,
+        group_names::valid,
+        |(kind, pos)| {
+            warned = true;
+            emitted = warn(kind, pos);
+            emitted.is_ok()
+        },
+    );
+    emitted?;
+    if !warned {
+        return Ok(None);
+    }
+    // Escape literal class punctuation, retaining range separators, comment
+    // layout, and the grammar of the original pattern outside its classes.
+    let mut positions = literals.into_iter().peekable();
+    let mut result = String::with_capacity(source.len());
+    for (i, c) in source.chars().enumerate() {
+        if positions.next_if_eq(&i).is_some() {
+            result.push('\\');
+        }
+        result.push(c);
+    }
+    Ok(Some(result))
+}
+
 fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let number = flags
         .map(|value| ctx.as_int(value))
@@ -760,19 +840,35 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
     };
     // The encoded subject projection retains one scalar per original code point.
     // Check placement and source positions there before compiling its scalar-only twin.
-    let spelling = match (&projections, scalar) {
-        (Some((_, encoded)), _) => encoded.as_bytes(),
-        (_, Value::Bytes(value)) => value.as_slice(),
-        _ => ctx.str_value(id)?.as_bytes(),
+    let spelling = pattern_spelling(ctx, id, &projections)?;
+    let parsed = flags::parse(spelling, flags, bytes);
+    let body = &spelling[parsed.skip..];
+    let quoted = if may_warn_class(body) {
+        let start = flags::original_spelling(&spelling[..parsed.skip], bytes)
+            .chars()
+            .count();
+        // Warning filters may execute Python and allocate on the heap.
+        let source = flags::original_spelling(body, bytes).into_owned();
+        quote_class_members(&source, parsed.bits, bytes, |kind, pos| {
+            warn_class(ctx, kind, start + pos)
+        })?
+        .map(|s| {
+            if bytes {
+                s.chars().map(|c| c as u8).collect()
+            } else {
+                s.into_bytes()
+            }
+        })
+    } else {
+        None
     };
-    let parsed = match flags::parse(spelling, flags, bytes) {
-        Ok(parsed) => parsed,
-        Err((msg, pos)) => return Err(pattern_error_at(ctx, id, msg.into(), Some(pos))),
-    };
+    if let Some((msg, pos)) = parsed.fatal {
+        return Err(pattern_error_at(ctx, id, msg.into(), Some(pos)));
+    }
     let supplied_flags = flags;
     let inline_verbose = flags & VERBOSE == 0 && parsed.bits & VERBOSE != 0;
     let flags = parsed.bits;
-    let spelling = &spelling[parsed.skip..];
+    let spelling = &pattern_spelling(ctx, id, &projections)?[parsed.skip..];
     if let Some(bad) = &parsed.deferred
         && valid_prefix(id, &bad.prefix, flags, bytes, inline_verbose)
     {
@@ -784,7 +880,13 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         ));
     }
     check_flags(flags, bytes)?;
-    let pattern = match prepare(id, spelling, flags, bytes, inline_verbose) {
+    let pattern = match prepare(
+        id,
+        quoted.as_deref().unwrap_or(spelling),
+        flags,
+        bytes,
+        inline_verbose,
+    ) {
         Ok(pattern) => pattern,
         Err(message) => return Err(pattern_error(ctx, id, flags, message)),
     };
@@ -812,13 +914,21 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
     let mut pattern = if let Some((plain, _)) = projections {
         // A surrogate inside a leading comment has a different byte width in the
         // scalar-only program. Locate that program's own first significant byte.
-        let plain_flags = match flags::parse(plain.as_bytes(), supplied_flags, false) {
-            Ok(parsed) => parsed,
-            Err((msg, pos)) => return Err(pattern_error_at(ctx, id, msg.into(), Some(pos))),
+        let plain_flags = flags::parse(plain.as_bytes(), supplied_flags, false);
+        if let Some((msg, pos)) = plain_flags.fatal {
+            return Err(pattern_error_at(ctx, id, msg.into(), Some(pos)));
+        }
+        let body = &plain[plain_flags.skip..];
+        let scalar_quoted = if quoted.is_some() {
+            // Scalar-only replacements may have changed the length of the prefix.
+            // Filters already ran on the projection with the original positions.
+            quote_class_members(body, flags, false, |_, _| Ok(()))?
+        } else {
+            None
         };
         let mut scalar_pattern = prepare(
             id,
-            &plain.as_bytes()[plain_flags.skip..],
+            scalar_quoted.as_deref().unwrap_or(body).as_bytes(),
             flags,
             false,
             inline_verbose,
