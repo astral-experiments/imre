@@ -74,6 +74,21 @@ impl Parser<'_> {
             .map(|e| e.unwrap_or(NONE))
     }
 
+    fn aliases(&mut self, aliases: &[ast::Alias]) -> Id {
+        let nodes = aliases
+            .iter()
+            .map(|alias| {
+                let name = self.ctx.text(alias.name.as_str());
+                let asname = alias
+                    .asname
+                    .as_ref()
+                    .map_or(NONE, |n| self.ctx.text(n.as_str()));
+                self.node("alias", &[name, asname], alias.range())
+            })
+            .collect();
+        self.list(nodes)
+    }
+
     fn arg(&mut self, parameter: &mut ast::Parameter) -> Result<Id> {
         let name = self.ctx.text(parameter.name.as_str());
         let annotation = self.optional(parameter.annotation.take())?;
@@ -139,6 +154,19 @@ impl Parser<'_> {
         let (kind, fields) = match s {
             Stmt::Expr(v) => ("Expr", vec![self.expr(*v.value)?]),
             Stmt::Pass(_) => ("Pass", vec![]),
+            Stmt::Import(v) if !v.is_lazy => ("Import", vec![self.aliases(&v.names)]),
+            // Absolute future directives need feature validation before conversion.
+            Stmt::ImportFrom(v)
+                if !v.is_lazy && (v.level != 0 || v.module.as_deref() != Some("__future__")) =>
+            {
+                let module = v
+                    .module
+                    .as_ref()
+                    .map_or(NONE, |m| self.ctx.text(m.as_str()));
+                let names = self.aliases(&v.names);
+                let level = self.ctx.int(i64::from(v.level));
+                ("ImportFrom", vec![module, names, level])
+            }
             Stmt::Assign(v) => (
                 "Assign",
                 vec![self.exprs(v.targets)?, self.expr(*v.value)?, NONE],
