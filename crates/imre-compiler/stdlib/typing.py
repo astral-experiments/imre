@@ -127,16 +127,21 @@ class _TypedDictSymbol:
 
     __slots__ = ForwardRef.__slots__
 
+    def __expression__(self):
+        node = self.__ast_node__
+        return ((node,), 20) if type(node) is str else node
+
     def __repr__(self):
-        return "".join(t if type(t) is str else t[0] for t in self.__arg__)
+        tokens, _ = self.__expression__()
+        return "".join(t if type(t) is str else t[0] for t in tokens)
 
     def __hash__(self):
         return id(self)
 
     def __operand__(self, value, precedence=0):
         if type(value) is _TypedDictSymbol:
-            tokens = value.__arg__
-            return ("(", *tokens, ")") if value.__forward_module__ < precedence else tokens
+            tokens, priority = value.__expression__()
+            return ("(", *tokens, ")") if priority < precedence else tokens
         if type(value) in (list, tuple, set, dict):
             if type(value) is set and not value:
                 return ("{*()}",)
@@ -154,18 +159,18 @@ class _TypedDictSymbol:
                 tokens.append(",")
             tokens.append(closing)
             return tuple(tokens)
-        if self.__globals__.symbolic and value is ...:
+        if self.__stringifier_dict__.symbolic and value is ...:
             return ("...",)
-        if self.__globals__.symbolic or value is None or type(value) in (str, int, float, bool, complex):
+        if self.__stringifier_dict__.symbolic or value is None or type(value) in (str, int, float, bool, complex):
             return (repr(value),)
         # Real operands may have no name in the eventual evaluation namespace.
-        names = self.__globals__
+        names = self.__stringifier_dict__
         key = f"__annotationlib_name_{names.next_id}__"
         names.next_id += 1
         return ((key, value),)
 
     def __derived__(self, tokens, precedence=20):
-        return self.__globals__.symbol(tokens, self.__globals__.cells, precedence)
+        return self.__stringifier_dict__.symbol(tokens, None, precedence)
 
     def __getattr__(self, name):
         return self.__derived__((*self.__operand__(self, 20), ".", name))
@@ -207,7 +212,7 @@ class _TypedDictSymbol:
         return self.__derived__(tuple(tokens))
 
     def __contains__(self, item):
-        if self.__arg__ == ("__conditional_annotations__",):
+        if self.__ast_node__ == "__conditional_annotations__":
             return True
         raise NotImplementedError("symbolic annotation membership")
 
@@ -238,31 +243,34 @@ class _TypedDictNames(dict):
 
     def symbol(self, tokens, cells, precedence=20):
         value = _TypedDictSymbol()
-        value.__arg__ = tokens
-        value.__globals__ = self
+        value.__arg__ = None
+        value.__ast_node__ = tokens[0] if len(tokens) == 1 else (tokens, precedence)
+        value.__code__ = None
+        value.__stringifier_dict__ = self
+        value.__globals__ = self.source_globals
         value.__cell__ = cells
-        value.__forward_module__ = precedence
+        value.__forward_module__ = None
+        value.__forward_is_class__ = self.is_class
+        value.__forward_is_argument__ = False
+        value.__owner__ = self.owner
+        value.__extra_names__ = dict(t for t in tokens if type(t) is tuple) or None
+        value.__resolved_str_cache__ = None
         self.symbols.append(value)
         return value
 
     def __missing__(self, name):
-        return self.symbol((name,), self.cells)
+        return self.symbol((name,), None)
 
     def finish(self):
         # Convert the actual operands as in CPython. They can be held inside a
         # typing alias, an arbitrary container, or a callback's saved state.
         for value in self.symbols:
-            tokens = value.__arg__
-            extras = dict(t for t in tokens if type(t) is tuple)
+            tokens, _ = value.__expression__()
             value.__arg__ = repr(value)
-            value.__ast_node__ = tokens if extras else None
-            value.__resolved_str_cache__ = None
-            value.__extra_names__ = extras or None
-            value.__globals__ = self.source_globals
-            value.__forward_module__ = None
-            value.__forward_is_class__ = self.is_class
-            value.__forward_is_argument__ = False
-            value.__owner__ = self.owner
+            value.__ast_node__ = tokens if value.__extra_names__ else None
+            value.__stringifier_dict__ = None
+            if value.__cell__ is None:
+                value.__cell__ = self.cells
             _typing._finish_field_ref(value)
         self.symbols.clear()
 

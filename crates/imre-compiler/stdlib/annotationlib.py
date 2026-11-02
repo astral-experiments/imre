@@ -18,6 +18,8 @@ class ForwardRef:
     __slots__ = (
         "__arg__",
         "__ast_node__",
+        "__code__",
+        "__stringifier_dict__",
         "__globals__",
         "__extra_names__",
         "__resolved_str_cache__",
@@ -34,6 +36,7 @@ class ForwardRef:
             raise TypeError(f"Forward reference must be a string -- got {arg!r}")
         self.__arg__ = arg
         self.__ast_node__ = None
+        self.__code__ = None
         self.__globals__ = None
         self.__extra_names__ = None
         self.__resolved_str_cache__ = None
