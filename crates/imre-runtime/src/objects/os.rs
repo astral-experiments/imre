@@ -312,6 +312,16 @@ pub unsafe extern "C" fn imre_os_lseek(fd: usize, position: usize, whence: usize
     )
 }
 
+/// Set an open file's length without changing its offset or taking ownership.
+pub(crate) fn truncate(fd: i32, length: i64) -> io::Result<()> {
+    // SAFETY: ftruncate takes two integers and retains no pointers or descriptor ownership.
+    if unsafe { libc::ftruncate(fd, length) } < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 /// Seek on the open file description shared by the descriptor and its duplicates.
 pub(crate) fn seek(fd: i32, position: i64, whence: i32) -> Result<i64> {
     // SAFETY: lseek takes integer values and retains no pointers.
