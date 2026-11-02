@@ -1651,7 +1651,7 @@ pub(super) fn call(
                 collections::method(ctx, name, args, kwargs)
             }
             "memoryview" if matches!(method, "__getitem__" | "__setitem__" | "__delitem__") => {
-                ctx.memoryview_item_method(method, args, kwargs)
+                ctx.buffer_item_method("memoryview", method, args, kwargs)
             }
             "memoryview" if method == "cast" => ctx.cast_memoryview(args, kwargs),
             "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
