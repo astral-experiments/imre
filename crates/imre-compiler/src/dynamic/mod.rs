@@ -24,8 +24,10 @@ struct Imports {
     uses_import_builtin: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
+    opcode_names: HashSet<String>,
     signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
+    boxed_mock_names: HashSet<String>,
     pkgutil_names: HashSet<String>,
     get_data_names: HashSet<String>,
     machinery_names: HashSet<String>,
@@ -105,10 +107,12 @@ impl Imports {
             && matches!(
                 name,
                 "_imp"
+                    | "atexit"
+                    | "json"
+                    | "json.encoder"
                     | "sysconfig"
                     | "platform"
                     | "keyword"
-                    | "token"
                     | "site"
                     | "importlib.machinery"
                     | "traceback"
@@ -119,6 +123,15 @@ impl Imports {
             self.runtime_imports = true;
         }
     }
+}
+
+// Keep the two typed specialization constants on their existing route.
+fn boxed_opcode(name: &str) -> bool {
+    use crate::modules::{Binding, Intrinsic, IntrinsicModule};
+    matches!(
+        IntrinsicModule::Opcode.symbol(name),
+        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_)))
+    )
 }
 
 fn boxed_sys_export(name: &str) -> bool {
@@ -203,9 +216,13 @@ impl<'a> Visitor<'a> for Imports {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                    if name == "__future__" {
+                        self.runtime_imports = true;
+                    }
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
+                        "_opcode" => self.opcode_names.insert(bound.to_string()),
                         "signal" | "_signal" if cfg!(unix) => self
                             .signal_names
                             .insert(bound.to_string(), name.to_owned())
@@ -226,9 +243,17 @@ impl<'a> Visitor<'a> for Imports {
                     let suffix = a.name.as_str();
                     if imp.level == 0
                         && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
                     {
                         self.runtime_imports = true;
+                    }
+                    if imp.level == 0
+                        && name == "unittest.mock"
+                        && crate::modules::boxed_mock_export(suffix)
+                    {
+                        self.boxed_mock_names
+                            .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
                     }
                     if imp.level == 0 && name == "pkgutil" && suffix == "get_data" {
                         self.get_data_names
@@ -241,6 +266,7 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     if imp.level == 0
                         && ((name == "operator" && boxed_operator(suffix))
+                            || (name == "_opcode" && (boxed_opcode(suffix) || suffix == "*"))
                             || (name == "sys" && boxed_sys_export(suffix))
                             || (name == "string" && suffix == "templatelib"))
                     {
@@ -258,6 +284,11 @@ impl<'a> Visitor<'a> for Imports {
                     }
                 }
             }
+            Stmt::ClassDef(class)
+                if class.type_params.is_some() || crate::classes::defines_pickle_reducer(class) =>
+            {
+                self.runtime_imports = true;
+            }
             Stmt::Assign(a) if a.targets.iter().any(|t| self.sys_path(t)) => {
                 self.runtime_imports = true;
                 self.paths(&a.value);
@@ -267,9 +298,16 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
-        if matches!(e, Expr::Name(n) if n.id == "__import__" && n.ctx == ast::ExprContext::Load) {
-            self.uses_import_builtin = true;
-            self.add(0, "importlib");
+        if let Expr::Name(name) = e
+            && name.ctx == ast::ExprContext::Load
+        {
+            if name.id == "__import__" {
+                self.uses_import_builtin = true;
+                self.add(0, "importlib");
+            }
+            if self.boxed_mock_names.contains(name.id.as_str()) {
+                self.runtime_imports = true;
+            }
         }
         // A resource lookup can be the first operation to load its package.
         if let Expr::Call(call) = e
@@ -310,6 +348,8 @@ impl<'a> Visitor<'a> for Imports {
             && let Expr::Name(module) = &*attr.value
             && ((boxed_operator(attr.attr.as_str())
                 && self.operator_names.contains(module.id.as_str()))
+                || (boxed_opcode(attr.attr.as_str())
+                    && self.opcode_names.contains(module.id.as_str()))
                 || self
                     .signal_names
                     .get(module.id.as_str())
@@ -319,7 +359,8 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.runtime_imports = true;
         }
-        if matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
+        if matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "__reduce__" | "__reduce_ex__" | "__getstate__"))
+            || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
             || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
             self.runtime_imports = true;
@@ -402,19 +443,25 @@ pub(crate) fn compile(
     if !runtime_imports
         && !(cfg!(unix) && src.contains("signal"))
         && ![
+            "__future__",
             "_imp",
+            "atexit",
+            "weakref",
             "sys",
             "platform",
             "keyword",
-            "token",
             "site",
             "importlib",
+            "_opcode",
+            "json",
             "operator",
             "struct",
             "traceback",
             "unittest",
             "SystemExit",
             "__import__",
+            "__reduce",
+            "__getstate__",
             "templatelib",
         ]
         .iter()
@@ -517,6 +564,10 @@ pub(crate) fn compile(
             return Ok(None);
         }
         let mut names = imports.names;
+        // A late import of native pickle also needs its bundled reader and dependencies.
+        if imports.uses_import_builtin {
+            names.push((0, "pickle".to_owned()));
+        }
         // Importing array registers its type with MutableSequence. A runtime
         // __import__ can select array without naming it in a static import.
         if imports.uses_import_builtin
@@ -562,7 +613,6 @@ pub(crate) fn compile(
                     ))
                 } else {
                     import_module::boxed_source(&prefix)
-                        .or_else(|| crate::modules::bundled_runtime_source(&prefix))
                 };
                 if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
@@ -617,6 +667,16 @@ pub(crate) fn compile(
             }
         }
     }
+    // Cold imports can use the canonical threading factory when its Python dependencies
+    // are already registered. Check before adding the minimal collections fallback below.
+    let threading = ["_weakrefset", "collections", "warnings"]
+        .into_iter()
+        .all(|required| {
+            sources
+                .iter()
+                .any(|(name, path, _)| name == required && path.starts_with(bundled_root))
+        })
+        .then_some("threading");
     // Native modules can construct named tuples even without a source-level collections import.
     if !seen.contains("collections") {
         sources.push((
@@ -625,23 +685,44 @@ pub(crate) fn compile(
             include_str!("../../stdlib/collections/namedtuple_repr.py").into(),
         ));
     }
-    // These bundled initializers depend only on native modules and may be selected by name at runtime.
+    // The sealed io module also needs its Python protocols when imported indirectly.
+    sources.push((
+        "io".into(),
+        Path::new(bundled_root).join("io.py"),
+        include_str!("../../stdlib/io.py").into(),
+    ));
+    // The fixed list has only native dependencies and may be selected by name at runtime.
     for name in [
+        "__future__",
         "__hello__",
         "_tokenize",
+        "abc",
+        "annotationlib",
         "ast",
         "codecs",
+        "copyreg",
+        "datetime",
         "genericpath",
+        "hashlib",
+        "itertools",
+        "json",
+        "json.decoder",
+        "json.encoder",
+        "json.scanner",
         "platform",
         "re",
         "signal",
         "stat",
         "string",
         "string.templatelib",
+        "token",
         "zipimport",
-    ] {
+    ]
+    .into_iter()
+    .chain(threading)
+    {
         if !seen.contains(name)
-            && let Some((file, source)) = crate::modules::bundled_runtime_source(name)
+            && let Some((file, source)) = import_module::boxed_source(name)
         {
             sources.push((
                 name.into(),
@@ -652,8 +733,10 @@ pub(crate) fn compile(
     }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
+    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
+        "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),
         "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),
@@ -668,7 +751,6 @@ pub(crate) fn compile(
         "executable":startup.map(|(_, executable)| executable),
         "command":command.is_some(),"paths":paths,
     });
-    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     check_returns()?;
     let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
     Ok(Some(Compilation {

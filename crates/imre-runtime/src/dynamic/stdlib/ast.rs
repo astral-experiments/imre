@@ -136,6 +136,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         let ancestors = ctx.lineage(base);
         let class = ctx.alloc(Value::Class {
             namedtuple_fields: None,
+            io_kind: None,
             metaclass: None,
             name: spec.name.into(),
             scope,
@@ -261,6 +262,7 @@ fn parsed_instance(
         property: None,
         weak_reference: None,
         cycle: None,
+        member_values: None,
         memory_stream: None,
     })
 }

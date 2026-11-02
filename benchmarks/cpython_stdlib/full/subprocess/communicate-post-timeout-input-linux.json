@@ -1,0 +1,119 @@
+{
+  "method": "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input",
+  "ordinal": 168,
+  "discovered": 353,
+  "source": {
+    "cpython": "3.14.5",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "test_subprocess_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+    "method_sha256": "d950aced709c3f3524c4fa79d11013338528b1cadcc691957a690d0bef3ac7d2",
+    "before_measurement_commit": "922324dcc86ed7f313cc6eca7b6f4d3f2b599bca",
+    "tested_source_base": "b0787dfa9e113022cf9d08f2f087fa6347499f21",
+    "tested_artifacts": "Isolated candidate compiled from the tested source base and the recorded core patch.",
+    "compiler_sha256": "c70872a8b67779df9ccfde7131c344ae957b8ee6a415381786e59e5e5be36ea1",
+    "runtime_sha256": "482455a4495608af1c229198621f5a82200ee8ecf2270a5e66ba1aa27e22ef29",
+    "generated_method_entry_sha256": "00b96b0bdc2aec891d22b5f6913c0aa2a88f1516b8840159c3c0ce241b11748b",
+    "tested_core_patch_sha256": "b46630f6ce91b858e9f48f26347fc154918b717a1577dfabdca9707ae661427d"
+  },
+  "base_compiler": {
+    "O0": {
+      "compile_exit": 1,
+      "diagnostic": "local may be uninitialized on this path"
+    },
+    "O3": {
+      "compile_exit": 1,
+      "diagnostic": "local may be uninitialized on this path"
+    }
+  },
+  "scope": "Original method body compiled with the campaign typed assertion fixture. CPython executed the child.",
+  "api_values_in_all_three_runs": [
+    {
+      "call": 1,
+      "timeout_seconds": 0,
+      "outcome": "TimeoutExpired",
+      "input": {
+        "type": "str",
+        "bytes": 4105,
+        "sha256": "97556ad1ee5d722ace136acdb519a52aae27e8203e993e3dd2ba8f0fac106889"
+      },
+      "stdout": null,
+      "stderr": null
+    },
+    {
+      "call": 2,
+      "timeout_seconds": 15,
+      "outcome": "returned",
+      "input": null,
+      "stdout": {
+        "type": "str",
+        "bytes": 4106,
+        "sha256": "f9d98484d1675c15fc635c3a7f3cc435248337f8b4f3eacf77bb7adc3330638d"
+      },
+      "stderr": {
+        "type": "str",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "cpython_reference": {
+    "parent_pid": 39793,
+    "parent_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "child_pid": 39796,
+    "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "first_call_elapsed_ms": 0.237,
+    "retry_waitpid": {
+      "pid": 39796,
+      "raw_status": 0
+    },
+    "watchdog_final": "ECHILD",
+    "stdin_writes_by_call": [
+      0,
+      4105
+    ],
+    "child_stdin_bytes": 4105,
+    "child_stdin_eof": true
+  },
+  "standalone_native_with_cpython_child": {
+    "O0": {
+      "parent_pid": 42605,
+      "parent_image_sha256": "e4e60d0620f812626bf7bdaed8dca519be5adb8c7891168376bd96a68bfdadbb",
+      "child_pid": 42606,
+      "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "first_call_elapsed_ms": 0.052,
+      "retry_waitpid": {
+        "pid": 42606,
+        "raw_status": 0
+      },
+      "watchdog_final": "ECHILD",
+      "stdin_writes_by_call": [
+        0,
+        4105
+      ],
+      "child_stdin_bytes": 4105,
+      "child_stdin_eof": true,
+      "unwrapped_parent_sha256": "15ba398de54c2a5763fe7eeaa662e48c45ed0794d135ee7f6a0ce731d0bc00b5",
+      "unwrapped_root_wait_raw": 0
+    },
+    "O3": {
+      "parent_pid": 42626,
+      "parent_image_sha256": "2dabd1043502fdbe8616d37de28a70f96be841749447f3e8d6d20d08f5f66148",
+      "child_pid": 42627,
+      "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "first_call_elapsed_ms": 0.05,
+      "retry_waitpid": {
+        "pid": 42627,
+        "raw_status": 0
+      },
+      "watchdog_final": "ECHILD",
+      "stdin_writes_by_call": [
+        0,
+        4105
+      ],
+      "child_stdin_bytes": 4105,
+      "child_stdin_eof": true,
+      "unwrapped_parent_sha256": "a6fc6b37f71c4ade1a6ce030c47f8d724961705de79c3968f854f63bb3e62ad3",
+      "unwrapped_root_wait_raw": 0
+    }
+  }
+}

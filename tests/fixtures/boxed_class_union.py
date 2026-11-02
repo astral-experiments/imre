@@ -32,6 +32,53 @@ class RaisesEquality(EqualSeventeen):
 
 
 def current():
+    import gc
+    from typing import Dict, ForwardRef
+
+    class Symlink(str):
+        pass
+
+    recursive = Dict[str, Union[str, bytes, Symlink, 'FilesSpec']]
+    assert recursive.__args__[1].__args__ == (str, bytes, Symlink, ForwardRef('FilesSpec'))
+    assert type(Union['A', 'A']) is ForwardRef
+    assert (int | str | 'A').__args__ == (int, str, ForwardRef('A'))
+    assert ('A' | (int | str)).__args__ == (ForwardRef('A'), int, str)
+    variable = TypeVar('Variable')
+    assert (variable | 'A').__args__ == (variable, ForwardRef('A'))
+    for operand in (int, list[int]):
+        try:
+            operand | 'A'
+        except TypeError:
+            pass
+        else:
+            raise AssertionError('an ordinary type cannot be combined with a string')
+    try:
+        Union['(']
+    except SyntaxError as exc:
+        assert str(exc) == "Forward reference must be an expression -- got '('"
+    else:
+        raise AssertionError('expected invalid forward reference')
+
+    class Fault(str):
+        def lstrip(self):
+            raise RuntimeError("from original lstrip")
+
+    try:
+        Union[Fault("\ud800")]
+    except RuntimeError as exc:
+        assert str(exc) == "from original lstrip"
+    else:
+        raise AssertionError("forward reference skipped str subclass code")
+
+    class Collecting:
+        def __hash__(self):
+            gc.collect()
+            return 42
+
+    member = Collecting()
+    args = Union[member, 'A', 'B', 'A'].__args__
+    assert args == (member, ForwardRef('A'), ForwardRef('B'))
+
     class Member:
         def __ror__(self, left):
             return "reflected"

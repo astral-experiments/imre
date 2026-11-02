@@ -109,6 +109,12 @@ def __newobj_ex__(cls, args, kwargs):
     """
     return cls.__new__(cls, *args, **kwargs)
 
+def _has_type_dict(cls):
+    # Native types with no exposed class namespace declare no Python slots.
+    # Preserve normal namespace lookups for classes with a custom metaclass.
+    return type(cls) is not type or hasattr(cls, "__dict__")
+
+
 def _slotnames(cls):
     """Return a list of slot names for a given class.
 
@@ -121,6 +127,8 @@ def _slotnames(cls):
     """
 
     # Get the value from a cache in the class if possible
+    if not _has_type_dict(cls):
+        return []
     names = cls.__dict__.get("__slotnames__")
     if names is not None:
         return names
@@ -133,7 +141,7 @@ def _slotnames(cls):
     else:
         # Slots found -- gather slot names from all base classes
         for c in cls.__mro__:
-            if "__slots__" in c.__dict__:
+            if _has_type_dict(c) and "__slots__" in c.__dict__:
                 slots = c.__dict__['__slots__']
                 # if class has a single slot, it can be given as a string
                 if isinstance(slots, str):

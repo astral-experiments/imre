@@ -1,8 +1,19 @@
+from array import array
 import hashlib
 import hmac
 
 
 def current():
+    for code, values in (("i", [-129, 256]), ("f", [0.5]), ("d", [-1.5]), ("w", "😀")):
+        a = array(code, values)
+        raw = a.tobytes()
+        before = hashlib.sha256(a)
+        assert before.digest() == hashlib.sha256(raw).digest()
+        h = hashlib.new("sha256", a)
+        a.append(values[0])
+        h.update(a)
+        assert h.hexdigest() == hashlib.sha256(raw + a.tobytes()).hexdigest()
+        assert before.copy().digest() == hashlib.sha256(raw).digest()
     for name in ("MD5", "ssl3-md5", "SHA-1", "SHA-224", "sha2-256", "SHA-384", "2.16.840.1.101.3.4.2.3",
                  "SHA3-224", "sha3_256", "Sha3-384", "2.16.840.1.101.3.4.2.10"):
         h = hashlib.new(name=name, data=bytearray(b"abc"), usedforsecurity=False)

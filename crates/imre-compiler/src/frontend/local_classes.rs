@@ -65,6 +65,17 @@ impl Checker<'_> {
     /// Record method bindings without calling them. Eager defaults, decorators,
     /// arbitrary bases and executable class statements must not be silently elided.
     pub(super) fn define_local_class(&mut self, node: &ast::StmtClassDef) -> Result<(), String> {
+        if crate::classes::defines_pickle_reducer(node) {
+            return Err(self.object_runtime_export("pickle reducers", node));
+        }
+        if node.type_params.is_some() {
+            self.graph.needs_object_runtime.set(true);
+            return Err(error(
+                self.source,
+                node,
+                "class type parameters require the object runtime",
+            ));
+        }
         let name = node.name.as_str();
         for decorator in &node.decorator_list {
             if let Some(crate::modules::Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) =
@@ -84,8 +95,7 @@ impl Checker<'_> {
                 "local class declarations must appear directly in the enclosing function's suite",
             ));
         }
-        if node.type_params.is_some()
-            || !node.decorator_list.is_empty()
+        if !node.decorator_list.is_empty()
             || node
                 .arguments
                 .as_ref()
@@ -123,6 +133,11 @@ impl Checker<'_> {
                     }
                     self.fixed_class_attributes(id)
                 } else {
+                    if let Some(crate::modules::Binding::Intrinsic(kind)) = self.resolve(base)
+                        && kind.is_subclassable_calendar()
+                    {
+                        return Err(self.object_runtime_export("calendar subclasses", base));
+                    }
                     return Err(error(
                         self.source,
                         base,

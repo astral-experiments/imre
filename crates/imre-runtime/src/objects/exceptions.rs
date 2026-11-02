@@ -510,7 +510,7 @@ impl Error {
         }
     }
 
-    pub(super) fn unicode_decode(
+    pub(crate) fn unicode_decode(
         codec: &str,
         bytes: crate::BytesOwner,
         bounds: std::ops::Range<usize>,
@@ -554,8 +554,21 @@ impl Error {
         )
     }
 
+    pub(super) fn is_os_error(&self) -> bool {
+        self.kind.matches(Kind::OSError)
+    }
+
     pub(super) fn is_kind(&self, kind: Kind) -> bool {
         self.kind == kind
+    }
+
+    /// Preserve the native parser's description, complete document, and character offset
+    /// when constructing a fresh boxed decoder's Python exception.
+    pub(crate) fn json_decode_fields(&self) -> Option<(&str, &str, usize)> {
+        match &self.payload {
+            Some(Payload::Json(error)) => Some((&error.msg, &error.doc, error.pos)),
+            _ => None,
+        }
     }
 
     pub(super) fn json_decode(

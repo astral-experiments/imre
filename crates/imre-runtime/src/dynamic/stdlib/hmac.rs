@@ -58,7 +58,7 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
 
     // Invoke the supplied factory for both states, including lazy wheel functions.
     let outer = ctx.call(factory, Vec::new(), Vec::new())?;
-    if matches!(ctx.heap.get(outer), Value::Hash(hash) if hash.borrow().is_xof()) {
+    if matches!(ctx.heap.get(outer), Value::Hash(hash) if hash.lock().is_xof()) {
         return Err(Error::new("ValueError", "no reason supplied"));
     }
     let inner = ctx.call(factory, Vec::new(), Vec::new())?;

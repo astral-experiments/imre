@@ -6,7 +6,88 @@ class EchoDecoder(codecs.IncrementalDecoder):
         return self.errors, input, final
 
 
+def check_raw_unicode_escape():
+    for alias in ("raw-unicode-escape", "raw_unicode_escape", "RAW Unicode ESCAPE"):
+        assert str(b"A\xff\x00", alias) == "A\xff\x00"
+        assert br"\u20AC:\U0001f600".decode(alias) == "€:😀"
+        assert codecs.decode(br"\\u20ac\\\u20ac", alias) == "\\\\u20ac\\\\€"
+        assert bytearray(b"\\x00\\n\\\\q\\").decode(alias) == "\\x00\\n\\\\q\\"
+        assert ord(str(br"\udc80", alias)) == 0xdc80
+    for wire, start, end, reason in (
+        (br"xx\u12QZ", 2, 6, r"truncated \uXXXX escape"),
+        (br"\\\U0001", 2, 8, r"truncated \UXXXXXXXX escape"),
+        (br"\U00110000", 0, 10, r"\Uxxxxxxxx out of range"),
+    ):
+        try:
+            str(wire, "raw_unicode_escape")
+        except UnicodeDecodeError as error:
+            assert (error.encoding, error.object, error.start, error.end, error.reason) == (
+                "rawunicodeescape", wire, start, end, reason)
+        else:
+            raise AssertionError(wire)
+    assert str(br"\u0!\u20ac", "raw_unicode_escape", "ignore") == "!€"
+    assert str(br"\u0!\u20ac", "raw_unicode_escape", "replace") == "\ufffd!€"
+    assert str(br"\uQ", "raw_unicode_escape", "backslashreplace") == r"\x5c\x75Q"
+    assert str(b"ok", "raw_unicode_escape", "unknown.policy") == "ok"
+    def resume(error):
+        return "?", -1
+    codecs.register_error("test.raw_escape", resume)
+    assert codecs.decode(memoryview(br"\u00z"), "raw_unicode_escape", "test.raw_escape") == "?z"
+
+    from collections import namedtuple
+    Resume = namedtuple("Resume", "text position")
+
+    class ReplacementBytes(bytes):
+        pass
+
+    def change_input(error):
+        error.object = ReplacementBytes(br"\u00c4")
+        assert codecs.replace_errors(error) == ("\ufffd", 3)
+        return Resume("", 0)
+
+    codecs.register_error("test.raw_change_input", change_input)
+    assert br"\u3".decode("raw_unicode_escape", "test.raw_change_input") == "Ä"
+
+
+
+def check_escape_decode():
+    import warnings
+    from _codecs import escape_decode
+
+    assert codecs.escape_decode is escape_decode
+    payload = bytes(range(256))
+    literal = repr(payload)[2:-1].encode("ascii")
+    assert escape_decode(memoryview(literal)) == (payload, len(literal))
+    assert escape_decode("é\\n", None) == (b"\xc3\xa9\n", 4)
+    assert escape_decode(bytearray(br"\1\12\1234"), "unused") == (b"\x01\nS4", 10)
+    assert escape_decode(b"a\\\nb") == (b"ab", 4)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        try:
+            escape_decode(br"\777\q")
+        except DeprecationWarning as error:
+            assert 'b"\\777" is an invalid octal escape sequence' in str(error)
+        else:
+            raise AssertionError("missing octal escape warning")
+    for policy, expected in [("ignore", b"z"), ("replace", b"?z")]:
+        assert escape_decode(br"\x4z", policy) == (expected, 4)
+    for data, policy, message in [
+        (br"a\x", "strict", r"invalid \x escape at position 1"),
+        (br"\xk", "nonexistent", "decoding error; unknown error handling code: nonexistent"),
+        (b"\\", "ignore", "Trailing \\ in string"),
+    ]:
+        try:
+            escape_decode(data, policy)
+        except ValueError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("expected invalid escape to raise")
+
+
 def current():
+    check_escape_decode()
+    utf16_encoders()
+    check_raw_unicode_escape()
     decoder = codecs.IncrementalDecoder(errors="replace")
     assert decoder.errors == "replace"
     assert decoder.getstate() == (b"", 0)
@@ -171,3 +252,23 @@ def current():
         b"\xff".decode("utf8", "test.strict_alias")
     except UnicodeDecodeError as e:
         print(e is seen[0], str(e))
+
+
+def utf16_encoders():
+    for name, canonical in (('unicodelittleunmarked', 'utf-16-le'), ('utf_16be', 'utf-16-be')):
+        text = '🙂\ud800\udcffZ'
+        try:
+            text.encode(name)
+        except UnicodeEncodeError as exc:
+            assert exc.object is text
+            assert (exc.encoding, exc.start, exc.end, exc.reason) == (canonical, 1, 2, 'surrogates not allowed')
+        else:
+            raise AssertionError('expected a surrogate encoding error')
+        assert text.encode(name, 'ignore') == '🙂Z'.encode(name)
+        assert text.encode(name, 'replace') == '🙂??Z'.encode(name)
+        assert text.encode(name, 'backslashreplace') == r'🙂\ud800\udcffZ'.encode(name)
+        assert text.encode(name, 'namereplace') == text.encode(name, 'backslashreplace')
+        assert text.encode(name, 'xmlcharrefreplace') == '🙂&#55296;&#56575;Z'.encode(name)
+    assert '\ud800\udcff'.encode('utf-16-le', 'surrogatepass') == b'\x00\xd8\xff\xdc'
+    assert '\ud800\udcff'.encode('utf-16-be', 'surrogatepass') == b'\xd8\x00\xdc\xff'
+    assert 'ü'.encode('utf-16-le', 'unused handler') == b'\xfc\x00'

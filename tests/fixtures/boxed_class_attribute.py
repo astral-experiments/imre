@@ -2,6 +2,16 @@
 
 import json
 
+for cls, bases, mro in (
+    (object, (), (object,)),
+    (dict, (object,), (dict, object)),
+    (bool, (int,), (bool, int, object)),
+    (KeyError, (LookupError,), (KeyError, LookupError, Exception, BaseException, object)),
+):
+    assert cls.__bases__ == bases and cls.__mro__ == mro
+    assert cls.__bases__ is cls.__bases__ and cls.__mro__ is cls.__mro__
+
+
 class Plain:
     declaring_module = __module__
 

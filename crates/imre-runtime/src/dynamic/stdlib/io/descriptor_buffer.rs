@@ -7,6 +7,7 @@ use std::rc::Rc;
 use super::super::{builtins, files, os_error};
 use super::file_io::RawFile;
 use super::{Context, Error, Id, NONE, Result, Value};
+use crate::objects::BoxedPipe;
 
 struct Descriptor {
     handle: Rc<RawFile>,
@@ -17,8 +18,7 @@ struct Descriptor {
 impl Descriptor {
     fn fd(&self) -> io::Result<RawFd> {
         self.handle
-            .fd
-            .get()
+            .live_fd()
             .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))
     }
 }
@@ -72,15 +72,94 @@ impl Seek for Descriptor {
     }
 }
 
+/// Return buffered bytes first, or perform one raw read without reading ahead.
+pub(super) fn read_once(reader: &mut BufReader<impl Read>, size: i64) -> Result<Vec<u8>> {
+    let size = usize::try_from(size).unwrap_or(reader.capacity());
+    let buffered = reader.buffer();
+    if !buffered.is_empty() {
+        let count = size.min(buffered.len());
+        let mut bytes = builtins::zeroed_bytes(count as i64)?;
+        bytes.copy_from_slice(&buffered[..count]);
+        reader.consume(count);
+        return Ok(bytes);
+    }
+    let mut bytes = builtins::zeroed_bytes(size as i64)?;
+    if !bytes.is_empty() {
+        loop {
+            match reader.get_mut().read(&mut bytes) {
+                Ok(count) => bytes.truncate(count),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => bytes.clear(),
+                Err(error) => return Err(os_error(error)),
+            }
+            break;
+        }
+    }
+    Ok(bytes)
+}
+
+/// RawFile.tell() exposes read-ahead. Read whole blocks directly and fill one
+/// complete buffer for a final partial block, as CPython's BufferedReader does.
+fn read_bytes(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Option<Vec<u8>>> {
+    let mut data = Vec::new();
+    let result = (|| -> io::Result<()> {
+        if size < 0 {
+            reader.read_to_end(&mut data)?;
+            return Ok(());
+        }
+        while data.len() < size as usize {
+            let remaining = size as usize - data.len();
+            if reader.buffer().is_empty() && remaining >= reader.capacity() {
+                let direct = remaining - remaining % reader.capacity();
+                if reader
+                    .get_mut()
+                    .take(direct as u64)
+                    .read_to_end(&mut data)?
+                    < direct
+                {
+                    break;
+                }
+            } else {
+                let buffered = match reader.fill_buf() {
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    result => result?,
+                };
+                let count = remaining.min(buffered.len());
+                if count == 0 {
+                    break;
+                }
+                data.try_reserve(count)
+                    .map_err(|_| io::ErrorKind::OutOfMemory)?;
+                data.extend_from_slice(&buffered[..count]);
+                reader.consume(count);
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Ok(Some(data)),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            Ok((!data.is_empty()).then_some(data))
+        }
+        Err(error) if error.kind() == io::ErrorKind::OutOfMemory => {
+            Err(Error::new("MemoryError", ""))
+        }
+        Err(error) => Err(os_error(error)),
+    }
+}
+
 enum Buffer {
     Reader(BufReader<Descriptor>),
     Writer(BufWriter<Descriptor>),
+    // The process engine allocated this buffer before launching the child.
+    Pipe(BoxedPipe),
 }
 
 impl Buffer {
     fn position(&mut self) -> io::Result<u64> {
         // The caller can reposition the descriptor through another handle.
         match self {
+            Self::Pipe(_) => Err(io::Error::from_raw_os_error(libc::ESPIPE)),
             Self::Reader(r) => Ok(r
                 .get_mut()
                 .stream_position()?
@@ -91,6 +170,7 @@ impl Buffer {
 
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         let reader = match self {
+            Self::Pipe(_) => return Err(io::Error::from_raw_os_error(libc::ESPIPE)),
             Self::Reader(r) => r,
             Self::Writer(w) => return w.seek(position),
         };
@@ -147,12 +227,26 @@ impl BufferedFd {
         }
     }
 
+    pub(super) fn pipe(raw: Id, handle: Rc<RawFile>, reading: bool, pipe: BoxedPipe) -> Self {
+        Self {
+            raw,
+            handle,
+            reading,
+            buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
+        }
+    }
+
+    pub(super) fn uses_raw(&self, raw: &Rc<RawFile>) -> bool {
+        Rc::ptr_eq(raw, &self.handle)
+    }
+
     pub(in crate::dynamic) fn closed(&self) -> bool {
-        self.handle.fd.get().is_none()
+        self.handle.live_fd().is_none()
     }
 
     fn close(&self) -> Result<()> {
         let pending = match self.buffer.borrow_mut().take() {
+            Some(Buffer::Pipe(pipe)) => pipe.close().map_err(Into::into),
             Some(Buffer::Writer(mut writer)) => {
                 let flushed = if self.closed() {
                     Ok(())
@@ -177,11 +271,31 @@ impl BufferedFd {
     ) -> Result<Id> {
         let name = name.strip_prefix("file.").unwrap_or(name);
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
+            super::native_reader::check_raw(ctx, receiver, self, name)?;
             self.close()?;
             return Ok(NONE);
         }
-        let closed = || Error::new("ValueError", "I/O operation on closed file.");
-        let size = if matches!(name, "read" | "readline") {
+        let closed = || {
+            Error::new(
+                "ValueError",
+                match name {
+                    "read" | "read1" => "read of closed file",
+                    "readline" => "readline of closed file",
+                    "readinto" => "readinto of closed file",
+                    "seek" => "seek of closed file",
+                    "flush" | "__enter__" => "I/O operation on closed file.",
+                    _ => "I/O operation on closed file",
+                },
+            )
+        };
+        let size = if let ("read1", [n]) = (name, args) {
+            Some(ctx.index_integer(*n)?.to_i64().ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?)
+        } else if matches!(name, "read" | "readline") {
             Some(files::read_length(ctx, args.first().copied())?)
         } else {
             None
@@ -209,7 +323,8 @@ impl BufferedFd {
         } else {
             None
         };
-        let fd = self.handle.fd.get().ok_or_else(closed)?;
+        super::native_reader::check_raw(ctx, receiver, self, name)?;
+        let fd = self.handle.live_fd().ok_or_else(closed)?;
         let mut slot = self.buffer.borrow_mut();
         let buffer = slot.as_mut().ok_or_else(closed)?;
         match name {
@@ -224,8 +339,10 @@ impl BufferedFd {
                 unsafe { libc::lseek(fd, 0, libc::SEEK_CUR) } >= 0,
             )),
             "flush" => {
-                if let Buffer::Writer(w) = buffer {
-                    w.flush().map_err(os_error)?;
+                match buffer {
+                    Buffer::Writer(w) => w.flush().map_err(os_error)?,
+                    Buffer::Pipe(pipe) => pipe.flush()?,
+                    Buffer::Reader(_) => {}
                 }
                 Ok(NONE)
             }
@@ -235,11 +352,19 @@ impl BufferedFd {
                     .seek(seek.expect("validated seek"))
                     .map_err(os_error)? as i64,
             )),
-            "read" | "readline" => {
-                let Buffer::Reader(r) = buffer else {
+            "read" | "read1" | "readline" => {
+                if !self.reading {
                     return Err(Error::new("UnsupportedOperation", "read"));
-                };
+                }
                 let size = size.unwrap_or(-1);
+                if name == "read1" {
+                    let bytes = match buffer {
+                        Buffer::Reader(r) => read_once(r, size)?,
+                        Buffer::Pipe(pipe) => pipe.read1(usize::try_from(size).ok())?,
+                        Buffer::Writer(_) => unreachable!(),
+                    };
+                    return Ok(ctx.alloc(Value::Bytes(bytes)));
+                }
                 if name == "read" && size < -1 {
                     return Err(Error::new(
                         "ValueError",
@@ -249,25 +374,40 @@ impl BufferedFd {
                 if name == "read" && size > crate::MAX_BYTES_LEN as i64 {
                     return Err(Error::new("OverflowError", "byte string is too large"));
                 }
+                if let Buffer::Pipe(pipe) = buffer {
+                    let data = pipe.read(usize::try_from(size).ok(), name == "readline")?;
+                    return Ok(ctx.alloc(Value::Bytes(data)));
+                }
+                let Buffer::Reader(r) = buffer else {
+                    unreachable!()
+                };
+                if name == "read" {
+                    return Ok(
+                        read_bytes(r, size)?.map_or(NONE, |data| ctx.alloc(Value::Bytes(data)))
+                    );
+                }
                 let mut reader = r.take(if size < 0 { u64::MAX } else { size as u64 });
                 let mut data = Vec::new();
-                if name == "readline" {
-                    reader.read_until(b'\n', &mut data)
-                } else {
-                    reader.read_to_end(&mut data)
-                }
-                .map_err(os_error)?;
+                reader.read_until(b'\n', &mut data).map_err(os_error)?;
                 Ok(ctx.alloc(Value::Bytes(data)))
             }
             "readinto" if args.len() == 1 => {
-                let Buffer::Reader(r) = buffer else {
+                if !self.reading {
                     return Err(Error::new("UnsupportedOperation", "readinto"));
-                };
+                }
                 let Value::ByteArray(bytes) = ctx.heap.get_mut(args[0]) else {
                     return Err(Error::new(
                         "TypeError",
                         "readinto requires a writable buffer",
                     ));
+                };
+                if let Buffer::Pipe(pipe) = buffer {
+                    let data = pipe.read(Some(bytes.len()), false)?;
+                    bytes[..data.len()].copy_from_slice(&data);
+                    return Ok(ctx.int(data.len() as i64));
+                }
+                let Buffer::Reader(r) = buffer else {
+                    unreachable!()
                 };
                 let mut total = 0;
                 while total < bytes.len() {
@@ -280,11 +420,15 @@ impl BufferedFd {
                 Ok(ctx.int(total as i64))
             }
             "write" if args.len() == 1 => {
-                let Buffer::Writer(w) = buffer else {
+                if self.reading {
                     return Err(Error::new("UnsupportedOperation", "write"));
-                };
+                }
                 let data = ctx.bytes_like(args[0])?;
-                w.write_all(data).map_err(os_error)?;
+                match buffer {
+                    Buffer::Pipe(pipe) => pipe.write(data)?,
+                    Buffer::Writer(w) => w.write_all(data).map_err(os_error)?,
+                    Buffer::Reader(_) => unreachable!(),
+                }
                 Ok(ctx.int(data.len() as i64))
             }
             _ => Err(Error::new(

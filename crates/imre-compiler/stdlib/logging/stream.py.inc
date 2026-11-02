@@ -1,21 +1,4 @@
-"""Handler classes and record delivery shared by both native representations."""
-
-class Handler:
-    _name: str | None
-    _closed: bool
-    level: int
-    formatter: Formatter | None
-    filters: list[Filter]
-    lock: _Lock | None
-
-    def __init__(self, level: _Level = 0) -> None:
-        self.filters = []
-        self._name = None
-        self.level = _handler_level(level)
-        self.formatter = None
-        self._closed = False
-        self.createLock()
-
+    # Shared by the boxed and fixed-layout Handler classes.
     def createLock(self) -> None:
         self.lock = _Lock()
 
@@ -52,21 +35,11 @@ class Handler:
     def format(self, record: LogRecord) -> str:
         fmt = self.formatter
         if fmt is None:
-            return _default_formatter.format(record)
+            return _defaultFormatter.format(record)
         return fmt.format(record)
 
     def emit(self, record: LogRecord | None) -> None:
         raise NotImplementedError("emit must be implemented by Handler subclasses")
-
-    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
-        if record is None:
-            return None
-        for item in self.filters:
-            if not item.filter(record):
-                return False
-        with self.lock:
-            self.emit(record)
-        return record
 
     def handleError(self, record: LogRecord) -> None:
         _handle_error(record)
@@ -103,9 +76,7 @@ class StreamHandler(Handler):
 
     def flush(self) -> None:
         with self.lock:
-            stream = self.stream
-            if stream is not None:
-                stream.flush()
+            _flush_handler_stream(self)
 
     def emit(self, record: LogRecord | None) -> None:
         if record is None:
@@ -130,17 +101,3 @@ class StreamHandler(Handler):
             old = self.stream
             self.stream = stream
         return old
-
-
-def _deliver(logger: Logger, level: int, record: LogRecord) -> None:
-    current: Logger | None = logger
-    found = False
-    while current is not None:
-        for handler in current.handlers:
-            found = True
-            if level >= handler.level:
-                handler.handle(record)
-        if not current.propagate:
-            break
-        current = current.parent
-    _fallback(logger, level, record, found)

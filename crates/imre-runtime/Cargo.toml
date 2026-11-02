@@ -13,12 +13,14 @@ crate-type = ["rlib", "staticlib"]
 allocator-api2 = "=0.2.21"
 blake2b_simd = "=1.0.5"
 blake2s_simd = "=1.0.5"
+fancy-regex.workspace = true
 imre-ast = { path = "../imre-ast" }
 imre-regex = { path = "../imre-regex" }
 indexmap = "=2.14.2"
 base64 = "=0.22.1"
 constant_time_eq = "=0.4.2"
 num-bigint.workspace = true
+num-integer = "=0.1.47"
 num-traits.workspace = true
 compact_str.workspace = true
 itoa.workspace = true

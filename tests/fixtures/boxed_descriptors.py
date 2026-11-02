@@ -226,6 +226,21 @@ def current():
     keys = {first: 1, second: 2}
     assert keys[first] == 1 and keys[second] == 2
 
+    class Number(int):
+        def __radd__(self, other):
+            return "reflected"
+
+    add = int.__add__
+    assert type(add) is type(object.__hash__) and add.__objclass__ is int
+    assert getattr(add.__objclass__, add.__name__) is add
+    assert Number.__add__ is bool.__add__ is add
+    number = Number(1 << 100)
+    assert add(True, number) == (1 << 100) + 1 and 1 + number == "reflected"
+    bound = add.__get__(number, Number)
+    assert repr(bound) == f"<method-wrapper '__add__' of Number object at {id(number):#x}>"
+    assert bound(number) == 1 << 101
+    assert add(number, 0.5) is NotImplemented
+
     class Library:
         field = 17
 

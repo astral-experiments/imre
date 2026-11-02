@@ -1,8 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::{Context, Error, Id, NONE, Result, Value, argument, builtins};
-use crate::objects::HashState;
+use crate::objects::{HashState, SharedHash};
 
 mod blake2;
 
@@ -10,6 +7,7 @@ mod blake2;
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
     match ctx.heap.get(ctx.scalar_value(id)) {
         Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+        Value::Array(array) => Ok(array.as_bytes()),
         Value::Str(_) => Err(Error::new(
             "TypeError",
             "Strings must be encoded before hashing",
@@ -63,7 +61,7 @@ pub(super) fn hash(
     )?;
     let input = hash_input(ctx, data, flag, string)?;
     let state = (HashState::provider(name)?.create)(input);
-    Ok(ctx.alloc(Value::Hash(Rc::new(RefCell::new(state)))))
+    Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
 }
 
 pub(super) fn algorithms(ctx: &mut Context) -> Result<Id> {
@@ -131,7 +129,7 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     let provider = HashState::provider(name);
     let data = hash_input(ctx, data, flag, string)?;
     let state = (provider?.create)(data);
-    Ok(ctx.alloc(Value::Hash(Rc::new(RefCell::new(state)))))
+    Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
 }
 
 pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
@@ -140,10 +138,11 @@ pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     };
     let value = match name {
         "hash.update" => {
-            hash.borrow_mut().update(buffer(ctx, argument(args, 1)?)?);
+            let data = buffer(ctx, argument(args, 1)?)?;
+            hash.lock().update(data);
             return Ok(NONE);
         }
-        "hash.copy" => Value::Hash(Rc::new(RefCell::new(hash.borrow().clone()))),
+        "hash.copy" => Value::Hash(SharedHash::new(hash.lock().clone())),
         _ => unreachable!("registered hash method"),
     };
     Ok(ctx.alloc(value))
@@ -158,16 +157,16 @@ pub(super) fn digest(
     let Value::Hash(hash) = ctx.heap.get(argument(args, 0)?) else {
         unreachable!("bound hash method");
     };
-    let hash = Rc::clone(hash);
+    let hash = hash.clone();
     let positional = &args[1..];
     let hex = method == "hexdigest";
-    let value = if hash.borrow().is_xof() {
+    let value = if hash.lock().is_xof() {
         let [length] = builtins::bind_builtin_arguments(method, positional, kwargs, ["length"], 1)?;
         let length = ctx.index_integer(length.expect("bound required length"))?;
         if hex {
-            Value::Str(hash.borrow().xof_hexdigest(&length)?.to_string())
+            Value::Str(hash.lock().xof_hexdigest(&length)?.to_string())
         } else {
-            Value::Bytes(hash.borrow().xof_digest(&length)?)
+            Value::Bytes(hash.lock().xof_digest(&length)?)
         }
     } else {
         if !kwargs.is_empty() {
@@ -186,10 +185,10 @@ pub(super) fn digest(
             ));
         }
         if hex {
-            Value::Str(hash.borrow().hexdigest()?.to_string())
+            Value::Str(hash.lock().hexdigest()?.to_string())
         } else {
             Value::Bytes(
-                hash.borrow()
+                hash.lock()
                     .fixed_digest(method, |data| Ok(data.to_vec()))?,
             )
         }
@@ -270,8 +269,8 @@ fn update_from_file(ctx: &mut Context, file: Id, factory: Id, size: Option<Id>) 
         return Ok(digest);
     }
     let native_hash = matches!(ctx.heap.get(digest), Value::Hash(_));
-    if let Some(&class) = ctx.builtins.get("_io.BytesIO")
-        && ctx.heap.get(file).instance_class() == Some(class)
+    if let Some(class) = ctx.heap.get(file).instance_class()
+        && ctx.heap.get(class).io_kind() == Some("BytesIO")
     {
         // A native digest consumes this snapshot synchronously. A Python update
         // callback can observe the exported view and must take the getbuffer path.
@@ -342,7 +341,7 @@ fn read_chunks(ctx: &mut Context, file: Id, digest: Id, buf: Id, view: Option<Id
             let Value::Hash(state) = ctx.heap.get(digest) else {
                 unreachable!()
             };
-            state.borrow_mut().update(&bytes[..end as usize]);
+            state.lock().update(&bytes[..end as usize]);
         }
         ctx.heap.release_temporaries_since(step);
         ctx.heap.reserve_slot_or_request_collection();
@@ -405,7 +404,7 @@ pub(super) fn provider_method(
     }
     match method_name {
         "copy" | "update" | "digest" | "hexdigest" => {
-            let xof = matches!(ctx.heap.get(receiver), Value::Hash(h) if h.borrow().is_xof());
+            let xof = matches!(ctx.heap.get(receiver), Value::Hash(h) if h.lock().is_xof());
             if xof && matches!(method_name, "digest" | "hexdigest") {
                 return digest(ctx, method_name, args, kwargs);
             }

@@ -5,21 +5,104 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod buffered_io;
 mod descriptor_buffer;
+mod native_reader;
 pub(in crate::dynamic) use descriptor_buffer::BufferedFd;
 mod bytes_io;
+mod docstrings;
 mod file_io;
-pub(in crate::dynamic) use file_io::open;
+pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
 
 #[derive(Clone)]
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
+    BufferedReader(Id),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
 }
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
+
+// CPython 3.14.5 Lib/io.py, in wildcard import order.
+const PUBLIC_NAMES: &[&str] = &[
+    "BlockingIOError",
+    "open",
+    "open_code",
+    "IOBase",
+    "RawIOBase",
+    "FileIO",
+    "BytesIO",
+    "StringIO",
+    "BufferedIOBase",
+    "BufferedReader",
+    "BufferedWriter",
+    "BufferedRWPair",
+    "BufferedRandom",
+    "TextIOBase",
+    "TextIOWrapper",
+    "UnsupportedOperation",
+    "SEEK_SET",
+    "SEEK_CUR",
+    "SEEK_END",
+    "DEFAULT_BUFFER_SIZE",
+    "text_encoding",
+    "IncrementalNewlineDecoder",
+    "Reader",
+    "Writer",
+];
+
+/// Build the interpreter's shared text reader without taking ownership of fd 0.
+pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
+    let fd = ctx.int(0);
+    let mode = ctx.text("r");
+    let buffering = ctx.int(-1);
+    let encoding = ctx.text(crate::sys::standard_field(0, false).as_str());
+    let errors = ctx.text(crate::sys::standard_field(0, true).as_str());
+    let newline = ctx.text("\n");
+    let stream = match open(
+        ctx,
+        &[fd, mode, buffering, encoding, errors, newline, FALSE],
+        &[],
+    ) {
+        Err(error)
+            if matches!(error.os_args.as_deref(),
+                Some(super::super::os_error::Args::Native { source, .. }) if source.errno == i64::from(libc::EBADF)
+            ) =>
+        {
+            return Ok(NONE);
+        }
+        result => result?,
+    };
+    let buffer = ctx.lookup_attr(stream, "buffer")?;
+    let raw = ctx.lookup_attr(buffer, "raw")?;
+    let name = ctx.text("<stdin>");
+    ctx.set_attr(raw, "name", name)?;
+    Ok(stream)
+}
+
+/// Follow strong edges from the original sys module without retaining any of the streams.
+pub(in crate::dynamic) fn rooted_input_chain(ctx: &Context) -> Option<[Id; 3]> {
+    let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
+        return None;
+    };
+    let stdin = ctx.scope_name(scope, "__stdin__")?;
+    let Value::Instance {
+        memory_stream: Some(MemoryStream::Wrapper(wrapper)),
+        ..
+    } = ctx.heap.get(stdin)
+    else {
+        return None;
+    };
+    let buffer = wrapper.buffer.get()?;
+    let Value::File(file) = ctx.heap.get(buffer) else {
+        return None;
+    };
+    let super::BinaryFile::Descriptor(fd) = file.as_ref() else {
+        return None;
+    };
+    Some([stdin, buffer, fd.raw])
+}
 
 /// Select the default text encoding from the interpreter's startup configuration.
 pub(super) fn text_encoding(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -106,25 +189,40 @@ pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     ctx.call(open, vec![path, mode], Vec::new())
 }
 
-/// Install canonical class objects so subclasses inherit the same methods across imports.
+/// Install public metadata and the types of native buffered file handles.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
-    let open = ctx.builtin("open");
-    ctx.bind(module, "open", open);
+    let names = PUBLIC_NAMES
+        .iter()
+        .map(|name| ctx.heap.code_name(name))
+        .collect();
+    let exports = ctx.alloc(Value::List(names));
+    ctx.bind(module, "__all__", exports);
+    for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
+        let value = ctx.int(origin);
+        ctx.bind(module, name, value);
+    }
+    // Register the actual types of buffered files returned by the native open().
+    let types = ["_io.BufferedWriter", "_io.BufferedRandom"]
+        .iter()
+        .map(|name| ctx.builtin(name))
+        .collect();
+    let types = ctx.alloc(Value::Tuple(types));
+    ctx.bind(module, "_buffered_types", types);
+}
+
+/// Construct a low-level module's native I/O classes before io.py declares its ABCs.
+pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_object: Id) {
     let text_encoding = ctx.builtin("_io.text_encoding");
     ctx.bind(module, "text_encoding", text_encoding);
     let unsupported = ctx.builtin("UnsupportedOperation");
     ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
-    for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
-        let value = ctx.int(origin);
-        ctx.bind(module, name, value);
-    }
     let object = ctx.builtin("object");
     let io = class(
         ctx,
         module,
-        "IOBase",
+        "_IOBase",
         object,
         &[
             "closed",
@@ -145,27 +243,30 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     let raw = class(
         ctx,
         module,
-        "RawIOBase",
+        "_RawIOBase",
         io,
         &["read", "readall", "readinto", "write"],
     );
-    ctx.builtins.insert("_io._RawIOBase".into(), raw);
     let file = class(ctx, module, "FileIO", raw, file_io::METHODS);
-    ctx.builtins.insert("_io.FileIO".into(), file);
-    let buffered = class(ctx, module, "BufferedIOBase", io, buffered_io::METHODS);
-    ctx.builtins.insert("_io._BufferedIOBase".into(), buffered);
+    let buffered = class(ctx, module, "_BufferedIOBase", io, buffered_io::METHODS);
+    let reader = class(
+        ctx,
+        module,
+        "BufferedReader",
+        buffered,
+        native_reader::METHODS,
+    );
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
-    ctx.builtins.insert("_io.BytesIO".into(), bytes_io);
     let text = class(
         ctx,
         module,
-        "TextIOBase",
+        "_TextIOBase",
         io,
-        &["encoding", "errors", "newlines", "detach"],
+        &[
+            "encoding", "errors", "newlines", "detach", "read", "readline", "write",
+        ],
     );
-    ctx.builtins.insert("_io._TextIOBase".into(), text);
     let wrapper = class(ctx, module, "TextIOWrapper", text, text_wrapper::METHODS);
-    ctx.builtins.insert("_io.TextIOWrapper".into(), wrapper);
     let string_io = class(
         ctx,
         module,
@@ -185,30 +286,82 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
             "line_buffering",
         ],
     );
-    ctx.builtins.insert("_io.StringIO".into(), string_io);
+    // Native open and intrinsic file objects retain their initial _io classes.
+    let initial = !ctx.builtins.contains_key("_io._IOBase");
+    let opener = if initial {
+        ctx.builtins
+            .insert("_io.open.__self__".into(), module_object);
+        ctx.builtin("open")
+    } else {
+        let callable = ctx.alloc(Value::IoMethod {
+            owner: reader,
+            name: "open",
+        });
+        ctx.alloc(Value::Method {
+            callable,
+            receiver: module_object,
+            explicit: false,
+        })
+    };
+    ctx.bind(module, "open", opener);
+    if initial {
+        for (name, class) in [
+            ("_io._IOBase", io),
+            ("_io._RawIOBase", raw),
+            ("_io._BufferedIOBase", buffered),
+            ("_io._TextIOBase", text),
+            ("_io.BufferedReader", reader),
+            ("_io.FileIO", file),
+            ("_io.BytesIO", bytes_io),
+            ("_io.TextIOWrapper", wrapper),
+            ("_io.StringIO", string_io),
+        ] {
+            ctx.builtins.insert(name.into(), class);
+        }
+    }
 }
 
-fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'static str]) -> Id {
-    let scope = ctx.scope("io", Some(module));
+/// The native classes are immutable; Python I/O ABCs and user subclasses remain mutable.
+pub(in super::super) fn check_class_write(ctx: &Context, object: Id, attr: &str) -> Result<()> {
+    if let Value::Class { io_kind: Some(_), name, .. } = ctx.heap.get(object) {
+        return Err(Error::new(
+            "TypeError",
+            format!("cannot set '{attr}' attribute of immutable type '_io.{name}'"),
+        ));
+    }
+    Ok(())
+}
+
+fn class(
+    ctx: &mut Context,
+    module: Id,
+    name: &'static str,
+    base: Id,
+    methods: &[&'static str],
+) -> Id {
+    let scope = ctx.scope("_io", Some(module));
     let owner = ctx
         .allocate_class(name.into(), scope, vec![base])
         .expect("a single I/O base has a linearization");
-    let module_name = ctx.text(
-        if matches!(name, "StringIO" | "BytesIO" | "TextIOWrapper" | "FileIO") {
-            "_io"
-        } else {
-            "io"
-        },
-    );
+    let Value::Class { io_kind, .. } = ctx.heap.get_mut(owner) else {
+        unreachable!()
+    };
+    *io_kind = Some(name.trim_start_matches('_'));
+    if let Some(doc) = docstrings::base(name) {
+        let doc = ctx.text(doc);
+        ctx.bind(scope, "__doc__", doc);
+    }
+    let module_name = ctx.text("_io");
     ctx.bind(scope, "__module__", module_name);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
     let wrapper = name == "TextIOWrapper";
     let descriptor_owner = match name {
-        "TextIOBase" => "_io._TextIOBase",
+        "_TextIOBase" => "_io._TextIOBase",
         "StringIO" => "_io.StringIO",
         "FileIO" => "_io.FileIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
+        "BufferedReader" => "_io.BufferedReader",
         "BytesIO" => "_io.BytesIO",
         _ => "_io._IOBase",
     };
@@ -219,6 +372,7 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
             "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
         ) || descriptor_owner == "_io.FileIO"
             && matches!(name, "mode" | "closefd" | "_blksize")
+            || descriptor_owner == "_io.BufferedReader" && matches!(name, "raw" | "mode" | "name")
             || wrapper && text_wrapper::property(name)
         {
             let set = (wrapper && name == "_CHUNK_SIZE").then(|| {
@@ -242,6 +396,66 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     owner
 }
 
+/// Text and buffered bases validate their C signatures before rejecting a transfer.
+fn unsupported_transfer(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    text: bool,
+) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes at most 1 argument ({count} given)"),
+        ));
+    }
+    if name == "write" {
+        let Some(&value) = args.first() else {
+            return Err(Error::new(
+                "TypeError",
+                "write() takes exactly 1 positional argument (0 given)",
+            ));
+        };
+        if text {
+            let nul = match ctx.heap.get(ctx.scalar_value(value)) {
+                Value::Str(s) => s.contains('\0'),
+                Value::SurrogateStr(_) => ctx
+                    .encode_utf8_codepoints(value, false, "strict")?
+                    .contains(&0),
+                _ => {
+                    let kind = if value == NONE {
+                        "None"
+                    } else {
+                        ctx.type_name(value)
+                    };
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("write() argument 1 must be str, not {kind}"),
+                    ));
+                }
+            };
+            if nul {
+                return Err(Error::new("ValueError", "embedded null character"));
+            }
+        }
+    } else if let Some((key, _)) = kwargs.first() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() got an unexpected keyword argument '{key}'"),
+        ));
+    } else if let Some(&size) = args.first() {
+        ctx.index_integer(size)?
+            .to_i64()
+            .and_then(|n| i32::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new("OverflowError", "Python int too large to convert to C int")
+            })?;
+    }
+    Err(Error::new("UnsupportedOperation", name))
+}
+
 fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
     let message = match name {
         "read" | "read1" | "readline" | "readlines" | "truncate" if n > 1 => {
@@ -263,20 +477,25 @@ fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
 }
 
 /// IOBase consumes the receiver's actual iterator and each writer override.
-fn lines(
+pub(super) fn lines(
     ctx: &mut Context,
     receiver: Id,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let (owner, name) = if let Some(method) = name.strip_prefix("file.") {
+        (ctx.type_name(receiver).trim_start_matches("_io."), method)
+    } else {
+        ("_IOBase", name)
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("_IOBase.{name}() takes no keyword arguments"),
+            format!("{owner}.{name}() takes no keyword arguments"),
         ));
     }
-    argument_count("_IOBase", name, args.len())?;
+    argument_count(owner, name, args.len())?;
     if matches!(name, "__iter__" | "writelines") {
         let closed = ctx.lookup_attr(receiver, "closed")?;
         if ctx.truth(closed)? {
@@ -298,9 +517,13 @@ fn lines(
         }
         "writelines" => {
             let iterator = ctx.iterator(args[0])?;
+            ctx.heap.keep(iterator);
+            let step = ctx.heap.temporary_mark();
             while let Some(line) = ctx.next_item(iterator)? {
+                ctx.heap.keep(line);
                 let write = ctx.lookup_attr(receiver, "write")?;
                 ctx.call(write, vec![line], Vec::new())?;
+                ctx.heap.release_temporaries_since(step);
             }
             Ok(NONE)
         }
@@ -336,33 +559,64 @@ pub(in super::super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let bytes_io = ctx.builtins.get("_io.BytesIO").copied();
-    let raw = ctx.builtins.get("_io._RawIOBase") == Some(&owner);
-    let buffered = ctx.builtins.get("_io._BufferedIOBase") == Some(&owner);
+    if name == "open" {
+        let Some((_, arguments)) = args.split_first() else {
+            return Err(Error::new("TypeError", "_io.open needs its module"));
+        };
+        let file = open(ctx, arguments, kwargs)?;
+        if ctx.heap.get(file).native_io_class_name() == Some("_io.BufferedReader")
+            && Some(&owner) != ctx.builtins.get("_io.BufferedReader")
+        {
+            // Keep the original file cursor, but use the class captured by this _io.open.
+            let reader = ctx.instance(owner, None);
+            let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(reader) else {
+                unreachable!()
+            };
+            *memory_stream = Some(MemoryStream::BufferedReader(file));
+            return Ok(reader);
+        }
+        return Ok(file);
+    }
+    let owner_kind = ctx.heap.get(owner).io_kind();
+    let raw = owner_kind == Some("RawIOBase");
+    let buffered = owner_kind == Some("BufferedIOBase");
+    let text = owner_kind == Some("TextIOBase");
+    let bytes_io = owner_kind == Some("BytesIO");
     let descriptor = if raw {
         Some("_RawIOBase")
     } else if buffered {
         Some("_BufferedIOBase")
-    } else if bytes_io == Some(owner) {
+    } else if text {
+        Some("_TextIOBase")
+    } else if owner_kind == Some("BufferedReader") {
+        Some("BufferedReader")
+    } else if bytes_io {
         Some("BytesIO")
     } else {
         None
     };
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
-            (Some("BytesIO"), "__init__") => {
-                "descriptor '__init__' of '_io.BytesIO' object needs an argument".into()
+            (Some(class @ ("BytesIO" | "BufferedReader")), "__init__") => {
+                format!("descriptor '__init__' of '_io.{class}' object needs an argument")
             }
             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
             _ => format!("unbound I/O method {name} needs a receiver"),
         };
         return Err(Error::new("TypeError", message));
     };
-    if !ctx.instance_of(receiver, owner) {
+    let receiver_class = match ctx.heap.get(receiver) {
+        Value::Instance { class, .. } => Some(*class),
+        value => value
+            .native_io_class_name()
+            .and_then(|name| ctx.builtins.get(name).copied()),
+    };
+    let Some(receiver_class) = receiver_class.filter(|&class| ctx.direct_subclass(class, owner))
+    else {
         let actual = ctx.type_name(receiver);
         let message = match (descriptor, name) {
-            (Some("BytesIO"), "__init__") => format!(
-                "descriptor '__init__' requires a '_io.BytesIO' object but received a '{actual}'"
+            (Some(class @ ("BytesIO" | "BufferedReader")), "__init__") => format!(
+                "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
             ),
             (Some(class), _) => format!(
                 "descriptor '{name}' for '_io.{class}' objects doesn't apply to a '{actual}' object"
@@ -370,6 +624,9 @@ pub(in super::super) fn call(
             _ => format!("invalid receiver for {name}"),
         };
         return Err(Error::new("TypeError", message));
+    };
+    if owner_kind == Some("BufferedReader") {
+        return native_reader::call(ctx, receiver, name, rest, kwargs);
     }
     if raw && matches!(name, "write" | "readinto") {
         if !kwargs.is_empty() {
@@ -380,9 +637,7 @@ pub(in super::super) fn call(
         }
         return Err(Error::new("NotImplementedError", ""));
     }
-    if bytes_io != Some(owner)
-        && matches!(name, "__iter__" | "__next__" | "readlines" | "writelines")
-    {
+    if !bytes_io && matches!(name, "__iter__" | "__next__" | "readlines" | "writelines") {
         return lines(ctx, receiver, name, rest, kwargs);
     }
     if name == "__del__" {
@@ -407,50 +662,55 @@ pub(in super::super) fn call(
         }
         return Ok(NONE);
     }
-    if name == "detach" && (ctx.builtins.get("_io._TextIOBase") == Some(&owner) || buffered) {
+    if name == "detach" && (text || buffered) {
         if !rest.is_empty() || !kwargs.is_empty() {
             return Err(Error::new("TypeError", "detach() takes no arguments"));
         }
         return Err(Error::new("UnsupportedOperation", "detach"));
     }
+    if (text || buffered) && matches!(name, "write" | "read" | "read1" | "readline") {
+        return unsupported_transfer(ctx, name, rest, kwargs, text);
+    }
     if buffered {
         return buffered_io::call(ctx, receiver, name, rest, kwargs);
     }
-    if ctx.builtins.get("_io._TextIOBase") == Some(&owner) {
+    if text {
         // The base class getters return None even on a closed or uninitialized subclass.
         return Ok(NONE);
     }
-    if ctx
-        .builtins
-        .get("_io.TextIOWrapper")
-        .is_some_and(|&class| ctx.instance_of(receiver, class))
-    {
+    let Value::Class { ancestors, .. } = ctx.heap.get(receiver_class) else {
+        unreachable!()
+    };
+    let layout = std::iter::once(&receiver_class)
+        .chain(ancestors)
+        .filter_map(|&class| ctx.heap.get(class).io_kind())
+        .find(|kind| {
+            matches!(
+                *kind,
+                "TextIOWrapper" | "FileIO" | "BytesIO" | "StringIO" | "BufferedReader"
+            )
+        });
+    if layout == Some("BufferedReader") && matches!(name, "__enter__" | "__exit__" | "writable") {
+        return native_reader::call(ctx, receiver, name, rest, kwargs);
+    }
+    if layout == Some("TextIOWrapper") {
         if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {
             return super::files::text_method(ctx, name, args, kwargs);
         }
         return text_wrapper::call(ctx, receiver, name, rest, kwargs);
     }
-    if let Some(&file) = ctx.builtins.get("_io.FileIO")
-        && (owner == file
-            || matches!(name, "__enter__" | "__exit__" | "flush")
-                && ctx.instance_of(receiver, file))
+    if owner_kind == Some("FileIO")
+        || matches!(name, "__enter__" | "__exit__" | "flush") && layout == Some("FileIO")
     {
         return file_io::call(ctx, receiver, name, rest, kwargs);
     }
-    if bytes_io == Some(owner)
-        || matches!(name, "__enter__" | "__exit__")
-            && bytes_io.is_some_and(|class| ctx.instance_of(receiver, class))
-    {
+    if bytes_io || matches!(name, "__enter__" | "__exit__") && layout == Some("BytesIO") {
         return bytes_io::call(ctx, receiver, name, rest, kwargs);
     }
     if name == "__init__" {
         return string_io_init(ctx, receiver, rest, kwargs);
     }
-    if ctx
-        .builtins
-        .get("_io.StringIO")
-        .is_some_and(|&class| ctx.instance_of(receiver, class))
-    {
+    if layout == Some("StringIO") {
         return string_io_method(ctx, receiver, name, rest, kwargs);
     }
     let arity = match name {

@@ -26,6 +26,13 @@ fn safe_bytes(ctx: &mut Context, safe: Option<Id>, default: &'static [u8]) -> Re
     if let Value::Str(s) = ctx.heap.get(id) {
         return Ok(s.bytes().filter(u8::is_ascii).collect());
     }
+    if let Value::SurrogateStr(points) = ctx.heap.get(id) {
+        return Ok(points
+            .iter()
+            .filter(|&&point| point < 128)
+            .map(|&point| point as u8)
+            .collect());
+    }
     if let Some(bytes) = octets(ctx, id)
         && ctx.slot(id, "__iter__").is_none()
     {
@@ -160,10 +167,11 @@ pub(super) fn quote(
     errors: Option<Id>,
 ) -> Result<Id> {
     let storage = ctx.string_storage(id);
-    let boxed_text = storage.is_some_and(|v| v != id);
+    let encode_text_object =
+        storage.is_some_and(|v| v != id || matches!(ctx.heap.get(v), Value::SurrogateStr(_)));
     let boxed_bytes = ctx.scalar_value(id) != id && octets(ctx, id).is_some();
     let boxed_safe = safe.is_some_and(|v| matches!(ctx.heap.get(v), Value::Instance { .. }));
-    if name == "quote_plus" && (boxed_text || boxed_bytes || boxed_safe) {
+    if name == "quote_plus" && (encode_text_object || boxed_bytes || boxed_safe) {
         let space = ctx.text(" ");
         let safe = safe.unwrap_or_else(|| ctx.text(""));
         let byte_space = ctx.alloc(Value::Bytes(vec![b' ']));
@@ -184,7 +192,7 @@ pub(super) fn quote(
         let plus = ctx.text("+");
         return ctx.call(replace, vec![space, plus], Vec::new());
     }
-    if boxed_text && name != "quote_from_bytes" {
+    if encode_text_object && name != "quote_from_bytes" {
         if !ctx.truth(id)? {
             return Ok(id);
         }

@@ -17,6 +17,21 @@ pub(super) fn struct_time(ctx: &mut Context, values: Vec<Id>, zone: Id, offset: 
     })
 }
 
+/// Format local civil fields with fixed English names and the caller's year width.
+pub(super) fn ctime_text(fields: [i64; 9], year_width: usize) -> String {
+    // CPython uses fixed English abbreviations regardless of LC_TIME.
+    const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let [year, month, day, hour, minute, second, weekday, ..] = fields;
+    let weekday = DAYS[weekday as usize];
+    let month = MONTHS[(month - 1) as usize];
+    // _asctime formats the calendar year as a C int.
+    let year = year as libc::c_int;
+    format!("{weekday} {month} {day:2} {hour:02}:{minute:02}:{second:02} {year:0year_width$}")
+}
+
 fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [sequence, attributes] = bind("structseq", args, kwargs, ["sequence", "dict"])?;
     let sequence = sequence.ok_or_else(|| {
@@ -130,6 +145,7 @@ pub(super) fn call(
     let function = match name {
         "time" => "time.time",
         "time_ns" => "time.time_ns",
+        "sleep" => "time.sleep",
         "monotonic" => "time.monotonic",
         "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
@@ -142,6 +158,52 @@ pub(super) fn call(
         ));
     }
     match name {
+        "sleep" => {
+            let [seconds] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "time.sleep() takes exactly one argument ({} given)",
+                        args.len()
+                    ),
+                ));
+            };
+            audit::event(ctx, "time.sleep", args)?;
+            if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
+                crate::objects::time::sleep_float(*value)?;
+            } else {
+                let overflow = || {
+                    Error::new(
+                        "OverflowError",
+                        "timestamp too large to convert to C PyTime_t",
+                    )
+                };
+                let seconds = match ctx.index_integer(*seconds) {
+                    Ok(seconds) => seconds,
+                    Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+                        let class = ctx.exact_type(*seconds)?;
+                        let name = super::qualified_type(ctx, class)?;
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "'{}' object cannot be interpreted as an integer or float",
+                                ctx.str_value(name)?
+                            ),
+                        ));
+                    }
+                    Err(error) if ctx.is_builtin_error(&error, "OverflowError") => {
+                        return Err(overflow());
+                    }
+                    Err(error) => return Err(error),
+                };
+                let nanos = seconds
+                    .to_i64()
+                    .and_then(|n| n.checked_mul(1_000_000_000))
+                    .ok_or_else(overflow)?;
+                crate::objects::time::sleep_ns(nanos)?;
+            }
+            Ok(NONE)
+        }
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),
         "time_ns" if args.is_empty() => {
             let nanos = i64::try_from(wall_time_ns()).map_err(|_| {
@@ -221,20 +283,7 @@ pub(super) fn call(
             }
             let parts = civil(ctx, args.first().copied().unwrap_or(NONE), name == "gmtime")?;
             if name == "ctime" {
-                // CPython uses fixed English abbreviations regardless of LC_TIME.
-                const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-                const MONTHS: [&str; 12] = [
-                    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-                    "Dec",
-                ];
-                let [year, month, day, hour, minute, second, weekday, ..] = parts.fields;
-                let weekday = DAYS[weekday as usize];
-                let month = MONTHS[(month - 1) as usize];
-                // _asctime formats the calendar year as a C int.
-                let year = year as libc::c_int;
-                return Ok(ctx.text(format!(
-                    "{weekday} {month} {day:2} {hour:02}:{minute:02}:{second:02} {year}"
-                )));
+                return Ok(ctx.text(ctime_text(parts.fields, 0)));
             }
             let fields = parts.fields.map(|n| ctx.int(n));
             let zone = parts.zone.map_or(NONE, |s| ctx.text(s.as_str()));

@@ -1,4 +1,4 @@
-//! Integer, pointer, byte string, and padding fields in native struct records.
+//! Layout and decoding of native and standard struct records.
 
 #[derive(Clone, Copy)]
 struct Field {
@@ -13,6 +13,7 @@ struct Field {
 pub(crate) enum UnpackedField {
     Integer(u64),
     Signed(i64),
+    Float(f64),
     Bytes(Vec<u8>),
 }
 
@@ -73,7 +74,8 @@ impl StructFormat {
                 b'L' | b'l' => (4, 1),
                 b'B' => (1, 1),
                 b'H' => (2, align_of::<u16>()),
-                b'I' => (4, align_of::<u32>()),
+                b'i' | b'I' => (4, align_of::<u32>()),
+                b'd' => (8, align_of::<f64>()),
                 b'Q' => (8, align_of::<u64>()),
                 b'x' => (1, 1),
                 b'P' if prefix == b'@' => (size_of::<usize>(), align_of::<usize>()),
@@ -150,12 +152,14 @@ impl StructFormat {
                 word[8 - field.len()..].copy_from_slice(field);
                 u64::from_be_bytes(word)
             };
-            result.push(if code == b'l' {
-                // Move the field's sign bit into bit 63 before the arithmetic shift.
-                let shift = (8 - field.len()) * 8;
-                UnpackedField::Signed(((value << shift) as i64) >> shift)
-            } else {
-                UnpackedField::Integer(value)
+            result.push(match code {
+                b'i' | b'l' => {
+                    // Move the field's sign bit into bit 63 before the arithmetic shift.
+                    let shift = (8 - field.len()) * 8;
+                    UnpackedField::Signed(((value << shift) as i64) >> shift)
+                }
+                b'd' => UnpackedField::Float(f64::from_bits(value)),
+                _ => UnpackedField::Integer(value),
             });
         }
         Ok(result)

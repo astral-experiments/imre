@@ -1,6 +1,11 @@
 import contextlib
+import time
 import warnings
+from collections import ChainMap
 from unittest import SkipTest, TestCase, _enterCleanupContext
+
+DIFF_OMITTED = ('\nDiff is %s characters long. '
+                 'Set self.maxDiff to None to see it.')
 
 _module_cleanups = []
 
@@ -26,10 +31,86 @@ def doModuleCleanups():
 
 
 # CPython 3.14.5 Lib/unittest/case.py. See stdlib/docstrings/LICENSE.
+def expectedFailure(test_item):
+    test_item.__unittest_expecting_failure__ = True
+    return test_item
+
+
+class _UnexpectedSuccess(Exception):
+    pass
+
+
+def _addExpectedFailure(self, result, exc_info):
+    try:
+        callback = result.addExpectedFailure
+    except AttributeError:
+        warnings.warn("TestResult has no addExpectedFailure method, reporting as passes", RuntimeWarning)
+        result.addSuccess(self)
+    else:
+        callback(self, exc_info)
+
+
+def _addUnexpectedSuccess(self, result):
+    try:
+        callback = result.addUnexpectedSuccess
+    except AttributeError:
+        import sys
+        warnings.warn("TestResult has no addUnexpectedSuccess method, reporting as failure", RuntimeWarning)
+        try:
+            raise _UnexpectedSuccess from None
+        except _UnexpectedSuccess:
+            result.addFailure(self, sys.exc_info())
+    else:
+        callback(self)
+
+
 class _ShouldStop(Exception):
     """
     The test should stop.
     """
+
+
+_subtest_msg_sentinel = object()
+
+
+class _OrderedChainMap(ChainMap):
+    def __iter__(self):
+        seen = set()
+        for mapping in self.maps:
+            for key in mapping:
+                if key not in seen:
+                    seen.add(key)
+                    yield key
+
+
+class _SubTest(TestCase):
+    def __init__(self, test_case, message, params):
+        super().__init__()
+        self.test_case = test_case
+        self.failureException = test_case.failureException
+        self._message = message
+        self.params = params
+
+    def _subDescription(self):
+        parts = []
+        if self._message is not _subtest_msg_sentinel:
+            parts.append("[" + str(self._message) + "]")
+        if self.params:
+            items = [key + "=" + repr(self.params[key]) for key in self.params]
+            parts.append("(" + ", ".join(items) + ")")
+        return " ".join(parts) or "(<subtest>)"
+
+    def id(self):
+        return self.test_case.id() + " " + self._subDescription()
+
+    def __str__(self):
+        return str(self.test_case) + " " + self._subDescription()
+
+    def shortDescription(self):
+        return self.test_case.shortDescription()
+
+    def runTest(self):
+        raise NotImplementedError("subtests cannot be run directly")
 
 
 class _Outcome(object):
@@ -84,10 +165,31 @@ class _TestPartExecutor(contextlib.ContextDecorator):
             outcome.success = outcome.success and self.old_success
 
 
+# From CPython 3.14.5 Lib/unittest/case.py. See ../docstrings/LICENSE.
+def _addDuration(self, result, elapsed):
+    try:
+        addDuration = result.addDuration
+    except AttributeError:
+        warnings.warn("TestResult has no addDuration method",
+                      RuntimeWarning)
+    else:
+        addDuration(self, elapsed)
+
+
+TestCase._addDuration = _addDuration
+
+
 def _addSkip(result, test_case, reason):
     addSkip = getattr(result, 'addSkip', None)
     if addSkip is not None:
         addSkip(test_case, reason)
+        from unittest import TextTestResult
+        if isinstance(result, TextTestResult):
+            status = "skipped " + repr(reason)
+            if isinstance(test_case, _SubTest):
+                result._markSubTest(test_case._subDescription(), "s", status)
+            else:
+                result._mark("s", status)
     else:
         warnings.warn("TestResult has no addSkip method, skips not reported",
                       RuntimeWarning, 2)

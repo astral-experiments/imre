@@ -18,7 +18,7 @@ declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
-declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
+declare i64 @imre_dyn_class_annotation(ptr, i64, i64, i64, i32)
 declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
 declare i1 @imre_dyn_failed(ptr)
@@ -28,7 +28,7 @@ declare void @imre_dyn_discard_truth(ptr, i64)
 declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
-declare i64 @imre_dyn_call_at(ptr, i64, i64, i64, i64, ptr)
+declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
@@ -72,6 +72,15 @@ pub(crate) fn emit(
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
+        if source.contains("nonlocal") {
+            statements::type_parameters::check_nonlocals(source, &body)
+                .map_err(|error| format!("{}:{error}", path.display()))?;
+        }
+        if let Some(param) = &private_names.duplicate_type_parameter {
+            let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
+            let error = crate::frontend::error(source, param, &reason);
+            return Err(format!("{}:{error}", path.display()));
+        }
         let location = SourceMap {
             unit,
             has_templates,
@@ -113,7 +122,13 @@ enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
     GeneratorFunction(&'a [ast::Stmt]),
-    Annotations(Vec<(&'a str, &'a ast::Expr)>),
+    ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
+    Annotations(
+        Vec<(&'a str, &'a ast::Expr)>,
+        Option<statements::ClassBindings>,
+    ),
+    AnnotationValue(&'a ast::Expr),
+    AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
     Generator(&'a [ast::Comprehension], &'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
@@ -218,6 +233,8 @@ impl Output {
         let mut f = Function {
             output: self,
             source,
+            class_sites: None,
+            annotation_lookup: false,
             class_locals: match &body {
                 Body::Namespace(stmts) if !prefix.is_empty() => {
                     Some(statements::class_locals(stmts))
@@ -247,19 +264,33 @@ impl Output {
                     f.bind("__doc__", &value);
                 }
                 f.declare_globals(stmts);
-                f.statements(stmts);
+                if f.class_locals.is_some() && !f.source.string_annotations {
+                    f.annotated_class_body(stmts);
+                } else {
+                    f.statements(stmts);
+                }
             }
             Body::Statements(stmts) => {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
             Body::GeneratorFunction(_) => {}
-            Body::Annotations(entries) => f.annotations(&entries),
+            Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
+            Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
             }
             Body::Generator(generators, element) => f.generator_step(generators, element),
+            Body::AnnotationThunk(entry, range) => {
+                f.checkpoint(&range);
+                let value = f.checked(&format!("call i64 {entry}(ptr %ctx, i64 {})", f.scope));
+                f.end(&format!("ret i64 {value}"));
+            }
+            Body::AnnotationValue(expr) => {
+                let value = f.expr(expr);
+                f.end(&format!("ret i64 {value}"));
+            }
             Body::Expression(expr) => {
                 f.checkpoint(expr);
                 let value = f.expr(expr);
@@ -298,7 +329,9 @@ struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
     prefix: String,
-    class_locals: Option<BTreeSet<String>>,
+    class_sites: Option<statements::class_annotations::ClassSites>,
+    class_locals: Option<statements::ClassBindings>,
+    annotation_lookup: bool,
     ir: String,
     block: String,
     error: String,
@@ -393,19 +426,13 @@ impl Function<'_, '_> {
     fn op_at(&mut self, name: &str, args: &[&str], span: Option<[usize; 4]>) -> String {
         let op = self.output.data(name.as_bytes());
         let arg = |index| *args.get(index).unwrap_or(&"0");
-        let fixed = format!(
-            "ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}",
+        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        self.checked(&format!(
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}, ptr {position})",
             arg(0),
             arg(1),
             arg(2)
-        );
-        let invocation = if let Some(span) = span {
-            let position = self.output.position(span);
-            format!("call i64 @imre_dyn_op_at({fixed}, ptr {position})")
-        } else {
-            format!("call i64 @imre_dyn_op({fixed})")
-        };
-        self.checked(&invocation)
+        ))
     }
 
     fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
@@ -437,14 +464,16 @@ impl Function<'_, '_> {
     }
 
     fn lookup(&mut self, name: &str) -> String {
-        let op = if self
-            .class_locals
-            .as_ref()
-            .is_some_and(|locals| locals.contains(name))
-        {
-            "lookup_class_local"
-        } else {
-            "lookup"
+        let op = match &self.class_locals {
+            Some(class) if self.annotation_lookup && class.globals.contains(name) => {
+                "lookup_annotation_global"
+            }
+            Some(class) if self.annotation_lookup && class.locals.contains(name) => {
+                "lookup_class_annotation_global"
+            }
+            Some(_) if self.annotation_lookup => "lookup_class_annotation",
+            Some(class) if class.locals.contains(name) => "lookup_class_local",
+            _ => "lookup",
         };
         let name = self.code_name(name);
         self.op(op, &[&self.scope.clone(), &name])
@@ -577,6 +606,7 @@ impl Function<'_, '_> {
         span: Option<[usize; 4]>,
     ) -> String {
         let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
-        self.checked(&format!("call i64 @imre_dyn_call_at(ptr %ctx, i64 {callable}, i64 {args}, i64 {kwargs}, i64 {mark}, ptr {position})"))
+        let scope = &self.scope;
+        self.checked(&format!("call i64 @imre_dyn_scoped_call_at(ptr %ctx, i64 {callable}, i64 {args}, i64 {kwargs}, i64 {mark}, ptr {position}, i64 {scope})"))
     }
 }

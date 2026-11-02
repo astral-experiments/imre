@@ -2,6 +2,22 @@
 
 use super::*;
 
+/// A sealed literal must still be valid when checked in unreachable code.
+fn boxed_lookahead(spelling: &str, verbose: bool) -> bool {
+    let Ok((source, names)) =
+        imre_regex::lookahead_source(spelling, verbose, imre_regex::Alphabet::Unicode, false)
+    else {
+        return false;
+    };
+    let mut seen = HashSet::new();
+    let valid_names = names.iter().flatten().all(|name| {
+        (ruff_python_stdlib::identifiers::is_identifier(name)
+            || ruff_python_stdlib::keyword::is_keyword(name))
+            && seen.insert(name)
+    });
+    valid_names && fancy_regex::Regex::new(&source).is_ok_and(|re| re.captures_len() == names.len())
+}
+
 #[derive(Clone)]
 pub(super) struct CaptureLayout {
     groups: std::rc::Rc<[crate::fixed_regex::Capture]>,
@@ -253,8 +269,13 @@ impl Checker<'_> {
             ));
         };
         check_string(literal, self.source)?;
-        let pattern = crate::fixed_regex::translate(literal.value.to_str(), verbose)
-            .map_err(|message| error(self.source, literal, &message))?;
+        let spelling = literal.value.to_str();
+        let pattern = crate::fixed_regex::translate(spelling, verbose).map_err(|message| {
+            if boxed_lookahead(spelling, verbose) {
+                return self.object_builtin_error("regex lookahead", literal);
+            }
+            error(self.source, literal, &message)
+        })?;
         self.globals
             .regex_literals
             .borrow_mut()

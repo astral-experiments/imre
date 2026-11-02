@@ -1,10 +1,12 @@
 //! Box the entries and stateless decoders of the native codec registry.
 use std::collections::HashMap;
 
+mod bytes_escape;
+mod raw_unicode_escape;
 mod surrogate_utf8;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, CodecInfo, Object};
+use crate::objects::{Codec, CodecInfo, DecodeIssue, Object, StrEncoder, Utf16Order};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
@@ -155,7 +157,7 @@ pub(super) fn builtin_handler(
     } else {
         false
     };
-    let Value::Bytes(bytes) = ctx.heap.get(object) else {
+    let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(object)) else {
         return Err(type_error(
             "UnicodeError 'object' attribute must be a bytes",
         ));
@@ -263,21 +265,82 @@ pub(in crate::dynamic) fn encode_text(
         .map(|id| ctx.str_value(id))
         .transpose()?
         .unwrap_or("strict");
+    let encoder = StrEncoder::lookup(encoding, errors)?;
     if let Ok(text) = ctx.str_value(id) {
-        return Ok(crate::objects::Codec::encode_str(text, encoding, errors)?);
+        return Ok(encoder.encode_str(text, errors)?);
     }
-    if encoding.contains('\0') || errors.contains('\0') {
-        return Err(Error::new("ValueError", "embedded null character"));
-    }
-    let crate::objects::Codec::Utf8 { signature } = crate::objects::Codec::lookup(encoding)? else {
-        return Err(Error::new(
+    let errors = errors.to_owned();
+    match encoder {
+        StrEncoder::Utf16(order) => encode_utf16_codepoints(ctx, id, order, &errors),
+        StrEncoder::Registered(Codec::Utf8 { signature }) => {
+            ctx.encode_utf8_codepoints(id, signature, &errors)
+        }
+        StrEncoder::Registered(codec)
+            if matches!(errors.as_str(), "strict" | "surrogateescape")
+                && !ctx.codec_entries.handlers.contains_key(&errors) =>
+        {
+            ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
+        }
+        StrEncoder::Registered(codec)
+            if matches!(errors.as_str(), "ignore" | "replace" | "backslashreplace") =>
+        {
+            // Apply the built-in handler to lone surrogates, then encode the scalar result.
+            let replaced = ctx.encode_utf8_codepoints(id, false, &errors)?;
+            let text = std::str::from_utf8(&replaced).expect("these handlers produce scalar text");
+            Ok(StrEncoder::Registered(codec).encode_str(text, &errors)?)
+        }
+        _ => Err(Error::new(
             "NotImplementedError",
             "encoding non-scalar strings with this codec is unsupported",
-        ));
-    };
-    // Encoding can allocate a Python exception, so release the borrow of the heap.
-    let errors = errors.to_owned();
-    ctx.encode_utf8_codepoints(id, signature, &errors)
+        )),
+    }
+}
+
+/// UTF-16 reports one surrogate at a time, even for consecutive high and low surrogates.
+fn encode_utf16_codepoints(
+    ctx: &mut Context,
+    id: Id,
+    order: Utf16Order,
+    errors: &str,
+) -> Result<Vec<u8>> {
+    let points = ctx.string_codepoints(id)?;
+    let mut bytes = Vec::new();
+    for (i, &point) in points.iter().enumerate() {
+        if let Some(ch) = char::from_u32(point) {
+            order.append(&mut bytes, ch.encode_utf16(&mut [0; 2]).iter().copied())?;
+            continue;
+        }
+        if ctx.codec_entries.handlers.contains_key(errors) {
+            return Err(Error::new(
+                "NotImplementedError",
+                "custom UTF-16 encoding error handlers are unsupported",
+            ));
+        }
+        match errors {
+            "strict" | "surrogateescape" => {
+                return Err(ctx.string_encoding_error(
+                    id,
+                    order.name(),
+                    "surrogates not allowed",
+                    point,
+                    i..i + 1,
+                ));
+            }
+            "ignore" => (),
+            "replace" => order.append(&mut bytes, [u16::from(b'?')])?,
+            "surrogatepass" => order.append(&mut bytes, [point as u16])?,
+            "backslashreplace" | "namereplace" => order.append(
+                &mut bytes,
+                compact_str::format_compact!("\\u{point:04x}").encode_utf16(),
+            )?,
+            "xmlcharrefreplace" => order.append(
+                &mut bytes,
+                compact_str::format_compact!("&#{point};").encode_utf16(),
+            )?,
+            _ => return Err(crate::objects::unknown_handler(errors).into()),
+        }
+    }
+    Ok(bytes)
 }
 
 /// codecs.encode/decode use the registered codec directly, bypassing methods on the input.
@@ -312,14 +375,14 @@ pub(super) fn transform(
             }
         }
     }
+    if name == "decode" {
+        return decode_named(ctx, ctx.scalar_value(input), encoding, errors);
+    }
     let spelling = encoding
         .map(|id| ctx.str_value(id))
         .transpose()?
         .unwrap_or("utf-8");
     let codec = CodecInfo::lookup(spelling)?.codec();
-    if name == "decode" {
-        return decode_bytes(ctx, codec, ctx.scalar_value(input), errors);
-    }
     if ctx.string_storage(input).is_none() {
         let encoder = match codec {
             Codec::Utf8 { .. } => "utf_8",
@@ -336,13 +399,30 @@ pub(super) fn transform(
     Ok(ctx.alloc(Value::Bytes(result)))
 }
 
-/// Regular codecs share the typed implementation. Registered Python callbacks reenter the native heap.
-pub(in crate::dynamic) fn decode_bytes(
+/// Boxed decoding can represent lone surrogates from raw Unicode escapes.
+pub(in crate::dynamic) fn decode_named(
     ctx: &mut Context,
-    codec: Codec,
     input: Id,
+    encoding: Option<Id>,
     errors: Option<Id>,
 ) -> Result<Id> {
+    let spelling = encoding
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("utf-8");
+    if spelling.contains('\0') {
+        return Err(Error::new("ValueError", "embedded null character"));
+    }
+    let key = crate::objects::normalize_codec(spelling)?;
+    if key == "raw_unicode_escape" {
+        let name = error_name(ctx, errors)?.to_owned();
+        return ctx.with_buffer_export(input, |ctx| raw_unicode_escape::decode(ctx, input, &name));
+    }
+    let codec = Codec::by_key(&key, spelling)?;
+    decode_bytes(ctx, codec, input, errors)
+}
+
+fn error_name(ctx: &Context, errors: Option<Id>) -> Result<&str> {
     let name = errors
         .map(|id| ctx.str_value(id))
         .transpose()?
@@ -350,6 +430,17 @@ pub(in crate::dynamic) fn decode_bytes(
     if name.contains('\0') {
         return Err(Error::new("ValueError", "embedded null character"));
     }
+    Ok(name)
+}
+
+/// Regular codecs share the typed implementation. Registered Python callbacks reenter the native heap.
+pub(in crate::dynamic) fn decode_bytes(
+    ctx: &mut Context,
+    codec: Codec,
+    input: Id,
+    errors: Option<Id>,
+) -> Result<Id> {
+    let name = error_name(ctx, errors)?;
     if let Codec::Utf8 { signature } = codec
         && name == "surrogateescape"
     {
@@ -369,13 +460,7 @@ pub(in crate::dynamic) fn decode_bytes(
         && uses_python_handler(ctx, name)
     {
         let name = name.to_owned();
-        if matches!(ctx.heap.get(input), Value::ByteArray(_)) {
-            ctx.bytearray_exports.push(input);
-            let result = registered_utf8(ctx, input, &name, signature);
-            ctx.bytearray_exports.pop();
-            return result;
-        }
-        return registered_utf8(ctx, input, &name, signature);
+        return ctx.with_buffer_export(input, |ctx| registered_utf8(ctx, input, &name, signature));
     }
     let result = codec
         .decode(ctx.bytes_like(input)?, Some(name))
@@ -429,8 +514,28 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
     let Some(issue) = crate::objects::utf8_prefix(&mut text, data, 0)? else {
         return Ok(ctx.text(text));
     };
-    let mut points: Vec<u32> = text.chars().map(u32::from).collect();
-    let raised = ctx.decode_error(issue.error(data));
+    let points = text.chars().map(u32::from).collect();
+    let error = issue.error(data);
+    resume_decode(ctx, name, points, error, |points, data, position| {
+        text.clear();
+        let issue = crate::objects::utf8_prefix(&mut text, data, position)?;
+        points
+            .try_reserve(text.len())
+            .map_err(|_| crate::Error::allocation())?;
+        points.extend(text.chars().map(u32::from));
+        Ok(issue)
+    })
+}
+
+/// Resume from the position and possibly changed byte object supplied by the handler.
+fn resume_decode(
+    ctx: &mut Context,
+    name: &str,
+    mut points: Vec<u32>,
+    error: crate::Error,
+    mut prefix: impl FnMut(&mut Vec<u32>, &[u8], usize) -> Result<Option<DecodeIssue>>,
+) -> Result<Id> {
+    let raised = ctx.decode_error(error);
     if raised.decode.is_none() {
         return Err(raised);
     }
@@ -441,10 +546,7 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
     loop {
         let response = ctx.call(callback, vec![exception], Vec::new())?;
         let invalid = || type_error("decoding error handler must return (str, int) tuple");
-        let values = match ctx.heap.get(ctx.scalar_value(response)) {
-            Value::Tuple(values) | Value::NamedTuple { values, .. } => values,
-            _ => return Err(invalid()),
-        };
+        let values = ctx.tuple_items(response)?.ok_or_else(invalid)?;
         let [replacement, newpos] = values.as_slice() else {
             return Err(invalid());
         };
@@ -465,7 +567,7 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
                 )
             })?;
         let input = ctx.lookup_attr(exception, "object")?;
-        let Value::Bytes(data) = ctx.heap.get(input) else {
+        let Value::Bytes(data) = ctx.heap.get(ctx.scalar_value(input)) else {
             return Err(type_error(
                 "UnicodeError 'object' attribute must be a bytes",
             ));
@@ -482,17 +584,39 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
                 format!("position {position} from error handler out of bounds"),
             ));
         }
-        text.clear();
-        let issue = crate::objects::utf8_prefix(&mut text, data, position as usize)?;
-        points
-            .try_reserve(text.len())
-            .map_err(|_| crate::Error::allocation())?;
-        points.extend(text.chars().map(u32::from));
-        let Some(issue) = issue else {
+        let Some(issue) = prefix(&mut points, data, position as usize)? else {
             return Ok(ctx.text_codepoints(points));
         };
         ctx.advance_decode_error(exception, issue.start, issue.end, issue.reason);
     }
+}
+
+fn positional_decoder_args(
+    function: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, Option<Id>)> {
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "_codecs.{function}() takes no keyword arguments"
+        )));
+    }
+    match args {
+        [input] => Ok((*input, None)),
+        [input, errors] => Ok((*input, Some(*errors))),
+        [] => Err(type_error(format!(
+            "{function} expected at least 1 argument, got 0"
+        ))),
+        _ => Err(type_error(format!(
+            "{function} expected at most 2 arguments, got {}",
+            args.len()
+        ))),
+    }
+}
+
+pub(super) fn escape_decode(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (input, errors) = positional_decoder_args("escape_decode", args, kwargs)?;
+    ctx.with_buffer_export(input, |ctx| bytes_escape::decode(ctx, input, errors))
 }
 
 pub(in crate::dynamic) fn decode(
@@ -508,28 +632,7 @@ pub(in crate::dynamic) fn decode(
         Codec::CodePage(_) => "charmap_decode",
     };
     let (input, errors) = match codec {
-        Codec::Latin1 | Codec::Ascii => {
-            if !kwargs.is_empty() {
-                return Err(type_error(format!(
-                    "_codecs.{function}() takes no keyword arguments"
-                )));
-            }
-            match args {
-                [input] => (*input, None),
-                [input, errors] => (*input, Some(*errors)),
-                [] => {
-                    return Err(type_error(format!(
-                        "{function} expected at least 1 argument, got 0"
-                    )));
-                }
-                _ => {
-                    return Err(type_error(format!(
-                        "{function} expected at most 2 arguments, got {}",
-                        args.len()
-                    )));
-                }
-            }
-        }
+        Codec::Latin1 | Codec::Ascii => positional_decoder_args(function, args, kwargs)?,
         _ => {
             let bound = matches!(codec, Codec::CodePage(_));
             let wrapper = if bound { "Codec.decode" } else { "decode" };

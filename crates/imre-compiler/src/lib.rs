@@ -270,10 +270,12 @@ fn object_fallback<T>(
     let check_returns = || {
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
-            graph
-                .session
-                .diagnostic_copy()?
-                .check_return_types(skipped.as_deref(), &overloads)?;
+            graph.session.diagnostic_copy()?.check_fallback_contracts(
+                skipped.as_deref(),
+                &overloads,
+                !graph.needs_object_runtime.get()
+                    && graph.object_builtin_errors.borrow().contains(&error),
+            )?;
         }
         Ok(())
     };
@@ -1056,6 +1058,39 @@ def present_after_exhaustion(value: int | None) -> int:
         return value + 1
 "#;
         compile(source, &CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn handler_flow_requires_a_direct_unconditional_raise() {
+        let source = r#"
+class Policy:
+    def stop(self, value: str) -> None:
+        "Report a rejected value."
+        raise ValueError(value)
+
+def parse(policy: Policy, text: str) -> int:
+    try:
+        parsed = int(text)
+    except ValueError:
+        policy.stop(text)
+    return parsed
+"#;
+        super::check(source).unwrap();
+
+        let conditional = source.replace(
+            "        raise ValueError(value)",
+            "        if value:\n            raise ValueError(value)",
+        );
+        let overridden = format!(
+            "{source}\nclass Continue(Policy):\n    def stop(self, value: str) -> None:\n        pass\n"
+        );
+        for unproven in [conditional, overridden] {
+            let error = super::check(&unproven).unwrap_err();
+            assert!(
+                error.contains("local may be uninitialized on this path"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

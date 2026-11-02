@@ -105,8 +105,10 @@ class Case(Base):
     events.append(('body', value))
     value = 'class'
     def label(self):
-        self.__seen = value
-        return super().label(), self.__seen
+        self.__seen: UnusedAnnotation = value
+        seen = {}
+        seen[0]: UnusedAnnotation = self.__seen
+        return super().label(), seen[0]
     def increment(self):
         self.previous += 1
     def nested(self):
@@ -165,6 +167,72 @@ class Case(Base):
     else:
         raise AssertionError("class decorator exception was lost")
     assert namespace["Broken"] is old and events[-2:] == ["decorated", "Broken"]
+
+
+def source_annotations():
+    from types import FunctionType
+
+    ns = {"__name__": "annotations", "format": bytes, "Alias": bytes}
+    exec("""def factory(outer, Alias, Global):
+    class C:
+        global Global
+        def uses_global(self, x: Global): ...
+        def method(self, first: Late, /, normal: outer, *args: format,
+                   named: Alias, **kw: int) -> None: ...
+        Alias = str
+        def sibling(self, arg: Alias): ...
+    return C
+""", ns)
+    cls = ns["factory"](bool, int, int)
+    cls.Global = float
+    ns["Global"] = complex
+    assert cls.uses_global.__annotations__ == {"x": complex}
+    assert cls.uses_global.__annotate__.__code__.co_freevars == ("__classdict__",)
+    provider = cls.method.__annotate__
+    assert provider.__code__.co_freevars == ("__classdict__", "outer")
+    assert provider.__closure__[0] is cls.sibling.__annotate__.__closure__[0]
+    assert provider.__globals__ is ns
+    try:
+        cls.method.__annotations__
+    except NameError as exc:
+        assert exc.name == "Late"
+    else:
+        raise AssertionError("unresolved annotation was evaluated")
+    for unsupported in (3, 4):
+        try:
+            provider(unsupported)
+        except NotImplementedError as exc:
+            assert exc.args == ()
+        else:
+            raise AssertionError("raw provider accepted a public replay format")
+    # Replay with replacement globals, as annotationlib does for missing names.
+    clone = FunctionType(provider.__code__, {"Late": complex, "format": list},
+                         closure=provider.__closure__)
+    cls.Alias = float
+    replayed = clone(2)
+    assert list(replayed) == ["normal", "first", "args", "named", "kw", "return"]
+    assert replayed == {"normal": bool, "first": complex, "args": list, "named": float,
+                        "kw": int, "return": None}
+    del cls.Alias
+    ns["Late"] = tuple
+    values = cls.method.__annotations__
+    assert values["first"] is tuple and values["args"] is bytes
+    assert values["named"] is bytes
+    assert cls.method.__annotations__ is values
+    exec("from __future__ import annotations\nclass F:\n    def f(self, n: Missing, obj: 'A') -> tuple[int]: ...", ns)
+    future = ns["F"].f
+    assert future.__annotate__.__closure__ is None
+    assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
+    for expr in ("(tmp := int)", "(yield int)", "(await T)"):
+        for source in ("def f(arg: " + expr + "): pass",
+                       "def f(obj): obj.field: " + expr + " = 1",
+                       "def f(obj): obj[0]: " + expr + " = 1"):
+            try:
+                compile(source, "<annotations>", "exec")
+            except SyntaxError:
+                pass
+            else:
+                raise AssertionError("invalid annotation expression compiled")
 
 
 def source_test_cases():
@@ -328,7 +396,268 @@ def choose(value, guard):
     assert choose(ValueError("matched"), False) == "exception"
 
 
+def source_genexpr():
+    namespace = {}
+    exec("""
+def make(events):
+    def source():
+        events.append("outer")
+        return [(1, 2), (3, 4)]
+    def inner(value):
+        events.append(value)
+        return (value, value + 1)
+    tag = "early"
+    value = "outer local"
+    result = ((tag, item) for pair in source() for value in pair if value % 2 for item in inner(value))
+    tag = "late"
+    return result, value
+""", namespace)
+    events = []
+    generator, original = namespace["make"](events)
+    assert events == ["outer"] and original == "outer local"
+    assert next(generator) == ("late", 1)
+    assert events == ["outer", 1]
+    assert list(generator) == [("late", 2), ("late", 3), ("late", 4)]
+    assert events == ["outer", 1, 3]
+
+
+def named_bindings():
+    namespace = {}
+    exec("""def recipe(values):
+    source = iter(values)
+    while batch := next(source, None):
+        yield batch
+    yield batch
+
+def outer(value):
+    state = []
+    def update():
+        nonlocal cell
+        state.append((cell, (cell := value), cell))
+    def read():
+        return cell
+    (cell := [])
+    update()
+    return state, read
+
+def shadow():
+    if False:
+        (shadowed := 1)
+    return shadowed
+
+def use_global(value):
+    global global_target
+    return (global_target := value)
+
+def annotated(arg: (lambda: (shadowed, (shadowed := 4)))):
+    pass
+""", namespace)
+    marker = []
+    assert list(namespace["recipe"]([1, 2, marker])) == [1, 2, marker]
+    stored, read = namespace["outer"](marker)
+    assert stored[0][0] is not marker
+    assert stored[0][1] is stored[0][2] is read() is marker
+    namespace["shadowed"] = 9
+    for read_local in (namespace["shadow"], namespace["annotated"].__annotations__["arg"]):
+        try:
+            read_local()
+        except UnboundLocalError:
+            pass
+        else:
+            raise AssertionError("walrus target was not a local")
+    assert namespace["use_global"](marker) is namespace["global_target"] is marker
+    exec("x = lambda a=(from_default := 3): (inside := a)", namespace)
+    assert namespace["x"]() == namespace["from_default"] == 3
+    assert "inside" not in namespace
+    for text in (
+        "def f():\n    (x := 1)\n    global x",
+        "def f():\n    global x\n    if True: (x := 1)\n    global x",
+        "(i for i in (items := [1]))",
+        "(__debug__ := True)",
+    ):
+        try:
+            compile(text, "walrus.py", "exec")
+        except SyntaxError:
+            pass
+        else:
+            raise AssertionError(text)
+
+
+def method_argument_lifetime():
+    import gc
+
+    events = []
+
+    class Target:
+        def __call__(self, value):
+            events.append(value)
+
+        def __del__(self):
+            events.append("released")
+
+    class Holder:
+        pass
+
+    holder = Holder()
+
+    def argument():
+        del holder.method
+        gc.collect()
+        events.append("argument")
+        return "called"
+
+    for source in ("holder.method(argument())", "holder.method(value=argument())"):
+        holder.method = Target()
+        exec(source, {"holder": holder, "argument": argument})
+        assert events == ["argument", "called", "released"], events
+        events.clear()
+
+
+def source_eval():
+    make = tuple
+    assert eval("make([2, 1])") == (2, 1)
+    assert eval("(make := 3)") == 3 and make is tuple
+    supplied = {"a": 9}
+    code = compile("a * 2", "<expr>", "eval")
+    assert eval(code, supplied) == 18
+    assert eval(code, globals=supplied, locals={"a": 1}) == 2
+    assert eval("len([])", {"__builtins__": {"len": lambda value: 17}}) == 17
+    try:
+        eval("a = 3")
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("eval accepted a statement")
+
+
+def starred_calls():
+    events = []
+
+    def mark(value):
+        events.append(value)
+        return value
+
+    def spread():
+        mark("iter")
+        yield 2
+
+    def collect(*values, label):
+        return values, label
+
+    scope = {"collect": collect, "mark": mark, "spread": spread}
+    exec("answer = collect(*spread(), label=mark(3))", scope)
+    assert scope["answer"] == ((2,), 3) and events == [3, "iter"]
+    events.clear()
+    exec("answer = collect(mark(1), *spread(), *(), label=mark(3))", scope)
+    assert scope["answer"] == ((1, 2), 3) and events == [1, "iter", 3]
+
+    for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
+        events.clear()
+        try:
+            exec("mark(0)\n" + source, scope)
+        except SyntaxError as error:
+            assert error.msg == "keyword argument repeated: label" and not events
+            assert error.filename == "<string>" and (error.lineno, error.end_lineno) == (2, 2)
+            assert (error.offset, error.end_offset) == (24, 31)
+        else:
+            raise AssertionError("duplicate explicit keyword compiled")
+
+    try:
+        compile("x=1\rcollect(a=1, a=2)(b=1, b=2)", "<caller>", "exec")
+    except SyntaxError as error:
+        assert error.msg == "keyword argument repeated: b"
+        assert (error.lineno, error.offset, error.end_lineno, error.end_offset) == (2, 24, 2, 27)
+    else:
+        raise AssertionError("invalid outer call accepted")
+
+    class Options:
+        def keys(self):
+            return ["label"]
+
+        def __getitem__(self, key):
+            return mark(4)
+
+    scope["options"] = Options()
+    events.clear()
+    exec("answer = collect(*spread(), **options)", scope)
+    assert scope["answer"] == ((2,), 4) and events == [4, "iter"]
+
+    events.clear()
+    try:
+        exec("collect(*spread(), **options, label=mark(5), other=mark(6), **mark(7))", scope)
+    except TypeError as error:
+        assert "got multiple values for keyword argument 'label'" in str(error)
+        assert events == [4, 5, 6]
+    else:
+        raise AssertionError("duplicate keyword was accepted")
+
+    events.clear()
+    try:
+        exec("collect(*spread(), **{1: mark(5)})", scope)
+    except TypeError as error:
+        assert error.args == ("keywords must be strings",) and events == [5, "iter"]
+    else:
+        raise AssertionError("non-string keyword was accepted")
+
+    class NoIter:
+        __iter__ = None
+
+    class BrokenIter:
+        def __iter__(self):
+            raise TypeError("from iterator")
+
+    scope["no_iter"] = NoIter()
+    scope["broken_iter"] = BrokenIter()
+    for source, message in (
+        ("collect(*42)", f"{collect.__module__}.{collect.__qualname__}() argument after * must be an iterable, not int"),
+        ("collect(1, *42)", "Value after * must be an iterable, not int"),
+        ("collect(*no_iter)", "'NoIter' object is not iterable"),
+        ("collect(1, *broken_iter)", "from iterator"),
+    ):
+        try:
+            exec(source, scope)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("invalid positional unpack was accepted")
+
+    class BadHint:
+        def __iter__(self):
+            return iter(())
+
+        def __length_hint__(self):
+            raise LookupError("bad hint")
+
+    scope["bad_hint"] = BadHint()
+    exec("answer = collect(*bad_hint, label=0)", scope)
+    assert scope["answer"] == ((), 0)
+    try:
+        exec("collect(1, *bad_hint, label=0)", scope)
+    except LookupError as error:
+        assert error.args == ("bad hint",)
+    else:
+        raise AssertionError("starred length hint failure was lost")
+
+    def broken():
+        yield 0
+        raise ValueError("broken iterator")
+
+    scope["broken"] = broken
+    try:
+        exec("collect(*broken(), label=0)", scope)
+    except ValueError as error:
+        assert error.args == ("broken iterator",)
+    else:
+        raise AssertionError("starred iterator failure was lost")
+
+
 def current():
+    starred_calls()
+    source_eval()
+    method_argument_lifetime()
+    named_bindings()
+    source_annotations()
+    source_genexpr()
     source_match()
     check_scope_directives()
     relative_import_hooks()
@@ -347,6 +676,7 @@ def current():
             compile(data, "settings.py", "exec")
         except SyntaxError as error:
             print(str(error), error.args, error.msg, error.filename, error.lineno, error.offset, error.text, error.end_lineno, error.end_offset)
+    exec("assert ... is expected", {"expected": Ellipsis, "Ellipsis": None})
     namespace = {"__name__": "template", "events": [], "external": 41, "default": 100}
     namespace["left"] = Comparable()
     namespace["right"] = object()

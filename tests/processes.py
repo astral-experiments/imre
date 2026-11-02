@@ -306,6 +306,10 @@ def main() -> None:
             result = files.run([compiler, "check", str(path)], temporary)
             assert result.returncode > 0 and result.stderr, (name, result)
             assert b"panicked" not in result.stderr and b"Sanitizer" not in result.stderr, (name, result.stderr)
+            if name == "expanded_args":
+                assert b"argument unpacking requires a source-defined function or method" in result.stderr, result.stderr
+            if name == "expanded_kwargs":
+                assert b"no-matching-overload" in result.stderr, result.stderr
             if name in {"boolean_timeout", "optional_integer_timeout"}:
                 assert b"integer literal or float | None" in result.stderr, (name, result.stderr)
             if name == "mixed_timeout_field":

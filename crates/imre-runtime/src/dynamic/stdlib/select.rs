@@ -8,7 +8,7 @@ use crate::objects::{
 use std::{io, time::Duration};
 
 /// Convert an integer or the integer returned by a file object's fileno method.
-fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
+pub(super) fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
     let number = if let Ok(n) = ctx.as_int(object) {
         n
     } else {
@@ -34,7 +34,11 @@ fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
 }
 
 /// Convert the optional timeout before a syscall or any descriptor lookups.
-fn timeout(ctx: &mut Context, value: Option<&Id>, poll: bool) -> Result<Option<Duration>> {
+pub(super) fn timeout(
+    ctx: &mut Context,
+    value: Option<&Id>,
+    poll: bool,
+) -> Result<Option<Duration>> {
     let Some(&value) = value.filter(|&&id| id != NONE) else {
         return Ok(None);
     };

@@ -28,14 +28,10 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     let file = match file.filter(|&file| file != NONE) {
         Some(file) => file,
         None => {
-            let sys = ctx.module("sys")?;
-            match ctx.lookup_attr(sys, "stdout") {
-                Ok(NONE) => return Ok(NONE),
-                Ok(file) => file,
-                Err(error) if ctx.is_attribute_error(&error) => {
-                    return Err(Error::new("RuntimeError", "lost sys.stdout"));
-                }
-                Err(error) => return Err(error),
+            match ctx.sys_binding("stdout")? {
+                Some(NONE) => return Ok(NONE),
+                Some(file) => file,
+                None => return Err(Error::new("RuntimeError", "lost sys.stdout")),
             }
         }
     };

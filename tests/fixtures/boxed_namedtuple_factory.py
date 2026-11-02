@@ -58,6 +58,18 @@ def current():
     assert tagged == (1, 2) and tagged.tag == "set by init"
     assert tuple.__new__(Tagged, (3,), tag="unused") == (3,)
 
+    from copyreg import _reconstructor
+    assert tuple.__init__ is Fields.__init__ is object.__init__
+    assert _reconstructor(Fields, tuple, (1, 2)) == (1, 2)
+    assert Fields(1, 2).__init__(1, 2) is None
+    assert tuple.__init__((), ()) is None
+    try:
+        tuple.__init__(tagged, ())
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("extra arguments with an overridden initializer")
+
     short = tuple.__new__(Fields, (7,))
     assert {short: "one"}[(7,)] == "one" and short.left == 7
     try:

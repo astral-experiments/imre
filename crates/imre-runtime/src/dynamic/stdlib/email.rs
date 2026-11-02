@@ -1,4 +1,4 @@
-//! Bind the three mail date functions used by HTTP to the native calendar.
+//! Native email.utils operations used by HTTP and email address parsing.
 use super::*;
 use crate::dynamic::builtins::bind;
 use crate::objects::Calendar;
@@ -19,6 +19,18 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match name {
+        "_has_surrogates" => {
+            let [s] = bind(name, args, kwargs, ["s"])?;
+            let value = required(s, name, "s")?;
+            let encoded = ctx
+                .lookup_attr(value, "encode")
+                .and_then(|encode| ctx.call(encode, Vec::new(), Vec::new()));
+            match encoded {
+                Ok(_) => Ok(FALSE),
+                Err(error) if ctx.is_builtin_error(&error, "UnicodeEncodeError") => Ok(TRUE),
+                Err(error) => Err(error),
+            }
+        }
         "parsedate_to_datetime" => {
             let [data] = bind(name, args, kwargs, ["data"])?;
             let id = required(data, name, "data")?;

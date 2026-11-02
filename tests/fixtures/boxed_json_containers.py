@@ -54,4 +54,80 @@ def current():
     else:
         raise AssertionError("incomparable keys")
 
+    # A Python string can contain both raw surrogate halves and scalar values.
+    key = "é\ud800\udfff"
+    value = '\ufffd"\n\udc0d'
+    doc = {key: [value]}
+    escaped = '{"\\u00e9\\ud800\\udfff": ["\\ufffd\\"\\n\\udc0d"]}'
+    raw = '{"é\ud800\udfff": ["\ufffd\\"\\n\udc0d"]}'
+    for ascii, want in ((True, escaped), (False, raw)):
+        assert json.dumps(doc, ensure_ascii=ascii, skipkeys=True) == want
+        stream = StringIO()
+        json.dump(doc, stream, ensure_ascii=ascii)
+        assert stream.getvalue() == want
+
+    chunks = []
+    class Writer:
+        def write(self, chunk):
+            chunks.append(chunk)
+            if chunk == '"\udfff"':
+                raise ValueError("writer stopped")
+
+    try:
+        json.dump({key: '\udfff', 'other': object()}, Writer(), ensure_ascii=False, default=reject)
+    except ValueError as error:
+        assert str(error) == "writer stopped"
+        assert not hasattr(error, "__notes__")
+    else:
+        raise AssertionError("writer exception")
+    assert chunks == ['{', '"' + key + '"', ': ', '"\udfff"']
+
+    class Key:
+        @property
+        def __class__(self):
+            return Record
+
+    for streaming, expected_name in [(False, "Key"), (True, "Record")]:
+        output = StringIO()
+        try:
+            data = {"first": 1, Key(): 2}
+            if streaming:
+                json.dump(data, output)
+            else:
+                json.dumps(data)
+        except TypeError as exc:
+            assert exc.args == ("keys must be str, int, float, bool or None, not " + expected_name,)
+        else:
+            raise AssertionError("invalid key")
+        if streaming:
+            assert output.getvalue() == '{"first": 1'
+
+    class Failure(Exception):
+        def add_note(self, note):
+            calls.append(note)
+            super().add_note(note)
+
+    def fail(value):
+        raise original
+
+    for streaming in (False, True):
+        original = Failure("failed to encode value")
+        calls = []
+        notes = ["existing"]
+        original.__notes__ = notes
+        wrapped = [{23: object()}]
+        try:
+            if streaming:
+                json.dump(wrapped, StringIO(), default=fail)
+            else:
+                json.dumps(wrapped, default=fail)
+        except Failure as caught:
+            assert caught is original and caught.__notes__ is notes
+        else:
+            raise AssertionError("expected callback error")
+        key = "'23'" if streaming else "23"
+        expected = ["when serializing dict item " + key, "when serializing list item 0"]
+        assert notes == ["existing"] + expected
+        assert calls == (expected if streaming else [])
+
     print("encoded container subclasses")

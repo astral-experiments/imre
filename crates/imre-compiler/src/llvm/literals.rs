@@ -155,7 +155,7 @@ impl Emitter<'_, '_> {
             (
                 &self.regex_literals,
                 Type::RegexPattern,
-                "imre_regex_compile",
+                "imre_regex_literal",
                 "imre_object_release",
             ),
             (

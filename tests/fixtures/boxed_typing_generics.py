@@ -217,6 +217,19 @@ for base in (K, t.TypeVar):
         print(str(error))
 
 
+class Subscription:
+    def __class_getitem__(cls, item):
+        return cls, item
+
+
+class InheritedSubscription(Subscription):
+    pass
+
+
+assert isinstance(Subscription.__dict__["__class_getitem__"], classmethod)
+assert InheritedSubscription[int] == (InheritedSubscription, int)
+
+
 class Parameterize:
     def __get__(self, instance, owner):
         def bind(args):
@@ -277,3 +290,40 @@ for alias, args, message in (
         assert str(error) == message
     else:
         raise AssertionError("invalid specialization accepted")
+
+
+def fresh_box():
+    class Box[Item]:
+        value: Item
+
+        def parameter(self):
+            return Item
+
+        def shadow(self, Item):
+            def change():
+                nonlocal Item
+                Item = str
+            change()
+            return Item
+
+    return Box
+
+
+box = fresh_box()
+item, = box.__type_params__
+assert item is not fresh_box().__type_params__[0]
+assert box.__annotations__["value"] is box().parameter() is item
+assert box.parameter.__code__.co_freevars == ("Item",)
+assert box.parameter.__closure__[0].cell_contents is item
+assert box().shadow(bytes) is str and box().parameter() is item
+assert item.__name__ == "Item" and item.__infer_variance__ is True
+assert "Item" not in box.__dict__ and "Item" not in globals()
+assert box.__bases__ == (t.Generic,) and box.__orig_bases__ == (t.Generic[item],)
+assert box.__parameters__ == (item,) and t.get_args(box[int]) == (int,)
+
+
+class Hidden[__P]:
+    value = __P
+
+
+assert Hidden.value is Hidden.__type_params__[0] and Hidden.value.__name__ == "__P"

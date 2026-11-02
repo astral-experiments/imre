@@ -50,17 +50,60 @@ def current():
     exec("class Virtual(metaclass=Meta): marker = 42", namespace)
     virtual = namespace["Virtual"]
     assert type(virtual) is Meta and virtual.marker == 42
+    token = abc.get_cache_token()
     assert Abstract.register(virtual) is virtual
+    changed = abc.get_cache_token()
+    assert changed != token
+    assert Abstract.register(virtual) is virtual
+    assert abc.get_cache_token() == changed
+    assert Abstract.register(Complete) is Complete
+    assert abc.get_cache_token() == changed
     assert issubclass(virtual, Abstract) and isinstance(virtual(), Abstract)
     assert Abstract not in virtual.__mro__
 
-    class Custom(type):
+    class Factory(type):
+        __call__ = dict
+
+    class Refined(Factory):
+        def __call__(cls, *, key):
+            return cls, key
+
+    class Base(metaclass=Factory):
+        pass
+
+    class Derived(metaclass=Refined):
+        pass
+
+    class Combined(Base, Derived):
+        pass
+
+    assert type(Base) is Factory and type(Combined) is Refined
+    assert Base(key=42) == {"key": 42}
+    assert Combined(key=42) == (Combined, 42)
+
+    class Other(type):
         pass
 
     try:
-        class Unsupported(metaclass=Custom):
-            events.append("custom")
-    except NotImplementedError:
-        assert events == ["meta", "body"]
+        class Conflict(Base, metaclass=Other):
+            events.append("conflict")
+    except TypeError as exc:
+        assert "metaclass conflict" in str(exc)
     else:
-        assert type(Unsupported) is Custom and events[-1] == "custom"
+        raise AssertionError("accepted incompatible metaclasses")
+    assert events == ["meta", "body"]
+
+    try:
+        direct = Factory("Direct", (), {})
+    except NotImplementedError:
+        pass
+    else:
+        assert type(direct) is Factory and direct(key=3) == {"key": 3}
+
+    Factory.__call__ = Base
+    try:
+        Base()
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("recursive metaclass call returned")

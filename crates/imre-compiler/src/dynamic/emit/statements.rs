@@ -1,4 +1,6 @@
+pub(super) mod class_annotations;
 mod class_metadata;
+pub(super) mod type_parameters;
 mod worker;
 
 use ruff_python_ast as ast;
@@ -19,13 +21,22 @@ struct ClosureNames {
     locals_incomplete: bool,
 }
 
-pub(super) fn class_locals(body: &[ast::Stmt]) -> std::collections::BTreeSet<String> {
+#[derive(Clone)]
+pub(super) struct ClassBindings {
+    pub(super) locals: std::collections::BTreeSet<String>,
+    pub(super) globals: std::collections::BTreeSet<String>,
+}
+
+pub(super) fn class_locals(body: &[ast::Stmt]) -> ClassBindings {
     let mut names = ClosureNames::default();
     names.visit_body(body);
     names
         .locals
         .retain(|name| !names.globals.contains(name) && !names.nonlocals.contains(name));
-    names.locals
+    ClassBindings {
+        locals: names.locals,
+        globals: names.globals,
+    }
 }
 
 impl<'a> Visitor<'a> for ClosureNames {
@@ -34,21 +45,30 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
                 self.incomplete = true;
-                if !f.decorator_list.is_empty()
-                    || f.parameters
-                        .posonlyargs
-                        .iter()
-                        .chain(&f.parameters.args)
-                        .chain(&f.parameters.kwonlyargs)
-                        .any(|arg| arg.default.is_some())
-                {
-                    self.locals_incomplete = true;
+                // Loading a name or a literal cannot introduce a binding in the
+                // defining frame. Keep the conservative fallback for other expressions.
+                for decorator in &f.decorator_list {
+                    self.visit_decorator(decorator);
+                    self.locals_incomplete |= !decorator.expression.is_name_expr();
+                }
+                for param in f.parameters.iter_non_variadic_params() {
+                    if let Some(default) = &param.default {
+                        self.visit_expr(default);
+                        self.locals_incomplete |=
+                            !default.is_literal_expr() && !default.is_name_expr();
+                    }
                 }
             }
             ast::Stmt::ClassDef(c) => {
                 self.locals.insert(c.name.to_string());
                 self.incomplete = true;
-                self.locals_incomplete = true;
+                // Only class header expressions can introduce names in this enclosing function.
+                for decorator in &c.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(args) = &c.arguments {
+                    self.visit_arguments(args);
+                }
             }
             ast::Stmt::Global(g) => {
                 self.globals.extend(g.names.iter().map(ToString::to_string));
@@ -251,17 +271,24 @@ impl Function<'_, '_> {
                         let key = self.code_name(name.id.as_str());
                         if self.class_locals.is_some() && !self.source.string_annotations {
                             // Class annotations may refer to a name bound after the class body.
+                            let value = self.output.code(
+                                self.source,
+                                String::new(),
+                                Body::AnnotationValue(&v.annotation),
+                            );
                             let code = self.output.definition(
                                 self.source,
                                 String::new(),
-                                Body::Expression(&v.annotation),
+                                Body::AnnotationThunk(value.clone(), v.annotation.range()),
                                 v.annotation.start(),
                             );
+                            self.remember_annotation(v, name.id.as_str(), &value);
                             let name = self.text("__annotate__");
                             let sig = self.text("{}");
                             let defaults = self.op("dict", &[]);
                             let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
-                            self.op("annotate_deferred", &[&self.scope.clone(), &key, &thunk]);
+                            let offset = v.start().to_u32();
+                            self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
                         } else {
                             let value =
                                 if self.class_locals.is_some() && self.source.string_annotations {
@@ -316,6 +343,28 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
+                    let outer = self.scope.clone();
+                    let mut outer_class_locals = None;
+                    let parameter_scope = v.type_params.as_deref().map(|params| {
+                        let names = self.op("dict", &[]);
+                        for param in params {
+                            let ast::TypeParam::TypeVar(typevar) = param else {
+                                self.unsupported("variadic class type parameters");
+                                continue;
+                            };
+                            if typevar.bound.is_some() || typevar.default.is_some() {
+                                self.unsupported("class type parameter bounds and defaults");
+                            }
+                            let binding = self.code_name(typevar.name.as_str());
+                            let name =
+                                self.code_name(self.source.private_names.definition(&typevar.name));
+                            self.op("put", &[&names, &binding, &name]);
+                        }
+                        let scope = self.op("class_parameter_scope", &[&outer, &names]);
+                        self.scope = self.op("class_base_scope", &[&scope, &outer]);
+                        outer_class_locals = self.class_locals.take();
+                        scope
+                    });
                     let bases = self.op("list", &[]);
                     let kwargs = if let Some(args) = v.arguments.as_deref() {
                         if args
@@ -330,6 +379,11 @@ impl Function<'_, '_> {
                     } else {
                         "0".into()
                     };
+                    if let Some(scope) = parameter_scope.as_ref() {
+                        self.scope = scope.clone();
+                        let generic = self.lookup(".generic_base");
+                        self.op("append", &[&bases, &generic]);
+                    }
                     let init = self.define(
                         v.start(),
                         self.source.private_names.definition(&v.name),
@@ -337,6 +391,10 @@ impl Function<'_, '_> {
                         None,
                         Body::Namespace(&v.body),
                     );
+                    if parameter_scope.is_some() {
+                        self.scope = outer;
+                        self.class_locals = outer_class_locals;
+                    }
                     let operation = if v.type_params.is_some() {
                         "parameterized_class"
                     } else {
@@ -447,12 +505,21 @@ impl Function<'_, '_> {
                         continue;
                     };
                     let module = self.import(&name);
-                    for alias in &v.names {
+                    let fromlist = self.op("list", &[]);
+                    let names: Vec<_> = v
+                        .names
+                        .iter()
+                        .map(|alias| self.code_name(alias.name.as_str()))
+                        .collect();
+                    for attr in &names {
+                        self.op("append", &[&fromlist, attr]);
+                    }
+                    self.op("fromlist", &[&module, &fromlist]);
+                    for (alias, attr) in v.names.iter().zip(names) {
                         if alias.name.as_str() == "*" {
                             self.op("import_star", &[&self.scope.clone(), &module]);
                             continue;
                         }
-                        let attr = self.code_name(alias.name.as_str());
                         let value = self.op("from", &[&module, &attr]);
                         self.bind(
                             alias.asname.as_ref().unwrap_or(&alias.name).as_str(),
@@ -530,7 +597,7 @@ impl Function<'_, '_> {
             _ => None,
         };
         let flags = match (&body, params) {
-            (Body::Namespace(_) | Body::Annotations(_), _) => None,
+            (Body::Namespace(_) | Body::Annotations(..) | Body::ClassAnnotations(..), _) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -577,15 +644,46 @@ impl Function<'_, '_> {
         let annotate = if entries.is_empty() {
             "0".into()
         } else {
+            let class = self
+                .class_locals
+                .as_ref()
+                .filter(|_| !self.source.string_annotations)
+                .cloned();
+            let reads = class_metadata::annotation_reads(
+                &entries,
+                class.as_ref(),
+                self.source.string_annotations,
+            );
+            use imre_ast::code_flags::*;
+            let mut annotation_flags = OPTIMIZED | NEWLOCALS;
+            if self.prefix.contains(".<locals>.") {
+                annotation_flags |= NESTED;
+            }
+            if self.source.string_annotations {
+                annotation_flags |= FUTURE_ANNOTATIONS;
+            }
+            if self.source.barry_as_flufl {
+                annotation_flags |= FUTURE_BARRY_AS_BDFL;
+            }
+            let sig = self.text(
+                &json!({
+                    "posonly": ["format"],
+                    "code_flags": annotation_flags,
+                    "scope_reads": reads,
+                    "scope_complete": true,
+                    "scope_locals_complete": true,
+                    "annotation_class": class.is_some(),
+                })
+                .to_string(),
+            );
             let code = self.output.definition(
                 self.source,
                 String::new(),
-                Body::Annotations(entries),
+                Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
-            let sig = self.text(r#"{"posonly":["format"]}"#);
             let defaults = self.op("dict", &[]);
             self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
         };
@@ -636,12 +734,16 @@ impl Function<'_, '_> {
             Body::Expression(expr) => closure_names.visit_expr(expr),
             _ => closure_names.incomplete = true,
         }
-        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns)
-            && let Some((names, lock_only)) = worker::parameters(stmts, params)
-        {
-            signature["thread_parameters"] = json!(names);
-            if lock_only {
-                signature["thread_worker_locks"] = json!(names);
+        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
+            if let Some((names, lock_only)) = worker::parameters(stmts, params) {
+                signature["thread_parameters"] = json!(names);
+                if lock_only {
+                    signature["thread_worker_locks"] = json!(names);
+                }
+            } else if let Some(names) = worker::captured_locks(stmts, params) {
+                signature["thread_captured_locks"] = json!(names);
+            } else if let Some(field) = worker::bound_lock_field(stmts, params) {
+                signature["thread_bound_lock_field"] = json!(field);
             }
         }
         let code = self.output.definition(self.source, prefix, body, start);
@@ -718,7 +820,7 @@ impl Function<'_, '_> {
         function
     }
 
-    pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
+    fn check_annotation_format(&mut self) {
         // CPython's compiled annotation callable accepts VALUE and VALUE_WITH_FAKE_GLOBALS.
         let format = self.lookup("format");
         let two = self.integer(2);
@@ -728,10 +830,23 @@ impl Function<'_, '_> {
         let condition = self.truth(&unsupported);
         self.branch(&condition, &bad, &good);
         self.label(&bad);
-        let error = self.lookup("NotImplementedError");
+        let name = self.code_name("NotImplementedError");
+        let error = self.op("builtin", &[&name]);
         self.raise(&error, None, false);
         self.label(&good);
+    }
+
+    pub(super) fn annotations(
+        &mut self,
+        entries: &[(&str, &ast::Expr)],
+        class: Option<ClassBindings>,
+    ) {
+        self.check_annotation_format();
         let values = self.op("dict", &[]);
+        // The public format parameter is outside the annotation expressions' lexical scope.
+        self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+        self.annotation_lookup = true;
+        self.class_locals = class;
         for &(name, expression) in entries {
             let key = self.code_name(name);
             let value = if self.source.string_annotations {
@@ -894,7 +1009,7 @@ impl Function<'_, '_> {
         let explicit = if cause.is_some() { 2 } else { 0 };
         let cause = cause.unwrap_or("0");
         self.line(&format!(
-            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit})"
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit}, ptr null)"
         ));
         self.jump(&self.error.clone());
     }
@@ -1163,7 +1278,12 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
             }
             captures.visit_expr(element);
         }
-        Body::Namespace(_) | Body::Annotations(_) | Body::Unsupported(..) => {}
+        Body::Namespace(_)
+        | Body::Annotations(..)
+        | Body::ClassAnnotations(..)
+        | Body::AnnotationThunk(..)
+        | Body::AnnotationValue(_)
+        | Body::Unsupported(..) => {}
     }
     captures.0
 }

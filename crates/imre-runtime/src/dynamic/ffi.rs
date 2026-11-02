@@ -17,10 +17,11 @@ impl Context {
         arguments: Id,
         keywords: Id,
         mark: usize,
+        scope: Id,
     ) -> Result<Id> {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
-        let result = self.call(callable, args, kwargs)?;
+        let result = self.call_in_scope(scope, callable, args, kwargs)?;
         self.finish_call_operands(mark, result);
         Ok(result)
     }
@@ -151,10 +152,6 @@ impl Context {
                 };
                 self.template_interpolation(a, b, conversion, spec)
             }
-            "template_literal" => {
-                let parts = self.items(a)?;
-                self.template_literal(&parts)
-            }
             "build_template" => {
                 let interpolations = self.items(b)?;
                 Ok(self.template_from_literal(a, interpolations))
@@ -176,6 +173,38 @@ impl Context {
                 builtins::call(self, "len", &[a], &[])
             }
             "match_sequence_length" => Ok(NONE),
+            "builtin" => {
+                let name = copy_label(self.str_value(a)?)?;
+                Ok(self.builtin(&name))
+            }
+            "annotation_scope" => Ok(self
+                .scope_data(a)
+                .parent
+                .expect("annotation function scope")),
+            "lookup_annotation_global"
+            | "lookup_class_annotation"
+            | "lookup_class_annotation_global" => {
+                let name = copy_label(self.str_value(b)?)?;
+                if op != "lookup_annotation_global" {
+                    if let Some(&cell) = self.scope_data(a).closure.cells.get("__classdict__") {
+                        let Value::Cell(Some(mapping)) = *self.heap.get(cell) else {
+                            return Err(self.missing_binding(a, a, "__classdict__"));
+                        };
+                        match self.load_exec_name(mapping, &name) {
+                            Err(error) if self.is_builtin_error(&error, "KeyError") => {}
+                            value => return value,
+                        }
+                    } else if let Some(value) = self.scope_name(a, &name) {
+                        return Ok(value);
+                    }
+                }
+                let scope = if op == "lookup_class_annotation" {
+                    a
+                } else {
+                    self.root_scope(a)
+                };
+                self.lookup(scope, &name)
+            }
             "lookup" | "lookup_class_local" => {
                 let name = copy_label(self.str_value(b)?)?;
                 if op == "lookup_class_local" {
@@ -233,8 +262,9 @@ impl Context {
                 let name = copy_label(self.str_value(b)?)?;
                 self.module(&name)
             }
+            "fromlist" => self.prepare_fromlist(a, b),
             "from" => self.import_from(a, b),
-            "import_star" => self.import_star(a, b, false),
+            "import_star" => self.import_star(a, b),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
@@ -347,6 +377,33 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
+            "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_annotation_environment" => self.class_annotation_environment(a, b),
+            "class_annotation_locals" => {
+                let parent = self.scope_data(a).parent.expect("annotation globals");
+                let local = self.scope("", Some(parent));
+                let Value::Scope(frame) = self.heap.get_mut(local) else {
+                    unreachable!()
+                };
+                frame.exec_locals = Some(b);
+                Ok(local)
+            }
+            "class_base_scope" => {
+                if self.scope_data(b).class_body.is_none() {
+                    return Ok(a);
+                }
+                // A generic class's bases can read its enclosing class dictionary. Its
+                // body and methods close over the parameter scope without that dictionary.
+                let module = self.scope_data(a).module.clone();
+                let scope = self.scope(&module, Some(a));
+                let namespace = self.class_namespace_dict(b, true);
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!()
+                };
+                frame.exec_locals = Some(namespace);
+                frame.closure.declared_complete = true;
+                Ok(scope)
+            }
             "class" | "parameterized_class" => {
                 let metaclass = self.dict_named_item(a, "metaclass");
                 let total = self.dict_named_item(a, "total");
@@ -362,32 +419,9 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
-            "annotate" | "annotate_deferred" => {
+            "annotate" => {
                 if let Some(mapping) = self.scope_name(a, "__annotations__") {
-                    if op == "annotate_deferred" {
-                        let thunks = if let Some(dict) = self
-                            .scope_data(a)
-                            .class_namespace
-                            .as_ref()
-                            .and_then(|c| c.annotation_thunks)
-                        {
-                            dict
-                        } else {
-                            let dict = self.dict(Vec::new());
-                            let Value::Scope(scope) = self.heap.get_mut(a) else {
-                                unreachable!()
-                            };
-                            scope
-                                .class_namespace
-                                .get_or_insert_with(Default::default)
-                                .annotation_thunks = Some(dict);
-                            dict
-                        };
-                        self.put_item(thunks, b, c)?;
-                        self.put_item(mapping, b, NONE)?;
-                    } else {
-                        self.put_item(mapping, b, c)?;
-                    }
+                    self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
             }
@@ -410,6 +444,15 @@ impl Context {
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
+            "neg" | "pos" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") =>
+            {
+                let method = if op == "neg" {
+                    "datetime.timedelta.__neg__"
+                } else {
+                    "datetime.timedelta.__pos__"
+                };
+                stdlib::call(self, method, &[a], &[])
+            }
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
             }
@@ -630,8 +673,10 @@ pub(super) fn new_context<S: Into<String>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
-    let executable = config["executable"]
-        .as_str()
+    let launcher = config["executable"].as_str();
+    let helper_executable =
+        launcher.map_or_else(crate::objects::python_executable_text, str::to_owned);
+    let executable = launcher
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
@@ -641,14 +686,18 @@ pub(super) fn new_context<S: Into<String>>(
         workers: Default::default(),
         config,
         executable,
+        helper_executable,
         argv: NONE,
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        exit_callbacks: Vec::new(),
         contexts: Vec::new(),
-        bytearray_exports: Vec::new(),
+        buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
+        // Measure the execution thread before entering the native Python evaluator.
+        repr_sequence_words: super::operators::remaining_repr_words(),
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,
@@ -656,6 +705,8 @@ pub(super) fn new_context<S: Into<String>>(
         codec_entries: Default::default(),
         frozen_override: 0,
         modules: NONE,
+        import_missing: NONE,
+        bootstrap_globals: NONE,
         classes: HashMap::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
@@ -667,6 +718,8 @@ pub(super) fn new_context<S: Into<String>>(
         slot_depth: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
+    let object = ctx.builtin("object");
+    ctx.import_missing = ctx.instance(object, None);
     let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
     let paths: Vec<String> =
@@ -704,7 +757,8 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    match ctx.module("__main__") {
+    let result = ctx.module("sys").and_then(|_| ctx.module("__main__"));
+    let status = match result {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
@@ -747,7 +801,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             eprintln!("{error}");
             1
         }
-    }
+    };
+    ctx.workers.join_before_exit_callbacks();
+    atexit::run(&mut ctx);
+    status
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
@@ -868,18 +925,6 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
 }
 
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_op(
-    ctx: *mut Context,
-    opcode: *const c_char,
-    a: Id,
-    b: Id,
-    c: Id,
-) -> Id {
-    // SAFETY: legacy call sites pass the same handles, without an instruction position.
-    unsafe { imre_dyn_op_at(ctx, opcode, a, b, c, std::ptr::null()) }
-}
-
-#[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_op_at(
     ctx: *mut Context,
     opcode: *const c_char,
@@ -903,7 +948,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
-/// Invoke a compiled call using the root mark taken before its operands were evaluated.
+/// Accept calls from native objects generated before lexical call scopes were passed.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_call_at(
     ctx: *mut Context,
@@ -913,12 +958,27 @@ pub(super) unsafe extern "C" fn imre_dyn_call_at(
     mark: usize,
     span: *const [u32; 4],
 ) -> Id {
+    // SAFETY: both entry points accept the same context, operands, mark and optional position.
+    unsafe { imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, NONE) }
+}
+
+/// Invoke a compiled call using the root mark taken before its operands were evaluated.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    args: Id,
+    kwargs: Id,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
     // SAFETY: the generated caller owns the context and supplies a null or static position.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.call_packed(callable, args, kwargs, mark);
+    let result = ctx.call_packed(callable, args, kwargs, mark, scope);
     finish_at(ctx, result, span)
 }
 
@@ -943,6 +1003,21 @@ pub(super) unsafe extern "C" fn imre_dyn_generator_body(
         let source = unsafe { cstr(source) };
         code.body = value::Body::PendingGenerator { source, body_line };
     }
+}
+
+/// Record a class annotation only when its statement executes.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
+    ctx: *mut Context,
+    scope: Id,
+    name: Id,
+    thunk: Id,
+    offset: u32,
+) -> Id {
+    // SAFETY: the compiler passes the active context and handles from the current class body.
+    let ctx = unsafe { &mut *ctx };
+    let result = ctx.record_class_annotation(scope, name, thunk, offset);
+    finish(ctx, result)
 }
 
 /// Static per-definition record emitted beside its native entry point.
@@ -1025,7 +1100,7 @@ impl Context {
                     freevars.push(name.to_owned());
                     break;
                 }
-                if !frame.closure.declared_complete {
+                if frame.class_body.is_none() && !frame.closure.declared_complete {
                     return None;
                 }
                 cursor = frame.parent;
@@ -1051,15 +1126,40 @@ impl Context {
             .ok()
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
+        let annotation_class = metadata["annotation_class"] == true;
+        let mut read_class = false;
         let reads = metadata["scope_reads"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|v| v.as_str());
+            .filter_map(|v| v.as_str())
+            .filter(|name| {
+                if annotation_class && *name == "__class__" {
+                    read_class = true;
+                    false
+                } else {
+                    !annotation_class || *name != "__classdict__"
+                }
+            });
+        let lexical = if annotation_class {
+            self.scope_data(scope).parent.unwrap_or(scope)
+        } else {
+            scope
+        };
         let freevars = (metadata["scope_complete"].as_bool() == Some(true)
             && metadata["class_cell"].as_bool() != Some(true))
-        .then(|| self.enclosing_freevars(scope, reads))
-        .flatten();
+        .then(|| self.enclosing_freevars(lexical, reads))
+        .flatten()
+        .map(|mut freevars| {
+            if annotation_class {
+                freevars.push("__classdict__".to_owned());
+                if read_class {
+                    freevars.push("__class__".to_owned());
+                }
+                freevars.sort();
+            }
+            freevars
+        });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
         self.alloc(Value::Code(value::CodeObject {
@@ -1095,12 +1195,14 @@ impl Context {
     ) -> Id {
         let owner = self.scope_data(scope);
         let class_cell = owner.class_cell;
-        let scope =
-            if owner.exec_locals.is_some() || (owner.class_body.is_some() && !annotation_scope) {
-                owner.parent.unwrap_or(scope)
-            } else {
-                scope
-            };
+        let scope = if owner.exec_locals.is_some()
+            || ((owner.class_body.is_some() || owner.class_namespace.is_some())
+                && !annotation_scope)
+        {
+            owner.parent.unwrap_or(scope)
+        } else {
+            scope
+        };
         let fields =
             super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
         let signature = self.code_object(code).parameters;
@@ -1156,6 +1258,16 @@ impl Context {
         let names = self.code_object(code).freevars.clone();
         let mut cells = Vec::new();
         for name in &names {
+            if signature["annotation_class"] == true {
+                if name == "__classdict__" {
+                    cells.push(self.class_annotation_dict_cell(scope));
+                    continue;
+                }
+                if name == "__class__" {
+                    cells.push(class_cell.expect("class annotation scope"));
+                    continue;
+                }
+            }
             let mut cursor = scope;
             loop {
                 let frame = self.scope_data(cursor);
@@ -1180,7 +1292,7 @@ impl Context {
                 cursor = frame.parent.expect("free variable has enclosing scope");
             }
         }
-        let scope = if !annotation_scope && self.code_object(code).closure_supported {
+        let scope = if self.code_object(code).closure_supported {
             let mut globals = scope;
             while let Some(parent) = self.scope_data(globals).parent {
                 globals = parent;
@@ -1329,17 +1441,20 @@ impl Context {
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
+                .chain(&self.exit_callbacks)
                 .copied()
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.contexts.iter().copied())
-                .chain(self.bytearray_exports.iter().copied())
+                .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
                 .chain([
                     self.argv,
                     self.sys_path,
                     self.modules,
+                    self.import_missing,
+                    self.bootstrap_globals,
                     self.default_encoding,
                     self.token_missing,
                 ]),
@@ -1369,8 +1484,12 @@ impl Context {
 
     /// Run deferred callbacks when a native loop reaches a collection point.
     pub(super) fn collect_garbage(&mut self) {
+        let automatic_gc = self
+            .heap
+            .automatic_gc
+            .load(std::sync::atomic::Ordering::Relaxed);
         if self.heap.has_ordinary_finalizers() {
-            if self.heap.cycles_due() {
+            if automatic_gc && self.heap.cycles_due() {
                 let _ = self.collect_full();
                 return;
             }
@@ -1388,7 +1507,7 @@ impl Context {
             }
         }
         let (heap, roots) = self.heap_and_roots();
-        if let Some(callbacks) = heap.collect_if_due(roots) {
+        if let Some(callbacks) = heap.collect_if_due(roots, automatic_gc) {
             self.run_weak_callbacks(callbacks);
         }
     }

@@ -1,6 +1,7 @@
 """Attribute patching on live Python objects, including module namespaces."""
 
 import builtins
+from contextlib import ContextDecorator
 from functools import wraps
 from importlib import import_module
 from types import ModuleType
@@ -60,20 +61,35 @@ def _patch_owner(name):
     return owner
 
 
+def _get_target(target):
+    try:
+        owner, attribute = target.rsplit('.', 1)
+    except (AttributeError, TypeError, ValueError):
+        raise TypeError(f"Need a valid target to patch. You supplied: {target!r}")
+    return lambda: _patch_owner(owner), attribute
+
+
+_missing_option = object()
+
+
 class _patch:
-    def __init__(self, target, new, create):
-        try:
-            self.owner_name, self.attribute = target.rsplit('.', 1)
-        except (AttributeError, TypeError, ValueError):
-            raise TypeError(f"Need a valid target to patch. You supplied: {target!r}")
+    def __init__(self, getter, attribute, new, create, *,
+                 side_effect=_missing_option, return_value=_missing_option):
+        self.getter = getter
+        self.attribute = attribute
         self.new = new
         self.create = create
+        self.mock_kwargs = {}
+        if side_effect is not _missing_option:
+            self.mock_kwargs['side_effect'] = side_effect
+        if return_value is not _missing_option:
+            self.mock_kwargs['return_value'] = return_value
         self.is_started = False
 
     def __enter__(self):
         if self.is_started:
             raise RuntimeError("Patch is already started")
-        target = _patch_owner(self.owner_name)
+        target = self.getter()
         name = self.attribute
         try:
             original = target.__dict__[name]
@@ -85,7 +101,11 @@ class _patch:
             self.create = True
         if original is DEFAULT and not self.create:
             raise AttributeError(f"{target} does not have the attribute {name!r}")
-        replacement = MagicMock(name=name) if self.new is DEFAULT else self.new
+        replacement = self.new
+        if replacement is DEFAULT:
+            replacement = MagicMock(name=name, **self.mock_kwargs)
+        elif self.mock_kwargs:
+            raise TypeError("Can't pass kwargs to a mock we aren't creating")
         setattr(target, name, replacement)
         self.target = target
         self.original = original
@@ -111,6 +131,16 @@ class _patch:
             self.is_started = False
 
     def __call__(self, func):
+        if isinstance(func, type):
+            for name in dir(func):
+                if name.startswith(patch.TEST_PREFIX):
+                    method = getattr(func, name)
+                    # Some boxed builtins are callable without exposing __call__.
+                    if hasattr(method, '__call__') or isinstance(method, type(len)):
+                        patcher = _patch(self.getter, self.attribute, self.new, self.create,
+                                         **self.mock_kwargs)
+                        setattr(func, name, patcher(method))
+            return func
         if hasattr(func, 'patchings'):
             func.patchings.append(self)
             return func
@@ -129,8 +159,59 @@ class _patch:
         return patched
 
 
-def _patch_attribute(self, target, new=DEFAULT, *, create=False):
-    return _patch(target, new, create)
+def _patch_attribute(self, target, new=DEFAULT, *, create=False, **kwargs):
+    getter, attribute = _get_target(target)
+    return _patch(getter, attribute, new, create, **kwargs)
+
+
+def _patch_object(target, attribute, new=DEFAULT, *, create=False, **kwargs):
+    if type(target) is str:
+        raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
+    return _patch(lambda: target, attribute, new, create, **kwargs)
+
+
+class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
+    def __init__(self, in_dict, values=(), clear=False, **kwargs):
+        updates = dict(values)
+        updates.update(kwargs)
+        super().__init__(in_dict, updates, clear)
+
+    def _enter(self):
+        if isinstance(self.in_dict, str):
+            self.in_dict = _patch_owner(self.in_dict)
+        mapping = self.in_dict
+        try:
+            self._original = mapping.copy()
+        except AttributeError:
+            self._original = {key: mapping[key] for key in mapping}
+        self._change(self.values, self.clear)
+        return mapping
+
+    def _change(self, values, clear):
+        mapping = self.in_dict
+        if clear:
+            try:
+                mapping.clear()
+            except AttributeError:
+                for key in list(mapping):
+                    del mapping[key]
+        try:
+            mapping.update(values)
+        except AttributeError:
+            for key in values:
+                mapping[key] = values[key]
+
+    def _exit(self):
+        if self._original is not None:
+            self._change(self._original, True)
+        return False
+
+    __enter__ = _enter
+
+    def __exit__(self, *exc_info):
+        return self._exit()
 
 
 _PatchFactory.__call__ = _patch_attribute
+_PatchFactory.dict = staticmethod(_BoxedDictionaryPatch)
+_PatchFactory.object = staticmethod(_patch_object)

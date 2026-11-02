@@ -119,8 +119,9 @@ def _boxedAssertion(self, context, method, expected, regex, args, kwargs):
             raise TypeError(repr(next(iter(kwargs))) + " is an invalid keyword argument for this function")
         return context(self, expected, msg, regex)
     callback = args[0]
-    name = getattr(callback, "__name__", None)
-    if name is None:
+    try:
+        name = callback.__name__
+    except AttributeError:
         name = str(callback)
     with context(self, expected, None, regex, name):
         callback(*args[1:], **kwargs)
@@ -156,10 +157,26 @@ def assertRegex(self, text, expected_regex, msg=None):
         msg = self._formatMessage(msg, standardMsg)
         raise self.failureException(msg)
 
+
+def assertNotRegex(self, text, unexpected_regex, msg=None):
+    """Fail the test if the text matches the regular expression."""
+    if isinstance(unexpected_regex, (str, bytes)):
+        unexpected_regex = re.compile(unexpected_regex)
+    match = unexpected_regex.search(text)
+    if match:
+        standardMsg = 'Regex matched: %r matches %r in %r' % (
+            text[match.start() : match.end()],
+            unexpected_regex.pattern,
+            text)
+        # _formatMessage ensures the longMessage option is respected
+        msg = self._formatMessage(msg, standardMsg)
+        raise self.failureException(msg)
+
 TestCase.assertRegex = assertRegex
+TestCase.assertNotRegex = assertNotRegex
 TestCase.assertRaisesRegex = assertRaisesRegex
 TestCase._formatMessage = _boxed_format_message
 TestCase.assertRaises = assertRaises
 TestCase.assertWarns = assertWarns
 TestCase.assertWarnsRegex = assertWarnsRegex
-del assertRegex, assertRaises, assertRaisesRegex, assertWarns, assertWarnsRegex
+del assertRegex, assertNotRegex, assertRaises, assertRaisesRegex, assertWarns, assertWarnsRegex

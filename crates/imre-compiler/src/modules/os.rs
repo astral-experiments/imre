@@ -31,11 +31,17 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
     }
     Some(match name {
+        "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
+        "chdir" if cfg!(unix) => Intrinsic::Chdir,
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
         "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
+        "mkfifo" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkfifo"),
+        "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
+        "waitpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.waitpid"),
+        "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
         "scandir" if cfg!(any(target_os = "linux", target_os = "macos")) => {
             Intrinsic::ObjectRuntimeExport("posix.scandir")
@@ -51,6 +57,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
+        "link" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.link"),
+        "symlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.symlink"),
         "remove" => Intrinsic::Fd(FdOperation::Remove),
         "lseek" => Intrinsic::Fd(FdOperation::Seek),
         "O_RDONLY" => Intrinsic::DescriptorConstant("o_rdonly"),

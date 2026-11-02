@@ -179,6 +179,6 @@ pub(super) fn new(
         } else {
             initialize!(blake2s_simd, Blake2s)
         };
-        Ok(ctx.alloc(Value::Hash(Rc::new(RefCell::new(state)))))
+        Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
     })
 }

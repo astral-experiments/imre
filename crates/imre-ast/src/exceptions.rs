@@ -130,6 +130,7 @@ exception_kinds! {
         BinasciiError = 69 => "binascii.Error",
         BinasciiIncomplete = 70 => "binascii.Incomplete",
         PackageNotFoundError = 71 => "PackageNotFoundError",
+        HError = 72 => "socket.herror",
     }
 }
 
@@ -246,6 +247,7 @@ impl Kind {
                     | Self::ProcessLookupError
                     | Self::TimeoutError
                     | Self::GaiError
+                    | Self::HError
                     | Self::BadGzipFile
                     | Self::ShutilError
                     | Self::SameFileError

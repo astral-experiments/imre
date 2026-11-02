@@ -117,12 +117,31 @@ impl Calendar {
         make_delta(mask, words).map(Self)
     }
 
+    pub(crate) fn shift_duration(&self, other: &Self, subtract: bool) -> Result<Self, Error> {
+        shift_delta(
+            self.delta_microseconds(),
+            other.delta_microseconds(),
+            subtract,
+        )
+        .map(Self)
+    }
+
+    pub(crate) fn negate_delta(&self) -> Result<Self, Error> {
+        negate_delta(&self.0).map(Self)
+    }
+
     pub(crate) fn seconds(&self) -> f64 {
         total_seconds(delta(&self.0))
     }
 
     pub(crate) fn zone(offset: &Self, name: Option<&str>) -> Result<Self, Error> {
         make_zone(offset.0.clone(), name.map(text::owned_string)).map(Self)
+    }
+
+    /// Format the stored fixed UTC offset for %z or %:z.
+    pub(crate) fn strftime_offset(&self, colon: bool) -> String {
+        let text = offset_text(offset(&self.0));
+        if colon { text } else { text.replace(':', "") }
     }
 
     pub(crate) fn is_utc(&self) -> bool {
@@ -244,6 +263,14 @@ impl Calendar {
         })
     }
 
+    pub(crate) fn delta_microseconds(&self) -> i128 {
+        delta(&self.0)
+    }
+
+    pub(crate) fn from_delta_microseconds(us: &Int) -> Result<Self, Error> {
+        try_owner(Value::Delta(validate_delta(&us.big())?)).map(Self)
+    }
+
     pub(crate) fn delta_parts(&self) -> (i128, i128, i128) {
         parts(delta(&self.0))
     }
@@ -268,6 +295,28 @@ impl Calendar {
 
     pub(crate) fn text(&self) -> String {
         with(&self.0, |v| calendar_text(v, false))
+    }
+
+    /// date.__str__ calls isoformat, which uses a T separator for a datetime receiver.
+    pub(crate) fn iso_text(&self) -> String {
+        with(&self.0, |v| calendar_text(v, true))
+    }
+
+    /// Use the receiver's class name but the descriptor owner's field layout.
+    pub(crate) fn subtype_repr(&self, class: &str, as_date: bool) -> String {
+        let mut text = String::new();
+        let mut out = super::super::values::ReprWriter(&mut text);
+        if as_date {
+            write_named_repr(
+                &Value::DateOnly(i128::from(self.ordinal())),
+                Some(class),
+                &mut out,
+            )
+        } else {
+            with(&self.0, |v| write_named_repr(v, Some(class), &mut out))
+        }
+        .expect("writing to a string succeeds");
+        text
     }
 
     pub(crate) fn repr(&self) -> String {

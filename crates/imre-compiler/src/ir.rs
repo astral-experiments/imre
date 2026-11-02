@@ -1744,11 +1744,16 @@ pub(crate) enum StrDescriptor {
     IsAlpha,
     IsDigit,
     ZFill,
+    IsTitle,
+    Title,
+    SwapCase,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
         Some(match name {
             "lower" => Self::Lower,
+            "title" => Self::Title,
+            "swapcase" => Self::SwapCase,
             "strip" => Self::Strip,
             "lstrip" => Self::LStrip,
             "rstrip" => Self::RStrip,
@@ -1756,6 +1761,7 @@ impl StrDescriptor {
             "isascii" => Self::IsAscii,
             "isalpha" => Self::IsAlpha,
             "isdigit" => Self::IsDigit,
+            "istitle" => Self::IsTitle,
             "islower" => Self::IsLower,
             "zfill" => Self::ZFill,
             _ => return None,
@@ -1764,12 +1770,19 @@ impl StrDescriptor {
     pub(crate) fn is_predicate(self) -> bool {
         matches!(
             self,
-            Self::IsAlnum | Self::IsAscii | Self::IsAlpha | Self::IsDigit | Self::IsLower
+            Self::IsAlnum
+                | Self::IsAscii
+                | Self::IsAlpha
+                | Self::IsDigit
+                | Self::IsLower
+                | Self::IsTitle
         )
     }
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Lower => "lower",
+            Self::Title => "title",
+            Self::SwapCase => "swapcase",
             Self::Strip => "strip",
             Self::LStrip => "lstrip",
             Self::RStrip => "rstrip",
@@ -1777,6 +1790,7 @@ impl StrDescriptor {
             Self::IsAscii => "isascii",
             Self::IsAlpha => "isalpha",
             Self::IsDigit => "isdigit",
+            Self::IsTitle => "istitle",
             Self::IsLower => "islower",
             Self::ZFill => "zfill",
         }
@@ -1816,6 +1830,9 @@ pub(crate) enum TextOperation {
     Lower,
     Upper,
     Capitalize,
+    CaseMap {
+        title: bool,
+    },
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -1859,6 +1876,7 @@ pub(crate) enum TextPredicate {
     Digit,
     Space,
     Lower,
+    Title,
     Upper,
 }
 
@@ -2181,7 +2199,6 @@ pub(crate) enum ProcessOperation {
     SelectorClass(Option<bool>),
     SetSelector,
     Executable,
-    RunToStderr,
     ShellOutput {
         status: bool,
     },
@@ -2202,7 +2219,8 @@ pub(crate) enum ProcessOperation {
     },
     Call {
         streams: u32,
-        check: bool,
+        // Discarded run calls supply check as an evaluated operand.
+        fixed_check: Option<bool>,
     },
     PopenPid,
     PopenActive,

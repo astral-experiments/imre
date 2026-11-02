@@ -135,3 +135,42 @@ def current():
     bcm = struct.Struct("@3I4l2I")
     fields = (1, 2, 3, -1, 17, -19, 23, 29, 31)
     assert bcm.unpack(bcm.pack(*fields)) == fields
+
+    class Double:
+        def __float__(self):
+            return 1.5
+
+    class FloatSubclass(float):
+        def __float__(self):
+            raise AssertionError("converted a float subclass")
+
+    for prefix in ("", "@", "=", "<", ">", "!"):
+        layout = struct.Struct(prefix + "2id")
+        values = (-(1 << 31), (1 << 31) - 1, 1.5)
+        assert layout.size == 16
+        assert struct.unpack(layout.format, layout.pack(*values)) == values
+        assert struct.unpack(prefix + "d", struct.pack(prefix + "d", Field(-7))) == (-7.0,)
+        for value in (1 << 31, -(1 << 31) - 1, OverflowingIndex()):
+            try:
+                struct.pack(prefix + "i", value)
+            except struct.error as error:
+                assert str(error) == "'i' format requires -2147483648 <= number <= 2147483647"
+            else:
+                raise AssertionError("signed int overflow accepted")
+
+    assert struct.calcsize("@B0d") == struct.calcsize("@Bd") - 8
+    assert struct.calcsize("=Bd") == 9
+    assert struct.pack("<i", Field(-3)) == b"\xfd\xff\xff\xff"
+    assert struct.unpack(">i", b"\x80\x00\x00\x01") == (-(1 << 31) + 1,)
+    assert struct.pack(">d", Double()) == b"\x3f\xf8" + bytes(6)
+    assert struct.pack("<d", FloatSubclass(1.5)) == bytes(6) + b"\xf8\x3f"
+    for raw in (b"\x80" + bytes(7), b"\x7f\xf0" + bytes(6), b"\x7f\xf8" + bytes(5) + b"\x04"):
+        value, = struct.unpack("!d", raw)
+        assert type(value) is float and struct.pack("<d", value) == raw[::-1]
+    for value in ("1", 1 << 9999, OverflowingIndex()):
+        try:
+            struct.pack(">d", value)
+        except struct.error as error:
+            assert str(error) == "required argument is not a float"
+        else:
+            raise AssertionError("invalid double accepted")

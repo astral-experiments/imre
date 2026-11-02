@@ -24,12 +24,27 @@ def files(anchor=_missing, *, package=_missing):
     return reader.files()
 
 
+def _get_resource(anchor, path_names):
+    if anchor is None:
+        raise TypeError("anchor must be module or string, got None")
+    return files(anchor).joinpath(*path_names)
+
+
+def read_binary(anchor, *path_names):
+    """Read and return contents of *resource* within *package* as bytes."""
+    return _get_resource(anchor, path_names).read_bytes()
+
+
 def read_text(anchor, *path_names, encoding=_missing, errors='strict'):
     """Read a text resource, defaulting to UTF-8 for a single path component."""
     if encoding is _missing:
         if len(path_names) > 1:
             raise TypeError("'encoding' argument required with multiple path names")
         encoding = 'utf-8'
-    if anchor is None:
-        raise TypeError("anchor must be module or string, got None")
-    return files(anchor).joinpath(*path_names).read_text(encoding=encoding, errors=errors)
+    return _get_resource(anchor, path_names).read_text(encoding=encoding, errors=errors)
+
+
+def as_file(path):
+    """Provide a pathlib.Path for the duration of a context manager."""
+    from importlib.resources._as_file import as_file as materialize
+    return materialize(path)

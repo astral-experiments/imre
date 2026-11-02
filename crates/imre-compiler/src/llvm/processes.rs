@@ -463,13 +463,16 @@ impl Emitter<'_, '_> {
                     ));
                 }
                 self.line(format!("store {layout} {aggregate}, ptr {config}"));
-                if let ProcessOperation::Call { check, .. } = operation {
+                if let ProcessOperation::Call { fixed_check, .. } = operation {
                     let timeout = &args[12].value;
                     let kind = if timeout.ty == Type::Int { 2 } else { 7 };
+                    let check = fixed_check.map_or_else(
+                        || args[14].value.operand.clone(),
+                        |check| u8::from(check).to_string(),
+                    );
                     let word = self.checked_instruction(format!(
-                        "call i64 @imre_call_config(ptr {config}, i32 {kind}, i64 {}, i1 {})",
+                        "call i64 @imre_call_config(ptr {config}, i32 {kind}, i64 {}, i1 {check})",
                         timeout.operand,
-                        u8::from(check)
                     ));
                     return self.unpack_word(word, returns);
                 }
@@ -661,14 +664,6 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::Executable => self.call("imre_sys_executable", Type::Str, &[]),
-            ProcessOperation::RunToStderr => {
-                let check = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
-                self.checked_line(format!(
-                    "call void @imre_subprocess_to_stderr(ptr {}, i32 {check})",
-                    args[0].value.operand
-                ));
-                none()
-            }
             ProcessOperation::EnvironGet if returns == Type::Str => self.call(
                 "imre_environ_get",
                 Type::Str,

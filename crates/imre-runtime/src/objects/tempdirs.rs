@@ -446,7 +446,7 @@ fn cleanup(path: &str) -> Result<()> {
 
 /// Remove entries relative to held directory descriptors. On failure, `path`
 /// names the current entry even if a descendant was exchanged for a symlink.
-fn remove_tree(path: &mut PathBuf) -> io::Result<()> {
+pub(crate) fn remove_tree(path: &mut PathBuf) -> io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("."));
     let name = CString::new(path.file_name().unwrap_or(OsStr::new(".")).as_bytes())?;
     #[cfg(target_os = "linux")]

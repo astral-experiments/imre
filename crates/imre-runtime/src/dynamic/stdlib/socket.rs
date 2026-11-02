@@ -9,11 +9,9 @@ const CONSTANTS: &[(&str, i32)] = &[
     ("AF_UNIX", libc::AF_UNIX),
     ("AI_PASSIVE", libc::AI_PASSIVE),
     ("SOCK_STREAM", libc::SOCK_STREAM),
-    ("SOL_SOCKET", libc::SOL_SOCKET),
     ("IPPROTO_TCP", libc::IPPROTO_TCP),
     ("IPPROTO_IPV6", libc::IPPROTO_IPV6),
     ("IPV6_V6ONLY", libc::IPV6_V6ONLY),
-    ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_SNDBUF", libc::SO_SNDBUF),
     ("TCP_NODELAY", libc::TCP_NODELAY),
     ("SHUT_RD", libc::SHUT_RD),
@@ -24,11 +22,38 @@ const CONSTANTS: &[(&str, i32)] = &[
 
 // socket.py imports these constants once, so deletion must not fall back to a native value.
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    ("AI_NUMERICSERV", libc::AI_NUMERICSERV),
+    ("EAI_SERVICE", libc::EAI_SERVICE),
+    ("EAI_NODATA", libc::EAI_NODATA),
+    ("EAI_NONAME", libc::EAI_NONAME),
+    ("SOL_TCP", libc::IPPROTO_TCP),
+    ("NI_DGRAM", libc::NI_DGRAM),
+    ("NI_NAMEREQD", libc::NI_NAMEREQD),
+    ("NI_NOFQDN", libc::NI_NOFQDN),
+    ("NI_NUMERICHOST", libc::NI_NUMERICHOST),
+    ("NI_NUMERICSERV", libc::NI_NUMERICSERV),
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
+    ("SOL_SOCKET", libc::SOL_SOCKET),
+    ("SO_REUSEADDR", libc::SO_REUSEADDR),
+    ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),
     ("SOCK_RAW", libc::SOCK_RAW),
     ("SOCK_RDM", libc::SOCK_RDM),
     ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
+];
+
+const RESOLVER_NAMES: &[&str] = &[
+    "gaierror",
+    "herror",
+    "gethostname",
+    "gethostbyname",
+    "gethostbyaddr",
+    "getnameinfo",
+    "getservbyname",
+    "getservbyport",
+    "if_nameindex",
+    "if_nametoindex",
+    "if_indextoname",
 ];
 
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
@@ -37,6 +62,14 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
+    for name in RESOLVER_NAMES {
+        let value = ctx.builtin(&format!("socket.{name}"));
+        ctx.bind(scope, name, value);
+    }
+    let pair = ctx.builtin("_socket.socketpair");
+    ctx.bind(scope, "socketpair", pair);
+    let resolver = ctx.builtin("_socket.getaddrinfo");
+    ctx.bind(scope, "getaddrinfo", resolver);
     let socket_type = attribute(ctx, "socket")?;
     ctx.bind(scope, "SocketType", socket_type);
     for name in ["has_ipv6", "socket", "close", "error"] {
@@ -46,21 +79,75 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
     Ok(())
 }
 
-/// An ordinary importlib-only executable can load socket without its bundled Python source.
+/// Snapshot the native constants and build the public enum members before socket.py runs.
 pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) -> Result<()> {
     let low = ctx.module("_socket")?;
-    for &(name, _) in IMPORTED_CONSTANTS {
+    ctx.bind(scope, "_socket", low);
+    let getaddrinfo = ctx.builtin("socket.getaddrinfo");
+    ctx.bind(scope, "getaddrinfo", getaddrinfo);
+    for name in IMPORTED_CONSTANTS
+        .iter()
+        .map(|&(name, _)| name)
+        .chain(RESOLVER_NAMES.iter().copied())
+    {
         match ctx.lookup_attr(low, name) {
             Ok(value) => ctx.bind(scope, name, value),
             Err(error) if ctx.is_attribute_error(&error) => {}
             Err(error) => return Err(error),
         }
     }
+    let Value::Module {
+        scope: low_scope, ..
+    } = *ctx.heap.get(low)
+    else {
+        return Err(Error::new("TypeError", "_socket must be a module"));
+    };
+    let namespace = ctx.module_globals(low_scope)?;
+    for (class_name, prefix, base_name) in [
+        ("AddressFamily", "AF_", "enum.IntEnum"),
+        ("SocketKind", "SOCK_", "enum.IntEnum"),
+        ("AddressInfo", "AI_", "enum.IntFlag"),
+    ] {
+        let enum_scope = ctx.scope("socket", None);
+        let module = ctx.text("socket");
+        ctx.bind(enum_scope, "__module__", module);
+        let mut entries: Vec<_> = ctx
+            .dict_entries(namespace)
+            .expect("module globals")
+            .iter()
+            .filter_map(|&(key, value)| {
+                let name = ctx.str_value(key).ok()?;
+                (name.starts_with(prefix) && !name.bytes().any(|ch| ch.is_ascii_lowercase()))
+                    .then(|| (name.to_owned(), value))
+            })
+            .collect();
+        // Enum._convert_ sorts by value, breaking alias ties by name. When
+        // replacement exports cannot be ordered together, it sorts by name.
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        if entries.iter().all(|(_, value)| ctx.as_int(*value).is_ok()) {
+            entries.sort_by(|(_, a), (_, b)| ctx.as_int(*a).unwrap().cmp(&ctx.as_int(*b).unwrap()));
+        }
+        for (name, value) in &entries {
+            ctx.bind(enum_scope, name, *value);
+        }
+        let base = ctx.builtin(base_name);
+        let class = ctx.allocate_class(class_name.into(), enum_scope, vec![base])?;
+        ctx.populate_enum(class, Some(base))?;
+        ctx.bind(scope, class_name, class);
+        for (name, _) in entries {
+            let member = ctx.class_attr(class, &name).expect("declared socket enum");
+            ctx.bind(scope, &name, member);
+        }
+    }
     Ok(())
 }
 
 pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
-    if let Some(&(_, value)) = CONSTANTS.iter().find(|&&(key, _)| key == name) {
+    if !name.starts_with("AF_")
+        && !name.starts_with("SOCK_")
+        && !name.starts_with("AI_")
+        && let Some(&(_, value)) = CONSTANTS.iter().find(|&&(key, _)| key == name)
+    {
         return Ok(ctx.int(i64::from(value)));
     }
     match name {
@@ -69,9 +156,7 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         "has_ipv6" => Ok(super::TRUE),
         "socket" => Ok(ctx.builtin("socket.socket")),
         "close" => Ok(ctx.builtin("_socket.close")),
-        "getaddrinfo" | "getfqdn" | "gaierror" => {
-            Ok(ctx.alloc(Value::Native(format!("socket.{name}"))))
-        }
+        "getfqdn" => Ok(ctx.alloc(Value::Native("socket.getfqdn".into()))),
         "error" => Ok(ctx.builtin("OSError")),
         "timeout" => Ok(ctx.alloc(Value::Native("TimeoutError".into()))),
         _ => Err(Error::new(
@@ -246,32 +331,232 @@ fn unsigned_mask(value: crate::Int) -> u32 {
         .expect("masked uint32")
 }
 
-fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let keys = ["host", "port", "family", "type", "proto", "flags"];
-    check_args("getaddrinfo", args, kwargs, keys.len(), &keys)?;
-    let host =
-        option(args, 0, kwargs, "host")?.ok_or_else(|| Error::new("TypeError", "missing host"))?;
-    let service =
-        option(args, 1, kwargs, "port")?.ok_or_else(|| Error::new("TypeError", "missing port"))?;
-    let host = (host != NONE).then(|| ctx.str_value(host)).transpose()?;
-    let service = match ctx.heap.get(service) {
-        Value::None => None,
-        Value::Str(s) => Some(s.clone()),
-        Value::Int(n) => Some(n.to_string()),
+/// PyArg's "et" conversion IDNA-encodes str and treats bytes/bytearray as already encoded.
+fn host_argument(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Vec<u8>> {
+    let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+    let bytes = match ctx.heap.get(ctx.scalar_value(arg)) {
+        Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(arg)?.to_vec(),
+        Value::Str(_) | Value::SurrogateStr(_) => {
+            let host = ctx.str_value(arg)?;
+            if !host.is_ascii() {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "Unicode host names require IDNA encoding",
+                ));
+            }
+            // Match the ASCII fast path in encodings.idna; the final label may be empty.
+            let empty = if host.starts_with('.') {
+                Some(0)
+            } else {
+                host.find("..").map(|i| i + 1)
+            };
+            if let Some(i) = empty {
+                return Err(ctx.string_encoding_error(
+                    arg,
+                    "idna",
+                    "label empty",
+                    u32::from(b'.'),
+                    i..i + 1,
+                ));
+            }
+            let mut offset = 0;
+            for label in host.split('.') {
+                if label.len() >= 64 {
+                    return Err(ctx.string_encoding_error(
+                        arg,
+                        "idna",
+                        "label too long",
+                        0,
+                        offset..offset + label.len(),
+                    ));
+                }
+                offset += label.len() + 1;
+            }
+            host.as_bytes().to_vec()
+        }
         _ => {
             return Err(Error::new(
                 "TypeError",
-                "port must be an integer or a string",
+                format!(
+                    "{name}() argument 1 must be str, bytes or bytearray, not {}",
+                    ctx.type_name(arg)
+                ),
             ));
         }
     };
+    if bytes.contains(&0) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() argument 1 must be encoded string without null bytes, not {}",
+                ctx.type_name(arg)
+            ),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn interface_name(ctx: &mut Context, name: &std::ffi::CStr) -> Result<Id> {
+    let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+    Ok(ctx.text_codepoints(codec.decode_filesystem(name.to_bytes())?))
+}
+
+fn if_nameindex(ctx: &mut Context) -> Result<Id> {
+    struct Interfaces(*mut libc::if_nameindex);
+
+    impl Drop for Interfaces {
+        fn drop(&mut self) {
+            // SAFETY: this guard owns the array returned by if_nameindex.
+            unsafe { libc::if_freenameindex(self.0) };
+        }
+    }
+
+    // SAFETY: if_nameindex has no arguments and returns a new sentinel-terminated array.
+    let pointer = unsafe { libc::if_nameindex() };
+    if pointer.is_null() {
+        return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
+    }
+    let interfaces = Interfaces(pointer);
+    let mut entry = interfaces.0;
+    let mut result = Vec::new();
+    // SAFETY: the array and each terminated name are valid until the guard drops.
+    unsafe {
+        while (*entry).if_index != 0 {
+            let index = ctx.int(i64::from((*entry).if_index));
+            let name = interface_name(ctx, std::ffi::CStr::from_ptr((*entry).if_name))?;
+            result.push(ctx.alloc(Value::Tuple(vec![index, name])));
+            entry = entry.add(1);
+        }
+    }
+    Ok(ctx.alloc(Value::List(result)))
+}
+
+// Some libc implementations leave errno unchanged when an interface is missing.
+fn set_interface_errno(errno: libc::c_int) {
+    // SAFETY: each accessor returns this thread's writable errno.
+    unsafe {
+        #[cfg(target_os = "linux")]
+        {
+            *libc::__errno_location() = errno;
+        }
+        #[cfg(target_vendor = "apple")]
+        {
+            *libc::__error() = errno;
+        }
+        #[cfg(target_os = "android")]
+        {
+            *libc::__errno() = errno;
+        }
+    }
+}
+
+fn if_nametoindex(ctx: &mut Context, arg: Id) -> Result<Id> {
+    let path = super::posixpath::fspath(ctx, arg)?;
+    let name = super::os::c_path(ctx, path, "embedded null byte")?;
+    set_interface_errno(libc::ENODEV);
+    // SAFETY: name is a live, NUL-terminated filesystem spelling.
+    let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
+    if index == 0 {
+        return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
+    }
+    Ok(ctx.int(i64::from(index)))
+}
+
+fn if_indextoname(ctx: &mut Context, arg: Id) -> Result<Id> {
+    use num_traits::{Signed, ToPrimitive};
+    let value = ctx.index_integer(arg)?;
+    let value = value.big();
+    if value.is_negative() {
+        return Err(Error::new("ValueError", "Cannot convert negative int"));
+    }
+    let index = value
+        .to_u32()
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large for C unsigned int"))?;
+    let mut name = [0; libc::IF_NAMESIZE + 1];
+    set_interface_errno(libc::ENXIO);
+    // SAFETY: the buffer holds at least IF_NAMESIZE bytes; on success libc terminates it.
+    let ptr = unsafe { libc::if_indextoname(index, name.as_mut_ptr()) };
+    if ptr.is_null() {
+        return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
+    }
+    // SAFETY: a successful call returns a pointer into the live name buffer.
+    interface_name(ctx, unsafe { std::ffi::CStr::from_ptr(ptr) })
+}
+
+fn getaddrinfo_args(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<[Id; 6]> {
+    let values = super::super::builtins::bind_builtin_arguments(
+        "getaddrinfo",
+        args,
+        kwargs,
+        ["host", "port", "family", "type", "proto", "flags"],
+        2,
+    )?;
+    let zero = ctx.int(0);
+    Ok(values.map(|value| value.unwrap_or(zero)))
+}
+
+/// An importlib-only executable may use socket without its bundled Python source.
+fn public_getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let args = getaddrinfo_args(ctx, args, kwargs)?;
+    let socket = ctx.module("socket")?;
+    let low = ctx.lookup_attr(socket, "_socket")?;
+    let resolver = ctx.lookup_attr(low, "getaddrinfo")?;
+    let rows = ctx.call(resolver, args.to_vec(), Vec::new())?;
+    let iter = ctx.iterator(rows)?;
+    let mut result = Vec::new();
+    while let Some(row) = ctx.next_item(iter)? {
+        let mut fields = ctx.unpack_items(row, 5, None)?;
+        for (value, name) in fields.iter_mut().zip(["AddressFamily", "SocketKind"]) {
+            let class = ctx.lookup_attr(socket, name)?;
+            match ctx.call(class, vec![*value], Vec::new()) {
+                Ok(member) => *value = member,
+                Err(error) if ctx.is_builtin_error(&error, "ValueError") => {}
+                Err(error) => return Err(error),
+            }
+        }
+        result.push(ctx.alloc(Value::Tuple(fields)));
+    }
+    Ok(ctx.alloc(Value::List(result)))
+}
+
+pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [host, service, family, ty, protocol, flags] = getaddrinfo_args(ctx, args, kwargs)?;
+    let family = ctx.index_c_int(family)?;
+    let ty = ctx.index_c_int(ty)?;
+    let protocol = ctx.index_c_int(protocol)?;
+    let flags = ctx.index_c_int(flags)?;
+    let host = match ctx.heap.get(ctx.scalar_value(host)) {
+        Value::None => None,
+        Value::Bytes(bytes) => Some(bytes.clone()),
+        _ => Some(ctx.str_value(host)?.as_bytes().to_vec()),
+    };
+    let service = if let Some(index) = ctx.index_value(service)? {
+        Some(index.to_string().into_bytes())
+    } else {
+        match ctx.heap.get(ctx.scalar_value(service)) {
+            Value::None => None,
+            Value::Bytes(bytes) => Some(bytes.clone()),
+            Value::Str(s) => Some(s.as_bytes().to_vec()),
+            Value::SurrogateStr(_) => Some(ctx.encode_utf8_codepoints(service, false, "strict")?),
+            _ => return Err(Error::new("OSError", "Int or String expected")),
+        }
+    };
+    // CPython passes the NUL-terminated host and service buffers to libc.
+    fn c_string_prefix(value: &[u8]) -> &[u8] {
+        value.split(|&byte| byte == 0).next().unwrap_or_default()
+    }
     let rows = native::getaddrinfo(
-        host,
-        service.as_deref(),
-        int_option(ctx, args, kwargs, 2, "family", libc::AF_UNSPEC)?,
-        int_option(ctx, args, kwargs, 3, "type", 0)?,
-        int_option(ctx, args, kwargs, 4, "proto", 0)?,
-        int_option(ctx, args, kwargs, 5, "flags", 0)?,
+        host.as_deref().map(c_string_prefix),
+        service.as_deref().map(c_string_prefix),
+        family,
+        ty,
+        protocol,
+        flags,
     )?;
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
@@ -283,6 +568,140 @@ fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
         result.push(ctx.alloc(Value::Tuple(vec![family, ty, protocol, name, addr])));
     }
     Ok(ctx.alloc(Value::List(result)))
+}
+
+/// Parse a PyArg "s" argument as strict UTF-8 without calling str subclass methods.
+fn service_text(
+    ctx: &mut Context,
+    name: &str,
+    index: usize,
+    value: Id,
+) -> Result<std::ffi::CString> {
+    let storage = ctx.string_storage(value).ok_or_else(|| {
+        let ty = if value == NONE {
+            "None"
+        } else {
+            ctx.type_name(value)
+        };
+        Error::new(
+            "TypeError",
+            format!("{name}() argument {index} must be str, not {ty}"),
+        )
+    })?;
+    let text = match ctx.heap.get(storage) {
+        Value::Str(text) => std::ffi::CString::new(text.as_bytes()),
+        _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
+    };
+    text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+fn lookup_service(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    if !(1..=2).contains(&args.len()) {
+        let bound = if args.is_empty() {
+            "at least 1 argument"
+        } else {
+            "at most 2 arguments"
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes {bound} ({} given)", args.len()),
+        ));
+    }
+    enum Query {
+        Name(std::ffi::CString),
+        Port(i32),
+    }
+    let query = if name == "getservbyname" {
+        Query::Name(service_text(ctx, name, 1, args[0])?)
+    } else {
+        Query::Port(ctx.index_c_int(args[0])?)
+    };
+    // Parse the optional protocol before checking the converted port's 16-bit range.
+    let proto = args
+        .get(1)
+        .map(|&v| service_text(ctx, name, 2, v))
+        .transpose()?;
+    let audit_proto = proto
+        .as_ref()
+        .map_or(NONE, |s| ctx.text(s.to_str().expect("parsed UTF-8")));
+    match query {
+        Query::Name(service) => {
+            let audit_name = ctx.text(service.to_str().expect("parsed UTF-8"));
+            super::audit::event(ctx, "socket.getservbyname", &[audit_name, audit_proto])?;
+            Ok(ctx.int(i64::from(native::service_by_name(
+                &service,
+                proto.as_deref(),
+            )?)))
+        }
+        Query::Port(port) => {
+            let port = u16::try_from(port)
+                .map_err(|_| Error::new("OverflowError", "getservbyport: port must be 0-65535."))?;
+            let audit_port = ctx.int(i64::from(port));
+            super::audit::event(ctx, "socket.getservbyport", &[audit_port, audit_proto])?;
+            Ok(ctx.text(native::service_by_port(port, proto.as_deref())?))
+        }
+    }
+}
+
+fn getnameinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "getnameinfo() takes no keyword arguments",
+        ));
+    }
+    let &[sockaddr, flags] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "getnameinfo() takes exactly 2 arguments ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let flags = ctx.index_c_int(flags)?;
+    let fields = ctx
+        .tuple_items(sockaddr)?
+        .ok_or_else(|| Error::new("TypeError", "getnameinfo() argument 1 must be a tuple"))?;
+    if !(2..=4).contains(&fields.len()) {
+        return Err(Error::new(
+            "TypeError",
+            "getnameinfo(): illegal sockaddr argument",
+        ));
+    }
+    let host = ctx
+        .string_storage(fields[0])
+        .ok_or_else(|| Error::new("TypeError", "getnameinfo(): illegal sockaddr argument"))?;
+    let host = ctx.encode_utf8_codepoints(host, false, "strict")?;
+    if host.contains(&0) {
+        return Err(Error::new("ValueError", "embedded null character"));
+    }
+    let port = ctx.index_c_int(fields[1])?;
+    let mut unsigned = |&id| ctx.index_integer(id).map(unsigned_mask);
+    let flow = fields.get(2).map(&mut unsigned).transpose()?;
+    let scope = fields.get(3).map(unsigned).transpose()?.unwrap_or(0);
+    if flow.is_some_and(|v| v > 0xfffff) {
+        return Err(Error::new(
+            "OverflowError",
+            "getnameinfo(): flowinfo must be 0-1048575.",
+        ));
+    }
+    super::audit::event(ctx, "socket.getnameinfo", &[sockaddr])?;
+    let (host, service) = native::getnameinfo(&host, port, flow, scope, flags)?;
+    let host = ctx.text(host);
+    let service = ctx.text(service);
+    Ok(ctx.alloc(Value::Tuple(vec![host, service])))
 }
 
 fn getsockopt(
@@ -338,6 +757,19 @@ pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     Ok(NONE)
 }
 
+pub(super) fn socketpair(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    check_args("socketpair", args, kwargs, 3, &[])?;
+    let mut values = [libc::AF_UNIX, libc::SOCK_STREAM, 0];
+    for (value, &arg) in values.iter_mut().zip(args) {
+        *value = ctx.index_c_int(arg)?;
+    }
+    let [family, kind, proto] = values;
+    let (left, right) = native::socketpair(family, kind, proto)?;
+    let left = ctx.alloc(Value::Socket(left));
+    let right = ctx.alloc(Value::Socket(right));
+    Ok(ctx.alloc(Value::Tuple(vec![left, right])))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -355,7 +787,44 @@ pub(super) fn call(
             )?;
             return Ok(ctx.alloc(Value::Socket(handle)));
         }
-        "getaddrinfo" => return getaddrinfo(ctx, args, kwargs),
+        "if_nameindex" => {
+            check_args(name, args, kwargs, 0, &[])?;
+            return if_nameindex(ctx);
+        }
+        "if_nametoindex" => {
+            let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+            return if_nametoindex(ctx, arg);
+        }
+        "if_indextoname" => {
+            let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+            return if_indextoname(ctx, arg);
+        }
+        "getaddrinfo" => return public_getaddrinfo(ctx, args, kwargs),
+        "getnameinfo" => return getnameinfo(ctx, args, kwargs),
+        "getservbyname" | "getservbyport" => return lookup_service(ctx, name, args, kwargs),
+        "gethostname" => {
+            check_args(name, args, kwargs, 0, &[])?;
+            super::audit::event(ctx, "socket.gethostname", args)?;
+            let raw = native::hostname()?;
+            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            return Ok(ctx.text_codepoints(codec.decode_filesystem(&raw)?));
+        }
+        "gethostbyname" => {
+            let host = host_argument(ctx, name, args, kwargs)?;
+            super::audit::event(ctx, "socket.gethostbyname", args)?;
+            return Ok(ctx.text(native::hostbyname(&host)?.to_string()));
+        }
+        "gethostbyaddr" => {
+            let host = host_argument(ctx, name, args, kwargs)?;
+            super::audit::event(ctx, "socket.gethostbyaddr", args)?;
+            let entry = native::hostbyaddr(&host)?;
+            let name = ctx.text(entry.name);
+            let aliases = entry.aliases.into_iter().map(|s| ctx.text(s)).collect();
+            let aliases = ctx.alloc(Value::List(aliases));
+            let addresses = entry.addresses.into_iter().map(|s| ctx.text(s)).collect();
+            let addresses = ctx.alloc(Value::List(addresses));
+            return Ok(ctx.alloc(Value::Tuple(vec![name, aliases, addresses])));
+        }
         "getfqdn" => {
             check_args(name, args, kwargs, 1, &["name"])?;
             let host = option(args, 0, kwargs, "name")?
@@ -424,6 +893,10 @@ pub(super) fn call(
         "__enter__" => return Ok(*receiver),
         "__exit__" | "close" => native::close(&s)?,
         "fileno" => return Ok(ctx.int(i64::from(native::fd(&s)))),
+        "get_inheritable" => {
+            let enabled = crate::objects::os::INHERITABLE.enabled(native::fd(&s))?;
+            return Ok(if enabled { super::TRUE } else { super::FALSE });
+        }
         "bind" => native::bind(
             &s,
             &address(ctx, native::family(&s), argument(args, 0)?, method)?,
@@ -442,7 +915,13 @@ pub(super) fn call(
             let child = ctx.alloc(Value::Socket(child));
             return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
         }
-        "getsockname" => return pack_address(ctx, &native::sockname(&s)?),
+        "getsockname" | "getpeername" => {
+            return match native::socket_name(&s, method == "getpeername")? {
+                native::SocketName::Internet(addr) => pack_address(ctx, &addr),
+                native::SocketName::UnnamedUnix => Ok(ctx.text("")),
+                native::SocketName::NoAddress => Ok(NONE),
+            };
+        }
         "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
         "getblocking" => {
             return Ok(if native::imre_socket_getblocking(&s) {

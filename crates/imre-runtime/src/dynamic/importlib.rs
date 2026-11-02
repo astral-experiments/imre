@@ -121,11 +121,7 @@ impl Context {
         if let Some(list) = fromlist
             && self.truth(list)?
         {
-            match self.lookup_attr(module, "__path__") {
-                Ok(_) => self.load_fromlist(module, list, None)?,
-                Err(err) if self.is_attribute_error(&err) => {}
-                Err(err) => return Err(err),
-            }
+            self.prepare_fromlist(module, list)?;
         } else if let Some((first, _)) = name.split_once('.') {
             let head = format!("{base}.{first}");
             let key = self.text(&head);
@@ -137,32 +133,43 @@ impl Context {
         Ok(module)
     }
 
+    /// A nonempty fromlist probes the live package path once before binding any names.
+    pub(super) fn prepare_fromlist(&mut self, module: Id, list: Id) -> Result<Id> {
+        match self.lookup_attr(module, "__path__") {
+            Ok(_) => self.load_fromlist(module, list, false)?,
+            Err(err) if self.is_attribute_error(&err) => {}
+            Err(err) => return Err(err),
+        }
+        Ok(module)
+    }
+
     /// Import missing children of a package requested by a nonempty fromlist.
-    fn load_fromlist(&mut self, module: Id, list: Id, all: Option<&str>) -> Result<()> {
+    fn load_fromlist(&mut self, module: Id, list: Id, recursive: bool) -> Result<()> {
         let iterator = self.iterator(list)?;
         self.heap.reserve_temporaries(1)?;
         self.heap.keep(iterator);
         while let Some(item) = self.next_item(iterator)? {
-            let name = self
-                .str_value(item)
-                .map_err(|_| {
-                    Error::new(
+            let name = match self.str_value(item) {
+                Ok(name) => name.to_owned(),
+                Err(_) => {
+                    let owner = if recursive {
+                        let id = self.lookup_attr(module, "__name__")?;
+                        format!("{}.__all__", self.str_value(id)?)
+                    } else {
+                        "``from list''".to_owned()
+                    };
+                    return Err(Error::new(
                         "TypeError",
-                        format!(
-                            "Item in {} must be str, not {}",
-                            all.unwrap_or("``from list''"),
-                            self.type_name(item)
-                        ),
-                    )
-                })?
-                .to_owned();
+                        format!("Item in {owner} must be str, not {}", self.type_name(item)),
+                    ));
+                }
+            };
             if name == "*" {
-                if all.is_none() {
+                if !recursive {
                     match self.lookup_attr(module, "__all__") {
-                        Ok(names) => {
-                            let id = self.lookup_attr(module, "__name__")?;
-                            let owner = format!("{}.__all__", self.str_value(id)?);
-                            self.load_fromlist(module, names, Some(&owner))?;
+                        Ok(_) => {
+                            let names = self.lookup_attr(module, "__all__")?;
+                            self.load_fromlist(module, names, true)?;
                         }
                         Err(err) if self.is_attribute_error(&err) => {}
                         Err(err) => return Err(err),
@@ -170,7 +177,7 @@ impl Context {
                 }
                 continue;
             }
-            match self.lookup_attr(module, &name) {
+            match self.lookup_named_attr(module, &name, Some(item)) {
                 Ok(_) => continue,
                 Err(err) if self.is_attribute_error(&err) => {}
                 Err(err) => return Err(err),
@@ -178,7 +185,18 @@ impl Context {
             let id = self.lookup_attr(module, "__name__")?;
             let child = format!("{}.{name}", self.str_value(id)?);
             // Missing children are ignored, but a missing dependency inside a child propagates.
-            self.find_module(&child)?;
+            if let Err(error) = self.find_module(&child) {
+                let fields = error.import.as_ref();
+                if !self.is_builtin_error(&error, "ModuleNotFoundError")
+                    || fields.and_then(|fields| fields.name.as_deref()) != Some(&child)
+                {
+                    return Err(error);
+                }
+                let key = self.text(&child);
+                if self.public_registered_module(key)? == Some(NONE) {
+                    return Err(error);
+                }
+            }
         }
         Ok(())
     }
@@ -420,7 +438,10 @@ impl Context {
         for_resource: bool,
     ) -> Result<Id> {
         let key = self.text(fullname);
-        if let Some(module) = self.registered_module(key)? {
+        let modules = self.public_modules()?;
+        if self.contains(key, modules)? {
+            let modules = self.public_modules()?;
+            let module = self.get_item(modules, key)?;
             if module == NONE {
                 return Ok(NONE);
             }
@@ -431,11 +452,11 @@ impl Context {
                 )),
                 Err(e)
                     if self.is_attribute_error(&e)
-                        && (stdlib::is_module(fullname)
-                            || matches!(
-                                self.heap.get(module),
-                                Value::Module { origin: None, .. }
-                            )) =>
+                        && matches!(
+                            self.heap.get(module),
+                            Value::Module { constructor: None, origin, .. }
+                                if origin.is_none() || stdlib::is_module(fullname)
+                        ) =>
                 {
                     if for_resource {
                         return Ok(NONE);
@@ -457,9 +478,8 @@ impl Context {
         }
         let (child, search, top_level) =
             if let Some((parent_name, child)) = fullname.rsplit_once('.') {
-                let parent = self
-                    .find_module(parent_name)?
-                    .ok_or_else(|| Self::missing_module(parent_name))?;
+                // util.find_spec imports the parent through the ordinary __import__ fast path.
+                let parent = self.module(parent_name)?;
                 let path = match self.lookup_attr(parent, "__path__") {
                     Err(cause) if self.is_attribute_error(&cause) => {
                         let mut error = Error::new(

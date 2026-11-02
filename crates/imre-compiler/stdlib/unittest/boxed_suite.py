@@ -42,9 +42,80 @@ def _runRegistered(self, case, name):
         reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
         self._skipCase(case, name, reason)
     else:
-        if getattr(cls, "__unittest_expecting_failure__", False) or getattr(method, "__unittest_expecting_failure__", False):
-            raise NotImplementedError("native unittest does not yet support expectedFailure")
-        self._runCase(case, name, case.setUp, method, case.tearDown)
+        _runBoxedCase(self, case, name, method)
+
+
+def _runBoxedCase(dispatch, test, name, method):
+    result = dispatch._observer if isinstance(dispatch, _CaseResultDispatch) else dispatch
+    expecting_failure = (getattr(test, "__unittest_expecting_failure__", False)
+                         or getattr(method, "__unittest_expecting_failure__", False))
+    result.startTest(test)
+    try:
+        dispatch._startCase(name)
+        outcome = case._Outcome(result)
+        start_time = case.time.perf_counter()
+        try:
+            test._outcome = outcome
+            with outcome.testPartExecutor(test):
+                test._callSetUp()
+            if outcome.success:
+                outcome.expecting_failure = expecting_failure
+                with outcome.testPartExecutor(test):
+                    test._callTestMethod(method)
+                outcome.expecting_failure = False
+                with outcome.testPartExecutor(test):
+                    test._callTearDown()
+            test.doCleanups()
+            test._addDuration(result, case.time.perf_counter() - start_time)
+            if outcome.success:
+                if not expecting_failure:
+                    result.addSuccess(test)
+                    dispatch._mark(".", "ok")
+                elif outcome.expectedFailure is None:
+                    test._addUnexpectedSuccess(result)
+                else:
+                    test._addExpectedFailure(result, outcome.expectedFailure)
+        finally:
+            outcome.expectedFailure = None
+            test._outcome = None
+    finally:
+        result.stopTest(test)
+
+
+def _boxedSubTestEnter(self):
+    if self.entered:
+        raise AttributeError("'_GeneratorContextManager' object has no attribute 'args'")
+    self.entered = True
+    outcome = getattr(self.case, "_outcome", None)
+    if outcome is not None and outcome.result_supports_subtests:
+        self.parent = self.case._subtest
+        parents = () if self.parent is None else self.parent.params.maps
+        params = case._OrderedChainMap(self.params, *parents)
+        message = self.message if self.has_message else case._subtest_msg_sentinel
+        subtest = case._SubTest(self.case, message, params)
+        self.case._subtest = subtest
+        self._executor = outcome.testPartExecutor(subtest, True)
+        self._executor.__enter__()
+
+
+def _boxedSubTestExit(self, typ, value, tb):
+    outcome = getattr(self.case, "_outcome", None)
+    if outcome is None or not outcome.result_supports_subtests:
+        return False
+    try:
+        suppressed = self._executor.__exit__(typ, value, tb)
+        if typ is not None and not suppressed:
+            return False
+        if outcome.expectedFailure or (not outcome.success and getattr(outcome.result, "failfast", False)):
+            raise case._ShouldStop
+        return suppressed
+    finally:
+        self.case._subtest = self.parent
+
+
+TestCase._subtest = None
+_SubTestContext.__enter__ = _boxedSubTestEnter
+_SubTestContext.__exit__ = _boxedSubTestExit
 
 
 TestResult._runRegistered = _runRegistered

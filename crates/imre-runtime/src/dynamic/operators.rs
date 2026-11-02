@@ -40,6 +40,13 @@ pub(super) fn surrogate_repr(points: &[u32]) -> String {
     result
 }
 
+/// Leave CPython's two native-stack margins available for exception handling.
+pub(super) fn remaining_repr_words() -> Option<usize> {
+    const STACK_MARGIN_WORDS: usize = 2048;
+    stacker::remaining_stack()
+        .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS))
+}
+
 fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
@@ -131,7 +138,7 @@ enum FormatPart {
     DefaultDictFactory(Id, usize),
     DefaultDictName(Id, usize),
     DefaultDictEnd(String),
-    SetMembers(Vec<Id>, usize),
+    SnapshotMembers(Vec<Id>, usize),
     Fields(Id, usize),
     Leave(Id, &'static str),
     ContextEnd(Id),
@@ -140,14 +147,14 @@ enum FormatPart {
 }
 
 impl FormatPart {
-    /// Snapshot the member identities before any element repr can mutate the set.
-    fn set_members(entries: &[(Id, Id)]) -> Result<Self> {
+    /// Snapshot members before an element's repr can mutate the container.
+    fn snapshot(items: impl ExactSizeIterator<Item = Id>) -> Result<Self> {
         let mut members = Vec::new();
         members
-            .try_reserve_exact(entries.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        members.extend(entries.iter().map(|&(key, _)| key));
-        Ok(Self::SetMembers(members, 0))
+            .try_reserve_exact(items.len())
+            .map_err(render_allocation)?;
+        members.extend(items);
+        Ok(Self::SnapshotMembers(members, 0))
     }
 
     /// Values a suspended renderer will read after a Python callback returns.
@@ -166,7 +173,7 @@ impl FormatPart {
             | Self::Fields(id, _)
             | Self::Leave(id, _)
             | Self::ContextEnd(id) => heap.keep(*id),
-            Self::SetMembers(members, index) => {
+            Self::SnapshotMembers(members, index) => {
                 // One traced owner keeps the snapshot alive across every following callback.
                 let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
                 *self = Self::Sequence(tuple, *index);
@@ -278,7 +285,7 @@ impl Context {
     }
 
     /// Preserve the integer object returned by the index protocol for type-sensitive errors.
-    fn index_result(&mut self, value: Id) -> Result<Option<(Id, crate::Int)>> {
+    pub(super) fn index_result(&mut self, value: Id) -> Result<Option<(Id, crate::Int)>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some((value, integer)));
         }
@@ -396,10 +403,15 @@ impl Context {
             Value::Str(s) => !s.is_empty(),
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
+            Value::MemoryView { .. } => !self.bytes_like(id)?.is_empty(),
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
             | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
+            Value::MappingProxy(_) => {
+                let length = builtins::call(self, "len", &[id], &[])?;
+                self.truth(length)?
+            }
             Value::DictView { dict, .. } => !self
                 .dict_entries(*dict)
                 .expect("dict view backing")
@@ -464,8 +476,45 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
-    /// Unwrap proxy layers before the existing mapping comparison or reflected Python slot.
-    fn mapping_comparison_target(&self, mut value: Id) -> Id {
+    pub(super) fn mapping_proxy(&mut self, mapping: Id) -> Result<Id> {
+        // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
+        let supported = match self.heap.get(self.scalar_value(mapping)) {
+            Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
+            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => false,
+            Value::Dict(_)
+            | Value::DefaultDict { .. }
+            | Value::MappingProxy(_)
+            | Value::Str(_)
+            | Value::SurrogateStr(_)
+            | Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::Array(_)
+            | Value::Range(_)
+            | Value::MemoryView { .. }
+            | Value::Context(_)
+            | Value::RegexMatch(_)
+            | Value::GenericAlias(_)
+            | Value::Union(_) => true,
+            _ => {
+                self.dict_storage(mapping).is_some()
+                    || self.slot(mapping, "__getitem__").is_some()
+                    || self.enum_values(mapping).is_some()
+            }
+        };
+        if !supported {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "mappingproxy() argument must be a mapping, not {}",
+                    self.type_name(mapping)
+                ),
+            ));
+        }
+        Ok(self.alloc(Value::MappingProxy(mapping)))
+    }
+
+    /// Return the wrapped object without recursing through nested read-only views.
+    pub(super) fn mapping_proxy_target(&self, mut value: Id) -> Id {
         while let Value::MappingProxy(mapping) = *self.heap.get(value) {
             value = mapping;
         }
@@ -526,8 +575,8 @@ impl Context {
                     }
                     break 'current same_receivers;
                 }
-                let left = self.mapping_comparison_target(a);
-                let right = self.mapping_comparison_target(b);
+                let left = self.mapping_proxy_target(a);
+                let right = self.mapping_proxy_target(b);
                 let (a, b) = if right != b { (right, left) } else { (left, b) };
                 if a == b {
                     break 'current true;
@@ -737,6 +786,18 @@ impl Context {
             }
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
+            }
+            (Value::MemoryView { .. }, Value::Array(array)) => self
+                .bytes_like(a)
+                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
+            (Value::Array(array), Value::MemoryView { .. }) => self
+                .bytes_like(b)
+                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
+            (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
+                match (self.bytes_like(a), self.bytes_like(b)) {
+                    (Ok(left), Ok(right)) => left == right,
+                    _ => false,
+                }
             }
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::SurrogateStr(a), Value::SurrogateStr(b)) => a == b,
@@ -1071,7 +1132,7 @@ impl Context {
             RenderRoot::Object(id),
             false,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -1105,7 +1166,7 @@ impl Context {
             RenderRoot::Object(id),
             true,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
     }
@@ -1197,7 +1258,9 @@ impl Context {
             root,
             quoted,
             true,
-            |ctx, id, quoted, work, ancestors| ctx.element_format(id, quoted, work, ancestors),
+            |ctx, id, quoted, work, ancestors, remaining| {
+                ctx.element_format(id, quoted, work, ancestors, remaining)
+            },
         )
     }
 
@@ -1291,6 +1354,7 @@ impl Context {
         quoted: bool,
         work: &mut [FormatPart],
         ancestors: &[Id],
+        sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
         if self.format_slot(id, "__repr__").is_none()
             && (quoted || self.format_slot(id, "__str__").is_none())
@@ -1309,11 +1373,13 @@ impl Context {
             part.keep_alive(&mut self.heap);
         }
         self.repr_ancestors.extend_from_slice(ancestors);
+        let previous = std::mem::replace(&mut self.repr_sequence_words, sequence_words);
         let converted = if quoted {
             self.repr_override(id)
         } else {
             builtins::call(self, "str", &[id], &[]).map(Some)
         };
+        self.repr_sequence_words = previous;
         let result = converted.and_then(|value| {
             value
                 .map(|s| {
@@ -1471,6 +1537,7 @@ impl Context {
             bool,
             &mut [FormatPart],
             &[Id],
+            Option<usize>,
         ) -> Result<Option<String>>,
     ) -> Result<String> {
         use FormatPart as Part;
@@ -1504,7 +1571,12 @@ impl Context {
                         else {
                             return Ok(output);
                         };
-                        ("{", end, "set(...)", Part::set_members(entries)?)
+                        (
+                            "{",
+                            end,
+                            "set(...)",
+                            Part::snapshot(entries.iter().map(|&(key, _)| key))?,
+                        )
                     }
                     Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                     Value::Tuple(items) => (
@@ -1540,13 +1612,19 @@ impl Context {
         const SLICE_FRAME_WORDS: usize = 78;
         // Nested list and tuple repr use 128 bytes per level in CPython 3.14 on x86-64.
         const SEQUENCE_FRAME_WORDS: usize = 16;
-        const STACK_MARGIN_WORDS: usize = 2048;
-        let stack_words = checked
-            .then(stacker::remaining_stack)
-            .flatten()
-            .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS));
+        // A pinned x86-64 CPython deque also formats a temporary list; each
+        // nested deque uses 832 bytes, including its ordinary sequence frame.
+        const EXTRA_DEQUE_FRAME_WORDS: usize = 104 - SEQUENCE_FRAME_WORDS;
+        let stack_words = checked.then(remaining_repr_words).flatten();
         let slice_budget = stack_words.map(|words| words / SLICE_FRAME_WORDS);
-        let sequence_budget = stack_words.map(|words| words / SEQUENCE_FRAME_WORDS);
+        // A Python callback may run on a new stack segment. Its renderer
+        // still shares the logical space left by the suspended containers.
+        let sequence_stack_words = if checked {
+            ctx.repr_sequence_words.or(stack_words)
+        } else {
+            None
+        };
+        let mut extra_deque_words = 0usize;
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
         // Pinned CPython 3.14 uses 192 native bytes per nested builtin alias with
@@ -1556,6 +1634,9 @@ impl Context {
         let mut type_words = 0usize;
         let mut typing_frames = 0usize;
         while let Some(part) = work.pop() {
+            let remaining_sequence_words = sequence_stack_words.map(|limit| {
+                limit.saturating_sub(active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words)
+            });
             match part {
                 Part::Closing(count) => close_parens(&mut output, count)?,
                 Part::Text(text) => append_rendered_text(&mut output, text)?,
@@ -1607,6 +1688,9 @@ impl Context {
                     append_rendered_text(&mut output, ")")?;
                 }
                 Part::Leave(id, end) => {
+                    if matches!(ctx.heap.get(id), Value::Deque(_)) {
+                        extra_deque_words -= EXTRA_DEQUE_FRAME_WORDS;
+                    }
                     ancestors.remove(&id);
                     let last = active.pop();
                     debug_assert_eq!(last, Some(id));
@@ -1651,12 +1735,12 @@ impl Context {
                         )?;
                     }
                 }
-                Part::SetMembers(members, index) => {
+                Part::SnapshotMembers(members, index) => {
                     if let Some(&member) = members.get(index) {
                         if index != 0 {
                             append_rendered_text(&mut output, ", ")?;
                         }
-                        push_frame(&mut work, Part::SetMembers(members, index + 1))?;
+                        push_frame(&mut work, Part::SnapshotMembers(members, index + 1))?;
                         push_frame(&mut work, Part::Value(member, true))?;
                     }
                 }
@@ -1712,7 +1796,14 @@ impl Context {
                     }
                 }
                 Part::SyntaxMessage(id) => {
-                    if let Some(text) = element_repr(&mut ctx, id, false, &mut work, &active)? {
+                    if let Some(text) = element_repr(
+                        &mut ctx,
+                        id,
+                        false,
+                        &mut work,
+                        &active,
+                        remaining_sequence_words,
+                    )? {
                         append_rendered_text(&mut output, &text)?;
                     } else if let Some(storage) = ctx.string_storage(id) {
                         append_rendered_text(&mut output, ctx.str_value(storage)?)?;
@@ -1733,7 +1824,14 @@ impl Context {
                     if checked
                         && repr
                         && native_storage.is_none()
-                        && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
+                        && let Some(text) = element_repr(
+                            &mut ctx,
+                            id,
+                            true,
+                            &mut work,
+                            &active,
+                            remaining_sequence_words,
+                        )?
                     {
                         append_rendered_text(&mut output, &text)?;
                         continue;
@@ -1935,6 +2033,14 @@ impl Context {
                             push_frame(&mut work, Part::Value(*value, true))?;
                             continue;
                         }
+                        Value::MappingProxy(mapping) => {
+                            if repr {
+                                append_rendered_text(&mut output, "mappingproxy(")?;
+                                push_frame(&mut work, Part::Text(")"))?;
+                            }
+                            push_frame(&mut work, Part::Value(*mapping, repr))?;
+                            continue;
+                        }
                         Value::Slice(_) => {
                             if slice_budget.is_some_and(|limit| slice_depth >= limit) {
                                 return Err(Error::new(
@@ -2017,6 +2123,24 @@ impl Context {
                             append_rendered_text(&mut output, ")")?;
                             continue;
                         }
+                        Value::Deque(ring) => {
+                            if ancestors.contains(&id) {
+                                append_rendered_text(&mut output, "[...]")?;
+                                continue;
+                            }
+                            let end = if let Some(maxlen) = ring.maxlen {
+                                push_frame(&mut work, Part::Suffix(format!(", maxlen={maxlen})")))?;
+                                "]"
+                            } else {
+                                "])"
+                            };
+                            (
+                                "deque([",
+                                end,
+                                "[...]",
+                                Part::snapshot(ring.items.iter().copied())?,
+                            )
+                        }
                         Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                         Value::Tuple(items) => (
                             "(",
@@ -2024,6 +2148,15 @@ impl Context {
                             "(...)",
                             Part::Sequence(storage, 0),
                         ),
+                        Value::SlotMember { owner, name } => {
+                            let owner = ctx.class_name(*owner);
+                            let field = ctx.str_value(*name)?;
+                            append_rendered_text(
+                                &mut output,
+                                &format!("<member '{field}' of '{owner}' objects>"),
+                            )?;
+                            continue;
+                        }
                         Value::ReadOnlyMember(owner, field) => {
                             append_rendered_text(
                                 &mut output,
@@ -2102,13 +2235,18 @@ impl Context {
                         append_rendered_text(&mut output, placeholder)?;
                         continue;
                     }
-                    if matches!(ctx.heap.get(storage), Value::List(_) | Value::Tuple(_))
-                        && sequence_budget.is_some_and(|limit| active.len() >= limit)
+                    if matches!(
+                        ctx.heap.get(storage),
+                        Value::List(_) | Value::Tuple(_) | Value::Deque(_)
+                    ) && remaining_sequence_words == Some(0)
                     {
                         return Err(Error::new(
                             "RecursionError",
                             "maximum recursion depth exceeded while getting the repr of an object",
                         ));
+                    }
+                    if matches!(ctx.heap.get(storage), Value::Deque(_)) {
+                        extra_deque_words += EXTRA_DEQUE_FRAME_WORDS;
                     }
                     push_frame(&mut active, id)?;
                     append_rendered_text(&mut output, start)?;
@@ -2119,7 +2257,10 @@ impl Context {
                             let Value::Set { entries, .. } = ctx.heap.get(storage) else {
                                 unreachable!()
                             };
-                            push_frame(&mut work, Part::set_members(entries)?)?;
+                            push_frame(
+                                &mut work,
+                                Part::snapshot(entries.iter().map(|&(key, _)| key))?,
+                            )?;
                         }
                         part => push_frame(&mut work, part)?,
                     }
@@ -2144,7 +2285,7 @@ impl Context {
             RenderRoot::Exception(error),
             false,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -2152,34 +2293,34 @@ impl Context {
     /// Render the receiver's identity without invoking its own __repr__ slot.
     pub(super) fn object_repr(&mut self, receiver: Id) -> Result<Id> {
         let class = self.exact_type(receiver)?;
+        Ok(self.text(self.default_object_repr(receiver, class)))
+    }
+
+    /// Spell the default repr using the actual receiver, even when its class overrides repr.
+    fn default_object_repr(&self, receiver: Id, class: Id) -> String {
         let name = match self.heap.get(class) {
-            Value::Class { name, scope, .. } => self.qualified_class_name(name, *scope),
+            Value::Class { scope, .. } => self.qualified_class_name(class, *scope),
             Value::Native(name) => name.clone(),
             _ => self.type_name(receiver).to_owned(),
         };
-        Ok(self.text(format!("<{name} object at {receiver:#x}>")))
+        format!("<{name} object at {receiver:#x}>")
     }
 
-    fn qualified_class_name(&self, name: &str, scope: Id) -> String {
-        let scope = self.scope_data(scope);
-        let attr = |key: &str| {
-            scope
-                .names
-                .get(key)
-                .and_then(|&id| match self.heap.get(id) {
-                    Value::Str(s) => Some(s.as_str()),
-                    _ => None,
-                })
+    fn qualified_class_name(&self, class: Id, scope: Id) -> String {
+        let module = match self.namespace_binding(self.scope_data(scope), "__module__") {
+            Some(value) => self.str_value(value).ok(),
+            None => Some(self.scope_data(scope).module.as_str()),
         };
-        let module = if scope.names.contains_key("__module__") {
-            attr("__module__")
-        } else {
-            Some(scope.module.as_str())
-        };
-        let name = attr("__qualname__").unwrap_or(name);
+        let name = self.class_name(class);
         match module {
             None | Some("builtins") => name.to_owned(),
-            Some(module) => format!("{module}.{name}"),
+            Some(module) => {
+                let qualname = self
+                    .namespace_binding(self.scope_data(scope), "__qualname__")
+                    .and_then(|value| self.str_value(value).ok())
+                    .unwrap_or(name);
+                format!("{module}.{qualname}")
+            }
         }
     }
 
@@ -2299,7 +2440,7 @@ impl Context {
                 let state = if lock.locked() { "locked" } else { "unlocked" };
                 format!("<{state} _thread.lock object at {id:#x}>")
             }
-            Value::Hash(state) => state.borrow().repr(id as usize).to_string(),
+            Value::Hash(state) => state.lock().repr(id as usize).to_string(),
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
             Value::PartialPlaceholder => "Placeholder".to_owned(),
@@ -2358,6 +2499,10 @@ impl Context {
                 output
             }
             Value::ByteArray(bytes) => self.bytearray_repr(id, bytes),
+            Value::MemoryView { owner, .. } => {
+                let state = if owner.is_some() { "" } else { "released " };
+                format!("<{state}memory at {id:#x}>")
+            }
             Value::Instance {
                 dictionary: Some(backing),
                 ..
@@ -2403,7 +2548,7 @@ impl Context {
                 RenderRoot::Exception(error),
                 repr,
                 false,
-                |_, _, _, _, _| Ok(None),
+                |_, _, _, _, _, _| Ok(None),
             )
             .unwrap_or_else(|_| {
                 if repr {
@@ -2444,7 +2589,8 @@ impl Context {
             }
             Value::GetSetDescriptor { owner, name, .. }
                 if crate::objects::HashState::is_provider_class(owner)
-                    || *owner == super::value::TEMPLATE_TYPE =>
+                    || *owner == super::value::TEMPLATE_TYPE
+                    || stdlib::datetime::members(owner).is_some() =>
             {
                 format!("<attribute '{name}' of '{owner}' objects>")
             }
@@ -2452,8 +2598,19 @@ impl Context {
                 "<attribute '__weakref__' of '{}' objects>",
                 self.weakref_descriptor_owner(*owner)
             ),
-            Value::Class { name, scope, .. } => {
-                format!("<class '{}'>", self.qualified_class_name(name, *scope))
+            Value::Class { scope, .. } => {
+                format!("<class '{}'>", self.qualified_class_name(id, *scope))
+            }
+            Value::Method {
+                callable,
+                receiver,
+                explicit: false,
+            } if let Value::Native(symbol) = self.heap.get(*callable)
+                && let Some(slot) =
+                    super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol)
+                && !slot.method =>
+            {
+                slot.bound_repr(self, *receiver)
             }
             Value::Method {
                 callable,
@@ -2515,6 +2672,7 @@ impl Context {
             Value::File(file) if let Some(name) = file.socket_reader_name() => {
                 format!("<_io.BufferedReader name={name}>")
             }
+            Value::Instance { class, .. } => self.default_object_repr(id, *class),
             _ => "<object>".to_owned(),
         };
         if recursive.is_some() {
@@ -2544,6 +2702,9 @@ impl Context {
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Get.apply(self, obj, key, false);
         }
+        if let Value::RegexMatch(m) = self.heap.get(obj) {
+            return m.clone().group_item(self, key);
+        }
         if let Some(value) = super::union::subscribe(self, obj, key) {
             return value;
         }
@@ -2560,8 +2721,8 @@ impl Context {
                 .ok_or_else(|| Error::new("TypeError", "enum member names must be a dictionary"))?;
             return self.get_item(names, key);
         }
-        if let Value::MappingProxy(dict) = *self.heap.get(obj) {
-            return self.get_item(dict, key);
+        if matches!(self.heap.get(obj), Value::MappingProxy(_)) {
+            return self.get_item(self.mapping_proxy_target(obj), key);
         }
         if let Value::Context(bindings) = self.heap.get(obj) {
             self.context_key(key)?;
@@ -3535,6 +3696,14 @@ impl Context {
         }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
+            "|" if !inplace
+                && matches!(self.heap.get(a), Value::Dict(_))
+                && matches!(self.heap.get(b), Value::Dict(_)) =>
+            {
+                let merged = builtins::copy_dict(self, a, a)?;
+                builtins::update_dict(self, merged, Some(b), &[])?;
+                return Ok(merged);
+            }
             "|" | "&" | "-"
                 if [a, b].into_iter().any(|id| {
                     matches!(
@@ -3919,6 +4088,16 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 }
 
 impl Context {
+    /// Native timedelta participates in the same reflected arithmetic ordering as a Python class.
+    fn timedelta_slot_class(&self, value: Id) -> Option<Id> {
+        match self.heap.get(value) {
+            Value::Calendar { value, .. } if value.class() == "timedelta" => {
+                self.builtins.get("datetime.timedelta").copied()
+            }
+            _ => None,
+        }
+    }
+
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
@@ -3931,7 +4110,25 @@ impl Context {
         {
             return Ok(None);
         }
-        let Some(method) = self.bound_slot(obj, name)? else {
+        let method = if matches!(
+            name,
+            "__add__"
+                | "__radd__"
+                | "__sub__"
+                | "__rsub__"
+                | "__mul__"
+                | "__rmul__"
+                | "__truediv__"
+                | "__rtruediv__"
+                | "__floordiv__"
+                | "__rfloordiv__"
+        ) && self.timedelta_slot_class(obj).is_some()
+        {
+            Some(self.lookup_attr(obj, name)?)
+        } else {
+            self.bound_slot(obj, name)?
+        };
+        let Some(method) = method else {
             // Overriding one multiplication method installs a numeric slot for both directions.
             if let Some(peer) = match name {
                 "__mul__" => Some("__rmul__"),
@@ -4024,28 +4221,38 @@ impl Context {
         self.truth(different)
     }
 
-    /// Call a container subclass override or its inherited native comparison.
-    fn container_compare_slot(
+    /// Call the first Python or native comparison slot in the receiver's MRO.
+    fn builtin_compare_slot(
         &mut self,
         name: &str,
         a: Id,
         b: Id,
-        set_order: bool,
+        native_order: bool,
     ) -> Result<Option<Id>> {
-        if set_order {
-            if !matches!(self.heap.get(self.scalar_value(a)), Value::Set { .. }) {
-                return self.operator_slot(a, name, b);
-            }
+        if native_order {
+            let receiver = self.heap.get(self.scalar_value(a));
+            let other = self.heap.get(self.scalar_value(b));
+            let compatible = match receiver {
+                Value::Set { .. } => matches!(other, Value::Set { .. }),
+                Value::Calendar { value, .. } if value.class() != "timezone" => {
+                    matches!(other, Value::Calendar { value: right, .. } if value.class() == right.class())
+                }
+                _ => return self.operator_slot(a, name, b),
+            };
             let class = self.exact_type(a)?;
-            // A mixin after set or frozenset in the MRO cannot displace its native slot.
             let native = self.find_in_mro(class, |base| match self.heap.get(base) {
-                Value::Native(kind) if matches!(kind.as_str(), "set" | "frozenset") => Some(true),
+                Value::Native(kind)
+                    if matches!(kind.as_str(), "set" | "frozenset")
+                        || stdlib::datetime::members(kind).is_some() =>
+                {
+                    Some(true)
+                }
                 _ => self.own_class_attr(base, name).map(|_| false),
             });
             if native != Some(true) {
                 return self.operator_slot(a, name, b);
             }
-            if !matches!(self.heap.get(self.scalar_value(b)), Value::Set { .. }) {
+            if !compatible {
                 return Ok(None);
             }
         } else if self.slot(a, name).is_some() {
@@ -4065,6 +4272,33 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        // Keep inherited dict comparisons on the iterative container walk, including cycles.
+        if op == "==" && [a, b].into_iter().all(|value| {
+            self.dict_storage(value).is_some()
+                && self.slot(value, "__eq__").is_none_or(|slot| {
+                    Some(&slot) == self.builtins.get("dict.__eq__")
+                })
+        }) {
+            return Ok(None);
+        }
+        if matches!(op, "==" | "!=")
+            && let Value::MemoryView { owner, .. } = self.heap.get(a)
+        {
+            if owner.is_some() {
+                self.check_buffer_exporter(b)?;
+            }
+            if owner.is_none()
+                || matches!(
+                    self.heap.get(self.scalar_value(b)),
+                    Value::Bytes(_)
+                        | Value::ByteArray(_)
+                        | Value::MemoryView { .. }
+                        | Value::Array(_)
+                )
+            {
+                return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));
+            }
+        }
         if matches!(op, "==" | "!=")
             && matches!(self.heap.get(a), Value::Deque(_))
             && matches!(self.heap.get(b), Value::Deque(_))
@@ -4072,8 +4306,8 @@ impl Context {
             return deque::compare(self, op, a, b).map(|result| Some(builtins::boolean(result)));
         }
         let (a, b) = if matches!(op, "==" | "!=") {
-            let left = self.mapping_comparison_target(a);
-            let right = self.mapping_comparison_target(b);
+            let left = self.mapping_proxy_target(a);
+            let right = self.mapping_proxy_target(b);
             if left != a || right != b {
                 // A mapping hook can drop the containers that own either original proxy.
                 self.heap.reserve_temporaries(2)?;
@@ -4115,10 +4349,16 @@ impl Context {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
-        let (ac, bc) = (
-            self.heap.get(a).instance_class(),
-            self.heap.get(b).instance_class(),
-        );
+        let class = |id| {
+            self.heap.get(id).instance_class().or_else(|| {
+                if matches!(op, "+" | "-" | "*" | "/" | "//") {
+                    self.timedelta_slot_class(id)
+                } else {
+                    None
+                }
+            })
+        };
+        let (ac, bc) = (class(a), class(b));
         if ac.is_none()
             && bc.is_none()
             && !(inplace.is_empty()
@@ -4128,11 +4368,15 @@ impl Context {
         {
             return Ok(None);
         }
-        let set_order = matches!(op, "<" | "<=" | ">" | ">=")
+        let native_order = matches!(op, "<" | "<=" | ">" | ">=")
             && [a, b]
                 .into_iter()
-                .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
-        if inplace.is_empty() && (self.same_sequence_family(a, b) || set_order) {
+                .any(|id| match self.heap.get(self.scalar_value(id)) {
+                    Value::Set { .. } => true,
+                    Value::Calendar { value, .. } => value.class() != "timezone",
+                    _ => false,
+                });
+        if inplace.is_empty() && (self.same_sequence_family(a, b) || native_order) {
             let ac = self.exact_type(a)?;
             let bc = self.exact_type(b)?;
             // The proper subtype's reflected slot has priority, even when it is inherited.
@@ -4142,7 +4386,7 @@ impl Context {
                 [(left, a, b), (right, b, a)]
             };
             for (name, left, right) in slots {
-                if let Some(result) = self.container_compare_slot(name, left, right, set_order)? {
+                if let Some(result) = self.builtin_compare_slot(name, left, right, native_order)? {
                     return Ok(Some(result));
                 }
             }
@@ -4173,6 +4417,11 @@ impl Context {
         }
         if let Some(result) = self.operator_slot(a, left, b)? {
             return Ok(Some(result));
+        }
+        if matches!(op, "==" | "!=")
+            && matches!(self.heap.get(b), Value::MemoryView { owner: Some(_), .. })
+        {
+            self.check_buffer_exporter(a)?;
         }
         if !reflected_first && (ac != bc || inplace.is_empty()) {
             return self.operator_slot(b, right, a);

@@ -33,7 +33,7 @@ pub(crate) struct FileState {
     stream: Option<Stream>,
     pub(super) name: Option<StrOwner>,
     // A closed text wrapper still owns its encoding; StringIO has no byte codec.
-    encoding: Option<StrOwner>,
+    pub(super) encoding: Option<StrOwner>,
     errors: Option<StrOwner>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
@@ -66,7 +66,7 @@ impl Stream {
     /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
-            Self::Standard(stderr) => return crate::sys::flush_standard(stderr),
+            Self::Standard(stderr) => return crate::sys::close_standard_output(stderr, true),
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Random(file) => return file.close(),
             Self::UnreadGzip { file, .. } => (file, Ok(())),
@@ -99,8 +99,15 @@ impl Drop for FileState {
 
 impl FileState {
     /// Opens a buffered binary writer with the same ownership and errors as typed files.
-    pub(crate) fn binary_writer(path: &str, mode: u32) -> Result<Self> {
-        open_state(&super::text::try_owned_string(path)?, mode, true, false)
+    pub(crate) fn binary_writer(path: &str, mode: u32, capacity: Option<usize>) -> Result<Self> {
+        open_state_with_capacity(
+            &super::text::try_owned_string(path)?,
+            mode,
+            true,
+            false,
+            None,
+            capacity,
+        )
     }
 
     /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
@@ -126,6 +133,26 @@ impl FileState {
         })
     }
 
+    pub(super) fn is_raw(&self) -> bool {
+        self.raw
+    }
+
+    /// Closing the raw view of a buffered pipe discards the outer pending bytes.
+    pub(super) fn close_raw_pipe(&mut self) -> io::Result<()> {
+        match self.stream.take() {
+            Some(Stream::Write(writer)) => close_file(writer.into_file()),
+            stream => stream.map_or(Ok(()), Stream::close),
+        }
+    }
+
+    pub(super) fn read_pipe_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        self.input()?.read_once(size)
+    }
+
+    pub(super) fn read_pipe_line(&mut self, size: Option<usize>) -> Result<Bytes> {
+        self.input()?.binary_line_limited(size)
+    }
+
     pub(crate) fn closed(&self) -> bool {
         self.stream.is_none()
     }
@@ -143,6 +170,12 @@ impl FileState {
 
     pub(crate) fn close(&mut self) -> io::Result<()> {
         self.stream.take().map_or(Ok(()), Stream::close)
+    }
+
+    pub(super) fn close_standard_buffer(&mut self) -> Result<()> {
+        let stderr = self.standard_writer()?;
+        self.stream.take();
+        crate::sys::close_standard_output(stderr, false).map_err(errno_error)
     }
 
     pub(super) fn communicate_stdin(&mut self, input: &[u8], close: bool) -> Result<()> {
@@ -411,6 +444,14 @@ impl FileState {
         self.write("\n")
     }
 
+    /// Boxed native text files are standard writers or read-only files.
+    pub(super) fn standard_writer(&mut self) -> Result<bool> {
+        match self.stream()? {
+            Stream::Standard(stderr) => Ok(*stderr),
+            _ => Err(Error::new(Kind::UnsupportedOperation, "not writable")),
+        }
+    }
+
     pub(super) fn has_encoding(&self) -> bool {
         self.encoding.is_some()
     }
@@ -566,6 +607,7 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
     let kind = match errno {
         libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
+        libc::ECHILD => Kind::ChildProcessError,
         libc::ESHUTDOWN => Kind::BrokenPipeError,
         _ => os_error_kind(error.kind()),
     };
@@ -714,6 +756,17 @@ fn open_state_with_encoding(
     gzip: bool,
     encoding: Option<(&str, &str)>,
 ) -> Result<FileState> {
+    open_state_with_capacity(path, mode, binary, gzip, encoding, None)
+}
+
+fn open_state_with_capacity(
+    path: &StrOwner,
+    mode: u32,
+    binary: bool,
+    gzip: bool,
+    encoding: Option<(&str, &str)>,
+    writer_capacity: Option<usize>,
+) -> Result<FileState> {
     let (file, metadata) = open_file_with(path.as_bytes(), mode, false, |error| {
         errno_with_filenames(
             error,
@@ -722,7 +775,8 @@ fn open_state_with_encoding(
         )
     })?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
+    let capacity = writer_capacity
+        .unwrap_or_else(|| crate::text_output::binary_capacity(metadata.blksize().into()));
     let fd = file.as_raw_fd();
     let stream = match mode {
         0 if gzip => Stream::UnreadGzip { file, capacity },

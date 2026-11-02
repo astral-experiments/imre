@@ -321,6 +321,21 @@ fn unittest_skip_decorator(
     }))
 }
 
+pub(crate) fn defines_pickle_reducer(node: &ast::StmtClassDef) -> bool {
+    let reducer = |name: &str| matches!(name, "__reduce__" | "__reduce_ex__" | "__getstate__");
+    let binding = |target: &ast::Expr| {
+        target
+            .as_name_expr()
+            .is_some_and(|n| reducer(n.id.as_str()))
+    };
+    node.body.iter().any(|stmt| match stmt {
+        ast::Stmt::FunctionDef(f) => reducer(f.name.as_str()),
+        ast::Stmt::Assign(a) => a.targets.iter().any(binding),
+        ast::Stmt::AnnAssign(a) => a.value.is_some() && binding(&a.target),
+        _ => false,
+    })
+}
+
 fn collect_class(
     graph: &SourceGraph,
     module: &SourceModule,
@@ -330,6 +345,10 @@ fn collect_class(
     exception_layout: bool,
     exceptions: &HashMap<DefinitionId, u32>,
 ) -> Result<Class, String> {
+    if defines_pickle_reducer(node) {
+        graph.needs_object_runtime.set(true);
+        return Err(module.error(node, "pickle reducers require the object runtime"));
+    }
     let http = enums::HttpEnum::bundled(module, node);
     let is_enum = http.is_some() || node.arguments.as_ref().is_some_and(|arguments| {
         matches!(arguments.args.as_ref(), [base] if matches!(graph.resolve(definition.module, base), Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))))
@@ -375,7 +394,8 @@ fn collect_class(
             })
         });
     if node.type_params.is_some() {
-        return Err(module.error(node, "class type parameters are unsupported"));
+        graph.needs_object_runtime.set(true);
+        return Err(module.error(node, "class type parameters require the object runtime"));
     }
     if is_enum && http.is_none() && !node.decorator_list.is_empty() {
         return Err(module.error(node, "decorated StrEnum declarations are unsupported"));

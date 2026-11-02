@@ -1,9 +1,48 @@
 use super::{Expr, Visitor, ast, resolve, visitor};
 use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
-/// Python sources used only by the boxed importer.
+/// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
+        "json" => Some((
+            "json/__init__.py",
+            concat!(
+                "r\"\"\"",
+                include_str!("../../stdlib/docstrings/json.txt"),
+                "\"\"\"\n",
+                include_str!("../../stdlib/json/boxed_init.py"),
+            ),
+        )),
+        "json.encoder" => Some((
+            "json/encoder.py",
+            include_str!("../../stdlib/json/encoder.py"),
+        )),
+        "json.decoder" => Some((
+            "json/decoder.py",
+            include_str!("../../stdlib/json/decoder.py"),
+        )),
+        "json.scanner" => Some((
+            "json/scanner.py",
+            include_str!("../../stdlib/json/scanner.py"),
+        )),
+        // A fresh _collections module exports the same accelerator type. Keep its
+        // Python wrappers around native storage in their own module namespace.
+        "_collections" => Some((
+            "_collections.py",
+            "from _imre_ordered_dict import OrderedDict\n",
+        )),
+        "_imre_ordered_dict" => Some((
+            "_imre_ordered_dict.py",
+            include_str!("../../stdlib/_imre_ordered_dict.py"),
+        )),
+        "traceback" => Some((
+            "traceback.py",
+            include_str!("../../stdlib/traceback_stack.py"),
+        )),
+        "subprocess" if cfg!(unix) => {
+            Some(("subprocess.py", include_str!("../../stdlib/subprocess.py")))
+        }
         "linecache" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             const UPSTREAM: &str = include_str!(
@@ -41,7 +80,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
                         section("def ismodule(object):", "def isclass(object):"),
-                        section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
                         &classes,
@@ -50,6 +88,37 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "bisect" => Some(("bisect.py", include_str!("../../stdlib/bisect.py"))),
+        "email.errors" => Some((
+            "email/errors.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/errors.py"
+            ),
+        )),
+        "email._encoded_words" => Some((
+            "email/_encoded_words.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/_encoded_words.py"
+            ),
+        )),
+        "email._header_value_parser" => Some((
+            "email/_header_value_parser.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/_header_value_parser.py"
+            ),
+        )),
+        "urllib.error" => Some((
+            "urllib/error.py",
+            include_str!("../../stdlib/urllib/error.py"),
+        )),
+        "urllib.request" => Some((
+            "urllib/request.py",
+            include_str!("../../stdlib/urllib/request.py"),
+        )),
+        "urllib.response" => Some((
+            "urllib/response.py",
+            include_str!("../../stdlib/urllib/response.py"),
+        )),
         "urllib.parse" => Some((
             "urllib/parse.py",
             include_str!("../../stdlib/urllib/parse.py"),
@@ -59,6 +128,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/annotationlib.py"),
         )),
         "functools" => Some(("functools.py", include_str!("../../stdlib/functools.py"))),
+        "sysconfig" if cfg!(target_os = "linux") => {
+            Some(("sysconfig.py", include_str!("../../stdlib/sysconfig.py")))
+        }
+        "hashlib" => Some(("hashlib.py", include_str!("../../stdlib/hashlib.py"))),
         // CPython 3.14.5 pathlib and its glob and NT path dependencies. See stdlib/docstrings/LICENSE.
         "pathlib" => Some((
             "pathlib/__init__.py",
@@ -79,7 +152,21 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/tempfile/names.py"),
                 "\n",
                 include_str!("../../stdlib/tempfile/boxed_spool.py"),
+                "\n",
+                include_str!("../../stdlib/tempfile/directory.py"),
             ),
+        )),
+        "doctest" => Some((
+            "doctest.py",
+            concat!(
+                include_str!("../../stdlib/doctest.py"),
+                "\n",
+                include_str!("../../stdlib/doctest_boxed.py"),
+            ),
+        )),
+        "_imre_doctest" => Some((
+            "_imre_doctest.py",
+            include_str!("../../stdlib/_imre_doctest.py"),
         )),
         "unittest" => Some((
             "unittest/__init__.py",
@@ -143,6 +230,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/resources/abc.py",
             include_str!("../../stdlib/importlib/resources/abc.py"),
         )),
+        "importlib.resources._as_file" => Some((
+            "importlib/resources/_as_file.py",
+            include_str!("../../stdlib/importlib/resources/_as_file.py"),
+        )),
         "importlib.resources._filesystem" => Some((
             "importlib/resources/_filesystem.py",
             include_str!("../../stdlib/importlib/resources/_filesystem.py"),
@@ -170,7 +261,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/_bootstrap_external.py",
             include_str!("../../stdlib/importlib/source_loader.py"),
         )),
-        _ => None,
+        _ => crate::modules::bundled_runtime_source(name),
     }
 }
 
@@ -226,6 +317,10 @@ pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
             calls.visit_body(&module.parsed.syntax().body);
         }
     }
+    calls
+        .imports
+        .targets
+        .extend_from_slice(&graph.doctest_imports);
     calls.imports
 }
 

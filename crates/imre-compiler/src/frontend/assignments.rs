@@ -561,7 +561,11 @@ impl Checker<'_> {
     /// Target type lookup is speculative: its expression executes only after
     /// the RHS. A private checker prevents that lookup from publishing writes
     /// or helper functions before their actual source evaluation point.
-    pub(super) fn assignment_context(&self, target: &ast::Expr) -> Option<Type> {
+    pub(super) fn assignment_context(
+        &self,
+        target: &ast::Expr,
+        rhs: Option<&ast::Expr>,
+    ) -> Option<Type> {
         let helpers = Helpers::new(0);
         let omitted_locals = self.omitted_assert_locals.clone();
         let omitted_free = self.omitted_assert_free.clone();
@@ -593,6 +597,12 @@ impl Checker<'_> {
                     return Some(ty);
                 }
                 let receiver = Self::weak_target(probe.expr(&attribute.value).ok()?);
+                // A mock accepts arbitrary effects and return values, including empty containers.
+                if self.native_mock_instance(receiver.ty)
+                    && matches!(attribute.attr.as_str(), "side_effect" | "return_value")
+                {
+                    return rhs.and_then(|value| self.empty_argument_type(value));
+                }
                 if let Type::Class(class) = receiver.ty
                     && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
                 {

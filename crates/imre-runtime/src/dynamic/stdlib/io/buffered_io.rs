@@ -11,44 +11,11 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "write" {
-        let count = args.len() + kwargs.len();
-        if count > 1 {
-            return Err(Error::new(
-                "TypeError",
-                format!("write() takes at most 1 argument ({count} given)"),
-            ));
-        }
-        if args.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "write() takes exactly 1 positional argument (0 given)",
-            ));
-        }
-        return Err(Error::new("UnsupportedOperation", "write"));
-    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
             format!("{name}() takes no keyword arguments"),
         ));
-    }
-    if matches!(name, "read" | "read1") {
-        if args.len() > 1 {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() takes at most 1 argument ({} given)", args.len()),
-            ));
-        }
-        if let Some(&id) = args.first() {
-            ctx.index_integer(id)?
-                .to_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?;
-        }
-        return Err(Error::new("UnsupportedOperation", name));
     }
     let [buffer] = args else {
         return Err(Error::new(

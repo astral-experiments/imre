@@ -22,14 +22,14 @@ impl Context {
         else {
             return None;
         };
-        let values = self.scope_data(*scope).names.get("_value2member_map_")?;
-        if !matches!(self.heap.get(*values), Value::Dict(_)) {
+        let values = self.namespace_binding(self.scope_data(*scope), "_value2member_map_")?;
+        if !matches!(self.heap.get(values), Value::Dict(_)) {
             return None;
         }
         ancestors
             .iter()
             .any(|&base| matches!(self.heap.get(base), Value::Native(name) if name == "enum.Enum"))
-            .then_some(*values)
+            .then_some(values)
     }
 
     fn scalar_enum_base(&self, base: Id) -> bool {
@@ -63,6 +63,7 @@ impl Context {
             property: None,
             weak_reference: None,
             cycle: None,
+            member_values: None,
             memory_stream: None,
         }))
     }
@@ -222,7 +223,7 @@ impl Context {
         if !kwargs.is_empty() {
             return Err(Error::new("TypeError", "unexpected enum decorator keyword"));
         }
-        let lineage = self.linearized_bases(&[*base])?;
+        let lineage = self.linearized_bases(&[*base], false)?;
         let Value::Class { ancestors, .. } = self.heap.get_mut(*class) else {
             return Err(Error::new("TypeError", "enum decorator requires a class"));
         };
@@ -245,12 +246,12 @@ impl Context {
             Some(state) => state
                 .members
                 .into_iter()
-                .map(|name| {
-                    let raw = fields.names[&name];
-                    (name, raw)
-                })
+                .filter_map(|name| self.namespace_binding(self.scope_data(scope), &name).map(|value| (name, value)))
                 .collect(),
-            None => fields.names.clone().into_iter().collect(),
+            None => self
+                .scope_bindings(scope)
+                .map(|(name, value)| (name.to_owned(), value))
+                .collect(),
         };
         let names = self.dict(Vec::new());
         let values = self.dict(Vec::new());

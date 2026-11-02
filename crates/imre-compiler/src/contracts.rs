@@ -154,6 +154,7 @@ impl Builtin {
                     | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
+                    | TextOperation::CaseMap { .. }
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
@@ -325,7 +326,6 @@ impl Builtin {
                 | ProcessOperation::PopenSignal
                 | ProcessOperation::ShellOutput { .. }
                 | ProcessOperation::CheckOutput { .. }
-                | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
                 | ProcessOperation::PopenCleanup
@@ -1327,6 +1327,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_get"
                 | "imre_str_expandtabs"
                 | "imre_str_zfill"
+                | "imre_str_case_map"
                 | "imre_str_lower"
                 | "imre_str_upper"
                 | "imre_str_capitalize"

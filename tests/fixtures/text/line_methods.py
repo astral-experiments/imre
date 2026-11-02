@@ -110,6 +110,16 @@ try:
     unbound_ascii(3)
 except TypeError as err:
     print(err)
+unbound_title = str.istitle
+print(str.istitle(Token.LETTER))
+for text in ("", "!?7", "Title Case", "Not a Title", "ABC", "ǅuro", "Aǅ", "Ⅰⅰ", "Aʕ",
+             "A\u0301B", "A\u0301b"):
+    print(text.istitle())
+    print(unbound_title(text))
+try:
+    unbound_title(3)
+except TypeError as err:
+    print(err)
 unbound_lower = str.islower
 for text in ("", "7東", "ʕ東", "aǅ", "ⅷ", "𐐨", "𐐀"):
     print(text.islower())

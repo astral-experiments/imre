@@ -10,6 +10,7 @@ use crate::StrOwner;
 mod annotations;
 mod argparse;
 mod args;
+pub(crate) use args::python_executable_text;
 mod asyncio;
 mod binascii;
 pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, crc32, unhexlify};
@@ -17,10 +18,11 @@ pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
 mod bytes;
+pub(crate) use bytes::DecodeIssue;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
     bytes_contains, bytes_contains_int, concat_bytes, owned_input as owned_bytes_input,
-    repeat_bytes, rsplit_bytes, rstrip_bytes,
+    repeat_bytes, split_bytes, strip_bytes,
 };
 pub(crate) mod cache_paths;
 mod calendar;
@@ -28,7 +30,10 @@ pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
 mod chainmap;
 mod charmaps;
 mod codecs;
-pub(crate) use codecs::{Codec, CodecInfo, decoding_error, unknown_handler, utf8_prefix};
+pub(crate) use codecs::{
+    Codec, CodecInfo, StrEncoder, Utf16Order, decoding_error, normalize as normalize_codec,
+    unknown_handler, utf8_prefix,
+};
 mod contexts;
 mod contextvars;
 mod copying;
@@ -48,7 +53,7 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::State as HashState;
+pub(crate) use hashlib::{SharedHash, State as HashState};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
@@ -59,7 +64,8 @@ mod joined_lines;
 mod json;
 pub(crate) use json::{
     DecodedJson, Indent as JsonIndent, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
-    write_fragment as write_json_fragment, write_string as write_json_string,
+    write_codepoints as write_json_codepoints, write_fragment as write_json_fragment,
+    write_string as write_json_string,
 };
 mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};
@@ -67,6 +73,7 @@ pub(crate) mod locks;
 pub(crate) mod logging;
 pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
 mod mappings;
+pub(crate) use mappings::IntKey;
 mod module_specs;
 mod namespaces;
 pub(crate) mod os;
@@ -76,9 +83,9 @@ mod paths;
 pub(crate) use paths::{directory_entries, exists, is_file, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::initial_environment;
+pub(crate) use processes::{BoxedPipe, BoxedPopen, initial_environment};
 mod random;
-pub(crate) use random::{imre_random_float, secrets_choice_index};
+pub(crate) use random::{choice_index, imre_random_float, random_below};
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;
@@ -97,11 +104,11 @@ mod text;
 pub(crate) use text::{dedent, hexadecimal};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
-pub(crate) use text::{UrlInput, capitalize, urlquote, urlsplit};
+pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
-    count_codepoints, count_text, expand_tabs, find_text, normalize_unicode, ord_byte, ord_char,
-    partition_text, python_alnum, python_isalpha, python_isdigit, python_islower, python_isspace,
-    python_isupper, split_parts,
+    count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
+    ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
+    python_islower, python_isspace, python_istitle, python_isupper, split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};
@@ -109,7 +116,7 @@ pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
 pub(crate) mod warnings;
-pub(crate) use warnings::{runtime_warning, unclosed_scandir};
+pub(crate) use warnings::runtime_warning;
 mod words;
 mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;

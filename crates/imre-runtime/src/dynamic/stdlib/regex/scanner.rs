@@ -37,12 +37,13 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
         *start = None;
         return Ok(NONE);
     }
-    let text = &subject_bytes(ctx, subject, re.bytes)?[..end];
+    // The scanner holds the storage it acquired when it was created.
+    let text = &subject_bytes(ctx, ctx.scalar_value(subject), re.bytes)?[..end];
     let mut caps = re.regex.create_captures();
     let retry_match = retry
         && match split::nonempty(&re, text, start, &mut caps) {
             Ok(found) => found,
-            Err(message) => return Err(pattern_error(ctx, re.source, re.flags, message)),
+            Err(message) => return Err(re.match_error(ctx, message)),
         }
         && group_spans(&caps)
             .next()
@@ -55,14 +56,16 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
                 start += 1;
             }
         }
-        re.regex.captures(
-            Input::new(text).range(start..end).anchored(if anchored {
-                Anchored::Yes
-            } else {
-                Anchored::No
-            }),
-            &mut caps,
-        );
+        re.regex
+            .captures(
+                Input::new(text).range(start..end).anchored(if anchored {
+                    Anchored::Yes
+                } else {
+                    Anchored::No
+                }),
+                &mut caps,
+            )
+            .map_err(|message| re.match_error(ctx, message))?;
     } else if !retry_match {
         caps.set_pattern(None);
     }
@@ -118,11 +121,12 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         // The Python translator validates the phrase before alternation. Passing
         // raw source to the backend can change token priority (e.g. x$|z) or
         // interpret Python literals inside a set as Rust class operations.
-        let parsed = imre_regex::translate_with_flags(
+        let parsed = imre_regex::translate_pattern(
             ctx.str_value(phrase)?,
             flags & VERBOSE != 0,
-            ascii,
+            super::alphabet(false, ascii, flags),
             flags & DOTALL != 0,
+            flags & IGNORECASE == 0 || ascii,
         )
         .map_err(|message| {
             if syntax_diagnostic(ctx, phrase, flags).is_some() {
@@ -161,13 +165,14 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         return Err(Error::new("RuntimeError", "invalid SRE code"));
     }
     let source = branches.join("|");
-    let regex =
-        build_regex(&source, false, effective).map_err(|e| Error::new("re.PatternError", e))?;
+    let regex = build_regex(&source, false, effective, &[])
+        .map_err(|e| Error::new("re.PatternError", e))?;
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
         source: NONE,
         flags,
         bytes: false,
         engine_source: source,
+        assertions: Vec::new(),
         regex,
         full: OnceCell::new(),
         split_retry: OnceCell::new(),

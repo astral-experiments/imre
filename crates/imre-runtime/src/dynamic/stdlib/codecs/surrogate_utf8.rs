@@ -18,12 +18,21 @@ impl Context {
     pub(in crate::dynamic) fn encode_os_path(&mut self, id: Id) -> Result<Vec<u8>> {
         let codec = Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
         match codec {
-            Codec::Utf8 { signature: false } => return self.encode_filesystem_string(id),
+            Codec::Utf8 { signature: false } => self.encode_filesystem_string(id),
             Codec::Utf8 { signature: true } => {
-                return self.encode_utf8_codepoints(id, true, "surrogateescape");
+                self.encode_utf8_codepoints(id, true, "surrogateescape")
             }
-            _ => {}
+            _ => self.encode_single_byte_codepoints(id, codec, true),
         }
+    }
+
+    /// Encode code points with a single-byte codec under strict or surrogateescape handling.
+    pub(super) fn encode_single_byte_codepoints(
+        &mut self,
+        id: Id,
+        codec: Codec,
+        surrogateescape: bool,
+    ) -> Result<Vec<u8>> {
         let points = self.string_codepoints(id)?;
         let mut bytes = Vec::new();
         bytes
@@ -33,7 +42,7 @@ impl Context {
         for (start, &point) in points.iter().enumerate() {
             if let Some(byte) = encode(point) {
                 bytes.push(byte);
-            } else if (0xdc80..=0xdcff).contains(&point) {
+            } else if surrogateescape && (0xdc80..=0xdcff).contains(&point) {
                 bytes.push(point as u8);
             } else {
                 let end = start
@@ -43,7 +52,7 @@ impl Context {
                         .count();
                 // A charmap passes the whole unmapped run to the error handler.
                 // ASCII and Latin-1 first consume its leading escaped bytes.
-                let start = if matches!(codec, Codec::CodePage(_)) {
+                let start = if surrogateescape && matches!(codec, Codec::CodePage(_)) {
                     start
                         - points[..start]
                             .iter()
@@ -61,7 +70,7 @@ impl Context {
         Ok(bytes)
     }
 
-    fn string_encoding_error(
+    pub(in crate::dynamic) fn string_encoding_error(
         &mut self,
         id: Id,
         codec: &str,

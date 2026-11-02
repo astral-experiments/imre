@@ -6,6 +6,8 @@ use crate::Int;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Format {
+    SignedByte,
+    UnsignedByte,
     Int,
     Float,
     Double,
@@ -15,6 +17,8 @@ enum Format {
 impl Format {
     fn code(self) -> &'static str {
         match self {
+            Self::SignedByte => "b",
+            Self::UnsignedByte => "B",
             Self::Int => "i",
             Self::Float => "f",
             Self::Double => "d",
@@ -24,6 +28,7 @@ impl Format {
 
     fn width(self) -> usize {
         match self {
+            Self::SignedByte | Self::UnsignedByte => 1,
             Self::Double => 8,
             _ => 4,
         }
@@ -32,6 +37,19 @@ impl Format {
     fn encode(self, ctx: &mut Context, item: Id) -> Result<[u8; 8]> {
         let mut out = [0; 8];
         match self {
+            Self::SignedByte => {
+                let long = ctx.index_c_long(item)?;
+                // CPython's 'b' setter parses a C short before narrowing to a signed char.
+                let short = i16::try_from(long)
+                    .map_err(|_| integer_overflow(long, "signed short integer"))?;
+                out[0] =
+                    i8::try_from(short).map_err(|_| integer_overflow(long, "signed char"))? as u8;
+            }
+            Self::UnsignedByte => {
+                let long = ctx.index_c_long(item)?;
+                out[0] = u8::try_from(long)
+                    .map_err(|_| integer_overflow(long, "unsigned byte integer"))?;
+            }
             Self::Int => {
                 let n = ctx.index_c_int(item)?;
                 out[..4].copy_from_slice(&n.to_ne_bytes());
@@ -82,6 +100,15 @@ impl Format {
     }
 }
 
+fn integer_overflow(value: i64, kind: &str) -> Error {
+    let bound = if value < 0 {
+        "less than minimum"
+    } else {
+        "greater than maximum"
+    };
+    Error::new("OverflowError", format!("{kind} is {bound}"))
+}
+
 #[derive(Clone)]
 pub(super) struct Array {
     format: Format,
@@ -98,10 +125,23 @@ impl Array {
         self.bytes.len() / self.format.width()
     }
 
+    /// Compare one-dimensional buffer values across formats, independently of element width.
+    pub(super) fn equals_unsigned_bytes(&self, bytes: &[u8]) -> bool {
+        self.format != Format::Wide
+            && self.len() == bytes.len()
+            && bytes.iter().enumerate().all(|(i, &byte)| match self.at(i) {
+                Ok(Value::Int(value)) => value.as_small() == Some(i64::from(byte)),
+                Ok(Value::Float(value)) => value == f64::from(byte),
+                _ => false,
+            })
+    }
+
     pub(super) fn at(&self, index: usize) -> Result<Value> {
         let width = self.format.width();
         let element = &self.bytes[width * index..width * (index + 1)];
         Ok(match self.format {
+            Format::SignedByte => Value::Int(Int::from(i64::from(element[0] as i8))),
+            Format::UnsignedByte => Value::Int(Int::from(i64::from(element[0]))),
             Format::Int => Value::Int(Int::from(i64::from(i32::from_ne_bytes(
                 element.try_into().unwrap(),
             )))),
@@ -122,7 +162,7 @@ impl Array {
         })
     }
 
-    fn append_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+    fn writable_bytes(&mut self, additional: usize) -> Result<&mut Vec<u8>> {
         if Rc::get_mut(&mut self.bytes).is_none() {
             let mut copy = Vec::new();
             copy.try_reserve_exact(self.bytes.len())
@@ -131,11 +171,50 @@ impl Array {
             self.bytes = Rc::new(copy);
         }
         let data = Rc::get_mut(&mut self.bytes).unwrap();
-        data.try_reserve(bytes.len())
+        data.try_reserve(additional)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        data.extend_from_slice(bytes);
+        Ok(data)
+    }
+
+    fn append_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.writable_bytes(bytes.len())?.extend_from_slice(bytes);
         Ok(())
     }
+}
+
+fn array_mut(ctx: &mut Context, receiver: Id) -> &mut Array {
+    let Value::Array(array) = ctx.heap.get_mut(receiver) else {
+        unreachable!("expected array receiver");
+    };
+    array
+}
+
+/// CPython validates the item, resizes at the original append offset, and converts
+/// again to store it. Both conversions can run Python that changes or copies the array.
+fn append_item(ctx: &mut Context, receiver: Id, item: Id) -> Result<()> {
+    let array = array_mut(ctx, receiver);
+    let format = array.format;
+    let offset = array.bytes.len();
+    format.encode(ctx, item)?;
+    if ctx.buffer_exports.contains(&receiver) {
+        return Err(Error::new(
+            "BufferError",
+            "cannot resize an array that is exporting buffers",
+        ));
+    }
+    let end = offset
+        .checked_add(format.width())
+        .ok_or_else(|| Error::new("MemoryError", ""))?;
+    let array = array_mut(ctx, receiver);
+    let additional = end.saturating_sub(array.bytes.len());
+    array.writable_bytes(additional)?.resize(end, 0);
+    let value = format.encode(ctx, item)?;
+    let slot = array_mut(ctx, receiver)
+        .writable_bytes(0)?
+        .get_mut(offset..end)
+        .ok_or_else(|| Error::new("IndexError", "array assignment index out of range"))?;
+    slot.copy_from_slice(&value[..format.width()]);
+    Ok(())
 }
 
 pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result<Id> {
@@ -156,11 +235,13 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
     }
     let code = ctx.str_value(*code)?;
     let format = match code {
+        "b" => Format::SignedByte,
+        "B" => Format::UnsignedByte,
         "i" => Format::Int,
         "f" => Format::Float,
         "d" => Format::Double,
         "w" => Format::Wide,
-        "b" | "B" | "u" | "h" | "H" | "I" | "l" | "L" | "q" | "Q" => {
+        "u" | "h" | "H" | "I" | "l" | "L" | "q" | "Q" => {
             return Err(Error::new(
                 "NotImplementedError",
                 format!("unsupported array typecode '{code}'"),
@@ -234,14 +315,15 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
             _ => {
                 let iterator = ctx.iterator(*initial)?;
                 ctx.heap.keep(iterator);
+                let receiver = ctx.alloc(Value::Array(array));
                 let mark = ctx.heap.temporary_mark();
                 let mut limit = ctx.heap.streaming_collection_limit();
                 while let Some(item) = ctx.next_item(iterator)? {
-                    let bytes = format.encode(ctx, item)?;
-                    array.append_bytes(&bytes[..format.width()])?;
+                    append_item(ctx, receiver, item)?;
                     ctx.heap.release_temporaries_since(mark);
                     ctx.collect_streaming_garbage(&mut limit);
                 }
+                return Ok(receiver);
             }
         }
     }
@@ -299,12 +381,7 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::List(items)))
         }
         ("append", &[item]) => {
-            let format = array.format;
-            let bytes = format.encode(ctx, item)?;
-            let Value::Array(array) = ctx.heap.get_mut(receiver) else {
-                unreachable!()
-            };
-            array.append_bytes(&bytes[..format.width()])?;
+            append_item(ctx, receiver, item)?;
             Ok(NONE)
         }
         _ => Err(Error::new("TypeError", "invalid arguments to array method")),

@@ -115,6 +115,27 @@ impl TextFile {
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().write(value)) }
     }
 
+    pub(crate) fn encoding(&self) -> Option<crate::StrOwner> {
+        // SAFETY: the retained encoding is cloned without running Python code.
+        unsafe { self.0.0.with(|storage| storage.file().encoding.clone()) }
+    }
+
+    /// Identify the still-open original stream, even when Python retained an alias.
+    pub(crate) fn standard_writer(&self) -> Result<bool> {
+        // SAFETY: checking the file state does not reenter Python.
+        unsafe {
+            self.0
+                .0
+                .with_mut(|storage| storage.file_mut().standard_writer())
+        }
+    }
+
+    /// Closing the binary layer flushes only its bytes and closes the enclosing text view.
+    pub(crate) fn close_standard_buffer(&self) -> Result<()> {
+        // SAFETY: this owned file state is a standard output stream; flushing runs no Python.
+        unsafe { self.0.0.with_mut(|s| s.file_mut().close_standard_buffer()) }
+    }
+
     pub(crate) fn flush(&self) -> Result<()> {
         // SAFETY: flushing the owned stream does not reenter native Python code.
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().flush()) }

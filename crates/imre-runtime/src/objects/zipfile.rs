@@ -129,9 +129,14 @@ fn store(storage: Storage) -> Result<ObjectOwner> {
 }
 
 impl Archive {
+    /// Open a filesystem archive for CRC-checked metadata member reads.
+    pub(crate) fn open_path(path: &str) -> Result<Self> {
+        Self::open(Source::open(path)?, Some(StrOwner::new(path.into())))
+    }
+
     /// Retain the central directory after closing the descriptor used to index it.
     pub(crate) fn index_import(path: &str) -> Result<Self> {
-        let mut archive = Self::open(Source::open(path)?, Some(StrOwner::new(path.into())))?;
+        let mut archive = Self::open_path(path)?;
         archive.source = None;
         Ok(archive)
     }
@@ -207,21 +212,31 @@ impl Archive {
 
     fn namelist(&self) -> Result<ObjectOwner> {
         let mut names = Words::new(3);
-        self.for_infos(|list| {
-            names
-                .values
-                .try_reserve_exact(list.len())
-                .map_err(|_| Error::allocation())?;
-            for &info in list {
-                // SAFETY: the rooted filelist owns initialized ZipInfo handles.
-                let info = unsafe { object(info as *const Object) }.zip_info();
-                names
-                    .values
-                    .push(StrOwner::into_raw(info.filename.clone()) as usize);
-            }
-            Ok(())
-        })?;
+        names
+            .values
+            .try_reserve_exact(self.for_infos(|entries| entries.len()))
+            .map_err(|_| Error::allocation())?;
+        self.visit_names(|name| names.values.push(StrOwner::into_raw(name.clone()) as usize));
         store(names.into_storage())
+    }
+
+    /// Visit central-directory names in the same order as ZipFile.namelist().
+    pub(crate) fn visit_names(&self, mut visit: impl FnMut(&StrOwner)) {
+        self.for_infos(|entries| {
+            for &word in entries {
+                // SAFETY: the archive owns each sealed ZipInfo throughout this visit.
+                let info = unsafe { object(word as *const Object) }.zip_info();
+                visit(&info.filename);
+            }
+        })
+    }
+
+    /// Read an optional member with the same header and CRC checks as ZipFile.read.
+    pub(crate) fn read_named(&self, name: &Str) -> Result<Option<Bytes>> {
+        if !self.by_name.contains_key(name) || name.ends_with('/') {
+            return Ok(None);
+        }
+        self.member_by_name(name)?.read(None).map(Some)
     }
 
     fn for_infos<T>(&self, f: impl FnOnce(&[usize]) -> T) -> T {

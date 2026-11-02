@@ -7,9 +7,9 @@ fn plain() -> crate::ObjectOwner {
 // The native object runtime and its module registry are thread-confined.
 // Keep one owner in the registry; every returned handle owns a separate reference.
 thread_local! { static SENTINEL: crate::ObjectOwner = plain(); }
-const STR_METHOD_NAMES: [&str; 10] = [
+const STR_METHOD_NAMES: [&str; 13] = [
     "lower", "strip", "lstrip", "rstrip", "isalnum", "islower", "isascii", "isalpha", "isdigit",
-    "zfill",
+    "zfill", "istitle", "title", "swapcase",
 ];
 thread_local! {
     static STR_METHODS: [crate::ObjectOwner; STR_METHOD_NAMES.len()] = std::array::from_fn(|index|

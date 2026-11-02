@@ -17,7 +17,7 @@ enum LaunchApi {
     Popen,
     Call(bool),
     CheckOutput,
-    Run,
+    Run { discarded: bool },
 }
 
 fn integer_deadline(value: &ast::Expr) -> bool {
@@ -178,14 +178,6 @@ pub(super) fn process_error_view(
                 precise = false;
                 return;
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::RunToStderr), _) => (
-                ProcessCapture {
-                    stdout: false,
-                    stderr: false,
-                    text: false,
-                },
-                types.list(Type::Str),
-            ),
             ExprKind::Builtin(
                 Builtin::Process(ProcessOperation::CheckOutput { capture, .. }),
                 args,
@@ -216,10 +208,18 @@ pub(super) fn process_error_view(
                 (capture, types.command_type(cmd))
             }
             ExprKind::Builtin(
-                Builtin::Process(ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                Builtin::Process(
+                    op @ (ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                ),
                 args,
             ) => {
-                timed = true;
+                timed |= !matches!(
+                    op,
+                    ProcessOperation::Call {
+                        fixed_check: None,
+                        ..
+                    }
+                );
                 let command = match args[0].ty {
                     Type::Popen(_, _, id) => types.command_type(id),
                     ty => ty,
@@ -622,42 +622,6 @@ impl Checker<'_> {
         ))
     }
 
-    /// An immediately discarded process result can inherit the parent's stderr
-    /// directly without materializing a CompletedProcess or buffering its output.
-    pub(super) fn process_to_stderr(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let [argv] = call.arguments.args.as_ref() else {
-            return self.process_run(call);
-        };
-        let mut redirected = false;
-        let mut check = None;
-        for kw in &call.arguments.keywords {
-            match kw.arg.as_ref().map(|name| name.as_str()) {
-                Some("check") if check.is_none() => check = Some(&kw.value),
-                Some("stdout")
-                    if !redirected
-                        && self.resolve(&kw.value)
-                            == Some(Binding::Intrinsic(Intrinsic::Stderr)) =>
-                {
-                    redirected = true
-                }
-                _ => return self.process_run(call),
-            }
-        }
-        let argv = self.command_argument(argv)?;
-        if argv.ty != self.types.list(Type::Str) {
-            return self.process_run(call);
-        }
-        let check = match check {
-            Some(value) => self.expr_expected(value, Type::Bool)?,
-            None => Expr::boolean(false),
-        };
-        Ok(operation(
-            ProcessOperation::RunToStderr,
-            Type::None,
-            vec![argv, check],
-        ))
-    }
-
     /// Keywords capture their values in source order before applying the filesystem ABI.
     pub(super) fn shutil_which(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
@@ -994,7 +958,7 @@ impl Checker<'_> {
                 Some(Expr::absent(deadline)),
             ));
         }
-        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run) {
+        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run { .. }) {
             let input = self
                 .types
                 .optional(if capture.text { Type::Str } else { Type::Bytes });
@@ -1012,6 +976,19 @@ impl Checker<'_> {
                     sign_only: false,
                     kind: ParameterKind::KeywordOnly,
                 });
+            }
+        }
+        if matches!(api, LaunchApi::Popen | LaunchApi::Call(_))
+            && keyword("universal_newlines").is_some()
+        {
+            // stream_plan already checked the literal alias and selected the pipe type.
+            params.push(ParameterKind::KeywordOnly.parameter(
+                "universal_newlines",
+                Type::Bool,
+                None,
+            ));
+            if validation == 5 {
+                streams |= 1 << 22; // Popen must reject the conflicting flags before spawning.
             }
         }
         let child_options = params.len();
@@ -1091,6 +1068,9 @@ impl Checker<'_> {
                     checker.coerce(value, Type::Int, arg)
                 };
             }
+            if params[index].name == "universal_newlines" {
+                return Ok(Expr::boolean(false));
+            }
             match index {
                 0 => checker.command_argument(arg),
                 1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
@@ -1116,7 +1096,7 @@ impl Checker<'_> {
                 }
                 4..=8 => Ok(Expr::boolean(false)), // effect-free literals checked by stream_plan
                 11 => checker.condition(arg),
-                14 if api == LaunchApi::Run => checker.expr_expected(arg, Type::Bool),
+                14 if matches!(api, LaunchApi::Run { .. }) => checker.expr_expected(arg, Type::Bool),
                 14 => checker.expr(arg), // evaluated before reporting a forbidden check keyword
                 15..=17 => Ok(Expr::boolean(false)), // literals validated by stream_plan
                 12 => checker.deadline_value(arg),
@@ -1143,7 +1123,26 @@ impl Checker<'_> {
                 },
                 capture.stream(true),
             ),
-            LaunchApi::Run => (
+            // A discarded list[str] run forwarding stdout to stderr only needs the exit status.
+            LaunchApi::Run { discarded: true }
+                if streams == 4
+                    && args.values[args.order[0]].ty == self.types.list(Type::Str)
+                    && call.arguments.keywords.iter().all(|kw| {
+                        matches!(
+                            kw.arg.as_ref().map(|name| name.as_str()),
+                            Some("stdout" | "check")
+                        )
+                    }) =>
+            {
+                (
+                    ProcessOperation::Call {
+                        streams,
+                        fixed_check: None,
+                    },
+                    Type::Int,
+                )
+            }
+            LaunchApi::Run { .. } => (
                 ProcessOperation::Run {
                     streams,
                     validation,
@@ -1152,7 +1151,13 @@ impl Checker<'_> {
                 },
                 self.types.completed(capture, args.values[args.order[0]].ty),
             ),
-            LaunchApi::Call(check) => (ProcessOperation::Call { streams, check }, Type::Int),
+            LaunchApi::Call(check) => (
+                ProcessOperation::Call {
+                    streams,
+                    fixed_check: Some(check),
+                },
+                Type::Int,
+            ),
             LaunchApi::Popen => (
                 ProcessOperation::Popen { streams },
                 Type::Popen(
@@ -1320,8 +1325,12 @@ impl Checker<'_> {
         self.coerce(value, timeout, argument)
     }
 
-    pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        self.launch_process(call, LaunchApi::Run)
+    pub(super) fn process_run(
+        &mut self,
+        call: &ast::ExprCall,
+        discarded: bool,
+    ) -> Result<Expr, String> {
+        self.launch_process(call, LaunchApi::Run { discarded })
     }
 
     /// Path conversion is sealed and pure; optional paths retain their absence.

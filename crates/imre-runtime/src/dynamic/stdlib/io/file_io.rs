@@ -2,13 +2,13 @@
 
 use std::cell::Cell;
 use std::io::ErrorKind;
-use std::os::fd::{IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 use super::super::{builtins, files, os_error};
 use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
-use crate::objects::os;
+use crate::objects::{BoxedPipe, os};
 
 pub(super) const METHODS: &[&str] = &[
     "__init__", "__repr__", "closed", "mode", "closefd", "_blksize", "close", "fileno", "read",
@@ -17,7 +17,8 @@ pub(super) const METHODS: &[&str] = &[
 ];
 
 pub(in crate::dynamic) struct RawFile {
-    pub(super) fd: Cell<Option<RawFd>>,
+    fd: Cell<Option<RawFd>>,
+    pipe: Option<BoxedPipe>,
     closefd: bool,
     mode: &'static str,
     blksize: Cell<i64>,
@@ -43,8 +44,14 @@ fn closed() -> Error {
 }
 
 impl RawFile {
+    pub(super) fn live_fd(&self) -> Option<RawFd> {
+        self.fd
+            .get()
+            .filter(|_| self.pipe.as_ref().is_none_or(|p| !p.closed()))
+    }
+
     fn access<T>(&self, operation: impl FnOnce(RawFd) -> Result<T>) -> Result<T> {
-        operation(self.fd.get().ok_or_else(closed)?)
+        operation(self.live_fd().ok_or_else(closed)?)
     }
 
     pub(super) fn close(&self) -> Result<()> {
@@ -52,7 +59,11 @@ impl RawFile {
             && self.closefd
         {
             self.blksize.set(super::DEFAULT_BUFFER_SIZE);
-            os::close(fd)?;
+            if let Some(pipe) = &self.pipe {
+                pipe.close_raw()?;
+            } else {
+                os::close(fd)?;
+            }
         }
         Ok(())
     }
@@ -86,7 +97,7 @@ impl RawFile {
     }
 }
 
-fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
+pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
     match ctx.heap.get(receiver) {
         Value::Instance {
             memory_stream: Some(MemoryStream::Raw(raw)),
@@ -169,6 +180,20 @@ fn check_open_string(ctx: &mut Context, value: Id, name: &str, expected: &str) -
     Ok(())
 }
 
+enum DescriptorLookup {
+    FromArgument,
+    Resolved(Option<RawFd>),
+}
+
+/// FileIO falls back to the filesystem protocol when conversion to a C descriptor fails.
+fn descriptor_from_argument(ctx: &mut Context, file: Id) -> Option<RawFd> {
+    ctx.index_value(file)
+        .ok()
+        .flatten()
+        .and_then(|n| n.to_i64())
+        .and_then(|n| RawFd::try_from(n).ok())
+}
+
 /// Resolve the public open() arguments before opening the underlying file.
 pub(in crate::dynamic) fn open(
     ctx: &mut Context,
@@ -246,14 +271,10 @@ pub(in crate::dynamic) fn open(
         return open_raw(ctx, raw_arg, raw_mode, binary, owns);
     }
     let text_output = !binary && !mode_text.contains('+') && mode_text.contains(['w', 'a', 'x']);
-    // FileIO falls back to __fspath__ only when conversion to a C descriptor fails.
-    let fd = ctx
-        .index_value(raw_arg)
-        .ok()
-        .flatten()
-        .and_then(|n| n.to_i64())
-        .and_then(|n| RawFd::try_from(n).ok());
-    if fd.is_some() || text_output {
+    let text_input_with_newline =
+        buffering < 0 && newline.is_some() && matches!(mode_text, "r" | "rt" | "tr");
+    let fd = descriptor_from_argument(ctx, raw_arg);
+    if fd.is_some() || text_output || text_input_with_newline {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
@@ -274,13 +295,18 @@ pub(in crate::dynamic) fn open(
         }
         ctx.module("io")?;
         let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
-        initialize_file(ctx, raw, raw_arg, self::mode(&raw_mode), owns, fd, None)?;
+        initialize_file(
+            ctx,
+            raw,
+            raw_arg,
+            self::mode(&raw_mode),
+            owns,
+            DescriptorLookup::Resolved(fd),
+            None,
+            None,
+        )?;
         let handle = state(ctx, raw).expect("initialized FileIO");
-        let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
-        let buffer =
-            files::BinaryFile::Descriptor(super::BufferedFd::new(raw, handle, reading, capacity))
-                .into_value()?;
-        let buffer = ctx.heap.alloc_file_writer(buffer)?;
+        let buffer = buffered_descriptor(ctx, raw, handle, reading)?;
         if binary {
             return Ok(buffer);
         }
@@ -319,14 +345,18 @@ pub(in crate::dynamic) fn open(
             "Cannot use closefd=False with file name",
         ));
     }
-    if buffering > 0 {
-        return Err(Error::new(
-            "ValueError",
-            "explicit buffer sizes are unsupported",
-        ));
-    }
-    let path = ctx.str_value(filename)?;
     let mode = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
+    let writer_capacity = match (buffering, mode) {
+        (2.., "wb" | "ab" | "xb" | "bw" | "ba" | "bx") => Some(buffering as usize),
+        (1.., _) => {
+            return Err(Error::new(
+                "ValueError",
+                "explicit buffer sizes are unsupported",
+            ));
+        }
+        _ => None,
+    };
+    let path = ctx.str_value(filename)?;
     if errors
         .map(|v| ctx.str_value(v))
         .transpose()?
@@ -351,11 +381,12 @@ pub(in crate::dynamic) fn open(
     let writing = mode.contains(['w', 'a', 'x']);
     let file = match mode {
         "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
-            .map(Value::TextFile)
+            .map(|file| {
+                Value::TextFile(crate::dynamic::value::BoxedTextFile { file, buffer: None })
+            })
             .map_err(Error::from),
-        _ => {
-            files::BinaryFile::open(path, filename, mode).and_then(files::BinaryFile::into_value)
-        }
+        _ => files::BinaryFile::open(path, filename, mode, writer_capacity)
+            .and_then(files::BinaryFile::into_value),
     };
     match file {
         Ok(file) if writing => ctx.heap.alloc_file_writer(file),
@@ -409,17 +440,103 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             .unwrap_or("r"),
     );
     let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
-    initialize_file(ctx, receiver, path, selected_mode, owns, None, opener)
+    initialize_file(
+        ctx,
+        receiver,
+        path,
+        selected_mode,
+        owns,
+        DescriptorLookup::FromArgument,
+        opener,
+        None,
+    )
 }
 
+fn buffered_descriptor(
+    ctx: &mut Context,
+    raw: Id,
+    handle: Rc<RawFile>,
+    reading: bool,
+) -> Result<Id> {
+    let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
+    let buffer =
+        files::BinaryFile::Descriptor(super::BufferedFd::new(raw, handle, reading, capacity))
+            .into_value()?;
+    ctx.heap.alloc_file_writer(buffer)
+}
+
+impl Context {
+    /// Wrap mkstemp's read/write descriptor in a write-only buffered Python stream.
+    pub(in crate::dynamic) fn named_temporary_writer(
+        &mut self,
+        file: std::fs::File,
+        name: Id,
+    ) -> Result<Id> {
+        self.module("io")?;
+        let fd = file.as_raw_fd();
+        let raw = self.instance(self.builtins["_io.FileIO"], None);
+        initialize_file(
+            self,
+            raw,
+            name,
+            mode("wb"),
+            true,
+            DescriptorLookup::Resolved(Some(fd)),
+            None,
+            None,
+        )?;
+        // FileIO takes ownership of a passed descriptor only after successful initialization.
+        let _ = file.into_raw_fd();
+        let handle = state(self, raw).expect("initialized FileIO");
+        let result = buffered_descriptor(self, raw, handle.clone(), false);
+        if result.is_err() {
+            handle.close()?;
+        }
+        result
+    }
+}
+
+/// Expose the child stream and the native communication cursor through the same file.
+pub(in crate::dynamic) fn popen_pipe(
+    ctx: &mut Context,
+    file: crate::ObjectOwner,
+    reading: bool,
+) -> Result<Id> {
+    ctx.module("io")?;
+    let pipe = BoxedPipe::from_owner(file);
+    let fd = pipe.fileno()?;
+    let number = ctx.int(i64::from(fd));
+    let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
+    let mode = if reading { "rb" } else { "wb" };
+    initialize_file(
+        ctx,
+        raw,
+        number,
+        self::mode(mode),
+        true,
+        DescriptorLookup::Resolved(Some(fd)),
+        None,
+        Some(pipe.clone()),
+    )?;
+    if pipe.is_raw() {
+        return Ok(raw);
+    }
+    let handle = state(ctx, raw).expect("initialized FileIO");
+    let buffer = super::BufferedFd::pipe(raw, handle, reading, pipe);
+    ctx.heap
+        .alloc_file_writer(files::BinaryFile::Descriptor(buffer).into_value()?)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn initialize_file(
     ctx: &mut Context,
     receiver: Id,
     path: Id,
     selected_mode: Result<(u32, &'static str)>,
     owns: bool,
-    selected_fd: Option<RawFd>,
+    descriptor: DescriptorLookup,
     opener: Option<Id>,
+    pipe: Option<BoxedPipe>,
 ) -> Result<Id> {
     if let Some(raw) = state(ctx, receiver) {
         raw.close()?;
@@ -433,14 +550,10 @@ fn initialize_file(
             "bool is used as a file descriptor",
         )?;
     }
-    // CPython tries PyLong_AsInt, then the filesystem protocol if conversion fails.
-    let descriptor = selected_fd.or_else(|| {
-        ctx.index_value(path)
-            .ok()
-            .flatten()
-            .and_then(|n| n.to_i64())
-            .and_then(|n| RawFd::try_from(n).ok())
-    });
+    let descriptor = match descriptor {
+        DescriptorLookup::FromArgument => descriptor_from_argument(ctx, path),
+        DescriptorLookup::Resolved(fd) => fd,
+    };
     let encoded;
     let pathname = match descriptor {
         Some(fd) if fd < 0 => return Err(Error::new("ValueError", "negative file descriptor")),
@@ -508,6 +621,7 @@ fn initialize_file(
     let raw = Rc::new(RawFile {
         fd: Cell::new(Some(fd)),
         closefd: owns,
+        pipe,
         mode,
         blksize: Cell::new(blksize),
         repr_active: Cell::new(false),
@@ -519,7 +633,7 @@ fn initialize_file(
     let initialized = ctx.set_attr(receiver, "name", path).and_then(|()| {
         if descriptor.is_some() && flags == 2 {
             // Append seeks a passed descriptor to EOF, but does not alter its OS flags.
-            let active_fd = raw.fd.get().unwrap_or(-1);
+            let active_fd = raw.live_fd().unwrap_or(-1);
             // SAFETY: lseek accepts any descriptor number and retains no pointers.
             if unsafe { libc::lseek(active_fd, 0, libc::SEEK_END) } < 0 {
                 let err = std::io::Error::last_os_error();
@@ -623,7 +737,7 @@ pub(super) fn call(
         ));
     }
     let raw = state(ctx, receiver);
-    let is_closed = raw.as_ref().is_none_or(|raw| raw.fd.get().is_none());
+    let is_closed = raw.as_ref().is_none_or(|raw| raw.live_fd().is_none());
     match name {
         "closed" => return Ok(builtins::boolean(is_closed)),
         "closefd" => return Ok(builtins::boolean(raw.as_ref().is_none_or(|r| r.closefd))),
@@ -635,8 +749,12 @@ pub(super) fn call(
             ));
         }
         "__repr__" => {
-            let class = if ctx.heap.get(receiver).instance_class()
-                == ctx.builtins.get("_io.FileIO").copied()
+            let class = if ctx
+                .heap
+                .get(receiver)
+                .instance_class()
+                .and_then(|class| ctx.heap.get(class).io_kind())
+                == Some("FileIO")
             {
                 "_io.FileIO"
             } else {
@@ -661,7 +779,7 @@ pub(super) fn call(
                         format!("name={}", ctx.str_value(shown)?)
                     }
                     Err(err) if err.kind == "AttributeError" => {
-                        let fd = raw.fd.get().ok_or_else(closed)?;
+                        let fd = raw.live_fd().ok_or_else(closed)?;
                         format!("fd={fd}")
                     }
                     Err(err) => return Err(err),

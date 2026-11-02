@@ -5,7 +5,7 @@ import posix
 import posixpath
 from os import altsep, fspath, linesep, pathsep, sep
 from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
-from posixpath import normpath
+from posixpath import abspath, normpath
 
 
 class Path:
@@ -102,6 +102,14 @@ def current():
     assert os.path.lexists is posixpath.lexists is genericpath.lexists
     assert os.path.lexists(Path(__file__)) and not os.path.lexists(missing)
     assert os.path.isfile is posixpath.isfile is genericpath.isfile
+    assert os.path.isjunction is posixpath.isjunction is genericpath.isjunction
+    assert not os.path.isjunction(Path(missing))
+    try:
+        os.path.isjunction(42)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("isjunction accepted an invalid path")
     assert os.listdir is posix.listdir
     module_dir = os.path.dirname(__file__) or "."
     module_file = os.path.basename(__file__)
@@ -109,9 +117,28 @@ def current():
     assert os.path.realpath(os.fsencode(__file__), strict=os.path.ALLOW_MISSING) == os.fsencode(os.path.realpath(__file__))
     assert module_file in os.listdir(Path(module_dir))
     assert os.fsencode(module_file) in os.listdir(Path(os.fsencode(module_dir)))
+    assert os.path.join(b"root", b"sub", b"") == b"root/sub/"
+    assert os.path.join(b"root", b"before", b"/other", b"child") == b"/other/child"
+    try:
+        os.path.join(b"root", "text")
+    except TypeError as error:
+        assert str(error) == "Can't mix strings and bytes in path components"
+    else:
+        raise AssertionError("join accepted mixed bytes and text")
     assert os.path.join(Path("root"), "dirA") == "root/dirA"
     assert os.path.join("root", Path("/other"), Path("child")) == "/other/child"
     assert os.path.isabs(Path(b"/test"))
+    assert abspath is os.path.abspath is posixpath.abspath
+    assert abspath(path=Path(b"sub/../\xff")) == os.getcwdb().rstrip(b"/") + b"/\xff"
+    assert abspath(Path(os.fsdecode(b"//host/\xff/./name/.."))) == os.fsdecode(b"//host/\xff")
+    assert abspath(Raw(b"///host/../../dir")) == b"/dir"
+
+    class Rooted(Text):
+        def startswith(self, sep):
+            assert sep == "/"
+            return True
+
+    assert abspath(Rooted("a/../relative")) == "relative"
     assert os.path.relpath(Path("/a/./b"), start="/a/c") == "../b"
     assert os.path.relpath(Path(b"/a/\xff"), start=b"/a") == b"\xff"
     try:
@@ -156,6 +183,7 @@ def current():
     assert pathsep is os.pathsep is path_list_sep is os.path.pathsep is posixpath.pathsep
     assert linesep is os.linesep and linesep == "\n"
     assert not hasattr(posixpath, "linesep")
+    assert os.extsep == os.path.extsep == posixpath.extsep == "."
     assert pathsep == ":"
     assert ":λ::some path:".split(pathsep) == ["", "λ", "", "some path", ""]
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
@@ -263,6 +291,31 @@ def current():
                 assert borrowed.read() == b"abcdefghij"
         finally:
             os.close(replacement)
+
+        with open(path, "wb") as stream:
+            stream.write(b"first\r\nsecond\n\rlast")
+        for newline in ("\n", "\r", "\r\n"):
+            with open(Path(path), "r", -1, "utf-8", None, newline) as stream:
+                assert stream.read() == "first\r\nsecond\n\rlast"
+
+        calls = []
+        class FallbackPath(Path):
+            def __index__(self):
+                calls.append("index")
+                if len(calls) == 1:
+                    raise TypeError("use the pathname")
+                return alternate.fileno()
+
+            def __fspath__(self):
+                calls.append("fspath")
+                return self.value
+
+        value = FallbackPath(path)
+        with open(__file__, "rb", buffering=0) as alternate:
+            with open(value, "rt", encoding="utf-8", newline="\n") as stream:
+                assert stream.name is value and stream.read() == "first\r\nsecond\n\rlast"
+            assert calls == ["index", "fspath"]
+            assert alternate.read(6) == b"import"
     finally:
         os.unlink(path)
 

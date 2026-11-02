@@ -54,7 +54,7 @@ pub(super) fn property(name: &str) -> bool {
 
 /// The heap traces the buffer until detach returns it. No borrow spans a Python stream call.
 pub(in crate::dynamic) struct Wrapper {
-    buffer: Cell<Option<Id>>,
+    pub(super) buffer: Cell<Option<Id>>,
     encoding: Id,
     errors: Id,
     newline: Option<String>,
@@ -166,7 +166,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         Ok(Some(v.to_owned()))
     };
     let encoding = string(encoding, "encoding")?;
-    let encoding = crate::sys::file_encoding(encoding.as_deref()).to_owned();
+    let encoding = crate::sys::file_encoding(encoding.as_deref()).into_owned();
     string(errors, "errors")?;
     let newline = string(newline, "newline")?;
     if let Some(nl) = &newline

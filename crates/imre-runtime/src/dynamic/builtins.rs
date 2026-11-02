@@ -1,7 +1,9 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use super::Context;
-use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
+use super::value::{
+    DictIterator, ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value,
+};
 
 mod collections;
 mod dir;
@@ -25,10 +27,48 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     use crate::objects::exceptions::Kind;
     match name {
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+        "socket.gaierror" => Some(Kind::GaiError),
+        "socket.herror" => Some(Kind::HError),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),
     }
+}
+
+/// Methods declared on BaseException and inherited by every native exception type.
+pub(super) fn base_exception_method(name: &str) -> Option<&'static str> {
+    match name {
+        "add_note" => Some("BaseException.add_note"),
+        "with_traceback" => Some("BaseException.with_traceback"),
+        _ => None,
+    }
+}
+
+/// Native exception ancestors in MRO order, excluding the class itself and object.
+pub(super) fn exception_ancestors(
+    kind: imre_ast::exceptions::Kind,
+) -> impl Iterator<Item = &'static str> {
+    use imre_ast::exceptions::Kind::*;
+    // These are the exception types with native boxed children. UnsupportedOperation
+    // inherits from both OSError and ValueError, in that order.
+    [
+        ConnectionError,
+        OSError,
+        UnicodeError,
+        ValueError,
+        ArithmeticError,
+        LookupError,
+        ImportError,
+        NameError,
+        RuntimeError,
+        SyntaxError,
+        Warning,
+        Exception,
+        BaseException,
+    ]
+    .into_iter()
+    .filter(move |&base| base != kind && kind.matches(base))
+    .map(|base| base.name())
 }
 
 const FUNCTIONS: &[&str] = &[
@@ -67,6 +107,7 @@ const FUNCTIONS: &[&str] = &[
     "format",
     "compile",
     "exec",
+    "eval",
     "iter",
     "next",
 ];
@@ -165,7 +206,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(owner, "object" | "float" | "int" | "str") || is_exception(owner)).then_some(owner)
+    (matches!(owner, "object" | "dict" | "float" | "int" | "str") || is_exception(owner))
+        .then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -176,11 +218,15 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
         || is_enum_base(name)
 }
 
+/// The native classes exported directly by the builtins module.
+pub(super) fn is_exported_type(name: &str) -> bool {
+    TYPES.contains(&name) || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
+}
+
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
 pub(super) fn is_static_gc_type(name: &str) -> bool {
-    TYPES.contains(&name)
+    is_exported_type(name)
         || name == super::stdlib::flags::TYPE
-        || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
             name,
@@ -211,6 +257,9 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
+    if DictIterator::class(name).is_some() {
+        return true;
+    }
     matches!(
         name,
         "iterator"
@@ -223,9 +272,6 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "bytearray_iterator"
             | "range_iterator"
             | "longrange_iterator"
-            | "dict_keyiterator"
-            | "dict_valueiterator"
-            | "dict_itemiterator"
             | "callable_iterator"
             | "fieldnameiterator"
             | "formatteriterator"
@@ -239,6 +285,7 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "zip"
             | "itertools.count"
             | "itertools.repeat"
+            | "_io.BufferedRandom"
             | "_io.BufferedReader"
             | "_io.BufferedWriter"
             | super::deque::ITERATOR
@@ -255,6 +302,8 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__eq__",
+    "__new__",
     "__repr__",
     "__init__",
     "__len__",
@@ -281,6 +330,8 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &["release"];
+
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
     "append",
@@ -288,8 +339,12 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "copy",
     "endswith",
     "extend",
+    "lstrip",
     "reverse",
+    "rstrip",
+    "split",
     "startswith",
+    "strip",
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
@@ -297,10 +352,14 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "__repr__",
     "decode",
     "endswith",
+    "join",
+    "lstrip",
     "rfind",
     "rsplit",
     "rstrip",
+    "split",
     "startswith",
+    "strip",
     "translate",
 ];
 
@@ -314,12 +373,14 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "index",
     "isalnum",
     "isascii",
     "isalpha",
     "isdigit",
     "islower",
     "isspace",
+    "istitle",
     "isupper",
     "join",
     "lower",
@@ -336,6 +397,8 @@ pub(super) const STR_METHODS: &[&str] = &[
     "splitlines",
     "startswith",
     "strip",
+    "swapcase",
+    "title",
     "translate",
     "upper",
     "zfill",
@@ -362,17 +425,22 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
-        Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
-        Value::Float(_) if attr == "as_integer_ratio" => "float",
+        Value::Bool(_) if attr == "__repr__" => "bool",
+        Value::Int(_) if attr == "__repr__" => "int",
+        Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "bit_length" | "to_bytes") => "int",
+        Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
+        Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
+            iter.class_name()
+        }
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
             iter.kind
         }
         Value::Slice(_) if super::slice::METHODS.contains(&attr) => "slice",
-        Value::TupleGetterDoc | Value::ReadOnlyMember(_, _)
+        Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. }
             if super::namedtuple::GETTER_METHODS.contains(&attr) =>
         {
             "member_descriptor"
@@ -388,7 +456,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
+        Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
             "coroutine"
         }
@@ -397,6 +465,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "coroutine_wrapper"
         }
+        Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
@@ -413,10 +482,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         } if attr == "geturl" => "urllib.parse.ParseResult",
         Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
         Value::Hash(state)
-            if crate::objects::HashState::is_provider_class(state.borrow().class_name())
+            if crate::objects::HashState::is_provider_class(state.lock().class_name())
                 && matches!(attr, "update" | "copy" | "digest" | "hexdigest") =>
         {
-            state.borrow().class_name()
+            state.lock().class_name()
         }
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
@@ -428,6 +497,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "accept"
                     | "connect"
                     | "getsockname"
+                    | "getpeername"
                     | "fileno"
                     | "close"
                     | "recv"
@@ -439,6 +509,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "getsockopt"
                     | "setsockopt"
                     | "setblocking"
+                    | "get_inheritable"
                     | "getblocking"
                     | "__enter__"
                     | "__exit__"
@@ -518,6 +589,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "selectors"
         }
+        Value::File(handle)
+            if attr == "read1"
+                && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(fd) if fd.reading) =>
+        {
+            "file"
+        }
         Value::File(_)
             if matches!(
                 attr,
@@ -530,8 +607,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "read"
                     | "fileno"
                     | "readline"
+                    | "readlines"
                     | "readinto"
                     | "write"
+                    | "writelines"
                     | "flush"
                     | "close"
                     | "__enter__"
@@ -543,13 +622,18 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "match" | "fullmatch" | "search" | "split" | "scanner"
+                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "scanner"
             ) =>
         {
             "pattern"
         }
         Value::RegexScanner { .. } if matches!(attr, "match" | "search") => "scanner",
-        Value::RegexMatch(_) if matches!(attr, "group" | "groups" | "start" | "end" | "span") => {
+        Value::RegexMatch(_)
+            if matches!(
+                attr,
+                "group" | "groups" | "groupdict" | "start" | "end" | "span"
+            ) =>
+        {
             "match"
         }
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
@@ -714,6 +798,9 @@ pub(super) fn bind_builtin_arguments<const N: usize>(
             .iter()
             .find(|(key, _)| !names.contains(&key.as_str()))
             && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
+            && !names[..args.len()]
+                .iter()
+                .any(|name| kwargs.iter().any(|(key, _)| *name == key))
         {
             return Err(type_error(format!(
                 "{builtin}() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
@@ -841,12 +928,56 @@ fn delete_attribute(
     Ok(NONE)
 }
 
+impl Context {
+    /// Direct Python calls carry their lexical scope, including inlined comprehensions.
+    pub(super) fn call_in_scope(
+        &mut self,
+        scope: Id,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        if scope != NONE && matches!(self.heap.get(callable), Value::Native(name) if name == "eval")
+        {
+            return self.eval_source(scope, &args, &kwargs);
+        }
+        if scope != NONE
+            && args.is_empty()
+            && kwargs.is_empty()
+            && matches!(self.heap.get(callable), Value::Native(name) if name == "dir")
+            && self.scope_data(scope).parent.is_none()
+        {
+            let namespace = self.module_globals(scope)?;
+            return collections::sorted(self, &[namespace], &[]);
+        }
+        self.call(callable, args, kwargs)
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "BaseException.add_note" {
+        let Some((&exception, args)) = args.split_first() else {
+            return Err(type_error(
+                "unbound method BaseException.add_note() needs an argument",
+            ));
+        };
+        if !matches!(ctx.heap.get(exception), Value::Raised(_)) {
+            let kind = ctx
+                .builtin_type_name(exception)
+                .unwrap_or_else(|| ctx.type_name(exception));
+            return Err(type_error(format!(
+                "descriptor 'add_note' for 'BaseException' objects doesn't apply to a '{kind}' object"
+            )));
+        }
+        let note = one_positional_arg(name, args, kwargs)?;
+        ctx.add_exception_note(exception, note)?;
+        return Ok(NONE);
+    }
     if name == "object.__getattribute__" {
         let Some((&object, values)) = args.split_first() else {
             return Err(type_error(
@@ -883,13 +1014,23 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    if matches!(name, "object.__hash__" | "object.__repr__") {
-        let method = name.trim_start_matches("object.");
+    if matches!(
+        name,
+        "object.__hash__" | "object.__repr__" | "object.__str__"
+            | "mappingproxy.__repr__" | "mappingproxy.__str__"
+    ) {
+        let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
-                "descriptor '{method}' of 'object' object needs an argument"
+                "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
+        if owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)) {
+            return Err(type_error(format!(
+                "descriptor '{method}' requires a 'mappingproxy' object but received a '{}'",
+                ctx.type_name(receiver)
+            )));
+        }
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -901,8 +1042,22 @@ pub(super) fn call(
                 rest.len()
             )));
         }
+        if owner == "mappingproxy" {
+            if method == "__str__" {
+                return call(ctx, "str", &[receiver], &[]);
+            }
+            let repr = ctx.checked_format(receiver, true)?;
+            return Ok(ctx.text(repr));
+        }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
+        }
+        if method == "__str__" {
+            if let Some(value) = ctx.repr_override(receiver)? {
+                return Ok(value);
+            }
+            let repr = ctx.checked_format(receiver, true)?;
+            return Ok(ctx.text(repr));
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
@@ -925,13 +1080,29 @@ pub(super) fn call(
             return Ok(NONE);
         }
         if args.len() != 1 || !kwargs.is_empty() {
+            if let Some(&receiver) = args.first() {
+                let tuple = ctx.builtin("tuple");
+                if ctx.instance_of(receiver, tuple) {
+                    let class = ctx.exact_type(receiver)?;
+                    if ctx
+                        .class_attr(class, "__init__")
+                        .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
+                    {
+                        // Tuple subtypes consume their constructor arguments in __new__.
+                        return Ok(NONE);
+                    }
+                }
+            }
             return Err(type_error(
                 "object.__init__() takes exactly one argument (the instance to initialize)",
             ));
         }
         return Ok(NONE);
     }
-    if let Some((owner, method)) = name.split_once('.') {
+    // A module-qualified OSError subclass uses the exception constructor below.
+    if let Some((owner, method)) = name.split_once('.')
+        && exception_subclass(name, "OSError") != Some(true)
+    {
         return match owner {
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;
@@ -942,6 +1113,9 @@ pub(super) fn call(
                 };
                 arity(name, args, min, max)?;
                 ctx.call_coroutine_method(owner, method, args)
+            }
+            "generator" if matches!(method, "__iter__" | "__next__") => {
+                ctx.iterator_method(owner, method, args, kwargs)
             }
             "generator" if method == "send" => {
                 let [generator, value] = args else {
@@ -976,6 +1150,7 @@ pub(super) fn call(
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
+            "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
@@ -983,11 +1158,17 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
-            "str" | "bytes" | "bytearray" if method == "__repr__" => {
+            "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if matches!(method, "decode" | "endswith" | "startswith") => {
+            "bytearray"
+                if matches!(
+                    method,
+                    "decode" | "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+                ) =>
+            {
                 text::method(ctx, owner, method, args, kwargs)
             }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
@@ -1019,6 +1200,27 @@ pub(super) fn call(
             }
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
+            }
+            "memoryview" if method == "release" => {
+                positional(name, kwargs)?;
+                arity(name, args, 1, 1)?;
+                let exports = ctx
+                    .buffer_exports
+                    .iter()
+                    .filter(|&&view| view == args[0])
+                    .count();
+                if exports != 0 {
+                    let unit = if exports == 1 { "buffer" } else { "buffers" };
+                    return Err(Error::new(
+                        "BufferError",
+                        format!("memoryview has {exports} exported {unit}"),
+                    ));
+                }
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected memoryview"));
+                };
+                *owner = None;
+                Ok(NONE)
             }
             "slice" => super::slice::method(ctx, method, args, kwargs),
             "range" | "range_iterator" | "longrange_iterator" => {
@@ -1082,6 +1284,10 @@ pub(super) fn call(
             let class = ctx.builtin("object");
             Ok(ctx.instance(class, None))
         }
+        "mappingproxy" => {
+            let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
+            ctx.mapping_proxy(mapping.expect("required mapping"))
+        }
         "type" => {
             let [object] = args else {
                 return Err(if args.len() == 3 {
@@ -1107,8 +1313,9 @@ pub(super) fn call(
         "compile" => {
             positional(name, kwargs)?;
             arity(name, args, 3, 3)?;
-            ctx.compile_source(args[0], args[1], args[2])
+            ctx.compile_source(args[0], args[1], args[2], false)
         }
+        "eval" => ctx.eval_source(ctx.heap.current_scope(), args, kwargs),
         "exec" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
@@ -1129,6 +1336,11 @@ pub(super) fn call(
             }
             let scalar = ctx.scalar_value(value);
             match ctx.heap.get(scalar) {
+                Value::Calendar {
+                    value: duration, ..
+                } if duration.class() == "timedelta" => {
+                    super::stdlib::call(ctx, "datetime.timedelta.__abs__", &[value], &[])
+                }
                 Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
                 Value::Complex(number) => {
                     let magnitude = number.real.hypot(number.imag);
@@ -1410,8 +1622,10 @@ pub(super) fn call(
                     ..
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
-                Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
-                    collections::entries(ctx, *dict)?.len()
+                Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                Value::MappingProxy(_) => {
+                    let mapping = ctx.mapping_proxy_target(args[0]);
+                    return call(ctx, "len", &[mapping], &[]);
                 }
                 Value::Class { .. } => {
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
@@ -1422,6 +1636,7 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
+                Value::MemoryView { .. } => ctx.bytes_like(args[0])?.len(),
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -1458,6 +1673,33 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Filter {
                 predicate: *predicate,
                 input,
+            }))
+        }
+        "memoryview" => {
+            let [object] = bind(name, args, kwargs, ["object"])?;
+            let object = object.ok_or_else(|| {
+                type_error("memoryview() missing required argument 'object' (pos 1)")
+            })?;
+            ctx.check_buffer_exporter(object)?;
+            let owner = match ctx.heap.get(ctx.scalar_value(object)) {
+                Value::Bytes(_) => object,
+                Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
+                Value::Array(_) | Value::ByteArray(_) => {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "memoryview of a mutable buffer is unsupported",
+                    ));
+                }
+                _ => {
+                    return Err(type_error(format!(
+                        "memoryview: a bytes-like object is required, not '{}'",
+                        ctx.type_name(object)
+                    )));
+                }
+            };
+            Ok(ctx.alloc(Value::MemoryView {
+                owner: Some(owner),
+                hash: None,
             }))
         }
         "slice" => super::slice::construct(ctx, args, kwargs),
@@ -1537,10 +1779,15 @@ pub(super) fn call(
                 return Err(Error::new("ValueError", "Empty module name"));
             }
             let result = ctx.module(&name)?;
-            if ctx.optional_truth(fromlist, false)? {
-                return Ok(result);
+            if let Some(list) = fromlist
+                && ctx.truth(list)?
+            {
+                return ctx.prepare_fromlist(result, list);
             }
-            ctx.module(name.split('.').next().unwrap())
+            match name.split_once('.') {
+                Some((top, _)) => ctx.module(top),
+                None => Ok(result),
+            }
         }
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
@@ -1563,7 +1810,36 @@ pub(super) fn call(
         "input" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
-            Ok(ctx.text(crate::sys::read_input_line()?))
+            crate::flush_stdout().map_err(crate::objects::errno_error)?;
+            let sys = match ctx.threads.system_module {
+                Some(sys) => sys,
+                None => ctx.module("sys")?,
+            };
+            let stdin = match ctx.lookup_attr(sys, "stdin") {
+                Ok(NONE) => return Err(Error::new("RuntimeError", "lost sys.stdin")),
+                Err(error) if ctx.is_attribute_error(&error) => {
+                    return Err(Error::new("RuntimeError", "lost sys.stdin"));
+                }
+                result => result?,
+            };
+            let readline = ctx.lookup_attr(stdin, "readline")?;
+            let line = ctx.call(readline, Vec::new(), Vec::new())?;
+            let stripped = match ctx.heap.get(ctx.scalar_value(line)) {
+                Value::Bytes(b) if !b.is_empty() => {
+                    b.strip_suffix(b"\n").map(|s| Value::Bytes(s.to_vec()))
+                }
+                Value::Str(s) if !s.is_empty() => {
+                    s.strip_suffix('\n').map(|s| Value::Str(s.to_owned()))
+                }
+                Value::SurrogateStr(s) if !s.is_empty() => s
+                    .strip_suffix(&[u32::from('\n')])
+                    .map(|s| Value::SurrogateStr(s.to_vec())),
+                Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) => {
+                    return Err(Error::new("EOFError", "EOF when reading a line"));
+                }
+                _ => return Err(type_error("object.readline() returned non-string")),
+            };
+            Ok(stripped.map_or(line, |value| ctx.alloc(value)))
         }
         "print" => print::call(ctx, args, kwargs),
         "NoneType" | "NotImplementedType" | "ellipsis" => {

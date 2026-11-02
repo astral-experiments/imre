@@ -2,6 +2,7 @@
 import os
 import re
 import sys
+import types
 
 from fnmatch import fnmatch
 import unittest as _unittest
@@ -14,20 +15,118 @@ VALID_MODULE_NAME = re.compile(r'[_a-z]\w*\.py$', re.IGNORECASE)
 def _make_failed_import_test(name, suite_class):
     import traceback
     message = 'Failed to import test module: %s\n%s' % (name, traceback.format_exc())
-    return suite_class((_FailedTest(name, ImportError(message)),)), message
+    return _make_failed_test(name, ImportError(message), suite_class, message)
+
+
+def _make_failed_test(name, exception, suite_class, message):
+    return suite_class((_FailedTest(name, exception),)), message
 
 
 def _make_skipped_test(methodname, exception, suiteClass):
     @_unittest.skip(str(exception))
     def testSkipped(self):
         pass
-    attrs = {methodname: testSkipped}
-    TestClass = type("ModuleSkipped", (_unittest.TestCase,), attrs)
-    return suiteClass((TestClass(methodname),))
+
+    class ModuleSkipped(_unittest.TestCase):
+        __qualname__ = "ModuleSkipped"
+
+    setattr(ModuleSkipped, methodname, testSkipped)
+    return suiteClass((ModuleSkipped(methodname),))
 
 
 def _splitext(path):
     return os.path.splitext(path)[0]
+
+
+def loadTestsFromName(self, name, module=None):
+    """Return a suite of all test cases given a string specifier.
+
+    The name may resolve either to a module, a test case class, a
+    test method within a test case class, or a callable object which
+    returns a TestCase or TestSuite instance.
+
+    The method optionally resolves the names relative to a given module.
+    """
+    parts = name.split('.')
+    error_case, error_message = None, None
+    if module is None:
+        parts_copy = parts[:]
+        while parts_copy:
+            try:
+                module_name = '.'.join(parts_copy)
+                module = __import__(module_name)
+                break
+            except ImportError:
+                next_attribute = parts_copy.pop()
+                # Last error so we can give it to the user if needed.
+                error_case, error_message = _make_failed_import_test(
+                    next_attribute, self.suiteClass)
+                if not parts_copy:
+                    # Even the top level import failed: report that error.
+                    self.errors.append(error_message)
+                    return error_case
+        parts = parts[1:]
+    obj = module
+    for part in parts:
+        try:
+            parent, obj = obj, getattr(obj, part)
+        except AttributeError as e:
+            # We can't traverse some part of the name.
+            if (getattr(obj, '__path__', None) is not None
+                and error_case is not None):
+                # This is a package (no __path__ per importlib docs), and we
+                # encountered an error importing something. We cannot tell
+                # the difference between package.WrongNameTestClass and
+                # package.wrong_module_name so we just report the
+                # ImportError - it is more informative.
+                self.errors.append(error_message)
+                return error_case
+            else:
+                # Otherwise, we signal that an AttributeError has occurred.
+                import traceback
+                error_case, error_message = _make_failed_test(
+                    part, e, self.suiteClass,
+                    'Failed to access attribute:\n%s' % (
+                        traceback.format_exc(),))
+                self.errors.append(error_message)
+                return error_case
+
+    if isinstance(obj, types.ModuleType):
+        return self.loadTestsFromModule(obj)
+    elif (
+        isinstance(obj, type)
+        and issubclass(obj, _unittest.TestCase)
+        and obj not in (_unittest.TestCase, _unittest.FunctionTestCase)
+    ):
+        return self.loadTestsFromTestCase(obj)
+    elif (isinstance(obj, types.FunctionType) and
+          isinstance(parent, type) and
+          issubclass(parent, _unittest.TestCase)):
+        name = parts[-1]
+        inst = parent(name)
+        # static methods follow a different path
+        if not isinstance(getattr(inst, name), types.FunctionType):
+            return self.suiteClass([inst])
+    elif isinstance(obj, _unittest.TestSuite):
+        return obj
+    if callable(obj):
+        test = obj()
+        if isinstance(test, _unittest.TestSuite):
+            return test
+        elif isinstance(test, _unittest.TestCase):
+            return self.suiteClass([test])
+        else:
+            raise TypeError("calling %s returned %s, not a test" %
+                            (obj, test))
+    else:
+        raise TypeError("don't know how to make test from: %s" % obj)
+
+def loadTestsFromNames(self, names, module=None):
+    """Return a suite of all test cases found using the given sequence
+    of string specifiers. See 'loadTestsFromName()'.
+    """
+    suites = [self.loadTestsFromName(name, module) for name in names]
+    return self.suiteClass(suites)
 
 
 def discover(self, start_dir, pattern='test*.py', top_level_dir=None):
@@ -291,6 +390,8 @@ def _find_test_path(self, full_path, pattern, namespace=False):
         return None, False
 
 
+TestLoader.loadTestsFromName = loadTestsFromName
+TestLoader.loadTestsFromNames = loadTestsFromNames
 TestLoader.discover = discover
 TestLoader._get_directory_containing_module = _get_directory_containing_module
 TestLoader._get_name_from_path = _get_name_from_path

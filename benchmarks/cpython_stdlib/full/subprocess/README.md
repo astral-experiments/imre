@@ -89,15 +89,45 @@ change the results of the default reference command.
 
 ## Pipes and communication
 
-The same native-body command now executes 11 unchanged methods (the keys
-under `native_body_host_fixtures` in its result) at both levels. It covers stdin writes,
+The earlier native-body run executed 11 unchanged methods (the keys
+under `native_body_host_fixtures` in its result) at both levels. It covered stdin writes,
 stdout/stderr reads, merged output, EOF/closed state, and `communicate` with
 zero or one pipe. `ProcessTestCase.test_communicate_stdout` and
 `test_communicate_stderr` now have native-parent evidence as well as the older
-child-only observation. The native body of
-`test_post_timeout_communicate_sends_input` is attempted and reported under
-`blocked`: the compiler does not infer that its exception handler calling
-`self.fail()` cannot return. The original body is not rewritten.
+child-only observation.
+
+In `ProcessTestCase.test_post_timeout_communicate_sends_input`, the first
+`communicate()` timed out with 4,105 input bytes pending. At O0 and O3 the
+compiled original retried on the same child, sent all 4,105 bytes and closed
+stdin. The CPython child echoed the input plus a newline and exited zero.
+[Receipt](communicate-post-timeout-input-linux.json)
+
+To run the default-poll timeout original alone, add
+`--case test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output`
+to the native-body command above. The compiled `unittest.TestCase` checks that
+the first `communicate()` raises `TimeoutExpired` and that a second call on the
+same child returns all 262,144 stdout bytes. Pinned CPython supplies the
+original fixtures and runs the literal child program.
+
+`--case test.test_subprocess.ProcessTestCase.test_communicate_timeout` runs the
+text-mode retry original. The native `unittest.TestCase` checks `TimeoutExpired`
+and compares the complete stdout and stderr on the second `communicate()`
+call. Pinned CPython runs the original fixtures and child. The
+[Linux receipt](communicate-timeout-text-linux.json) records the partial stderr
+and both complete streams at O0 and O3.
+
+`--case test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input`
+runs the original with runtime-loaded modules. The compiled parent sends a byte
+memoryview to an Imre `-c` child, checks the 18 echoed bytes and that stderr is
+`None`, and runs both registered pipe cleanups. Pinned CPython supplies the
+original fixture hooks. [Linux receipt](memoryview-input-linux.json)
+
+Four default-poll `ProcessTestCase` methods previously had host-driven native
+operation evidence. Their bodies now run in Imre. The two EPIPE originals check that communicating with a 1 MiB input returns without a broken-pipe exception. The pipe-buffer original checks the echo under
+backpressure, and the descriptor-leak original checks all seven nonempty pipe
+configurations. Pinned CPython supplies the original fixture hooks and their
+selected zero-exit command. The stderr-only original already had native-body
+credit. [Linux receipt](communicate-pipes-family-linux.json)
 
 The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,

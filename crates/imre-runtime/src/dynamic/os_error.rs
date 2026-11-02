@@ -272,7 +272,16 @@ impl Context {
     }
 
     /// Attach the filesystem-protocol result to a failed syscall without losing its Python identity.
-    pub(super) fn with_errno_filename(&mut self, mut error: Error, filename: Id) -> Result<Error> {
+    pub(super) fn with_errno_filename(&mut self, error: Error, filename: Id) -> Result<Error> {
+        self.with_errno_filenames(error, filename, None)
+    }
+
+    pub(super) fn with_errno_filenames(
+        &mut self,
+        mut error: Error,
+        filename: Id,
+        filename2: Option<Id>,
+    ) -> Result<Error> {
         let Some(Args::Native { source, .. }) = error.os_args.as_deref() else {
             return Ok(error);
         };
@@ -285,6 +294,7 @@ impl Context {
             errno: Some(errno),
             strerror: Some(strerror),
             filename: Some(filename),
+            filename2,
             ..Fields::default()
         }))?);
         Ok(error)

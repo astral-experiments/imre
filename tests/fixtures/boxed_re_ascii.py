@@ -21,6 +21,37 @@ def current():
             assert str(error) == "cannot create 're.Pattern' instances"
         else:
             raise AssertionError("constructed a pattern without compiling")
+    from re import Match
+    found = unicode_digits.match("1")
+    assert type(found) is re.Match is Match
+    assert type(re.search(b"x", b"xy")) is Match
+    assert found.__class__ is Match
+    assert isinstance(found, Match) and not isinstance(unicode_digits, Match)
+    assert issubclass(Match, object) and not issubclass(Match, Pattern)
+    assert type(Match) is type and repr(Match) == "<class 're.Match'>"
+    assert (Match.__module__, Match.__name__, Match.__qualname__) == ("re", "Match", "Match")
+    assert Match[str].__origin__ is Match and Match[bytes].__args__ == (bytes,)
+    assert Match.__new__ is object.__new__
+    for construct in (lambda: Match(), lambda: Match.__new__(Match)):
+        try:
+            construct()
+        except TypeError as error:
+            assert str(error) == "cannot create 're.Match' instances"
+        else:
+            raise AssertionError("constructed a match without matching")
+    try:
+        Match.extra = 1
+    except TypeError as error:
+        assert str(error) == "cannot set 'extra' attribute of immutable type 're.Match'"
+    else:
+        raise AssertionError("modified re.Match")
+    try:
+        class SubMatch(Match):
+            pass
+    except TypeError as error:
+        assert str(error) == "type 're.Match' is not an acceptable base type"
+    else:
+        raise AssertionError("subclassed re.Match")
     print(re.A is re.ASCII, re.U is re.UNICODE)
     print(ascii_digits.pattern, ascii_digits.flags, unicode_digits.flags)
     for text in ("200", "-404", "+12", "1_2", "٢٠٠", "-１２", "200\n"):
@@ -40,6 +71,14 @@ def current():
     grouped = re.compile("(?P<letter>β+)(x)?")
     print(grouped.search(string="αββ", pos=1, endpos=3).group(0, "letter", 2))
     print(re.search(grouped, "αβ").group("letter"))
+    names = re.match(rb"(?P<z>a)(b)?(?P<a>x)?$", b"a")
+    default = []
+    values = names.groupdict(default=default)
+    assert list(values) == ["z", "a"]
+    assert values["z"] == b"a" and values["a"] is default
+    values["z"] = None
+    assert names.groupdict() == {"z": b"a", "a": None}
+    assert re.match(r"(x)$", "x").groupdict(default) == {}
     print(re.search(r"\d", "٣2", flags=re.ASCII).group())
     print(re.compile("β$").search("αβx", 1, 2).group())
     print(re.compile("^β").search("αβ", 1) is None)
@@ -98,3 +137,25 @@ def current():
     else:
         assert variable.fullmatch("bb").group(1) == "b"
         assert variable.fullmatch("ab") is None
+
+    for spelling, name, word in (
+        ("(?P<if>ab)(?P=if)", "if", "ab"),
+        ("(?P<état>é)(?P=état)", "état", "é"),
+        (b"(?P<word>\xff)(?P=word)", "word", b"\xff"),
+    ):
+        pattern = re.compile(spelling)
+        assert pattern.fullmatch(word + word).group(name) == word
+        assert pattern.fullmatch(word) is None
+
+    for spelling, message, position in (
+        ("é(?P<?foo>x)", "bad character in group name '?foo'", 5),
+        ("(?P=<foo>)", "bad character in group name '<foo>'", 4),
+        ("(?P<a.b>x)", "bad character in group name 'a.b'", 4),
+        (b"(?P<\xb5>x)", r"bad character in group name '\xb5'", 4),
+    ):
+        try:
+            re.compile(spelling)
+        except re.PatternError as error:
+            assert (error.msg, error.pattern, error.pos) == (message, spelling, position)
+        else:
+            raise AssertionError("invalid group name accepted")

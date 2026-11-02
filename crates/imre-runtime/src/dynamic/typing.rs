@@ -170,6 +170,11 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
         let generic = named_class(ctx, "typing", "Generic");
         ctx.bind(scope, "_is_protocol", TRUE);
         ctx.bind(scope, "_is_runtime_protocol", FALSE);
+        let members = ctx.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        ctx.bind(scope, "__protocol_attrs__", members);
         let parameters = ctx.alloc(Value::Tuple(Vec::new()));
         ctx.bind(scope, "__parameters__", parameters);
         let abstract_methods = ctx.alloc(Value::Set {
@@ -431,7 +436,13 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         Value::Native(n)
             if matches!(
                 n.as_str(),
-                "dict" | "list" | "tuple" | "set" | "type" | super::value::REGEX_PATTERN_TYPE
+                "dict"
+                    | "list"
+                    | "tuple"
+                    | "set"
+                    | "type"
+                    | super::value::REGEX_PATTERN_TYPE
+                    | super::value::REGEX_MATCH_TYPE
             ) =>
         {
             AliasKind::Builtin
@@ -708,9 +719,6 @@ pub(super) fn class_parameters(
     original: Option<Id>,
     bases: &[Id],
 ) -> Result<()> {
-    if let Some(original) = original {
-        ctx.bind(scope, "__orig_bases__", original);
-    }
     let Some(&generic) = ctx.classes.get("typing.Generic") else {
         return Ok(());
     };
@@ -721,12 +729,21 @@ pub(super) fn class_parameters(
         Some(tuple) => ctx.items(tuple)?,
         None => bases.to_vec(),
     };
+    bind_generic_parameters(ctx, scope, generic, &raw)
+}
+
+pub(super) fn bind_generic_parameters(
+    ctx: &mut Context,
+    scope: Id,
+    generic: Id,
+    raw: &[Id],
+) -> Result<()> {
     if raw.contains(&generic) {
         return Err(Error::new("TypeError", "Cannot inherit from plain Generic"));
     }
-    let vars = variables(ctx, &raw);
+    let vars = variables(ctx, raw);
     let mut explicit = None;
-    for id in raw {
+    for &id in raw {
         if let Value::GenericAlias(a) = ctx.heap.get(id)
             && a.origin == generic
             && explicit.replace(a.parameters).is_some()
@@ -826,6 +843,15 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__module__" => var.module,
             "__bound__" => var.bound,
             "__constraints__" => var.constraints,
+            "__default__" => no_default(ctx),
+            "has_default" => {
+                let callable = ctx.builtin("typing.TypeVar.has_default");
+                ctx.alloc(Value::Method {
+                    callable,
+                    receiver: value,
+                    explicit: false,
+                })
+            }
             "__infer_variance__" => {
                 if var.infer_variance {
                     TRUE
@@ -904,7 +930,42 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     Some(Ok(attr))
 }
 
-fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+/// Create fresh compiler-declared type variables in a lexical scope shared by the class body and methods.
+pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> Result<Id> {
+    let enclosing = ctx.scope_data(outer);
+    let parent = if enclosing.class_body.is_some() {
+        enclosing.parent.unwrap_or(outer)
+    } else {
+        outer
+    };
+    let module = enclosing.module.clone();
+    let scope = ctx.scope(&module, Some(parent));
+    let typing = ctx.text("typing");
+    let mut params = Vec::new();
+    for (binding, name) in ctx
+        .dict_entries(names)
+        .expect("declared class type parameters")
+        .to_vec()
+    {
+        let param = typevar(ctx, &[name], &[("infer_variance".to_owned(), TRUE)], typing)?;
+        let binding = ctx.str_value(binding)?.to_owned();
+        ctx.bind(scope, &binding, param);
+        params.push(param);
+    }
+    let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    frame.closure.declared.extend(frame.names.keys().cloned());
+    frame.closure.declared_complete = true;
+    let declared = ctx.alloc(Value::Tuple(params.clone()));
+    ctx.bind(scope, ".type_params", declared);
+    let generic = named_class(ctx, "typing", "Generic");
+    let base = alias(ctx, AliasKind::Generic, generic, params)?;
+    ctx.bind(scope, ".generic_base", base);
+    Ok(scope)
+}
+
+fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)], module: Id) -> Result<Id> {
     let mut name = args.first().copied();
     let mut bound = NONE;
     let mut covariant = false;
@@ -965,7 +1026,6 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
             "Constraints cannot be combined with bound=...",
         ));
     }
-    let module = ctx.heap.caller_module();
     let constraints = ctx.alloc(Value::Tuple(constraints.to_vec()));
     Ok(ctx.alloc(Value::TypeVar(TypeVariable {
         name,
@@ -978,12 +1038,204 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
     })))
 }
 
+/// Check a forward reference without evaluating names or converting the tree into Python AST objects.
+fn validate_forward_ref(source: &str) -> Result<()> {
+    use ruff_python_ast::token::TokenKind;
+    use ruff_python_ast::visitor::{self, Visitor};
+    use ruff_python_ast::{Expr, ExprContext};
+    use ruff_text_size::Ranged;
+    use std::collections::HashSet;
+
+    fn invalid_binding<'a>(mut names: impl Iterator<Item = &'a str>) -> bool {
+        let mut seen = HashSet::new();
+        names.any(|name| name == "__debug__" || !seen.insert(name))
+    }
+
+    #[derive(Default)]
+    struct Bindings {
+        invalid: bool,
+    }
+    impl<'a> Visitor<'a> for Bindings {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if self.invalid {
+                return;
+            }
+            self.invalid = match expr {
+                Expr::Call(call) => invalid_binding(
+                    call.arguments
+                        .keywords
+                        .iter()
+                        .filter_map(|kw| kw.arg.as_deref()),
+                ),
+                Expr::Lambda(lambda) => lambda.parameters.as_ref().is_some_and(|params| {
+                    invalid_binding(params.iter().map(|p| p.name().as_str()))
+                }),
+                Expr::Name(name) => name.ctx == ExprContext::Store && name.id == "__debug__",
+                Expr::Attribute(attr) => {
+                    attr.ctx == ExprContext::Store && attr.attr.as_str() == "__debug__"
+                }
+                _ => false,
+            };
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                visitor::walk_expr(self, expr)
+            });
+        }
+    }
+    if source.contains('\0') {
+        return Err(Error::new(
+            "SyntaxError",
+            "source code string cannot contain null bytes",
+        ));
+    }
+    // CPython's tokenizer caps the combined nesting of (), [] and {} at 200.
+    // Keep deeply nested input out of the recursive parser. Short references only lex once.
+    const MAX_NESTING: usize = 200;
+    if source.len() > MAX_NESTING {
+        let mut lexer =
+            ruff_python_parser::lexer::lex(source, ruff_python_parser::Mode::Expression);
+        let mut depth = 0_usize;
+        loop {
+            match lexer.next_token() {
+                TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
+                    depth += 1;
+                    if depth > MAX_NESTING {
+                        return Err(Error::new("SyntaxError", "too many nested parentheses"));
+                    }
+                }
+                TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenKind::EndOfFile | TokenKind::Unknown => break,
+                _ => {}
+            }
+        }
+    }
+    let parsed = ruff_python_parser::parse_expression(source)
+        .map_err(|error| Error::new("SyntaxError", error.to_string()))?;
+    let body = parsed.syntax().body.as_ref();
+    let invalid = match body {
+        Expr::Yield(_) => Some("'yield' outside function"),
+        Expr::YieldFrom(_) => Some("'yield from' outside function"),
+        Expr::Await(_) => Some("'await' outside function"),
+        _ => None,
+    };
+    if let Some(message) = invalid {
+        return Err(Error::new("SyntaxError", message));
+    }
+    // The grammar alone cannot validate nested coroutine/generator scopes or walrus
+    // bindings across comprehension scopes. Those require a compile-time symbol table.
+    let tokens = parsed.tokens();
+    let comprehension = tokens.iter().any(|t| t.kind() == TokenKind::For);
+    let lambda_body = body.as_lambda_expr().map(|lambda| lambda.body.range());
+    if tokens.iter().any(|token| match token.kind() {
+        TokenKind::Await | TokenKind::Async => true,
+        TokenKind::Yield => {
+            comprehension || !lambda_body.is_some_and(|r| r.contains_range(token.range()))
+        }
+        TokenKind::ColonEqual => comprehension,
+        _ => false,
+    }) {
+        return Err(Error::new(
+            "NotImplementedError",
+            "forward reference requires scope validation",
+        ));
+    }
+    let mut bindings = Bindings::default();
+    bindings.visit_expr(body);
+    if bindings.invalid {
+        return Err(Error::new(
+            "SyntaxError",
+            "invalid binding in forward reference",
+        ));
+    }
+    Ok(())
+}
+
+/// Finalize a temporary annotation name in place, including references retained by
+/// a user callback or inside a previously constructed typing alias.
+fn finish_field_ref(ctx: &mut Context, value: Id) -> Result<Id> {
+    let invalid = || Error::new("TypeError", "expected a TypedDict annotation symbol");
+    let Some(source) = ctx.module_value("typing", "_TypedDictSymbol") else {
+        return Err(invalid());
+    };
+    let target = ctx
+        .module_value("annotationlib", "ForwardRef")
+        .ok_or_else(invalid)?;
+    if !matches!(ctx.heap.get(value), Value::Instance { class, .. } if *class == source) {
+        return Err(invalid());
+    }
+    // Module attributes can be rebound. Only the two ordinary, equally slotted
+    // layouts can exchange their class pointer without moving any field storage.
+    let object = ctx.builtin("object");
+    let slots = |class, expected_name| {
+        let Value::Class {
+            name,
+            scope,
+            ancestors,
+            io_kind: None,
+            namedtuple_fields: None,
+            ..
+        } = ctx.heap.get(class)
+        else {
+            return None;
+        };
+        let layout = ctx.scope_data(*scope).class_namespace.as_ref()?;
+        if name != expected_name
+            || ancestors.as_slice() != [object]
+            || layout.member_slots
+            || ctx.class_attr(class, "__del__").is_some()
+        {
+            return None;
+        }
+        layout.slot_names.as_deref()
+    };
+    let source_slots = slots(source, "_TypedDictSymbol").ok_or_else(invalid)?;
+    if slots(target, "ForwardRef") != Some(source_slots) {
+        return Err(invalid());
+    }
+    let Value::Instance { class, .. } = ctx.heap.get_mut(value) else {
+        unreachable!()
+    };
+    *class = target;
+    ctx.heap.weak_edge_removed(source);
+    Ok(value)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     operation: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let ("_protocol_mro", [class], []) = (operation, args, kwargs) {
+        if matches!(ctx.heap.get(*class), Value::Native(_)) {
+            let bases = ctx.base_lineage(*class, true);
+            return Ok(ctx.alloc(Value::Tuple(bases)));
+        }
+        return ctx.lookup_attr(*class, "__mro__");
+    }
+    if let ("_protocol_member", [class, attr, missing], []) = (operation, args, kwargs) {
+        if let Value::Native(owner) = ctx.heap.get(*class) {
+            let name = ctx.str_value(*attr)?;
+            if let Some(member) = ctx.own_class_attr(*class, name) {
+                return Ok(member);
+            }
+            let symbol = format!("{owner}.{name}");
+            return Ok(
+                if super::wrapper_descriptor::BuiltinDescriptor::lookup(&symbol).is_some() {
+                    ctx.builtin(&symbol)
+                } else {
+                    *missing
+                },
+            );
+        }
+        let namespace = ctx.lookup_attr(*class, "__dict__")?;
+        return match ctx.get_item(namespace, *attr) {
+            Ok(member) => Ok(member),
+            Err(error) if error.kind == "KeyError" => Ok(*missing),
+            Err(error) => Err(error),
+        };
+    }
     if operation == "_new_typeddict" {
         let [name_id, root] = args else {
             return Err(Error::new(
@@ -1060,7 +1312,8 @@ pub(super) fn call(
         }));
     }
     if operation == "TypeVar" {
-        return typevar(ctx, args, kwargs);
+        let module = ctx.heap.caller_module();
+        return typevar(ctx, args, kwargs, module);
     }
     if operation == "cast" {
         let [typ, value] = super::builtins::bind("cast()", args, kwargs, ["typ", "val"])?;
@@ -1113,6 +1366,13 @@ pub(super) fn call(
         ("NoDefault.__reduce__", [value]) if matches!(ctx.heap.get(*value), Value::NoDefault) => {
             Ok(ctx.text("NoDefault"))
         }
+        ("TypeVar.has_default", [var]) if matches!(ctx.heap.get(*var), Value::TypeVar(_)) => {
+            Ok(FALSE)
+        }
+        ("TypeVar.has_default", _) => Err(Error::new(
+            "TypeError",
+            "TypeVar.has_default() takes no arguments",
+        )),
         ("TypeVarTuple.has_default", [pack])
             if let Value::TypeVarTuple { default, .. } = ctx.heap.get(*pack) =>
         {
@@ -1157,8 +1417,30 @@ pub(super) fn call(
             "TypeError",
             "_GenericAlias.__init__() requires an origin and arguments",
         )),
+        ("_finish_field_ref", [value]) => finish_field_ref(ctx, *value),
+        ("_validate_forward_ref", [text]) => {
+            validate_forward_ref(ctx.str_value(*text)?)?;
+            Ok(NONE)
+        }
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
+        }
+        ("get_origin" | "get_args", [v])
+            if matches!(ctx.heap.get(*v), Value::Instance { .. })
+                && ctx
+                    .module_value("typing", "_AnnotatedAlias")
+                    .is_some_and(|class| ctx.instance_of(*v, class)) =>
+        {
+            if operation == "get_origin" {
+                let typing = ctx.module("typing")?;
+                ctx.lookup_attr(typing, "Annotated")
+            } else {
+                let origin = ctx.lookup_attr(*v, "__origin__")?;
+                // Keep the origin rooted across a metadata descriptor lookup.
+                let args = ctx.alloc(Value::Tuple(vec![origin]));
+                let metadata = ctx.lookup_attr(*v, "__metadata__")?;
+                ctx.op("+", args, metadata, NONE)
+            }
         }
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
             Value::Instance { .. }
@@ -1293,13 +1575,26 @@ impl Context {
             })
     }
 
-    /// Reject direct runtime checks on protocol declarations before nominal matching.
-    pub(super) fn require_checkable_protocol(&self, class: Id) -> Result<()> {
+    pub(super) fn call_typing_helper(&mut self, name: &str, args: Vec<Id>) -> Result<Id> {
+        let helper = self
+            .module_value("typing", name)
+            .ok_or_else(|| Error::new("RuntimeError", format!("missing typing.{name}")))?;
+        self.call(helper, args, Vec::new())
+    }
+
+    /// abc and functools perform internal checks while walking a class hierarchy.
+    pub(super) fn check_runtime_protocol(&mut self, class: Id, subclass: bool) -> Result<()> {
         if self.is_protocol_declaration(class) {
-            return Err(Error::new(
-                "TypeError",
-                "Instance and class checks can only be used with @runtime_checkable protocols",
-            ));
+            let caller = self
+                .heap
+                .caller_module_at(0)
+                .and_then(|module| self.str_value(module).ok());
+            if !matches!(caller, None | Some("abc" | "functools")) {
+                self.call_typing_helper(
+                    "_check_protocol",
+                    vec![class, if subclass { TRUE } else { FALSE }],
+                )?;
+            }
         }
         Ok(())
     }
@@ -1330,7 +1625,31 @@ impl Context {
                     let result = self.call(check, vec![value], Vec::new())?;
                     return self.truth(result);
                 }
-                self.require_checkable_protocol(class)?;
+                if self.is_protocol_declaration(class) {
+                    self.check_runtime_protocol(class, false)?;
+                    let actual = self.exact_type(value)?;
+                    let reported = self.lookup_attr(value, "__class__")?;
+                    if reported != actual {
+                        if !matches!(
+                            self.builtin_type_name(reported),
+                            Some("type" | "typing._AnyMeta")
+                        ) {
+                            return Err(Error::new(
+                                "TypeError",
+                                "issubclass() arg 1 must be a class",
+                            ));
+                        }
+                        if self.abc_subclass_check(reported, class)? {
+                            return Ok(true);
+                        }
+                    }
+                    if self.abc_subclass_check(actual, class)? {
+                        return Ok(true);
+                    }
+                    let matched =
+                        self.call_typing_helper("_protocol_instance", vec![class, value])?;
+                    return self.truth(matched);
+                }
                 if self.has_abc_subclass_hook(class) {
                     let actual = self.exact_type(value)?;
                     if actual == class {
@@ -1356,8 +1675,8 @@ impl Context {
         if bases.iter().any(|&base| {
             matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
         }) {
-            let fields = self.scope_data(scope).names.get("__annotations__")
-                .and_then(|&annotations| self.dict_entries(annotations))
+            let fields = self.scope_name(scope, "__annotations__")
+                .and_then(|annotations| self.dict_entries(annotations))
                 .unwrap_or_default();
             let named_fields: std::rc::Rc<[String]> = fields
                 .iter()
@@ -1455,16 +1774,19 @@ impl Context {
                         "typing.TypeVar"
                             | "typing.TypeVarTuple"
                             | "NoDefaultType"
+                            | "datetime.timezone"
                             | super::stdlib::flags::TYPE
                             | "slice"
                             | "NoneType"
                             | "NotImplementedType"
                             | "ellipsis"
                             | super::value::REGEX_PATTERN_TYPE
+                            | super::value::REGEX_MATCH_TYPE
                             | super::value::TEMPLATE_ITER_TYPE
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE
                             | super::namedtuple::GETTER
+                            | super::thread_lock::CLASS
                             | "functools.KeyWrapper"
                             | "member_descriptor"
                     ))
@@ -1478,13 +1800,47 @@ impl Context {
         if bases.is_empty() {
             bases.push(self.builtin("object"));
         }
-        let ancestors = self.linearized_bases(&bases)?;
+        let ancestors = self.linearized_bases(&bases, false)?;
+        self.check_member_slot_bases(&bases, &ancestors)?;
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
-        mro.extend_from_slice(&ancestors);
+        // Keep allocation and special-slot dispatch on their existing native layout.
+        // The published MRO includes the declaring classes of inherited exception methods.
+        if ancestors.iter().any(|&base| {
+            matches!(self.heap.get(base), Value::Native(name) if super::builtins::is_exception(name))
+        }) {
+            mro.extend(self.linearized_bases(&bases, true)?);
+        } else {
+            mro.extend_from_slice(&ancestors);
+        }
         let slot_names = self.declared_slot_names(scope)?;
+        let members = if self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .is_some_and(|ns| ns.member_slots)
+        {
+            self.prepare_slot_members(
+                &name,
+                scope,
+                &bases,
+                slot_names.as_deref().unwrap_or_default(),
+            )?
+        } else {
+            Vec::new()
+        };
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
+        // type.__new__ wraps plain functions only, before the class becomes observable.
+        for name in ["__init_subclass__", "__class_getitem__"] {
+            if let Some(function) = self.namespace_binding(self.scope_data(scope), name)
+                && matches!(self.heap.get(function), Value::Function { .. })
+            {
+                let method = self.alloc(Value::ClassMethod(function));
+                self.bind_local(scope, name, method);
+            }
+        }
         let class = self.alloc(Value::Class {
+            io_kind: None,
             metaclass: None,
             namedtuple_fields,
             name,
@@ -1505,6 +1861,11 @@ impl Context {
         namespace.slot_names = slot_names;
         namespace.bases = bases;
         namespace.mro = mro;
+        for field in members {
+            let name = self.text(&field);
+            let descriptor = self.alloc(Value::SlotMember { owner: class, name });
+            self.bind_local(scope, &field, descriptor);
+        }
         Ok(class)
     }
 

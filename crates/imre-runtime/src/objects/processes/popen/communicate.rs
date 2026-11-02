@@ -12,7 +12,7 @@ pub(super) struct Communication {
     observed: [bool; 2],
 }
 
-enum Exchange {
+pub(super) enum Exchange {
     Done([Vec<u8>; 2]),
     Timeout([Option<Vec<u8>>; 2], Option<f64>),
 }
@@ -64,7 +64,7 @@ pub unsafe extern "C" fn imre_run_config(
         2 => Some("check argument not allowed, it will be overridden."),
         3 => Some("stdin and input arguments may not both be used."),
         4 => Some("stdout and stderr arguments may not be used with capture_output."),
-        5 => return Error::new(Kind::SubprocessError, "Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.").returning(std::ptr::null()),
+        5 => return super::ambiguous_text_mode().returning(std::ptr::null()),
         _ => fail("SystemError", "unknown check_output validation"),
     };
     if let Some(message) = invalid {
@@ -102,7 +102,7 @@ pub unsafe extern "C" fn imre_run_config(
     let result = process.and_then(|mut p| {
         // No caller can have consumed the freshly opened streams. Decode them
         // once after communication so timeouts keep their original raw bytes.
-        let exchange = p.communicate(input, timeout.as_ref(), false);
+        let exchange = p.communicate(input, timeout.as_ref(), false, selector::current());
         let killed = if matches!(exchange, Ok(Exchange::Done(_))) {
             Ok(())
         } else {
@@ -178,11 +178,12 @@ impl Communication {
 }
 
 impl Popen {
-    fn communicate(
+    pub(super) fn communicate(
         &mut self,
         input: &[u8],
         deadline: Option<&Deadline>,
         text: bool,
+        select: bool,
     ) -> Result<Exchange> {
         let data = &mut self.communication;
         if data.started && !input.is_empty() {
@@ -241,7 +242,6 @@ impl Popen {
                 };
             }
         }
-        let select = selector::current();
         while pollfds.iter().any(|poll| poll.fd >= 0) {
             let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
             if remaining.is_some_and(|t| t <= 0.0) {
@@ -335,7 +335,7 @@ pub unsafe extern "C" fn imre_popen_communicate(
         let timeout = Deadline::from_word(deadline_kind, deadline);
         let bytes = input_bytes(input, text);
         let result = with_process(handle, |p| -> Result<_> {
-            match p.communicate(bytes, timeout.as_ref(), text)? {
+            match p.communicate(bytes, timeout.as_ref(), text, selector::current())? {
                 Exchange::Done([stdout, stderr]) => {
                     let stream = |bytes, index| {
                         completed_stream(bytes, WordKind::new(*(*descriptor).kinds.add(index)))
@@ -400,7 +400,7 @@ fn deadline_capture_drains_both_full_pipes_before_expiry() {
     let mut ready = [0];
     std::fs::File::from(stdout).read_exact(&mut ready).unwrap();
     assert_eq!(ready, [b'!']);
-    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false);
+    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false, selector::current());
     assert!(child.signal(|| Ok(libc::SIGKILL)).is_ok());
     assert!(child.close_wait().is_ok());
     let Ok(Exchange::Timeout([Some(stdout), Some(stderr)], None)) = result else {

@@ -2,6 +2,66 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone
 
 
+def test_module_exports():
+    import _datetime
+    import datetime
+
+    assert (datetime.MINYEAR, datetime.MAXYEAR) == (1, 9999)
+    assert datetime.__all__ == (
+        "date", "datetime", "time", "timedelta", "timezone", "tzinfo", "MINYEAR", "MAXYEAR", "UTC",
+    )
+    assert datetime is not _datetime and not hasattr(_datetime, "__all__")
+    for name in datetime.__all__:
+        assert vars(datetime)[name] is vars(_datetime)[name]
+    assert datetime.UTC is _datetime.timezone.utc
+    assert issubclass(_datetime.timezone, datetime.tzinfo)
+    assert isinstance(datetime.UTC, _datetime.tzinfo)
+
+    class Zone(datetime.tzinfo):
+        pass
+
+    assert isinstance(Zone(), _datetime.tzinfo)
+    assert timezone.__mro__ == (timezone, datetime.tzinfo, object)
+    try:
+        Zone().utcoffset(None)
+    except NotImplementedError as exc:
+        assert str(exc) == "a tzinfo subclass must implement utcoffset()"
+    else:
+        raise AssertionError("missing abstract timezone offset")
+
+    class IntegerZone(datetime.tzinfo, int):
+        pass
+
+    assert IntegerZone(7) == 7
+    try:
+        datetime.tzinfo.__new__(IntegerZone)
+    except TypeError as exc:
+        assert "is not safe" in str(exc)
+    else:
+        raise AssertionError("accepted plain tzinfo storage for an integer subtype")
+
+
+    class ListZone(list, datetime.tzinfo):
+        pass
+
+    zone = datetime.tzinfo.__new__(ListZone)
+    zone.append(5)
+    assert type(zone) is ListZone and zone == [5]
+
+    class Mixin:
+        def __new__(cls):
+            return "mixin"
+
+    class ZoneFirst(datetime.tzinfo, Mixin):
+        pass
+
+    class MixinFirst(Mixin, datetime.tzinfo):
+        pass
+
+    assert type(ZoneFirst()) is ZoneFirst
+    assert MixinFirst() == "mixin"
+
+
 def test_class_constants():
     for cls, smallest, largest, step in (
         (date, date(1, 1, 1), date(9999, 12, 31), timedelta(days=1)),
@@ -129,10 +189,313 @@ def test_now():
             raise AssertionError("invalid now() arguments accepted")
 
 
+def test_subclass_construction():
+    class Date(date):
+        pass
+
+    class Clock(time):
+        pass
+
+    class Delta(timedelta):
+        pass
+
+    class Moment(dt):
+        def __new__(cls, year, label):
+            return super().__new__(cls, year, 2, 1, minute=42, fold=1)
+
+        def __init__(self, year, label):
+            self.label = label
+
+    class Grandchild(Moment):
+        pass
+
+    value = Grandchild(2000, label="leap")
+    assert type(value) is Grandchild and isinstance(value, dt) and isinstance(value, date)
+    assert (value.year, value.minute, value.fold, value.label) == (2000, 42, 1, "leap")
+    assert value.toordinal() == date(2000, 2, 1).toordinal()
+    assert type(dt.__new__(Moment, 2000, 1, 1)) is Moment
+    assert repr(value) == "Grandchild(2000, 2, 1, 0, 42, fold=1)"
+    assert date.__repr__(value) == "Grandchild(2000, 2, 1)"
+    assert str(value) == "2000-02-01 00:42:00"
+
+    class BadFormat(Grandchild):
+        @property
+        def isoformat(self):
+            raise AttributeError("blocked format")
+
+    try:
+        str(BadFormat(2000, "leap"))
+    except AttributeError as error:
+        assert str(error) == "blocked format"
+    else:
+        raise AssertionError("calendar formatting ignored a descriptor error")
+
+    assert repr(Clock(7, 8)) == "Clock(7, 8)"
+    assert repr(Delta(0)) == "Delta(0)"
+    assert not Delta() and Delta(seconds=1)
+
+    class Custom(Delta):
+        def __repr__(self):
+            return "custom " + super().__repr__()
+        def __bool__(self):
+            return True
+
+    custom = Custom()
+    assert repr(custom) == "custom Custom(0)" and bool(custom)
+    assert str(custom) == "0:00:00"
+
+    class HasLength(Delta):
+        def __len__(self):
+            return 5
+
+    assert not HasLength()
+
+    assert Date(2024, 2, 29).day == 29
+    assert Clock(microsecond=321).microsecond == 321
+    assert Delta(days=1, seconds=2).total_seconds() == 86402
+
+    class Shadow(Date):
+        year = "overridden"
+        @property
+        def day(self):
+            return self.month
+
+    shadow = Shadow(2024, 2, 29)
+    assert shadow.year == "overridden" and shadow.day == 2
+    try:
+        shadow.month = 7
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("calendar field was writable")
+
+    class Other(Date):
+        def __new__(cls):
+            return "foreign result"
+        def __init__(self):
+            raise AssertionError("initializer called for a foreign result")
+
+
+    class Mixin:
+        __slots__ = ()
+
+    class Mixed(Mixin, dt, date):
+        pass
+
+    assert Mixed(2001, 2, 3).year == 2001
+    try:
+        class Bad(date, time):
+            pass
+    except TypeError as error:
+        assert str(error) == "multiple bases have instance lay-out conflict"
+    else:
+        raise AssertionError("incompatible native layouts accepted")
+
+    assert Other() == "foreign result"
+    try:
+        date.__new__(Moment, 2000, 1, 1)
+    except TypeError as error:
+        assert "is not safe" in str(error)
+    else:
+        raise AssertionError("date allocated an incompatible datetime layout")
+
+
+def test_timedelta_negation():
+    class Delta(timedelta):
+        @property
+        def days(self):
+            raise AssertionError("negation read a Python attribute")
+
+    class Override(Delta):
+        def __neg__(self):
+            return "overridden"
+
+    zero = timedelta()
+    assert -zero is zero
+    assert -timedelta(microseconds=1) == timedelta(-1, 86399, 999999)
+    assert -timedelta(-1, 86399, 999999) == timedelta(microseconds=1)
+    assert -timedelta.min == timedelta(days=999999999)
+    assert -timedelta(days=999999999) == timedelta.min
+    try:
+        -timedelta.max
+    except OverflowError as error:
+        assert str(error) == "days=-1000000000; must have magnitude <= 999999999"
+    else:
+        raise AssertionError("negation exceeded the minimum duration")
+
+    inherited = -Delta(microseconds=5)
+    assert type(inherited) is timedelta and inherited == timedelta(microseconds=-5)
+    custom = Override(days=1)
+    assert -custom == "overridden"
+    assert timedelta.__neg__(custom) == timedelta(days=-1)
+
+
+def test_timedelta_positive_and_absolute():
+    zero = timedelta()
+    assert +zero is zero and abs(zero) is zero
+    tiny = timedelta(microseconds=-1)
+    for value, magnitude in (
+        (tiny, timedelta(microseconds=1)),
+        (timedelta.min, timedelta(days=999999999)),
+        (timedelta.max, timedelta.max),
+    ):
+        positive, absolute = +value, abs(value)
+        assert positive == value and absolute == magnitude
+        assert positive is not value and absolute is not value
+
+    class Inherited(timedelta):
+        def __neg__(self):
+            raise AssertionError("abs called subclass __neg__")
+
+    class Override(Inherited):
+        def __pos__(self):
+            return "positive"
+
+        def __abs__(self):
+            return "absolute"
+
+    value = Inherited(microseconds=-1)
+    assert type(+value) is type(abs(value)) is timedelta
+    assert +value == tiny and abs(value) == timedelta(microseconds=1)
+    custom = Override(days=-1)
+    assert +custom == "positive" and abs(custom) == "absolute"
+    assert timedelta.__pos__(custom) == timedelta(days=-1)
+    assert timedelta.__abs__(custom) == timedelta(days=1)
+
+
+def test_calendar_format():
+    class Day(date):
+        def __str__(self):
+            return "custom day"
+
+        def strftime(self, spec):
+            return "called " + spec
+
+    class Moment(dt):
+        pass
+
+    class Clock(time):
+        def strftime(self, spec):
+            return 37
+
+    day = Day(2024, 2, 29)
+    assert dt.__format__ is date.__format__
+    assert type(date.__format__).__name__ == type(time.__format__).__name__ == "method_descriptor"
+    assert type(day.__format__).__name__ == "builtin_function_or_method"
+    assert format(day) == "custom day" and day.__format__("%Y") == "called %Y"
+    moment = Moment(2024, 2, 29)
+    moment.strftime = lambda spec: "instance " + spec
+    assert format(moment, "%m") == "instance %m"
+    assert format(date(2024, 2, 29)) == "2024-02-29"
+    assert Clock().__format__("%H") == 37
+    try:
+        format(Clock(), "%H")
+    except TypeError as exc:
+        assert str(exc) == "__format__ must return a str, not int"
+    else:
+        raise AssertionError("format accepted a non-string result")
+    for value in (day, dt(2024, 2, 29), time()):
+        try:
+            value.__format__(123)
+        except TypeError as exc:
+            assert str(exc) == "__format__() argument 1 must be str, not int"
+        else:
+            raise AssertionError("non-string format specifier accepted")
+
+
+def test_calendar_reduction():
+    class Moment(dt):
+        pass
+
+    class Clock(time):
+        pass
+
+    stamp = Moment(2000, 2, 29, 12, 34, 56, 0x012345, UTC, fold=1)
+    stamp.note = "not part of immutable storage"
+    for value, state, folded in (
+        (date(2000, 2, 29), b"\x07\xd0\x02\x1d", b"\x07\xd0\x02\x1d"),
+        (Clock(1, 2, 3, 4, fold=1), b"\x01\x02\x03\0\0\x04", b"\x81\x02\x03\0\0\x04"),
+        (stamp, b"\x07\xd0\x02\x1d\x0c\x22\x38\x01\x23\x45", b"\x07\xd0\x82\x1d\x0c\x22\x38\x01\x23\x45"),
+    ):
+        for protocol in range(6):
+            cls, args = value.__reduce_ex__(protocol)
+            assert cls is type(value)
+            assert args == ((folded if protocol >= 4 else state),) + ((UTC,) if value is stamp else ())
+            restored = cls(*args)
+            assert type(restored) is cls and restored == value
+            assert not hasattr(restored, "note")
+            if isinstance(value, (time, dt)):
+                assert restored.fold == (protocol >= 4)
+        assert value.__reduce__() == value.__reduce_ex__(2)
+    assert date(b"\x07\xd0\x02\x1d".decode("latin1")) == date(2000, 2, 29)
+    assert timedelta(microseconds=-1).__reduce_ex__(3) == (timedelta, (-1, 86399, 999999))
+
+    class Custom(date):
+        def __reduce__(self):
+            return "class hook"
+
+    custom = Custom(2000, 1, 1)
+    assert custom.__reduce_ex__(3) == "class hook"
+    custom.__reduce__ = lambda: "instance hook"
+    assert custom.__reduce_ex__(3) == "instance hook"
+
+    class Mixin:
+        def __reduce_ex__(self, protocol):
+            return protocol
+
+    class Mixed(date, Mixin):
+        pass
+
+    item = Mixed(2000, 1, 1)
+    assert super(Mixed, item).__reduce_ex__(4) == 4
+
+
+def test_calendar_strftime():
+    calls = []
+
+    class Name(str):
+        def replace(self, old, new):
+            calls.append((old, new))
+            return super().replace(old, new)
+
+    class Moment(dt):
+        def timetuple(self):
+            return (7, 1, 2, 3, 4, 5, 1, 2, -1)
+
+        @property
+        def microsecond(self):
+            raise AssertionError("strftime read the Python attribute")
+
+        def utcoffset(self):
+            raise AssertionError("strftime used a receiver method")
+
+        def tzname(self):
+            raise AssertionError("strftime used a receiver method")
+
+    zone = timezone(timedelta(seconds=-75, microseconds=-2), Name("west%Y"))
+    stamp = Moment(2001, 2, 3, 8, 9, 10, 123, zone)
+    assert stamp.strftime(format="%F %C %T %f") == "0007-01-02 00 03:04:05 000123"
+    assert stamp.strftime("%%Z/%:z/%z") == "%Z/-00:01:15.000002/-000115.000002"
+    assert calls == []
+    assert stamp.strftime("%Z %Z %%f") == "west%Y west%Y %f"
+    assert calls == [("%", "%%")]
+    clock = time(8, 9, 10, 456, UTC)
+    assert clock.strftime("%F %H:%M:%S.%f %z %:z %Z") == "1900-01-01 08:09:10.000456 +0000 +00:00 UTC"
+    assert date(2000, 1, 1).strftime("\ud800%f\0%Z\udcff") == "\ud800000000\0\udcff"
+    assert time().strftime("%z%:z%Z") == ""
+
+
 def current():
+    test_calendar_strftime()
+    test_calendar_reduction()
+    test_calendar_format()
+    test_timedelta_negation()
+    test_timedelta_positive_and_absolute()
+    test_subclass_construction()
     test_now()
     test_time_of_day()
     test_http_date()
+    test_module_exports()
     test_class_constants()
     test_cookie_timestamp()
     for timestamp in (None, "0", 1 << 100):
@@ -149,6 +512,7 @@ def current():
     else:
         raise AssertionError("invalid timezone accepted")
     test_calendar_ordering()
+    test_calendar_day_methods()
 
 
 def test_calendar_ordering():
@@ -170,6 +534,46 @@ def test_calendar_ordering():
             print(str(error))
         else:
             raise AssertionError("ordered incompatible calendar operands")
+
+
+    class Declines(date):
+        def __lt__(self, other):
+            return NotImplemented
+
+        def __gt__(self, other):
+            return NotImplemented
+
+    class Reflected(Declines):
+        def __gt__(self, other):
+            return "reflected"
+
+    first = Declines(2000, 2, 28)
+    try:
+        first < Declines(2000, 2, 29)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("both calendar ordering hooks declined")
+    assert first < leap
+    assert (first < Reflected(2000, 2, 29)) == "reflected"
+
+
+def test_calendar_day_methods():
+    class Stamp(dt):
+        def weekday(self):
+            raise AssertionError("native isoweekday called weekday")
+
+        def timetuple(self):
+            raise AssertionError("native ctime called timetuple")
+
+        def ctime(self):
+            return "custom " + super().ctime()
+
+    value = Stamp(30, 12, 31, 22, 23, 24, tzinfo=UTC)
+    assert value.ctime() == "custom Tue Dec 31 22:23:24 0030"
+    assert date.ctime(value) == "Tue Dec 31 00:00:00 0030"
+    assert date(1, 1, 1).ctime() == "Mon Jan  1 00:00:00 0001"
+    assert value.isoweekday() == 2 and date(2024, 3, 3).isoweekday() == 7
 
 
 if __name__ == "__main__":

@@ -64,7 +64,18 @@ fn main() {
         c.push_str("#endif\n");
     }
     c.push_str("{NULL,0}};\nconst struct entry *imre_platform_errno_entries(size_t *len) { *len=sizeof(entries)/sizeof(entries[0])-1; return entries; }\n");
+    if matches!(
+        std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+        Ok("linux" | "macos")
+    ) {
+        // h_errno may be a macro rather than an exported variable.
+        c.push_str("#include <netdb.h>\nint imre_socket_host_errno(void) { return h_errno; }\n");
+    }
     let path = out_dir.join("errno.c");
     std::fs::write(&path, c).unwrap();
-    cc::Build::new().file(path).compile("imre_errno_headers");
+    println!("cargo:rerun-if-changed=native/locale_decode.c");
+    cc::Build::new()
+        .file(path)
+        .file("native/locale_decode.c")
+        .compile("imre_errno_headers");
 }

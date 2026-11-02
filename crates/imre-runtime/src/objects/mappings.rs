@@ -26,7 +26,7 @@ use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, fail, object};
 pub(super) type StringPairs = Vec<(StrOwner, StrOwner)>;
 
 #[derive(Clone)]
-pub(super) struct IntKey(pub(super) Int);
+pub(crate) struct IntKey(pub(crate) Int);
 
 impl PartialEq for IntKey {
     fn eq(&self, other: &Self) -> bool {

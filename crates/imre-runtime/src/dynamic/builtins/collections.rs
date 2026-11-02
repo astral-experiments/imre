@@ -1,5 +1,5 @@
 use super::super::calls::MappingOperation;
-use super::super::value::DictViewKind;
+use super::super::value::{DictViewKind, NOT_IMPLEMENTED};
 use super::*;
 use num_traits::Signed;
 
@@ -801,6 +801,7 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__eq__"
             | "dict.__repr__"
             | "dict.__len__"
             | "dict.__iter__"
@@ -814,7 +815,9 @@ pub(super) fn method(
                 "descriptor '{method}' of 'dict' object needs an argument"
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
-            None if name == "set.difference_update" || name.ends_with(".issubset") => {
+            None if matches!(name, "set.difference_update" | "set.update")
+                || name.ends_with(".issubset") =>
+            {
                 type_error(format!("unbound method {name}() needs an argument"))
             }
             None => type_error("missing collection receiver"),
@@ -842,11 +845,12 @@ pub(super) fn method(
                 ))
             }
         })?
-    } else if name == "set.difference_update" {
+    } else if matches!(name, "set.difference_update" | "set.update") {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
             return Err(type_error(format!(
-                "descriptor 'difference_update' for 'set' objects doesn't apply to a '{}' object",
+                "descriptor '{}' for 'set' objects doesn't apply to a '{}' object",
+                &name["set.".len()..],
                 ctx.type_name(object)
             )));
         }
@@ -866,6 +870,18 @@ pub(super) fn method(
         }
         let representation = ctx.checked_container_slot_repr(object, receiver)?;
         return Ok(ctx.text(representation));
+    }
+    if name == "dict.__eq__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __eq__() takes no keyword arguments"));
+        }
+        let [other] = args else {
+            return Err(type_error(format!("expected 1 argument, got {}", args.len())));
+        };
+        return match ctx.dict_storage(*other) {
+            Some(right) => Ok(boolean(ctx.checked_equal(receiver, right)?)),
+            None => Ok(NOT_IMPLEMENTED),
+        };
     }
     if name == "dict.__delitem__" {
         if !kwargs.is_empty() {
@@ -894,6 +910,7 @@ pub(super) fn method(
             | "frozenset.issuperset"
             | "set.discard"
             | "set.difference_update"
+            | "set.update"
             | "frozenset.copy"
             | "set.copy"
             | "frozenset.__contains__"
@@ -1233,7 +1250,8 @@ pub(super) fn builtin_slot(
     if !ctx.builtin_slot_accepts(object, owner) {
         return Err(type_error(format!(
             "descriptor '{method}' requires a '{owner}' object but received a '{}'",
-            ctx.type_name(object)
+            ctx.builtin_type_name(object)
+                .unwrap_or_else(|| ctx.type_name(object))
         )));
     }
     let storage = ctx.scalar_value(object);
@@ -1249,6 +1267,9 @@ pub(super) fn builtin_slot(
                 rest.len()
             )));
         };
+        if owner == "int" {
+            return integer::add(ctx, storage, *value);
+        }
         if method == "__add__" {
             return ctx.concat_list(storage, *value);
         }
@@ -1266,7 +1287,13 @@ pub(super) fn builtin_slot(
             )));
         }
         let text = match ctx.heap.get(storage) {
-            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) => ctx.repr(storage),
+            Value::Bool(value) if owner == "int" => u8::from(*value).to_string(),
+            Value::Int(value) => super::super::operators::rendered_integer(value)?.into_string(),
+            Value::Bool(_)
+            | Value::Float(_)
+            | Value::Str(_)
+            | Value::SurrogateStr(_)
+            | Value::Bytes(_) => ctx.repr(storage),
             Value::ByteArray(bytes) => ctx.bytearray_repr(object, bytes),
             Value::List(_) | Value::Tuple(_) | Value::Set { .. } => {
                 ctx.checked_container_slot_repr(object, storage)?

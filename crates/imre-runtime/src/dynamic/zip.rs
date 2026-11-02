@@ -203,12 +203,15 @@ impl Context {
                 format!("descriptor '{name}' of '{owner}' object needs an argument"),
             ));
         };
-        if !matches!(
-            (owner, self.heap.get(cursor)),
-            ("map", Value::Map { .. })
-                | ("filter", Value::Filter { .. })
-                | ("enumerate", Value::Enumerate { .. })
-        ) {
+        let accepts = match self.heap.get(cursor) {
+            Value::Map { .. } => owner == "map",
+            Value::Filter { .. } => owner == "filter",
+            Value::Enumerate { .. } => owner == "enumerate",
+            Value::DictIterator(iter) => owner == iter.class_name(),
+            Value::Generator { .. } => owner == "generator",
+            _ => false,
+        };
+        if !accepts {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -234,6 +237,18 @@ impl Context {
             "__next__" => self
                 .next_result(cursor)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
+            "__reduce__" => {
+                let Value::DictIterator(state) = self.heap.get(cursor) else {
+                    unreachable!("ordered dictionary iterator reduction");
+                };
+                // Walking a copy preserves the live cursor, including when iteration raises.
+                let snapshot = self.alloc(Value::DictIterator(*state));
+                let remaining = self.items(snapshot)?;
+                let items = self.alloc(Value::List(remaining));
+                let args = self.alloc(Value::Tuple(vec![items]));
+                let iter = self.builtin("iter");
+                Ok(self.alloc(Value::Tuple(vec![iter, args])))
+            }
             _ => unreachable!("iterator slot"),
         }
     }

@@ -17,3 +17,19 @@ for kwargs, expected in [
     with case.assertRaises(AssertionError) as caught:
         compare(3, 5, msg="detail", **kwargs)
     assert str(caught.exception) == expected + " : detail"
+
+
+def current():
+    compare = case.assertNotAlmostEqual
+    compare(1.001, 1, places=3)
+    compare(3, 5, delta=1)
+    with case.assertRaisesRegex(TypeError, "specify delta or places not both"):
+        compare(1, 1, places=2, delta=2)
+
+    for kwargs, expected in [
+        ({}, "3 == 3 within 7 places"),
+        ({"delta": 0}, "3 == 3 within 0 delta (0 difference)"),
+    ]:
+        with case.assertRaises(AssertionError) as caught:
+            compare(3, 3, msg="detail", **kwargs)
+        assert str(caught.exception) == expected + " : detail"

@@ -62,6 +62,7 @@ METHODS = {
         "test_communicate_stdin": "communicate returncode",
         "test_communicate_stdin_closed_before_call": "stdin.close communicate returncode exit",
         "test_communicate_stdout": "communicate",
+        "test_communicate_timeout_large_input": "Popen communicate:timeout communicate kill wait",
         "test_communicate_timeout_large_output": "communicate:timeout communicate",
         "test_cwd": "stdout.read wait returncode",
         "test_cwd_with_absolute_arg": "Popen:FileNotFoundError stdout.read wait returncode",
@@ -107,6 +108,7 @@ for i in range(int((payload.parent / "env-count").read_text())):
     child_env[(payload.parent / ("key-" + str(i))).read_bytes().decode()] = (payload.parent / ("val-" + str(i))).read_bytes().decode()
 """
     text = keywords.get("text") == "True" or keywords.get("encoding", "None") != "None"
+    input_value = "payload.read_bytes().decode()" if text else "payload.read_bytes()"
     opts = "".join(f", {key}={value}" for key, value in options)
     lines = []
     def operation(name, expr):
@@ -125,17 +127,19 @@ for i in range(int((payload.parent / "env-count").read_text())):
         if not text and index:
             operation(stream + ".read_size", f"p.{stream}.read(int(payload.read_text()))")
         if not index:
-            operation("stdin.write", f"p.stdin.write(payload.read_bytes(){'.decode()' if text else ''})")
+            operation("stdin.write", f"p.stdin.write({input_value})")
     operation("communicate", "p.communicate()")
-    operation("communicate_input", f"p.communicate(payload.read_bytes(){'.decode()' if text else ''})")
+    operation("communicate_input", f"p.communicate({input_value})")
     # The transport preserves the integer versus float spelling of TimeoutExpired.
     # Imre currently accepts integer literal deadlines and nullable float values.
     for seconds in (0, 15, 30, 60):
-        operation("communicate_input_" + str(seconds), f"p.communicate(payload.read_bytes(){'.decode()' if text else ''}, {seconds})")
+        operation("communicate_input_" + str(seconds), f"p.communicate({input_value}, {seconds})")
         operation("communicate_" + str(seconds), f"p.communicate(timeout={seconds})")
         operation("wait_" + str(seconds), f"p.wait(timeout={seconds})")
     operation("wait_float", "p.wait(timeout=float(payload.read_text()))")
     operation("communicate_float", "p.communicate(timeout=float(payload.read_text()))")
+    operation("communicate_input_float",
+              f"p.communicate({input_value}, timeout=float((payload.parent / 'timeout').read_text()))")
     lines.extend(['elif cmd == "exit":', '    with p:', '        pass', '    send(reply, "ok None")',
                   'else:', '    raise ValueError("unknown transport command")'])
     operations = "\n".join("                    " + line for line in lines)
@@ -320,6 +324,9 @@ class Remote:
         if timeout is not None:
             if type(timeout) is int and timeout in (0, 15, 30, 60):
                 cmd += "_" + str(timeout)
+            elif name == "communicate_input" and type(timeout) is float:
+                self.file.with_name("timeout").write_text(repr(timeout))
+                cmd += "_float"
             elif name in ("communicate", "wait"):
                 # Other integer timeouts are not converted on an exceptional path.
                 if type(timeout) is not float:

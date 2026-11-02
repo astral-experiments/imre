@@ -22,10 +22,37 @@ def current():
     print(pattern.fullmatch("# #\n") is None, pattern.fullmatch("# #").groups())
     print(pattern.match("é# #").group("optional"))
     print(re.match(r"a \s # ignored", "a\x1c", re.X).groups())
+    for flags in (0, re.VERBOSE, re.ASCII | re.IGNORECASE):
+        guarded = re.compile(r"(?:(?!x|:)[^!])+", flags)
+        assert guarded.search("aXbc").group() == ("a" if int(flags & re.I) != 0 else "aXbc")
+        assert guarded.fullmatch("abc").group() == "abc"
     for flags in (0, re.VERBOSE):
         magic = re.compile(b"([*?[])", flags)
         assert magic.search(b"name[1]").group(1) == b"["
         assert magic.search(b"name]") is None
+        assert re.fullmatch(r"{\w+}", "{width}", flags | re.I).group() == "{width}"
+        assert re.fullmatch(rb"{\w+}", b"{width}", flags).group() == b"{width}"
+        assert re.fullmatch(rb"\xff{word}", b"\xff{word}", flags)
+        assert re.fullmatch(r"\xff{word}", "ÿ{word}", flags)
+        assert re.fullmatch(r"{\w+}", "{\u0345}", flags | re.I) is None
+        assert re.fullmatch(r"{\W}", "{\u0345}", flags | re.I)
+        for invalid in (br"\u0061{word}", r"a{foo}*{2}"):
+            try:
+                re.compile(invalid, flags)
+            except re.PatternError:
+                pass
+            else:
+                raise AssertionError("invalid pattern compiled")
+        assert re.fullmatch(r"[{}]\{a{2}}", "{{aa}", flags)
+    assert re.fullmatch("(?x:a # {ignored}\n)b", "ab")
+    inline = re.compile("(?x) # one\n (?x) a (?-x: [#]) (?x: \u0085 )")
+    assert inline.flags == re.X | re.U
+    assert inline.fullmatch("a #\u0085")
+    assert inline.fullmatch("a #") is None
+    scoped = re.compile(b" a(?x: [ #] b) c")
+    assert scoped.flags == 0
+    assert scoped.fullmatch(b" a#b c")
+    assert scoped.fullmatch(b"a#bc") is None
     octets = re.compile(rb"[\x00-\x19\",;\\\x7f-\xff]", re.A)
     print(type(octets.pattern) is bytes, octets.flags, octets.groups)
     print([n for n in range(256) if octets.fullmatch(bytes([n])) is not None])

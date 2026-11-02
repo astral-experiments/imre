@@ -60,6 +60,38 @@ def byte_chunks():
         yield b'a\x00' b'\xff', br'\n', b''
 
 
+def formatted_lifetime():
+    events = []
+    class Result(str):
+        def __del__(self):
+            events.append("release result")
+
+    class Operand:
+        def __format__(self, spec):
+            return Result("value")
+        def __del__(self):
+            events.append("release operand")
+
+    def observe(label):
+        events.append(label)
+        return ""
+
+    def fields():
+        yield f"{Operand()}{observe('second field')}", observe("after join")
+        yield f"{Operand()}"
+
+    stream = fields()
+    assert next(stream) == ("value", "")
+    assert events == ["release operand", "second field", "release result", "after join"]
+    result = next(stream)
+    assert type(result) is Result
+    assert events[-1] == "release operand"
+
+
+def formatted_field(value, width):
+    yield f"{value = !a} {width:0{width}d}"
+
+
 def removed(items, pairs):
     for first, second in pairs:
         del items[first], items[second]
@@ -178,6 +210,7 @@ def delegate(child):
 
 
 def current():
+    formatted_lifetime()
     chain = iter([7, 8])
     for _ in range(96):
         chain = delegate(chain)
@@ -208,6 +241,7 @@ def current():
     assert pulls == ["outer"]
     assert next(values) == 1 and pulls == ["outer", 1]
     print(list(byte_chunks()))
+    assert list(formatted_field("é", 3)) == [r"value = '\xe9' 003"]
     prefix, *tail, final = RestartTail()
     assert (prefix, tail, final) == (1, [7], 8)
     assert list(starred([RestartTail()])) == [(1, [7], 8)]

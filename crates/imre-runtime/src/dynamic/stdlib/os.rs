@@ -18,29 +18,35 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "unlink", "utime",
+                "access", "chmod", "link", "lstat", "mkdir", "mkfifo", "open", "readlink", "rmdir",
+                "stat", "symlink", "unlink", "utime",
             ][..],
         ),
         (
             "supports_fd",
-            &["chmod", "listdir", "scandir", "stat", "utime"][..],
+            &["chdir", "chmod", "listdir", "scandir", "stat", "utime"][..],
         ),
         (
             "supports_follow_symlinks",
             &[
+                "access",
                 #[cfg(target_os = "macos")]
                 "chmod",
+                "link",
                 "stat",
                 "utime",
             ][..],
         ),
-        ("supports_effective_ids", &[][..]),
+        ("supports_effective_ids", &["access"][..]),
     ] {
         let set = ctx.alloc(Value::Set {
             entries: Default::default(),
             frozen: false,
         });
         for &function in functions {
+            if function == "mkfifo" && mkfifo::at_function().is_none() {
+                continue;
+            }
             let value = ctx.lookup_attr(module, function)?;
             builtins::set_add(ctx, set, value)?;
         }
@@ -320,6 +326,8 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
+mod links;
+mod mkfifo;
 mod unlink;
 mod utime;
 
@@ -327,14 +335,18 @@ mod utime;
 pub(super) fn is_descriptor_function(name: &str) -> bool {
     matches!(
         name,
-        "open"
+        "access"
+            | "open"
+            | "waitpid"
             | "readlink"
             | "scandir"
             | "remove"
             | "unlink"
             | "rmdir"
             | "mkdir"
+            | "mkfifo"
             | "chmod"
+            | "chdir"
             | "utime"
             | "dup"
             | "dup2"
@@ -348,7 +360,9 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_blocking"
             | "get_inheritable"
             | "set_inheritable"
-    )
+            | "link"
+            | "symlink"
+    ) || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -357,6 +371,21 @@ pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+fn ssize_t(ctx: &mut Context, value: Id) -> Result<isize> {
+    crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
+fn file_offset(ctx: &mut Context, value: Id) -> Result<i64> {
+    ctx.index_integer(value)?
+        .to_i64()
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C long"))
 }
 
 enum PathArg {
@@ -450,6 +479,33 @@ fn path_and_dir_fd(
     Ok((path, pathname, dir_fd))
 }
 
+/// Change the process working directory after converting and auditing the supplied path or fd.
+fn chdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(path)] = builtins::bind_builtin_arguments("chdir", args, kwargs, ["path"], 1)? else {
+        unreachable!("chdir requires a path")
+    };
+    let (path, filename) = path_or_fd(ctx, "chdir", path, true, stat::warn_bool_fd)?;
+    super::audit::event(ctx, "os.chdir", &[filename])?;
+    let rc = match path {
+        // CPython reserves -1 for a missing fd and has no pathname in this case.
+        PathArg::Fd(-1) => {
+            let error = std::io::Error::from_raw_os_error(libc::EFAULT);
+            return Err(
+                ctx.with_errno_filename(crate::objects::errno_error(error).into(), filename)?
+            );
+        }
+        // SAFETY: fchdir checks the caller-supplied descriptor without taking ownership.
+        PathArg::Fd(fd) => unsafe { libc::fchdir(fd) },
+        // SAFETY: the converted, NUL-terminated pathname lives through the call.
+        PathArg::Name(name) => unsafe { libc::chdir(name.as_ptr()) },
+    };
+    if rc < 0 {
+        let error = crate::objects::errno_error(std::io::Error::last_os_error());
+        return Err(ctx.with_errno_filename(error.into(), filename)?);
+    }
+    Ok(NONE)
+}
+
 /// Return the link contents with the string type of its converted path.
 fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (path, pathname, dir_fd) = path_and_dir_fd(ctx, "readlink", args, kwargs)?;
@@ -466,27 +522,87 @@ fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     Ok(ctx.text_codepoints(codec.decode_filesystem(&target)?))
 }
 
-/// Create a directory relative to dir_fd using the caller's mode and process umask.
-fn mkdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let names = ["path", "mode", "dir_fd"];
-    let [Some(path), mode, dir_fd] = (if args.len() > 2 {
-        builtins::bind_method_arguments("mkdir", args, kwargs, names, 2)?
-    } else {
-        builtins::bind_builtin_arguments("mkdir", args, kwargs, names, 1)?
-    }) else {
-        unreachable!("mkdir requires path")
+/// Bind two required positional-or-keyword operands followed by keyword-only options.
+fn bind_two_positional<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    if args.len() > 2 && args.len() + kwargs.len() <= N {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() takes exactly 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    builtins::bind_builtin_arguments(name, args, kwargs, names, 2)
+}
+
+/// Test filesystem access using the credentials and link policy requested by the caller.
+fn access(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["path", "mode", "dir_fd", "effective_ids", "follow_symlinks"];
+    let [Some(path), Some(mode), dir_fd, effective, follow] =
+        bind_two_positional("access", args, kwargs, names)?
+    else {
+        unreachable!("access requires path and mode")
     };
     let path = posixpath::path_arg(
         ctx,
         path,
-        "mkdir: path should be string, bytes or os.PathLike",
+        "access: path should be string, bytes or os.PathLike",
     )?;
-    let pathname = c_path(ctx, path, "mkdir: embedded null character in path")?;
+    let path = c_path(ctx, path, "access: embedded null character in path")?;
+    let mode = c_int(ctx, mode)?;
+    let dir_fd = directory_fd(ctx, dir_fd)?;
+    let effective = effective
+        .map(|v| ctx.truth(v))
+        .transpose()?
+        .unwrap_or(false);
+    let follow = follow.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
+    let flags = (if effective { libc::AT_EACCESS } else { 0 })
+        | (if follow { 0 } else { libc::AT_SYMLINK_NOFOLLOW });
+    // SAFETY: path is NUL-terminated and remains live through the synchronous check.
+    let status = unsafe {
+        if dir_fd == libc::AT_FDCWD && flags == 0 {
+            libc::access(path.as_ptr(), mode)
+        } else {
+            libc::faccessat(dir_fd, path.as_ptr(), mode, flags)
+        }
+    };
+    Ok(builtins::boolean(status == 0))
+}
+
+/// Create a directory or named pipe with the caller's mode and process umask.
+fn create_node(ctx: &mut Context, name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["path", "mode", "dir_fd"];
+    let [Some(path), mode, dir_fd] = (if args.len() > 2 {
+        builtins::bind_method_arguments(name, args, kwargs, names, 2)?
+    } else {
+        builtins::bind_builtin_arguments(name, args, kwargs, names, 1)?
+    }) else {
+        unreachable!("path is required")
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        &format!("{name}: path should be string, bytes or os.PathLike"),
+    )?;
+    let pathname = c_path(
+        ctx,
+        path,
+        &format!("{name}: embedded null character in path"),
+    )?;
     let mode = mode
         .map(|value| c_int(ctx, value))
         .transpose()?
-        .unwrap_or(0o777);
+        .unwrap_or(if name == "mkdir" { 0o777 } else { 0o666 });
     let dir_fd = directory_fd(ctx, dir_fd)?;
+    if name == "mkfifo" {
+        return mkfifo::create(&pathname, mode as libc::mode_t, dir_fd);
+    }
     // SAFETY: pathname is NUL-terminated and stays live through the synchronous call.
     if unsafe { libc::mkdirat(dir_fd, pathname.as_ptr(), mode as libc::mode_t) } != 0 {
         let error = crate::objects::errno_error(std::io::Error::last_os_error());
@@ -545,6 +661,15 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "access" {
+        return access(ctx, args, kwargs);
+    }
+    if name == "symlink" {
+        return links::symlink(ctx, args, kwargs);
+    }
+    if name == "link" {
+        return links::link(ctx, args, kwargs);
+    }
     if name == "scandir" {
         return scandir::open(ctx, args, kwargs);
     }
@@ -554,17 +679,44 @@ pub(super) fn descriptor(
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
     }
+    if name == "chdir" {
+        return chdir(ctx, args, kwargs);
+    }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
     }
-    if name == "mkdir" {
-        return mkdir(ctx, args, kwargs);
+    if matches!(name, "mkdir" | "mkfifo") {
+        return create_node(ctx, name, args, kwargs);
     }
     if name == "readlink" {
         return readlink(ctx, args, kwargs);
     }
     if name == "open" {
         return open(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "sendfile" {
+        let [Some(out_fd), Some(in_fd), Some(offset), Some(count)] =
+            builtins::bind_builtin_arguments(
+                name,
+                args,
+                kwargs,
+                ["out_fd", "in_fd", "offset", "count"],
+                4,
+            )?
+        else {
+            unreachable!("sendfile requires both descriptors, offset and count")
+        };
+        let out_fd = c_int(ctx, out_fd)?;
+        let in_fd = c_int(ctx, in_fd)?;
+        // Argument Clinic converts count before sendfile converts an explicit offset.
+        let count = ssize_t(ctx, count)?;
+        let offset = if offset == NONE {
+            None
+        } else {
+            Some(file_offset(ctx, offset)?)
+        };
+        return Ok(ctx.int(native::sendfile(out_fd, in_fd, offset, count)? as i64));
     }
     if name == "dup2" {
         let [Some(fd), Some(fd2), inheritable] = builtins::bind_builtin_arguments(
@@ -600,6 +752,25 @@ pub(super) fn descriptor(
             format!("posix.{name}() takes no keyword arguments"),
         ));
     }
+    if name == "waitpid" {
+        let [pid, options] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("waitpid expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let pid = c_int(ctx, *pid)?;
+        let options = c_int(ctx, *options)?;
+        // Reserve the result before consuming a child status from the kernel.
+        let mut result = Vec::new();
+        result
+            .try_reserve_exact(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for value in native::waitpid(pid, options)? {
+            result.push(ctx.int(i64::from(value)));
+        }
+        return Ok(ctx.alloc(Value::Tuple(result)));
+    }
     if name == "pipe" {
         if !args.is_empty() {
             return Err(Error::new(
@@ -625,12 +796,7 @@ pub(super) fn descriptor(
         };
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
-            let length = crate::signed_index(&ctx.index_integer(*data)?).ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    "Python int too large to convert to C ssize_t",
-                )
-            })?;
+            let length = ssize_t(ctx, *data)?;
             Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
         } else {
             // The synchronous syscall borrows the buffer after fd conversion.
@@ -651,9 +817,7 @@ pub(super) fn descriptor(
             ));
         };
         let fd = c_int(ctx, *fd)?;
-        let position = ctx.index_integer(*position)?.to_i64().ok_or_else(|| {
-            Error::new("OverflowError", "Python int too large to convert to C long")
-        })?;
+        let position = file_offset(ctx, *position)?;
         let whence = c_int(ctx, *whence)?;
         return Ok(ctx.int(native::seek(fd, position, whence)?));
     }

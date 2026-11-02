@@ -5,24 +5,11 @@ pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a stri
 impl Context {
     /// Copy live exports from a module in their original order. A failing lookup
     /// leaves earlier bindings visible, just like successive assignments.
-    pub(super) fn import_star(&mut self, scope: Id, module: Id, custom_hook: bool) -> Result<Id> {
+    pub(super) fn import_star(&mut self, scope: Id, module: Id) -> Result<Id> {
         self.heap.reserve_temporaries(1)?;
         self.heap.keep(module);
         let (names, implicit) = match self.lookup_attr(module, "__all__") {
-            Ok(names) => {
-                // Custom import hooks have already handled the fromlist. The native importer
-                // does not yet preload package children named by __all__.
-                if !custom_hook
-                    && let Value::Module { scope, .. } = *self.heap.get(module)
-                    && self.scope_name(scope, "__path__").is_some()
-                {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "wildcard imports from package __all__",
-                    ));
-                }
-                (names, false)
-            }
+            Ok(names) => (names, false),
             Err(error) if self.is_builtin_error(&error, "AttributeError") => {
                 // Some intrinsic namespaces synthesize names on first attribute lookup.
                 // Their currently materialized dictionary is not their public API.
@@ -110,6 +97,26 @@ impl Context {
         Ok(NONE)
     }
 
+    /// PEP 562 consults the live module dictionary only after ordinary lookup fails.
+    pub(super) fn module_get_attribute(
+        &mut self,
+        module: Id,
+        scope: Id,
+        name: &str,
+        original: Option<Id>,
+    ) -> Result<Id> {
+        match self.default_get_attr(module, name) {
+            Err(error) if self.is_attribute_error(&error) => {
+                let Some(hook) = self.scope_name(scope, "__getattr__") else {
+                    return Err(error);
+                };
+                let attribute = original.unwrap_or_else(|| self.text(name));
+                self.call(hook, vec![attribute], Vec::new())
+            }
+            result => result,
+        }
+    }
+
     /// Module attributes use the live namespace and the concrete module subclass's descriptors.
     pub(super) fn module_instance_attribute(
         &mut self,
@@ -123,9 +130,13 @@ impl Context {
             return self.instance_attribute(module, class, field, name);
         }
         match name {
-            "__init__" => {
-                let init = self.builtin("module.__init__");
-                return self.bind_attribute(init, module, class);
+            "__init__" | "__getattribute__" | "__dir__" | "__repr__" => {
+                let method = self.builtin(&format!("module.{name}"));
+                return self.bind_attribute(method, module, class);
+            }
+            "__setattr__" | "__str__" => {
+                let method = self.builtin(&format!("object.{name}"));
+                return self.bind_attribute(method, module, class);
             }
             "__doc__" => return Ok(self.text(DOC)),
             "__annotate__" => {
@@ -155,12 +166,9 @@ impl Context {
             }
             _ => {}
         }
-        if let Some(hook) = self.scope_name(scope, "__getattr__") {
-            let attr = self.text(name);
-            return self.call(hook, vec![attr], Vec::new());
-        }
-        if self.class_attr(class, "__getattr__").is_some() {
-            return self.instance_attribute(module, class, None, name);
+        match self.instance_attribute(module, class, None, name) {
+            Err(error) if self.is_attribute_error(&error) => {}
+            result => return result,
         }
         let prefix = self
             .scope_name(scope, "__name__")
@@ -173,6 +181,32 @@ impl Context {
             "AttributeError",
             format!("{kind} has no attribute '{name}'"),
         ))
+    }
+
+    pub(super) fn module_dir(&mut self, module: Id, scope: Id) -> Result<Id> {
+        if let Some(hook) = self.scope_name(scope, "__dir__") {
+            return self.call(hook, vec![], vec![]);
+        }
+        if let Value::Module {
+            name,
+            constructor: None,
+            ..
+        } = self.heap.get(module)
+            && super::stdlib::has_lazy_attributes(name)
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "dir() cannot enumerate lazy native module exports",
+            ));
+        }
+        let dict = self.module_globals(scope)?;
+        let keys = self
+            .dict_entries(dict)
+            .unwrap()
+            .iter()
+            .map(|&(key, _)| key)
+            .collect();
+        Ok(self.alloc(Value::List(keys)))
     }
 
     /// Replacing the annotation function invalidates its cached dictionary, and vice versa.
@@ -218,6 +252,7 @@ impl Context {
             origin: None,
             initializing: false,
             constructor: Some(class),
+            locale_error: None,
         })
     }
 
@@ -236,6 +271,30 @@ impl Context {
         };
         if name == "__init__" {
             return self.init_module(receiver, rest, kwargs);
+        }
+        if matches!(name, "__dir__" | "__repr__" | "__getattribute__") {
+            let Value::Module { scope, .. } = *self.heap.get(receiver) else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("module.{name} requires a module object"),
+                ));
+            };
+            if !kwargs.is_empty() || rest.len() != usize::from(name == "__getattribute__") {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("invalid arguments to module.{name}"),
+                ));
+            }
+            if name == "__getattribute__" {
+                let key = rest[0];
+                let attr = builtins::attribute_name(self, key)?;
+                return self.module_get_attribute(receiver, scope, &attr, Some(key));
+            }
+            if name == "__repr__" {
+                let repr = self.checked_format(receiver, true)?;
+                return Ok(self.text(repr));
+            }
+            return self.module_dir(receiver, scope);
         }
         let class = self.builtin("module");
         if matches!(name, "__new__") && self.subclass(receiver, class) {

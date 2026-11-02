@@ -1,4 +1,4 @@
-"""Compare one-request, synchronous TCPServer programs with real CPython sockets."""
+"""Compare typed and boxed TCPServer programs with real CPython sockets."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -106,6 +106,8 @@ def main():
     args = parser.parse_args()
     compiler = args.compiler.resolve()
     oracles = {source: observe([args.python, "-E", source]) for source in sorted(FIXTURES.glob("*.py"))}
+    threaded = FIXTURES.parent / "boxed_threading_tcp_server.py"
+    threaded_output = observe([args.python, "-E", threaded])
     with tempfile.TemporaryDirectory(prefix="imre-socketserver-") as tmp:
         root = Path(tmp)
         for name, (source, message) in REJECT.items():
@@ -120,13 +122,14 @@ def main():
         failure.write_text(CHECKED_ERROR)
         check_handler_error([args.python, "-E", failure], failure)
 
-        def build(source, level):
+        def build(source, level, *options):
             binary = root / source.stem
             subprocess.run([compiler, "build", source, "--no-cache", "--runtime", args.runtime.resolve(),
-                            "--clang", args.clang, "--opt-level", level, "-o", binary], check=True, timeout=180)
+                            "--clang", args.clang, "--opt-level", level, *options, "-o", binary], check=True, timeout=180)
             return binary
 
         for level in args.opt_levels:
+            assert observe([build(threaded, level, "--runtime-imports")]) == threaded_output
             check_handler_error([build(failure, level)], failure)
             timed_binary = build(timed, level)
             assert observe([timed_binary]) == b"socketserver listener timeout only supports None\n"

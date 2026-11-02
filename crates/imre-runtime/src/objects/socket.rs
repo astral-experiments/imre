@@ -6,13 +6,14 @@ use super::{Bytes, Int, Object, Storage, StorageCell, Str, c_int, errno_error};
 use num_traits::ToPrimitive;
 use std::ffi::{CStr, CString};
 use std::io;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
 
 pub(super) struct Socket {
     family: i32,
     kind: i32,
+    proto: i32,
     fd: RawFd,
     blocking: bool,
     readers: usize,
@@ -74,6 +75,18 @@ impl SocketInput {
             socket: Some(socket),
             buffer: io::Cursor::new(bytes),
         })
+    }
+
+    /// Consume buffered input first, otherwise receive at most the requested bytes once.
+    pub(crate) fn read1(&mut self, target: &mut [u8]) -> io::Result<usize> {
+        if self.buffer.position() < self.buffer.get_ref().len() as u64 {
+            return io::Read::read(&mut self.buffer, target);
+        }
+        // SAFETY: target is writable for its length, and receive does not retain it.
+        match unsafe { receive(self.as_raw_fd(), target.as_mut_ptr(), target.len(), 0) } {
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
+            result => result,
+        }
     }
 
     pub(crate) fn close(&mut self) -> io::Result<()> {
@@ -158,6 +171,10 @@ pub(crate) fn kind(s: &Object) -> i32 {
     state(s, |s| s.kind)
 }
 
+pub(crate) fn proto(s: &Object) -> i32 {
+    state(s, |s| s.proto)
+}
+
 pub(crate) fn fd(s: &Object) -> RawFd {
     state(s, |s| s.fd)
 }
@@ -223,7 +240,13 @@ fn setopt(fd: RawFd, level: i32, name: i32, value: i32) -> io::Result<()> {
     Ok(())
 }
 
-fn handle(raw: RawFd, blocking: bool, family: i32, kind: i32) -> Result<crate::ObjectOwner> {
+fn handle(
+    raw: RawFd,
+    blocking: bool,
+    family: i32,
+    kind: i32,
+    proto: i32,
+) -> Result<crate::ObjectOwner> {
     // SAFETY: the kernel transferred a new fd; every path now has an owner.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
     #[cfg(not(target_os = "linux"))]
@@ -238,6 +261,7 @@ fn handle(raw: RawFd, blocking: bool, family: i32, kind: i32) -> Result<crate::O
         fd: fd.into_raw_fd(),
         family,
         kind,
+        proto,
         blocking,
         readers: 0,
         close_requested: false,
@@ -263,7 +287,32 @@ pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwne
     let ty = ty | libc::SOCK_CLOEXEC;
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
     let raw = checked(unsafe { libc::socket(family, ty, proto) }).map_err(errno_error)?;
-    handle(raw, true, family, kind)
+    handle(raw, true, family, kind, proto)
+}
+
+pub(crate) fn socketpair(
+    family: i32,
+    kind: i32,
+    proto: i32,
+) -> Result<(crate::ObjectOwner, crate::ObjectOwner)> {
+    #[cfg(target_os = "linux")]
+    let (flags, blocking, kind) = (
+        kind | libc::SOCK_CLOEXEC,
+        kind & libc::SOCK_NONBLOCK == 0,
+        kind & !(libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let (flags, blocking) = (kind, true);
+
+    let mut pair = [-1; 2];
+    // SAFETY: on success socketpair initializes both entries and transfers both descriptors.
+    checked(unsafe { libc::socketpair(family, flags, proto, pair.as_mut_ptr()) })
+        .map_err(errno_error)?;
+    // SAFETY: the second descriptor needs an owner even if setting up the first endpoint fails.
+    let right = unsafe { OwnedFd::from_raw_fd(pair[1]) };
+    let left = handle(pair[0], blocking, family, kind, proto)?;
+    let right = handle(right.into_raw_fd(), blocking, family, kind, proto)?;
+    Ok((left, right))
 }
 
 #[unsafe(no_mangle)]
@@ -284,17 +333,54 @@ pub extern "C" fn imre_socket_new(family: usize, ty: usize, proto: usize) -> *co
     )
 }
 
-fn resolve(host: &str) -> Result<Ipv4Addr> {
-    match host {
-        "" => return Ok(Ipv4Addr::UNSPECIFIED),
-        "<broadcast>" => return Ok(Ipv4Addr::BROADCAST),
-        _ => {}
+/// Resolve one Internet address with CPython's wildcard and broadcast rules.
+fn lookup_ip(host: &[u8], family: i32) -> Result<IpAddr> {
+    if host.is_empty() && family == libc::AF_INET {
+        return Ok(Ipv4Addr::UNSPECIFIED.into());
     }
-    if let Ok(ip) = host.parse() {
+    if host == b"<broadcast>" {
+        return Ok(Ipv4Addr::BROADCAST.into());
+    }
+    if let Ok(text) = std::str::from_utf8(host)
+        && let Ok(ip) = text.parse::<IpAddr>()
+        && (family == libc::AF_UNSPEC || ip.is_ipv4())
+    {
         return Ok(ip);
     }
-    let rows = getaddrinfo(Some(host), None, libc::AF_INET, 0, 0, 0)?;
-    Ok(endpoint(&rows[0].addr.ipv4()?).0)
+    let list = if host.is_empty() {
+        address_list(
+            None,
+            Some(b"0"),
+            family,
+            libc::SOCK_DGRAM,
+            0,
+            libc::AI_PASSIVE,
+        )?
+    } else {
+        address_list(Some(host), None, family, 0, 0, 0)?
+    };
+    // SAFETY: address_list returns a non-null owned list with initialized address lengths.
+    let addr = unsafe {
+        let first = &*list.0;
+        if host.is_empty() && !first.ai_next.is_null() {
+            return Err(Error::new(
+                Kind::OSError,
+                "wildcard resolved to multiple address",
+            ));
+        }
+        InternetAddress::read(first.ai_addr, first.ai_addrlen)?
+    };
+    Ok(match addr {
+        InternetAddress::V4(v4) => endpoint(&v4).0.into(),
+        InternetAddress::V6(v6) => Ipv6Addr::from(v6.sin6_addr.s6_addr).into(),
+    })
+}
+
+pub(crate) fn hostbyname(host: &[u8]) -> Result<Ipv4Addr> {
+    match lookup_ip(host, libc::AF_INET)? {
+        IpAddr::V4(ip) => Ok(ip),
+        IpAddr::V6(_) => Err(Error::new(Kind::OSError, "address family mismatched")),
+    }
 }
 
 pub(crate) struct AddressInfo {
@@ -311,6 +397,24 @@ impl Drop for AddrInfoList {
         // SAFETY: the list was returned by getaddrinfo and remains uniquely owned.
         unsafe { libc::freeaddrinfo(self.0) };
     }
+}
+
+fn check_gai(code: i32) -> Result<()> {
+    if code == libc::EAI_SYSTEM {
+        return Err(errno_error(io::Error::last_os_error()));
+    }
+    if code != 0 {
+        // SAFETY: gai_strerror returns a static terminated message for a resolver error code.
+        let message = unsafe { CStr::from_ptr(libc::gai_strerror(code)) }.to_string_lossy();
+        return Err(Error::from_errno(
+            Kind::GaiError,
+            code,
+            &message,
+            None,
+            None,
+        ));
+    }
+    Ok(())
 }
 
 fn address_list(
@@ -347,20 +451,7 @@ fn address_list(
             &raw mut res,
         )
     };
-    if code == libc::EAI_SYSTEM {
-        return Err(errno_error(io::Error::last_os_error()));
-    }
-    if code != 0 {
-        // SAFETY: gai_strerror returns a static terminated message for a getaddrinfo result.
-        let message = unsafe { CStr::from_ptr(libc::gai_strerror(code)) }.to_string_lossy();
-        return Err(Error::from_errno(
-            Kind::GaiError,
-            code,
-            &message,
-            None,
-            None,
-        ));
-    }
+    check_gai(code)?;
     if res.is_null() {
         return Err(Error::new(
             Kind::OSError,
@@ -371,21 +462,14 @@ fn address_list(
 }
 
 pub(crate) fn getaddrinfo(
-    host: Option<&str>,
-    service: Option<&str>,
+    host: Option<&[u8]>,
+    service: Option<&[u8]>,
     family: i32,
     ty: i32,
     protocol: i32,
     flags: i32,
 ) -> Result<Vec<AddressInfo>> {
-    let list = address_list(
-        host.map(str::as_bytes),
-        service.map(str::as_bytes),
-        family,
-        ty,
-        protocol,
-        flags,
-    )?;
+    let list = address_list(host, service, family, ty, protocol, flags)?;
     let mut cursor = list.0;
     let mut rows = Vec::new();
     // SAFETY: all nodes and canonical names remain live until the list guard is dropped.
@@ -418,6 +502,191 @@ pub(crate) fn getaddrinfo(
     Ok(rows)
 }
 
+/// Resolve the numeric sockaddr first, then let the platform interpret the requested NI flags.
+pub(crate) fn getnameinfo(
+    host: &[u8],
+    port: i32,
+    flowinfo: Option<u32>,
+    scope_id: u32,
+    flags: i32,
+) -> Result<(String, String)> {
+    let list = address_list(
+        Some(host),
+        Some(port.to_string().as_bytes()),
+        libc::AF_UNSPEC,
+        libc::SOCK_DGRAM,
+        0,
+        libc::AI_NUMERICHOST,
+    )?;
+    // SAFETY: address_list returned a non-null list owned until the end of this function.
+    let entry = unsafe { &*list.0 };
+    if !entry.ai_next.is_null() {
+        return Err(Error::new(
+            Kind::OSError,
+            "sockaddr resolved to multiple addresses",
+        ));
+    }
+    // SAFETY: the list guard keeps ai_addr readable for its reported length.
+    let mut addr = unsafe { InternetAddress::read(entry.ai_addr, entry.ai_addrlen)? };
+    match &mut addr {
+        InternetAddress::V4(_) if flowinfo.is_some() => {
+            return Err(Error::new(Kind::OSError, "IPv4 sockaddr must be 2 tuple"));
+        }
+        InternetAddress::V6(v6) => {
+            v6.sin6_flowinfo = flowinfo.unwrap_or(0).to_be();
+            v6.sin6_scope_id = scope_id;
+        }
+        InternetAddress::V4(_) => {}
+    }
+    let (raw, len) = addr.raw_parts();
+    let mut host = [0; libc::NI_MAXHOST as usize];
+    let mut service = [0; 32]; // NI_MAXSERV on supported platforms.
+    // SAFETY: addr lives through the call and both writable lengths match their buffers.
+    check_gai(unsafe {
+        libc::getnameinfo(
+            raw,
+            len,
+            host.as_mut_ptr(),
+            host.len() as _,
+            service.as_mut_ptr(),
+            service.len() as _,
+            flags,
+        )
+    })?;
+    let decode = |buffer: &[libc::c_char]| {
+        // SAFETY: getnameinfo succeeded, so both output buffers are NUL terminated.
+        let bytes = unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes();
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|err| super::bytes::decode_error(bytes, err))
+    };
+    Ok((decode(&host)?, decode(&service)?))
+}
+
+enum Service<'a> {
+    Name(&'a CStr),
+    Port(u16),
+}
+
+/// Copy the requested field while the platform's service entry is still valid.
+fn with_service<T>(
+    key: Service<'_>,
+    protocol: Option<&CStr>,
+    read: impl FnOnce(&libc::servent) -> Result<T>,
+) -> Result<T> {
+    let proto = protocol.map_or(ptr::null(), CStr::as_ptr);
+    let missing = match key {
+        Service::Name(_) => "service/proto not found",
+        Service::Port(_) => "port/proto not found",
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn getservbyname_r(
+                name: *const libc::c_char,
+                proto: *const libc::c_char,
+                entry: *mut libc::servent,
+                buffer: *mut libc::c_char,
+                size: usize,
+                result: *mut *mut libc::servent,
+            ) -> libc::c_int;
+            fn getservbyport_r(
+                port: libc::c_int,
+                proto: *const libc::c_char,
+                entry: *mut libc::servent,
+                buffer: *mut libc::c_char,
+                size: usize,
+                result: *mut *mut libc::servent,
+            ) -> libc::c_int;
+        }
+
+        let mut entry = std::mem::MaybeUninit::uninit();
+        // NSS can need more space for aliases. Keep its scratch storage pointer-aligned.
+        let mut buffer = Vec::<usize>::new();
+        let mut words = 1024 / size_of::<usize>();
+        loop {
+            buffer
+                .try_reserve_exact(words)
+                .map_err(|_| Error::memory_error())?;
+            let bytes = buffer.capacity() * size_of::<usize>();
+            let buf = buffer.as_mut_ptr().cast();
+            let mut result = ptr::null_mut();
+            // SAFETY: both C strings are live or NULL, and the output and scratch storage
+            // remain valid until the requested field has been copied.
+            let rc = unsafe {
+                match key {
+                    Service::Name(name) => getservbyname_r(
+                        name.as_ptr(),
+                        proto,
+                        entry.as_mut_ptr(),
+                        buf,
+                        bytes,
+                        &raw mut result,
+                    ),
+                    Service::Port(port) => getservbyport_r(
+                        i32::from(port.to_be()),
+                        proto,
+                        entry.as_mut_ptr(),
+                        buf,
+                        bytes,
+                        &raw mut result,
+                    ),
+                }
+            };
+            if rc == libc::ERANGE {
+                words = buffer
+                    .capacity()
+                    .checked_mul(2)
+                    .ok_or_else(Error::memory_error)?;
+                continue;
+            }
+            if rc != 0 || result.is_null() {
+                return Err(Error::new(Kind::OSError, missing));
+            }
+            // SAFETY: a successful lookup initialized this entry in our live storage.
+            return read(unsafe { &*result });
+        }
+    }
+    #[cfg(target_vendor = "apple")]
+    {
+        // SAFETY: Darwin keeps the returned item in thread-local storage. Copy the field
+        // before another service lookup can replace it; neither reader calls back into Python.
+        unsafe {
+            let result = match key {
+                Service::Name(name) => libc::getservbyname(name.as_ptr(), proto),
+                Service::Port(port) => libc::getservbyport(i32::from(port.to_be()), proto),
+            };
+            read(
+                result
+                    .as_ref()
+                    .ok_or_else(|| Error::new(Kind::OSError, missing))?,
+            )
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_vendor = "apple")))]
+    Err(Error::new(
+        Kind::NotImplementedError,
+        "service lookup requires Linux or Darwin",
+    ))
+}
+
+pub(crate) fn service_by_name(name: &CStr, protocol: Option<&CStr>) -> Result<u16> {
+    with_service(Service::Name(name), protocol, |entry| {
+        Ok(u16::from_be(entry.s_port as u16))
+    })
+}
+
+pub(crate) fn service_by_port(port: u16, protocol: Option<&CStr>) -> Result<String> {
+    with_service(Service::Port(port), protocol, |entry| {
+        // SAFETY: the service entry owns a NUL-terminated canonical name.
+        let name = unsafe { CStr::from_ptr(entry.s_name) }.to_bytes();
+        std::str::from_utf8(name)
+            .map(str::to_owned)
+            .map_err(|err| super::bytes::decode_error(name, err))
+    })
+}
+
 /// Darwin's mDNS resolver also puts the owner of the PTR query in h_aliases.
 /// Only exclude the owner of this address, preserving other dotted aliases.
 #[cfg(any(target_vendor = "apple", test))]
@@ -448,83 +717,185 @@ fn is_reverse_owner(addr: std::net::IpAddr, alias: &str) -> bool {
     alias.eq_ignore_ascii_case(&owner)
 }
 
-/// Reverse resolution must consider aliases before falling back to the primary name.
-/// Copy both while the legacy resolver's hostent is protected.
+pub(crate) struct HostEntry {
+    pub(crate) name: String,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) addresses: Vec<String>,
+}
+
+/// Copy a possibly unaligned, null-terminated pointer list from a live hostent.
+unsafe fn host_list<T>(
+    mut list: *mut *mut libc::c_char,
+    mut copy: impl FnMut(*mut libc::c_char) -> Result<T>,
+) -> Result<Vec<T>> {
+    let mut result = Vec::new();
+    if !list.is_null() {
+        loop {
+            // SAFETY: the caller keeps the storage live and libc terminates the list with a null entry.
+            let item = unsafe { list.read_unaligned() };
+            if item.is_null() {
+                break;
+            }
+            result.push(copy(item)?);
+            // SAFETY: a non-null entry is followed by at least the terminator.
+            list = unsafe { list.add(1) };
+        }
+    }
+    Ok(result)
+}
+
+/// Copy the names and address bytes while the resolver's hostent storage is live.
+unsafe fn copy_host(host: *const libc::hostent, family: i32, length: i32) -> Result<HostEntry> {
+    // SAFETY: the caller supplies the resolver's initialized hostent and keeps its
+    // backing storage alive and exclusive until this function returns.
+    unsafe {
+        let Some(host) = host.as_ref() else {
+            unsafe extern "C" {
+                fn imre_socket_host_errno() -> libc::c_int;
+            }
+            // CPython's gethost_common reads h_errno even when gethostbyaddr_r supplied
+            // a separate error code. Read it before calling another libc function.
+            let code = imre_socket_host_errno();
+            let msg = CStr::from_ptr(libc::hstrerror(code)).to_string_lossy();
+            return Err(Error::from_errno(Kind::HError, code, &msg, None, None));
+        };
+        if host.h_addrtype != family || host.h_length != length || host.h_name.is_null() {
+            return Err(errno_error(io::Error::from_raw_os_error(
+                libc::EAFNOSUPPORT,
+            )));
+        }
+        let name = |s: *mut libc::c_char| {
+            let bytes = CStr::from_ptr(s).to_bytes();
+            std::str::from_utf8(bytes)
+                .map(str::to_owned)
+                .map_err(|err| super::bytes::decode_error(bytes, err))
+        };
+        Ok(HostEntry {
+            name: name(host.h_name)?,
+            aliases: host_list(host.h_aliases, name)?,
+            addresses: host_list(host.h_addr_list, |p| {
+                if family == libc::AF_INET {
+                    Ok(Ipv4Addr::from(p.cast::<[u8; 4]>().read_unaligned()).to_string())
+                } else {
+                    ipv6_text(&p.cast::<libc::in6_addr>().read_unaligned())
+                }
+            })?,
+        })
+    }
+}
+
+fn reverse_host(addr: IpAddr) -> Result<HostEntry> {
+    let (bytes, family): (&[u8], _) = match addr {
+        IpAddr::V4(ip) => (&ip.octets(), libc::AF_INET),
+        IpAddr::V6(ip) => (&ip.octets(), libc::AF_INET6),
+    };
+    let length = bytes.len() as i32;
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn gethostbyaddr_r(
+                addr: *const libc::c_void,
+                len: libc::socklen_t,
+                family: libc::c_int,
+                entry: *mut libc::hostent,
+                buffer: *mut libc::c_char,
+                buflen: usize,
+                result: *mut *mut libc::hostent,
+                host_error: *mut libc::c_int,
+            ) -> libc::c_int;
+        }
+        // CPython supplies 16 KiB of aligned storage minus one byte in a single call.
+        let mut buffer = [0u64; 16384 / size_of::<u64>()];
+        let mut entry = std::mem::MaybeUninit::uninit();
+        let mut result = ptr::null_mut();
+        let mut host_error = 0;
+        // SAFETY: the caller-owned buffers remain live while copy_host reads the result.
+        unsafe {
+            gethostbyaddr_r(
+                bytes.as_ptr().cast(),
+                length as _,
+                family,
+                entry.as_mut_ptr(),
+                buffer.as_mut_ptr().cast(),
+                size_of_val(&buffer) - 1,
+                &raw mut result,
+                &raw mut host_error,
+            );
+            copy_host(result, family, length)
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn gethostbyaddr(
+                addr: *const libc::c_void,
+                len: libc::socklen_t,
+                family: libc::c_int,
+            ) -> *mut libc::hostent;
+        }
+        static REVERSE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = REVERSE.lock().unwrap_or_else(|err| err.into_inner());
+        // SAFETY: the input bytes live through the call. Darwin returns per-thread
+        // resolver storage; copy it before another legacy lookup on this thread.
+        unsafe {
+            let result = gethostbyaddr(bytes.as_ptr().cast(), length as _, family);
+            copy_host(result, family, length)
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        Err(Error::new(
+            Kind::NotImplementedError,
+            "reverse host lookup requires Linux or macOS",
+        ))
+    }
+}
+
+pub(crate) fn hostbyaddr(host: &[u8]) -> Result<HostEntry> {
+    reverse_host(lookup_ip(host, libc::AF_UNSPEC)?)
+}
+
+pub(crate) fn hostname() -> Result<Vec<u8>> {
+    let mut buffer = [0u8; 1024];
+    let n = buffer.len() - 1;
+    // SAFETY: the buffer has n writable bytes and a trailing zero even if truncated.
+    checked(unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), n) }).map_err(errno_error)?;
+    Ok(CStr::from_bytes_until_nul(&buffer)
+        .unwrap()
+        .to_bytes()
+        .to_vec())
+}
+
 pub(crate) fn fqdn(name: &str) -> Result<String> {
-    use std::net::{IpAddr, ToSocketAddrs};
-    use std::sync::Mutex;
-    unsafe extern "C" {
-        fn gethostbyaddr(
-            addr: *const libc::c_void,
-            len: libc::socklen_t,
-            family: libc::c_int,
-        ) -> *mut libc::hostent;
-    }
-    static REVERSE: Mutex<()> = Mutex::new(());
-    let mut name = name.trim().to_owned();
-    if name.is_empty() || name == "0.0.0.0" {
-        let mut buffer = [0u8; 256];
-        let n = buffer.len() - 1;
-        // SAFETY: the buffer has n writable bytes and a trailing zero even if truncated.
-        checked(unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), n) })
-            .map_err(errno_error)?;
-        name = CStr::from_bytes_until_nul(&buffer)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-    }
+    let name = match name.trim() {
+        "" | "0.0.0.0" | "::" => String::from_utf8_lossy(&hostname()?).into_owned(),
+        host => host.to_owned(),
+    };
     if name.as_bytes().contains(&0) {
         return Err(Error::new(
             Kind::TypeError,
             "gethostbyaddr() argument 1 must be encoded string without null bytes",
         ));
     }
-    let addr = name.parse::<IpAddr>().ok().or_else(|| {
-        (name.as_str(), 0)
-            .to_socket_addrs()
-            .ok()?
-            .next()
-            .map(|address| address.ip())
-    });
-    let Some(addr) = addr else {
-        return Ok(name);
+    let entry = lookup_ip(name.as_bytes(), libc::AF_UNSPEC)
+        .and_then(|ip| reverse_host(ip).map(|host| (ip, host)));
+    let (_ip, entry) = match entry {
+        Ok(result) => result,
+        Err(e) if e.is_os_error() => return Ok(name),
+        Err(e) => return Err(e),
     };
-    let _guard = REVERSE.lock().unwrap_or_else(|error| error.into_inner());
-    // SAFETY: the address bytes live through gethostbyaddr. Its terminated name
-    // and aliases remain valid until another legacy lookup on this thread.
-    unsafe {
-        let host = match addr {
-            IpAddr::V4(ip) => gethostbyaddr(ip.octets().as_ptr().cast(), 4, libc::AF_INET),
-            IpAddr::V6(ip) => gethostbyaddr(ip.octets().as_ptr().cast(), 16, libc::AF_INET6),
-        };
-        if host.is_null() || (*host).h_name.is_null() {
-            return Ok(name);
-        }
-        let primary = CStr::from_ptr((*host).h_name)
-            .to_string_lossy()
-            .into_owned();
-        if primary.contains('.') {
-            return Ok(primary);
-        }
-        let mut aliases = (*host).h_aliases;
-        while !aliases.is_null() {
-            // CPython's gethost_common also accepts unaligned hostent pointer lists.
-            let entry = aliases.read_unaligned();
-            if entry.is_null() {
-                break;
+    if !entry.name.contains('.') {
+        for alias in entry.aliases {
+            #[cfg(target_vendor = "apple")]
+            if is_reverse_owner(_ip, &alias) {
+                continue;
             }
-            aliases = aliases.add(1);
-            let alias = CStr::from_ptr(entry).to_string_lossy();
             if alias.contains('.') {
-                #[cfg(target_vendor = "apple")]
-                if is_reverse_owner(addr, &alias) {
-                    continue;
-                }
-                return Ok(alias.into_owned());
+                return Ok(alias);
             }
         }
-        Ok(primary)
     }
+    Ok(entry.name)
 }
 
 #[unsafe(no_mangle)]
@@ -663,7 +1034,7 @@ pub(crate) fn ipv6_address(
 }
 
 pub(crate) fn address(host: &str, port: i64, name: &str) -> Result<libc::sockaddr_in> {
-    let ip = resolve(host)?;
+    let ip = hostbyname(host.as_bytes())?;
     let port = u16::try_from(port).map_err(|_| port_error(name))?;
     // SAFETY: zero is a valid initial sockaddr_in, including target-specific padding.
     let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
@@ -810,12 +1181,45 @@ fn peer_call(
     Ok((ret, addr, len))
 }
 
-pub(crate) fn sockname(s: &Object) -> Result<InternetAddress> {
-    // SAFETY: peer_call provides aligned storage and its capacity to getsockname.
-    let (_, addr, len) =
-        peer_call(|a, n| unsafe { libc::getsockname(fd(s), a, n) }).map_err(errno_error)?;
+pub(crate) enum SocketName {
+    Internet(InternetAddress),
+    UnnamedUnix,
+    NoAddress,
+}
+
+pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<SocketName> {
+    let (_, addr, len) = peer_call(|a, n| {
+        // SAFETY: peer_call supplies aligned address storage and its capacity for either syscall.
+        unsafe {
+            if peer {
+                libc::getpeername(fd(s), a, n)
+            } else {
+                libc::getsockname(fd(s), a, n)
+            }
+        }
+    })
+    .map_err(errno_error)?;
+    if len == 0 {
+        return Ok(SocketName::NoAddress);
+    }
+    if i32::from(addr.ss_family) == libc::AF_UNIX {
+        let path_offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+        if len as usize == path_offset {
+            return Ok(SocketName::UnnamedUnix);
+        }
+        // Darwin returns an empty NUL-terminated path. On Linux a leading NUL
+        // with any path bytes denotes an abstract address, not an unnamed one.
+        #[cfg(target_vendor = "apple")]
+        if len as usize > path_offset {
+            // SAFETY: the initialized storage includes at least the first Unix path byte.
+            let unix = unsafe { &*(&raw const addr).cast::<libc::sockaddr_un>() };
+            if unix.sun_path[0] == 0 {
+                return Ok(SocketName::UnnamedUnix);
+            }
+        }
+    }
     // SAFETY: the kernel initialized addr, and read validates its family and length.
-    unsafe { InternetAddress::read((&raw const addr).cast(), len) }
+    unsafe { InternetAddress::read((&raw const addr).cast(), len) }.map(SocketName::Internet)
 }
 
 pub(crate) fn endpoint(addr: &libc::sockaddr_in) -> (Ipv4Addr, u16) {
@@ -834,8 +1238,11 @@ pub unsafe extern "C" fn imre_socket_sockname(
 ) -> *mut usize {
     // SAFETY: the caller supplied the exact tuple layout.
     finish(
-        sockname(s)
-            .and_then(InternetAddress::ipv4)
+        socket_name(s, false)
+            .and_then(|name| match name {
+                SocketName::Internet(addr) => addr.ipv4(),
+                _ => Err(Error::new(Kind::TypeError, "expected IPv4 address")),
+            })
             .map(|addr| unsafe { addr_tuple(layout, addr) }),
         ptr::null_mut(),
     )
@@ -859,7 +1266,7 @@ pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, InternetAddress)
         })
     })
     .map_err(errno_error)?;
-    let child = handle(child, true, family(s), kind(s))?;
+    let child = handle(child, true, family(s), kind(s), proto(s))?;
     // SAFETY: the kernel filled the supplied storage, and child owns its fd on errors.
     let addr = unsafe { InternetAddress::read((&raw const addr).cast(), len) }?;
     Ok((child, addr))
@@ -1068,7 +1475,7 @@ pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
         // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
         let copy =
             checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, blocking, family, kind)?;
+        let child = handle(copy, blocking, family, kind, proto(s))?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
         set_blocking(copy, blocking).map_err(errno_error)?;
         Ok(crate::ObjectOwner::into_raw(child))
@@ -1175,9 +1582,15 @@ mod tests {
         use std::os::unix::net::UnixDatagram;
 
         let (sender, socket) = UnixDatagram::pair().unwrap();
-        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_UNIX, libc::SOCK_DGRAM)
-            .ok()
-            .expect("socket handle");
+        let receiver = super::handle(
+            socket.into_raw_fd(),
+            true,
+            libc::AF_UNIX,
+            libc::SOCK_DGRAM,
+            0,
+        )
+        .ok()
+        .expect("socket handle");
         sender.send(b"larger packet").unwrap();
         let received = super::recv(&receiver, 3, libc::MSG_TRUNC)
             .ok()
@@ -1198,9 +1611,15 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (socket, _) = listener.accept().unwrap();
-        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_INET, libc::SOCK_STREAM)
-            .ok()
-            .expect("socket handle");
+        let receiver = super::handle(
+            socket.into_raw_fd(),
+            true,
+            libc::AF_INET,
+            libc::SOCK_STREAM,
+            0,
+        )
+        .ok()
+        .expect("socket handle");
         sender.write_all(&[0x5a; 258]).unwrap();
         let scratch = vec![0xa5; 257];
         std::hint::black_box(&scratch);

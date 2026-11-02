@@ -1,3 +1,4 @@
+import gc
 import io
 import sys
 from io import RawIOBase
@@ -124,9 +125,30 @@ def check_base_writes():
             raise AssertionError("closed base operation returned a value")
 
 
+def check_text_base():
+    from _collections_abc import _check_methods
+
+    print(_check_methods(io.TextIOBase, "read", "write"))
+    stream = io.StringIO("untouched")
+    for transfer, values in ((io.TextIOBase.read, (0, 1 << 80, None)),
+                             (io.TextIOBase.write, (b"x", "ok", "a\0b", chr(0xd800)))):
+        for value in values:
+            try:
+                transfer(stream, value)
+            except (io.UnsupportedOperation, TypeError, ValueError, OverflowError) as error:
+                print(type(error).__name__, str(error))
+            else:
+                raise AssertionError("base operation returned a value")
+    print(stream.getvalue(), stream.tell())
+    try:
+        io.TextIOBase.readline(stream, ClosingOffset(stream))
+    except io.UnsupportedOperation as error:
+        print(error.args, stream.closed)
+
 
 def exercise(path):
     check_base_writes()
+    check_text_base()
     events = []
 
     class Byte:
@@ -165,6 +187,18 @@ def exercise(path):
         stream.seek(0)
         print(stream.readline(ReadSize(stream)), stream.tell())
     from io import UnsupportedOperation
+
+    buffered_path = path + ".buffered"
+    with open(buffered_path, "wb", 4) as writer:
+        writer.write(b"a")
+        writer.write(b"bcd")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b""
+        writer.write(b"e")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b"abcd"
+    with open(buffered_path, "rb") as reader:
+        assert reader.read() == b"abcde"
 
     target_path = path + ".output"
     with open(target_path, "wb") as output:
@@ -341,6 +375,30 @@ def exercise(path):
             reader.seek(ClosingOffset(reader))
         except ValueError as error:
             print(error.args, reader.closed)
+
+    def bad_lines():
+        yield b"prefix"
+        gc.collect()
+        yield None
+        raise AssertionError("read past the rejected item")
+
+    with open(path + ".writelines", "wb") as writer:
+        try:
+            writer.writelines(bad_lines())
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writelines accepted None")
+        assert writer.writelines([b"!"]) is None
+        for call, owner in ((lambda: writer.writelines(), "_IOBase"), (writer.writelines, "BufferedWriter")):
+            try:
+                call()
+            except TypeError as error:
+                assert str(error) == f"{owner}.writelines() takes exactly one argument (0 given)"
+            else:
+                raise AssertionError("writelines accepted zero arguments")
+    with open(path + ".writelines", "rb") as reader:
+        assert reader.read() == b"prefix!"
 
     lines = path + ".lines"
     with open(lines, "w") as output:

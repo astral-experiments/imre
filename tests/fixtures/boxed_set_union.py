@@ -11,6 +11,27 @@ def current():
     assert values.__contains__(2)
     assert values.issuperset((1, 2, 3))
 
+    class Override(set):
+        def update(self, *args):
+            raise AssertionError("called subclass update")
+        def add(self, item):
+            raise AssertionError("called subclass add")
+
+    target = Override([1])
+    update = set.update
+    assert update(target, (2,), {3}) is None
+    assert target == {1, 2, 3}
+    assert Child.update(target, target) is None
+    assert update.__get__(target, set)([4]) is None
+    assert target == {1, 2, 3, 4}
+    for args, kwargs in (((), {}), ((frozenset(),), {}), ((target,), {"items": ()})):
+        try:
+            update(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid set.update call")
+
     for left_type in (set, frozenset):
         for right_type in (set, frozenset):
             left = left_type(["GET"])

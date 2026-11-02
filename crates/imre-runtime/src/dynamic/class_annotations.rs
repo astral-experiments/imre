@@ -1,7 +1,67 @@
-//! Class-wide annotation providers used by TypedDict, following CPython's type descriptors.
+//! Deferred ordinary class declarations and class-wide annotation providers.
 use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
+    /// Capture the live class dictionary and the conditional declarations that ran.
+    pub(super) fn class_annotation_environment(
+        &mut self,
+        class_scope: Id,
+        conditional_offsets: Id,
+    ) -> Result<Id> {
+        let parent = self.scope_data(class_scope).parent.expect("class parent");
+        let dict_cell = self.class_annotation_dict_cell(class_scope);
+        let mut names = vec!["__classdict__".to_owned()];
+        let mut cells = vec![dict_cell];
+        if let Some(cell) = self.scope_data(class_scope).class_cell {
+            names.push("__class__".to_owned());
+            cells.push(cell);
+        }
+        if conditional_offsets != NONE {
+            names.push("__conditional_annotations__".to_owned());
+            let offsets = self.items(conditional_offsets)?;
+            let active = self.op("set", NONE, NONE, NONE)?;
+            for (index, offset) in offsets.into_iter().enumerate() {
+                let offset = self.as_integer(offset)?.try_into().expect("source offset");
+                if self
+                    .scope_data(class_scope)
+                    .class_namespace
+                    .as_ref()
+                    .and_then(|ns| ns.annotation_sites.as_ref())
+                    .is_some_and(|sites| sites.contains_key(&offset))
+                {
+                    let index = self.int(index as i64);
+                    super::builtins::set_add(self, active, index)?;
+                }
+            }
+            cells.push(self.alloc(Value::Cell(Some(active))));
+        }
+        Ok(self.closure_environment(parent, names, &cells))
+    }
+
+    /// Record each executed ordinary declaration once, in lexical order.
+    pub(super) fn record_class_annotation(
+        &mut self,
+        scope: Id,
+        name: Id,
+        thunk: Id,
+        offset: u32,
+    ) -> Result<Id> {
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!("compiled class scope")
+        };
+        let namespace = frame.class_namespace.get_or_insert_with(Default::default);
+        let Some(scratch) = namespace.annotation_scratch else {
+            return Err(Error::new(
+                "RuntimeError",
+                "annotation outside an executing class body",
+            ));
+        };
+        namespace.annotation_sites.get_or_insert_with(Default::default)
+            .insert(offset, (name, thunk));
+        self.put_item(scratch, name, NONE)?;
+        Ok(NONE)
+    }
+
     /// Keep declaration inputs alive across type creation, but remove the
     /// scratch field map before __set_name__ can inspect the class namespace.
     pub(super) fn prepare_typeddict_namespace(
@@ -10,31 +70,29 @@ impl Context {
         scratch: Id,
     ) -> Result<(Id, Id)> {
         let fields = self.scope_name(scope, "__annotations__").unwrap_or(NONE);
-        let thunks = self.enable_class_annotation_provider(scope);
+        let annotate = if fields == scratch || fields == NONE {
+            self.scope_name(scope, "__annotate__")
+                .or_else(|| self.scope_name(scope, "__annotate_func__"))
+                .unwrap_or(NONE)
+        } else {
+            NONE
+        };
         self.heap.keep(fields);
-        self.heap.keep(thunks);
+        self.heap.keep(annotate);
         let key = self.heap.code_name("__annotations__");
         self.remove_binding(scope, "__annotations__", key)?;
-        if thunks != NONE {
-            let factory = self
-                .module_value("typing", "_typeddict_body_annotator")
-                .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict body annotator"))?;
-            let annotate = self.call(factory, vec![thunks], Vec::new())?;
-            self.bind_local(scope, "__annotate_func__", annotate);
-        }
-        if fields == NONE {
-            return Ok((self.dict(Vec::new()), NONE));
-        }
-        Ok((fields, if fields == scratch { thunks } else { NONE }))
+        self.enable_class_annotation_provider(scope);
+        let fields = if fields == NONE { self.dict(Vec::new()) } else { fields };
+        Ok((fields, annotate))
     }
 
-    pub(super) fn enable_class_annotation_provider(&mut self, scope: Id) -> Id {
+    pub(super) fn enable_class_annotation_provider(&mut self, scope: Id) {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         let namespace = frame.class_namespace.get_or_insert_with(Default::default);
         namespace.provider_annotations = true;
-        namespace.annotation_thunks.take().unwrap_or(NONE)
+        namespace.annotation_sites = None;
     }
 
     pub(super) fn has_class_annotation_provider(&self, scope: Id) -> bool {
@@ -103,11 +161,21 @@ impl Context {
             }
             return Ok(());
         }
-        let key = self.heap.code_name("__annotations_cache__");
+        let explicit = self.scope_name(scope, name).is_some();
+        let storage = if explicit {
+            name
+        } else {
+            "__annotations_cache__"
+        };
+        let key = self.text(storage);
         if let Some(value) = value {
-            self.bind_local(scope, "__annotations_cache__", value);
-        } else if !self.remove_binding(scope, "__annotations_cache__", key)? {
+            self.bind_local(scope, storage, value);
+        } else if !self.remove_binding(scope, storage, key)? {
             return Err(Error::new("AttributeError", "__annotations__"));
+        }
+        if explicit {
+            let key = self.text("__annotations_cache__");
+            self.remove_binding(scope, "__annotations_cache__", key)?;
         }
         for name in ["__annotate__", "__annotate_func__"] {
             let key = self.heap.code_name(name);

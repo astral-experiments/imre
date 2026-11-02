@@ -14,7 +14,7 @@ use std::io;
 pub(super) mod links;
 pub(crate) mod scandir;
 pub(super) mod stat_result;
-pub(crate) use links::readlink_at;
+pub(crate) use links::{link_at, readlink_at, symlink_at};
 pub(crate) use stat_result::float_seconds;
 
 /// The target's primary or alternate separator, shared by typed and boxed imports.
@@ -110,6 +110,7 @@ macro_rules! descriptor_constants {
 }
 descriptor_constants! { descriptor_constant -> i32;
     imre_os_f_ok = F_OK, imre_os_r_ok = R_OK, imre_os_w_ok = W_OK, imre_os_x_ok = X_OK,
+    imre_os_wnohang = WNOHANG,
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,
@@ -328,6 +329,22 @@ pub extern "C" fn imre_os_close(fd: usize) {
     finish(c_int(fd).and_then(close), ());
 }
 
+/// Wait for a child independently of Popen and return its unmodified POSIX status.
+pub(crate) fn waitpid(pid: libc::pid_t, options: libc::c_int) -> Result<[i32; 2]> {
+    let mut status = 0;
+    loop {
+        // SAFETY: waitpid writes to the given status slot and retains no pointer.
+        let child = unsafe { libc::waitpid(pid, &mut status, options) };
+        if child >= 0 {
+            return Ok([child, status]);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(errno_error(error));
+        }
+    }
+}
+
 /// Close the descriptor once, including when the kernel reports an interrupt.
 pub(crate) fn close(fd: i32) -> Result<()> {
     // SAFETY: close accepts any descriptor number, including an invalid one.
@@ -402,6 +419,23 @@ fn transfer(mut syscall: impl FnMut() -> isize) -> Result<usize> {
             return Err(errno_error(error));
         }
     }
+}
+
+/// Copy through the kernel, borrowing both descriptors and any explicit input offset.
+#[cfg(target_os = "linux")]
+pub(crate) fn sendfile(
+    out_fd: i32,
+    in_fd: i32,
+    mut offset: Option<libc::off_t>,
+    count: isize,
+) -> Result<usize> {
+    crate::initialize_io();
+    let offset = offset
+        .as_mut()
+        .map_or(std::ptr::null_mut(), std::ptr::from_mut);
+    // SAFETY: a non-null offset points to our live, writable off_t throughout the call.
+    // The kernel validates the raw descriptors and receives the count as size_t.
+    transfer(|| unsafe { libc::sendfile(out_fd, in_fd, offset, count as usize) })
 }
 
 pub(crate) fn read(fd: i32, length: isize) -> Result<Vec<u8>> {
@@ -637,4 +671,29 @@ pub extern "C" fn imre_os_set_inheritable(fd: usize, value: usize) {
         c_int(fd).and_then(|fd| INHERITABLE.update(fd, c_int(value)? != 0)),
         (),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    #[test]
+    fn waitpid_observes_a_live_child_and_reaps_its_raw_exit_status() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "read release; exit 37"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = child.id() as libc::pid_t;
+        let early = waitpid(pid, libc::WNOHANG);
+        // Closing the only writer guarantees the shell can finish even if an assertion fails.
+        drop(child.stdin.take());
+        let exited = waitpid(pid, 0);
+        let already_reaped = waitpid(pid, libc::WNOHANG).unwrap_err();
+
+        assert_eq!(early.map_err(|error| error.into_parts().0).unwrap(), [0, 0]);
+        assert_eq!(exited.map_err(|error| error.into_parts().0).unwrap(), [pid, 37 << 8]);
+        assert_eq!(already_reaped.into_parts().0, "ChildProcessError");
+    }
 }
