@@ -2628,6 +2628,9 @@ impl Context {
             Value::SurrogateStr(points) => surrogate_repr(points),
             Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
+            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).hash_type() => {
+                format!("<{name} object at {id:#x}>")
+            }
             Value::Instance {
                 scalar: Some(payload),
                 ..
@@ -2762,6 +2765,16 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
+            Value::HashMethod { name, .. } => format!("<method '{name}' of '_md5.md5' objects>"),
+            Value::Method {
+                callable, receiver, ..
+            } if let Value::HashMethod { name, .. } = self.heap.get(*callable) => {
+                if matches!(self.heap.get(*receiver), Value::Module { .. }) {
+                    format!("<built-in function {name}>")
+                } else {
+                    format!("<built-in method {name} of _md5.md5 object at {receiver:#x}>")
+                }
+            }
             Value::Native(name)
                 if matches!(name.as_str(), "binascii.a2b_hex" | "binascii.unhexlify") =>
             {
@@ -2842,7 +2855,7 @@ impl Context {
     }
 
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        if self.raw_read_window(obj).is_some() {
+        if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
             return self.raw_view_get(obj, key);
         }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {

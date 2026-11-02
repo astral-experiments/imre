@@ -222,6 +222,20 @@ impl Checker<'_> {
         match target {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {
+                if let Some(Binding::Intrinsic(
+                    which @ (Intrinsic::Environ | Intrinsic::EnvironBytes),
+                )) = self.resolve(&subscript.value)
+                {
+                    let bytes = which == Intrinsic::EnvironBytes;
+                    let ty = if bytes { Type::Bytes } else { Type::Str };
+                    let value = self.coerce(value, ty, target)?;
+                    let key = self.expr_expected(&subscript.slice, ty)?;
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::EnvironSet { bytes }),
+                        vec![value, key],
+                    )));
+                }
                 let receiver = self.expr(&subscript.value)?;
                 if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
                     let value = self.coerce(value, element, target)?;

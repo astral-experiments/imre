@@ -188,6 +188,22 @@ fn run() -> Result<ExitCode, String> {
             .or_else(|| source_path.file_stem().map(PathBuf::from))
             .ok_or("Could not infer an executable name from the source path; pass -o OUTPUT.")?,
     };
+    let python = options.python_startup().map(|(flags, _)| flags);
+    #[cfg(unix)]
+    let child_disposition = python
+        .is_some()
+        .then(run_program::CompileChildren::prepare)
+        .transpose()
+        .map_err(|error| format!("Could not prepare compiler child waits: {error}"))?;
+    let run_image = |directory| {
+        #[cfg(unix)]
+        if let Some(disposition) = child_disposition {
+            disposition
+                .restore()
+                .map_err(|error| format!("Could not restore SIGCHLD: {error}"))?;
+        }
+        run_program(&output, directory, &source_path, args, python)
+    };
     if lto_linker.is_some() && (runtime.is_none() || target.is_none()) {
         return Err("--lto-linker requires explicit --runtime and --target".to_owned());
     }
@@ -290,13 +306,7 @@ fn run() -> Result<ExitCode, String> {
             progress.cached(label);
             if let Some(directory) = run_directory {
                 progress.running(&source_path);
-                return run_program(
-                    &output,
-                    directory,
-                    &source_path,
-                    args,
-                    options.python_startup().map(|(flags, _)| flags),
-                );
+                return run_image(directory);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -504,13 +514,7 @@ fn run() -> Result<ExitCode, String> {
         drop(temporary);
         drop(scratch);
         drop(stage);
-        return run_program(
-            &output,
-            directory,
-            &source_path,
-            args,
-            options.python_startup().map(|(flags, _)| flags),
-        );
+        return run_image(directory);
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -599,13 +603,7 @@ fn run_program(
     python: Option<&imre_compiler::CommandFlags>,
 ) -> Result<ExitCode, String> {
     #[cfg(unix)]
-    let status = run_program::launch(
-        output,
-        directory,
-        source,
-        args,
-        python.is_some_and(|flags| flags.faulthandler),
-    );
+    let status = run_program::launch(output, directory, source, args, python);
     #[cfg(not(unix))]
     let status = {
         let _directory = directory;
