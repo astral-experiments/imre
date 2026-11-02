@@ -2110,7 +2110,7 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Cell(contents) if name == "cell_contents" => {
+            Value::Cell(contents) | Value::ClassCell(contents) if name == "cell_contents" => {
                 return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
@@ -3311,7 +3311,7 @@ impl Context {
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
             self.heap.replace_cell(obj, None);
             return Ok(());
         }
@@ -3959,7 +3959,7 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
             self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
@@ -5600,6 +5600,16 @@ impl Context {
         } else {
             None
         };
+        if typed_dict_meta.is_none() && self.scope_name(scope, "__annotate_func__").is_some() {
+            self.enable_class_annotation_provider(scope);
+            if let Value::Scope(frame) = self.heap.get_mut(scope) {
+                frame.class_namespace.as_mut().unwrap().annotation_sites = None;
+            }
+            if self.scope_name(scope, "__annotations__") == Some(annotations) {
+                let key = self.heap.code_name("__annotations__");
+                self.remove_binding(scope, "__annotations__", key)?;
+            }
+        }
         if let Some(original) = original {
             self.bind(scope, "__orig_bases__", original);
         }
