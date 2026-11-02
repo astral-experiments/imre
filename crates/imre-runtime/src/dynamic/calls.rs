@@ -2873,7 +2873,8 @@ impl Context {
                 });
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "int" | "float" | "function" | "type") && name == "__new__" =>
+                if matches!(class.as_str(), "int" | "float" | "function" | "type")
+                    && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
             }
@@ -3388,7 +3389,9 @@ impl Context {
                 ..
             } => {
                 if name == "__abstractmethods__" {
-                    return self.own_class_attr(obj, name).ok_or_else(|| self.missing_attribute(obj, name));
+                    return self
+                        .own_class_attr(obj, name)
+                        .ok_or_else(|| self.missing_attribute(obj, name));
                 }
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
@@ -5184,7 +5187,10 @@ impl Context {
             }
             Value::Native(name) if name == "type.__new__" => {
                 let Some((&meta, rest)) = args.split_first() else {
-                    return Err(Error::new("TypeError", "type.__new__(): not enough arguments"));
+                    return Err(Error::new(
+                        "TypeError",
+                        "type.__new__(): not enough arguments",
+                    ));
                 };
                 self.type_from_namespace(meta, rest, &kwargs, true)
             }
@@ -5971,19 +5977,29 @@ impl Context {
             unreachable!()
         };
         let names = class_scope.class_body.take().unwrap();
-        let dictionary = class_scope.class_namespace.as_ref().and_then(|ns| ns.dictionary);
+        let dictionary = class_scope
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.dictionary);
         let members = if let Some(dict) = dictionary {
             self.dict_entries(dict).expect("class dictionary").to_vec()
         } else {
-            names.into_iter().map(|name| {
-                let value = self.scope_name(scope, &name).expect("class member");
-                (self.text(name), value)
-            }).collect()
+            names
+                .into_iter()
+                .map(|name| {
+                    let value = self.scope_name(scope, &name).expect("class member");
+                    (self.text(name), value)
+                })
+                .collect()
         };
-        let Value::Scope(class_scope) = self.heap.get_mut(scope) else { unreachable!() };
-        if let Some(dict) = class_scope.class_namespace.as_ref().and_then(|namespace| {
-            namespace.annotation_dict_cell.and(namespace.dictionary)
-        }) {
+        let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        if let Some(dict) = class_scope
+            .class_namespace
+            .as_ref()
+            .and_then(|namespace| namespace.annotation_dict_cell.and(namespace.dictionary))
+        {
             class_scope.namespace = Some(dict);
             class_scope.names.retain(|name, _| name == "__qualname__");
         }
@@ -6003,7 +6019,9 @@ impl Context {
                     let exception = self.raised_instance(error);
                     let note = self.text(format!(
                         "Error calling __set_name__ on '{:.100}' instance {} in '{:.100}'",
-                        self.type_name(value), self.repr(name), self.class_name(class),
+                        self.type_name(value),
+                        self.repr(name),
+                        self.class_name(class),
                     ));
                     let _ = self.add_exception_note(exception, note);
                     return self.op("reraise", exception, NONE, NONE).map(|_| ());
@@ -6045,8 +6063,13 @@ impl Context {
             if let Some(cell) = body.annotation_cell {
                 self.heap.replace_cell(cell, Some(dict));
             }
-            let entries = self.dict_entries(body.mapping).expect("class body dictionary");
-            if entries.iter().any(|&(key, _)| self.string_storage(key).is_none()) {
+            let entries = self
+                .dict_entries(body.mapping)
+                .expect("class body dictionary");
+            if entries
+                .iter()
+                .any(|&(key, _)| self.string_storage(key).is_none())
+            {
                 // Keep non-string descriptor keys interleaved with the surviving declared names.
                 let mut fields = self.scope_data(scope).names.clone();
                 fields.shift_remove("__qualname__");
@@ -6160,8 +6183,9 @@ impl Context {
         // inheriting type's normal namespace preparation, allocation, and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (self.class_attr(winner, "mro")
-                    .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
+            && (self
+                .class_attr(winner, "mro")
+                .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
                 || (!(direct_new && explicit == Some(winner))
                     && (["__prepare__", "__new__", "__init__"]
                         .iter()

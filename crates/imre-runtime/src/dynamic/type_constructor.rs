@@ -83,7 +83,9 @@ impl Context {
         frame.class_body = Some(Vec::new());
         let mut cell = None;
         let mut annotation_cell = None;
-        let body = entries.iter().any(|&(key, _)| self.string_storage(key).is_none())
+        let body = entries
+            .iter()
+            .any(|&(key, _)| self.string_storage(key).is_none())
             .then(|| self.dict(entries.clone()));
         for (key, value) in entries {
             if self.string_storage(key).is_none() {
@@ -134,7 +136,9 @@ impl Context {
             self.bind_local(scope, "__qualname__", name);
         }
         let cell = cell.unwrap_or_else(|| self.alloc(Value::Cell(None)));
-        let Value::Scope(frame) = self.heap.get_mut(scope) else { unreachable!() };
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
         frame.class_cell = Some(cell);
         let object = self.builtin("object");
         let slots = bases

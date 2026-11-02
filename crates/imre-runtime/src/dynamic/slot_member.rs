@@ -227,8 +227,22 @@ impl Context {
     pub(super) fn check_member_slot_bases(&mut self, bases: &[Id], ancestors: &[Id]) -> Result<()> {
         if bases.len() < 2
             || !ancestors.iter().any(|&base| match self.heap.get(base) {
-                Value::Native(name) => super::stdlib::datetime::members(name).is_some()
-                    || matches!(name.as_str(), "int" | "str" | "bytes" | "bytearray" | "tuple" | "list" | "dict" | "set" | "frozenset" | "float"),
+                Value::Native(name) => {
+                    super::stdlib::datetime::members(name).is_some()
+                        || matches!(
+                            name.as_str(),
+                            "int"
+                                | "str"
+                                | "bytes"
+                                | "bytearray"
+                                | "tuple"
+                                | "list"
+                                | "dict"
+                                | "set"
+                                | "frozenset"
+                                | "float"
+                        )
+                }
                 Value::Class { scope, .. } => self
                     .scope_data(*scope)
                     .class_namespace
