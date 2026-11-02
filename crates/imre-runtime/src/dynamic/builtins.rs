@@ -395,6 +395,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "strip",
     "translate",
     "upper",
+    "zfill",
 ];
 
 /// Select the builtin formatting implementation inherited by this native value or type.

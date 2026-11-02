@@ -2134,6 +2134,23 @@ impl Heap {
         id
     }
 
+    /// Allocate a distinct string result even when its value is a cached Latin-1 character.
+    pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
+        debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
+        if self.free_head == END {
+            self.slots
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        self.frames
+            .last_mut()
+            .unwrap()
+            .live
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(self.alloc_slot(value))
+    }
+
     fn alloc_slot(&mut self, value: Value) -> Id {
         let index = if self.free_head != END {
             let index = self.free_head;

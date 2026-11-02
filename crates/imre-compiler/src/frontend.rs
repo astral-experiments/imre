@@ -7698,9 +7698,9 @@ impl<'a> Checker<'a> {
                 if matches!(
                     receiver.ty,
                     Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
-                ) && ir::StrDescriptor::named(attribute.attr.as_str())
-                    .is_some_and(ir::StrDescriptor::is_predicate)
-                {
+                ) && ir::StrDescriptor::named(attribute.attr.as_str()).is_some_and(|method| {
+                    method.is_predicate() || method == ir::StrDescriptor::ZFill
+                }) {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
                         attribute,
@@ -9533,6 +9533,15 @@ impl<'a> Checker<'a> {
                 && self.classes.methods[class].contains_key(attribute.attr.as_str())
             {
                 return self.class_method_call(call, attribute, class, Some(receiver));
+            }
+            if attribute.attr.as_str() == "zfill"
+                && matches!(
+                    receiver.ty,
+                    Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
+                )
+            {
+                let copy = matches!(receiver.ty, Type::StrEnum(_));
+                return self.zfill(Self::string_value(receiver), call, copy);
             }
             let receiver = Self::enum_text(receiver);
             if matches!(receiver.ty, Type::Document(_)) {

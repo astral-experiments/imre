@@ -1739,6 +1739,7 @@ pub(crate) enum StrDescriptor {
     IsAscii,
     IsAlpha,
     IsDigit,
+    ZFill,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1752,6 +1753,7 @@ impl StrDescriptor {
             "isalpha" => Self::IsAlpha,
             "isdigit" => Self::IsDigit,
             "islower" => Self::IsLower,
+            "zfill" => Self::ZFill,
             _ => return None,
         })
     }
@@ -1772,6 +1774,7 @@ impl StrDescriptor {
             Self::IsAlpha => "isalpha",
             Self::IsDigit => "isdigit",
             Self::IsLower => "islower",
+            Self::ZFill => "zfill",
         }
     }
 }
@@ -1802,6 +1805,9 @@ pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
+    ZFill {
+        copy: bool,
+    },
     Normalize,
     Lower,
     Upper,

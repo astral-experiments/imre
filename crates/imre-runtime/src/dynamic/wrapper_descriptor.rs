@@ -73,6 +73,7 @@ impl BuiltinDescriptor {
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
             "str.islower" => ("str", "islower"),
+            "str.zfill" => ("str", "zfill"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -102,7 +103,7 @@ impl BuiltinDescriptor {
             name,
             method: matches!(
                 name,
-                "__format__" | "isascii" | "isalpha" | "isdigit" | "islower"
+                "__format__" | "isascii" | "isalpha" | "isdigit" | "islower" | "zfill"
             ),
         })
     }
@@ -232,6 +233,10 @@ impl BuiltinDescriptor {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
                     ("isascii" | "isalpha" | "isdigit" | "islower", _) => "($self, /)",
+                    ("zfill", "__doc__") => {
+                        "Pad a numeric string with zeros on the left, to fill a field of the given width.\n\nThe string is never truncated."
+                    }
+                    ("zfill", _) => "($self, width, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
