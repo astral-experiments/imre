@@ -2,6 +2,12 @@
 
 
 # CPython 3.14.5, Lib/codecs.py.
+BOM_UTF16_LE = b'\xff\xfe'
+BOM_UTF16_BE = b'\xfe\xff'
+BOM_UTF32_LE = b'\xff\xfe\x00\x00'
+BOM_UTF32_BE = b'\x00\x00\xfe\xff'
+
+
 class IncrementalDecoder(object):
     """
     An IncrementalDecoder decodes an input in multiple steps. The input can
