@@ -13,6 +13,17 @@ from typing import Any, Callable, Generic, Protocol, TypeVar
 
 
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def _caller(depth=1, default='__main__'):
+    try:
+        return _sys._getframemodulename(depth + 1) or default
+    except AttributeError:  # For platforms without _getframemodulename()
+        pass
+    try:
+        return _sys._getframe(depth + 1).f_globals.get('__name__', default)
+    except (AttributeError, ValueError):  # For platforms without _getframe()
+        pass
+    return None
+
 class NewType:
     """NewType creates simple unique types with almost zero runtime overhead.
 
@@ -43,7 +54,7 @@ class NewType:
             name = name.rpartition('.')[-1]
         self.__name__ = name
         self.__supertype__ = tp
-        def_mod = _sys._getframemodulename(1) or '__main__'
+        def_mod = _caller()
         if def_mod != 'typing':
             self.__module__ = def_mod
 
