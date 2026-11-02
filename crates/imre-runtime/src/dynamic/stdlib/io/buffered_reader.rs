@@ -161,6 +161,7 @@ impl Reader {
     fn reset(&self) {
         if let Some(update) = &self.update {
             update.raw_offset.set(0);
+            update.outside.set(None);
         }
         self.end.set(0);
         self.pos.set(0);
@@ -269,7 +270,7 @@ impl Reader {
         let count = self.raw_into(ctx, self.buffer, start, self.size - start)?;
         self.end.set(start + count.unwrap_or(0));
         if let Some(update) = &self.update {
-            update.raw_offset.set(self.end.get());
+            update.raw_offset.set(self.end.get() as i64);
         }
         Ok(count.is_some())
     }
@@ -469,9 +470,9 @@ impl Reader {
     }
 
     fn seek(&self, ctx: &mut Context, offset: i64, whence: i32) -> Result<Id> {
-        let pos = self.pos.get() as i64;
+        let pos = self.logical_pos();
         if let Some(absolute) = self.absolute.get() {
-            let start = absolute - self.raw_offset() as i64;
+            let start = absolute - self.raw_offset();
             let target = match whence {
                 0 => Some(offset),
                 1 => start
@@ -492,7 +493,7 @@ impl Reader {
             self.write_back(ctx)?;
             let offset = if whence == 1 {
                 offset
-                    .checked_add(pos - self.raw_offset() as i64)
+                    .checked_add(pos - self.raw_offset())
                     .ok_or_else(|| Error::new("OverflowError", "seek offset out of range"))?
             } else {
                 offset
@@ -614,7 +615,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
                 ));
             }
             reader.absolute.set(Some(end));
-            let logical = end.saturating_add(reader.pos.get() as i64 - reader.raw_offset() as i64);
+            let logical = end.saturating_add(reader.logical_pos() - reader.raw_offset());
             Ok(ctx.int(logical.max(0)))
         }
         "seek" => {

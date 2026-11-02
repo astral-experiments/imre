@@ -191,3 +191,29 @@ for method in ("readinto", "readinto1"):
         assert getattr(f, method)(bytearray(0)) == 0
         assert raw.getvalue() == b"XY"
         f.close()
+
+
+class BlockedRaw(io.BytesIO):
+    blocked = False
+
+    def write(self, data):
+        if self.blocked:
+            return None
+        return super().write(data)
+
+
+with BlockedRaw(b"abcdefgh") as raw:
+    f = io.BufferedRandom(raw, 6)
+    assert f.read(3) == b"abc" and f.write(b"X") == 1 and f.seek(1) == 1
+    raw.blocked = True
+    try:
+        f.write(b"01234567")
+    except BlockingIOError as error:
+        assert error.characters_written == 5
+    else:
+        raise AssertionError("blocked preflush accepted too much")
+    assert f.tell() == 6
+    raw.blocked = False
+    f.flush()
+    assert raw.getvalue() == b"abcX01234"
+    f.close()

@@ -4,23 +4,35 @@ use super::{Cell, Context, Error, Id, NONE, Reader, Result, Value, index, invoke
 
 #[derive(Default)]
 pub(super) struct Update {
-    pub(super) raw_offset: Cell<usize>,
+    pub(super) raw_offset: Cell<i64>,
+    // Compacting a partially blocked write can place the logical cursor outside the window.
+    pub(super) outside: Cell<Option<i64>>,
     // Bytes outside this range were read from the raw stream or have already been written.
     pub(super) dirty: Cell<Option<(usize, usize)>>,
 }
 
 impl Reader {
-    pub(super) fn raw_offset(&self) -> usize {
+    pub(super) fn logical_pos(&self) -> i64 {
         self.update
             .as_ref()
-            .map_or(self.end.get(), |u| u.raw_offset.get())
+            .and_then(|update| update.outside.get())
+            .unwrap_or(self.pos.get() as i64)
     }
 
-    fn move_raw(&self, ctx: &mut Context, update: &Update, to: usize, force: bool) -> Result<()> {
+    pub(super) fn raw_offset(&self) -> i64 {
+        self.update
+            .as_ref()
+            .map_or(self.end.get() as i64, |u| u.raw_offset.get())
+    }
+
+    fn move_raw(&self, ctx: &mut Context, update: &Update, to: i64, force: bool) -> Result<()> {
         if !force && update.raw_offset.get() == to {
             return Ok(());
         }
-        let offset = ctx.int(to as i64 - update.raw_offset.get() as i64);
+        let offset = ctx.int(
+            to.checked_sub(update.raw_offset.get())
+                .ok_or_else(|| Error::new("OverflowError", "seek offset out of range"))?,
+        );
         let whence = ctx.int(1);
         let result = invoke(ctx, self.raw()?, "seek", vec![offset, whence])?;
         let pos = index(ctx, result)?;
@@ -42,7 +54,7 @@ impl Reader {
         let Some((mut start, end)) = update.dirty.get() else {
             return Ok(());
         };
-        self.move_raw(ctx, update, start, false)?;
+        self.move_raw(ctx, update, start as i64, false)?;
         while start < end {
             let data = bytes_io::copy_bytes(&ctx.bytes_like(self.buffer)?[start..end])?;
             let Some(n) = bytes_writer::raw_write(ctx, self.raw()?, &data)? else {
@@ -50,7 +62,7 @@ impl Reader {
             };
             start += n;
             self.advance(n);
-            update.raw_offset.set(start);
+            update.raw_offset.set(start as i64);
             update.dirty.set(Some((start, end)));
         }
         update.dirty.set(None);
@@ -61,7 +73,7 @@ impl Reader {
         if let Some(update) = &self.update {
             self.write_back(ctx)?;
             // BufferedRandom rewinds even at offset zero. Raw callbacks observe this seek.
-            let result = self.move_raw(ctx, update, self.pos.get(), true);
+            let result = self.move_raw(ctx, update, self.logical_pos(), true);
             self.reset();
             result?;
         }
@@ -97,7 +109,8 @@ impl Reader {
 
     fn write_input(&self, ctx: &mut Context, input: Id, update: &Update) -> Result<Id> {
         let size = ctx.native_buffer_bytes(input)?.len();
-        if size < self.size && size <= self.size - self.pos.get() {
+        if update.outside.get().is_none() && size < self.size && size <= self.size - self.pos.get()
+        {
             self.buffer_input(ctx, input, 0, size, update)?;
             return Ok(ctx.int(size as i64));
         }
@@ -110,32 +123,31 @@ impl Reader {
             let Some((start, end)) = update.dirty.get() else {
                 return Err(error);
             };
-            let pos = self.pos.get();
-            if start > pos {
-                return Err(error);
-            }
+            let logical = self.logical_pos() - start as i64;
             let Value::ByteArray(buffer) = ctx.heap.get_mut(self.buffer) else {
                 unreachable!()
             };
             buffer.copy_within(start..end, 0);
             self.end.set(0);
-            self.pos.set(pos - start);
+            self.pos.set(end - start);
             update
                 .raw_offset
-                .set(update.raw_offset.get().saturating_sub(start));
+                .set(update.raw_offset.get() - start as i64);
             update.dirty.set(Some((0, end - start)));
-            let logical = self.pos.get();
-            self.pos.set(end - start);
             let accepted = size.min(self.size - self.pos.get());
             self.buffer_input(ctx, input, 0, accepted, update)?;
-            self.pos.set(logical + accepted);
+            let logical = logical + accepted as i64;
+            self.pos.set(logical.clamp(0, self.size as i64) as usize);
+            update
+                .outside
+                .set((logical != self.pos.get() as i64).then_some(logical));
             return if accepted == size {
                 Ok(ctx.int(size as i64))
             } else {
                 Err(descriptor_buffer::blocking_error(ctx, 0, accepted))
             };
         }
-        self.move_raw(ctx, update, self.pos.get(), false)?;
+        self.move_raw(ctx, update, self.logical_pos(), false)?;
         self.reset();
         let mut written = 0;
         while size - written >= self.size {
