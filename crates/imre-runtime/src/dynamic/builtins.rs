@@ -264,6 +264,24 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
+    is_final_iterator_type(name)
+        || matches!(
+            name,
+            "reversed"
+                | "enumerate"
+                | "map"
+                | "filter"
+                | "zip"
+                | "itertools.count"
+                | "itertools.repeat"
+                | "_io.BufferedRandom"
+                | "_io.BufferedReader"
+                | "_io.BufferedWriter"
+        )
+}
+
+/// Iterator implementations that CPython does not expose as subclassable types.
+pub(super) fn is_final_iterator_type(name: &str) -> bool {
     if DictIterator::class(name).is_some() {
         return true;
     }
@@ -285,16 +303,6 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "keys"
             | "values"
             | "items"
-            | "reversed"
-            | "enumerate"
-            | "map"
-            | "filter"
-            | "zip"
-            | "itertools.count"
-            | "itertools.repeat"
-            | "_io.BufferedRandom"
-            | "_io.BufferedReader"
-            | "_io.BufferedWriter"
             | super::deque::ITERATOR
             | super::deque::REVERSE_ITERATOR
     )
@@ -1399,22 +1407,12 @@ pub(super) fn call(
             let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
             ctx.mapping_proxy(mapping.expect("required mapping"))
         }
-        "type" => {
-            let [object] = args else {
-                return Err(if args.len() == 3 {
-                    Error::new(
-                        "NotImplementedError",
-                        "dynamic class construction with type() is unsupported",
-                    )
-                } else {
-                    type_error("type() takes 1 or 3 arguments")
-                });
-            };
-            if !kwargs.is_empty() {
-                return Err(type_error("type() takes no keyword arguments"));
-            }
-            ctx.exact_type(*object)
-        }
+        "type" => match args {
+            [object] if kwargs.is_empty() => ctx.exact_type(*object),
+            [_] => Err(type_error("type() takes no keyword arguments")),
+            [name, bases, namespace] => ctx.type_from_namespace(*name, *bases, *namespace, kwargs),
+            _ => Err(type_error("type() takes 1 or 3 arguments")),
+        },
         "super" => {
             if !kwargs.is_empty() {
                 return Err(type_error("super() takes no keyword arguments"));
