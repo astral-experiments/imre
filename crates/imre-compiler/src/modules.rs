@@ -3065,6 +3065,7 @@ impl<'a> Loader<'a> {
                             .map(|&at| &parsed.syntax().body[at]);
                         let simple = prefix.clone().all(|stmt| {
                             module_name_guard(stmt)
+                                || platform_import(&self.modules, id, stmt).is_some()
                                 || (module.is_package
                                     && value_name(stmt).is_some()
                                     && module_value(stmt).is_some_and(literal_export))
@@ -3144,6 +3145,10 @@ impl<'a> Loader<'a> {
                     )?;
                 }
                 _ => {
+                    if let Some(name) = platform_import(&self.modules, id, statement) {
+                        self.bind(id, name, Binding::ConditionalValue, statement)?;
+                        self.needs_object_imports = true;
+                    }
                     if let ast::Stmt::If(guard) = statement
                         && resolve_binding(&self.modules, id, &guard.test)
                             == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
@@ -4051,6 +4056,52 @@ pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom
             .as_ref()
             .is_some_and(|name| name.as_str() == "errno"))
     .then_some(import)
+}
+
+/// Both arms bind the same name. The runtime evaluates the platform check and
+/// imports the optional provider only in the selected arm, before the next import.
+fn platform_import<'a>(
+    modules: &[SourceModule],
+    module: ModuleId,
+    statement: &'a ast::Stmt,
+) -> Option<&'a str> {
+    let guard = statement.as_if_stmt()?;
+    let test = guard.test.as_compare_expr()?;
+    let [left, right] = test.operands.as_ref() else {
+        return None;
+    };
+    if resolve_binding(modules, module, left) != Some(Binding::Intrinsic(Intrinsic::SysPlatform)) {
+        return None;
+    }
+    let strings = |items: &[ast::Expr]| {
+        items
+            .iter()
+            .all(|item| matches!(item, ast::Expr::StringLiteral(_)))
+    };
+    match (test.ops.as_ref(), right) {
+        ([ast::CmpOp::Eq | ast::CmpOp::NotEq], ast::Expr::StringLiteral(_)) => {}
+        ([ast::CmpOp::In | ast::CmpOp::NotIn], ast::Expr::Set(set)) if strings(&set.elts) => {}
+        ([ast::CmpOp::In | ast::CmpOp::NotIn], ast::Expr::Tuple(tuple)) if strings(&tuple.elts) => {
+        }
+        _ => return None,
+    }
+    let [ast::Stmt::ImportFrom(import)] = guard.body.as_slice() else {
+        return None;
+    };
+    let [alias] = import.names.as_slice() else {
+        return None;
+    };
+    let [otherwise] = guard.elif_else_clauses.as_slice() else {
+        return None;
+    };
+    let [fallback] = otherwise.body.as_slice() else {
+        return None;
+    };
+    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+    (otherwise.test.is_none()
+        && value_name(fallback) == Some(name)
+        && module_value(fallback).is_some_and(literal_export))
+    .then_some(name)
 }
 
 /// Allow an identity check with a closed builtin raise before importing a dependency.
