@@ -2537,6 +2537,63 @@ def report(text):
         ):
             monitoring_entry.write_text(program)
             compare("-EB", monitoring_entry, native_args=("run", monitoring_entry, "--quiet"))
+        shadow = root / "hmac_shadow"
+        shadow.mkdir()
+        (shadow / "hmac.py").write_text("marker = 'local'\n")
+        shadow_entry = shadow / "entry.py"
+        shadow_entry.write_text(
+            "import sys\n"
+            "from importlib.machinery import SourceFileLoader\n"
+            "from importlib.util import module_from_spec, spec_from_file_location\n"
+            "sys.modules['_hashlib'] = sys.modules['_operator'] = None\n"
+            "loader = SourceFileLoader('hmac', sys.argv[1])\n"
+            "module = module_from_spec(spec_from_file_location('hmac', sys.argv[1], loader=loader))\n"
+            "sys.modules['hmac'] = module\n"
+            "loader.exec_module(module)\n"
+            "assert __import__('hmac') is module and module.marker == 'local'\n"
+            "for name in ('digest', '_digest_native', 'compare_digest', 'new', 'HMAC'):\n"
+            "    assert not hasattr(module, name)\n"
+        )
+        local_hmac = shadow / "hmac.py"
+        compare(
+            "-IB", shadow_entry, local_hmac,
+            native_args=("run", shadow_entry, "--module-root", shadow, "--runtime-imports", "--quiet", "--", local_hmac),
+        )
+
+        # Only exercise legacy-provider policy when the host OpenSSL can load it.
+        policy = root / "hmac-legacy.cnf"
+        policy.write_text(
+            "openssl_conf = init\n[init]\nproviders = providers\nalg_section = properties\n"
+            "[providers]\ndefault = default_provider\nlegacy = legacy_provider\n"
+            "[default_provider]\nactivate = 1\n[legacy_provider]\nactivate = 1\n"
+            "[properties]\ndefault_properties = provider=legacy\n"
+        )
+        policy_env = {"OPENSSL_CONF": str(policy)}
+        legacy_capabilities = """import _hashlib
+for name in ("md4", "ripemd160"):
+    print(_hashlib.new(name, b"abc").hexdigest())
+for name in ("md4", "ripemd160"):
+    try:
+        _hashlib.hmac_digest(b"k", b"m", name)
+    except ValueError as exc:
+        print(type(exc).__name__, str(exc))
+    else:
+        print("MAC permitted")
+"""
+        probe = run(sys.executable, "-IB", "-c", legacy_capabilities, extra=policy_env)
+        if probe.returncode == 0:
+            lines = probe.stdout.splitlines()
+            assert lines[:2] == [
+                b"a448017aaf21d8525fc10ae87aa6729d",
+                b"8eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
+            ]
+            if lines[2:] == [b"ValueError [digital envelope routines] unsupported"] * 2:
+                hmac_entry = fixtures / "bytes/hmac_digest.py"
+                compare(
+                    "-IB", hmac_entry, "legacy-policy", extra=policy_env,
+                    native_args=("run", hmac_entry, "--runtime-imports", "--quiet", "--", "legacy-policy"),
+                )
+
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
         call_args = fixtures / "unittest_mock_call_args.py"
@@ -2953,6 +3010,8 @@ def report(text):
             "bytes/hashlib_md5_provider.py",
             "bytes/hashlib_sha3_provider.py",
             "bytes/hashlib_kdf.py",
+            "bytes/hmac_digest.py",
+            "bytes/hmac_digest_fallback.py",
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",
