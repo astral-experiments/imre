@@ -14,7 +14,10 @@ def current():
     for method in (descriptor, update):
         assert method.__doc__ == "Update the set, keeping only elements found in it and all others."
         assert method.__text_signature__ == "($self, /, *others)"
+    cursor = iter(values)
     assert update() is None
+    assert update(alias) is None
+    assert list(cursor) == list(values)
     assert update([2, 3, 4], iter([1, 3, 3])) is None
     assert alias == {3}
 
@@ -49,6 +52,28 @@ def current():
     original.locked = equal.locked = True
     assert set.intersection_update(receiver, source) is None
     assert receiver.pop() is equal
+
+    class Collision:
+        locked = False
+
+        def __hash__(self):
+            return 0
+
+        def __eq__(self, other):
+            if self.locked:
+                raise RuntimeError("compared colliding keys")
+            return self is other
+
+    a, b = Collision(), Collision()
+    colliding = {a, b}
+    a.locked = b.locked = True
+    assert colliding.intersection_update(colliding) is None
+    try:
+        colliding.intersection_update(colliding, colliding)
+    except RuntimeError as error:
+        assert str(error) == "compared colliding keys"
+    else:
+        raise AssertionError("lost a key comparison")
 
     class Child(set):
         def intersection_update(self, other):
