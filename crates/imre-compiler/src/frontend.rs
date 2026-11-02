@@ -9346,6 +9346,18 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("posix.getpid")))
+                if call.arguments.is_empty()
+                    && self
+                        .graph
+                        .session
+                        .is_stdlib_function(self.module, &call.func, "os", "getpid") =>
+            {
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetPid), vec![]),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
             }

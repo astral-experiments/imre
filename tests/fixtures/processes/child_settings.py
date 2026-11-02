@@ -1,6 +1,8 @@
+import os
 import shutil
 import subprocess
 import sys
+from os import getpid as current_pid
 from pathlib import Path
 
 def nullable_group(args: list[str], group: int | None) -> bytes:
@@ -19,6 +21,9 @@ def report_filename(error: Exception, original: Path) -> None:
         raise AssertionError("launch error lost the executable filename")
 
 python = sys.argv[1]
+parent_pid = subprocess.check_output([python, "-I", "-c", "import os; print(os.getppid())"], text=True)
+print(os.getpid() == int(parent_pid))
+print(current_pid() == os.getpid())
 identity = [python, "-c", "import os; print(os.getpid() == os.getsid(0), os.getpid() == os.getpgrp())"]
 print(subprocess.check_output(identity, start_new_session=True))
 print(subprocess.run(identity, process_group=0, capture_output=True).stdout)

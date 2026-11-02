@@ -18,6 +18,11 @@ pub(super) mod stat_result;
 pub(crate) use links::{link_at, readlink_at, symlink_at};
 pub(crate) use stat_result::float_seconds;
 
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_getpid() -> usize {
+    Int::from_usize(std::process::id() as usize).into_raw()
+}
+
 /// The target's primary or alternate separator, shared by typed and boxed imports.
 pub(crate) fn os_separator(alternate: bool) -> Option<&'static str> {
     match (cfg!(windows), alternate) {
