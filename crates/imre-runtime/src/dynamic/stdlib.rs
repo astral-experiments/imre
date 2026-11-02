@@ -56,7 +56,7 @@ pub(super) mod regex;
 #[cfg(target_os = "linux")]
 mod resource;
 mod select;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub(super) mod signal;
 mod socket;
 mod structure;
@@ -125,7 +125,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "io"
             | "itertools"
             | "warnings"
-    ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
+    ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
 
@@ -239,7 +239,7 @@ pub(super) fn install_errno(ctx: &mut Context, scope: Id) -> Result<()> {
     Ok(())
 }
 
-fn os_error(err: std::io::Error) -> Error {
+pub(super) fn os_error(err: std::io::Error) -> Error {
     crate::objects::errno_error(err).into()
 }
 
@@ -943,7 +943,7 @@ fn urlsafe_input(ctx: &mut Context, text: Id) -> Result<(Id, bool)> {
     Ok((data, false))
 }
 
-fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
+pub(super) fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
@@ -996,7 +996,7 @@ pub(super) fn call(
     if super::lowlevel_threads::function_name(name).is_some() {
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     if matches!(name, "_signal.sigpending" | "_imre_signal.make_signals") {
         return signal::call(ctx, name, args, kwargs);
     }
@@ -1027,6 +1027,10 @@ pub(super) fn call(
     }
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
+    }
+    #[cfg(unix)]
+    if matches!(name, "_signal.signal" | "_signal.getsignal") {
+        return ctx.signal_call(name, args, kwargs);
     }
     #[cfg(unix)]
     if name == "_signal.default_int_handler" {

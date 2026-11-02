@@ -128,6 +128,16 @@ impl ChildControl {
     }
 
     pub(super) fn wait(&self, timeout: Option<&Deadline>) -> Result<Option<ReturnCode>> {
+        self.wait_with(timeout, || Ok(()))
+    }
+
+    /// Run pending Python handlers outside the PID lock before retrying an interrupted wait.
+    pub(super) fn wait_with<E: From<Error>>(
+        &self,
+        timeout: Option<&Deadline>,
+        mut check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Option<ReturnCode>, E> {
+        check()?;
         if let Some(status) = self.poll()? {
             return Ok(Some(status));
         }
@@ -140,9 +150,8 @@ impl ChildControl {
                 if remaining <= 0.0 {
                     return Ok(None);
                 }
-                std::thread::sleep(
-                    delay.min(Duration::try_from_secs_f64(remaining).unwrap_or(delay)),
-                );
+                let sleep = delay.min(Duration::try_from_secs_f64(remaining).unwrap_or(delay));
+                crate::objects::time::sleep_ns(sleep.as_nanos() as i64, &mut check)?;
                 if let Some(status) = self.poll()? {
                     return Ok(Some(status));
                 }
@@ -166,9 +175,12 @@ impl ChildControl {
             if result < 0 {
                 let error = io::Error::last_os_error();
                 match error.raw_os_error() {
-                    Some(libc::EINTR) => continue,
+                    Some(libc::EINTR) => {
+                        check()?;
+                        continue;
+                    }
                     Some(libc::ECHILD) => {}
-                    _ => return Err(errno_error(error)),
+                    _ => return Err(errno_error(error).into()),
                 }
             }
             if let Some(status) = self.poll()? {
