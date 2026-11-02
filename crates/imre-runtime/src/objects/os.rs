@@ -731,6 +731,28 @@ pub extern "C" fn imre_os_isatty(fd: usize) -> i32 {
     finish(c_int(fd).map(|fd| i32::from(isatty(fd))), 0)
 }
 
+/// A terminal follows UTF-8 mode or the current character locale. Other fds have no encoding.
+pub(crate) fn device_encoding(fd: i32) -> Option<std::borrow::Cow<'static, str>> {
+    isatty(fd).then(|| crate::sys::file_encoding(None))
+}
+
+/// Return an owned optional text word (zero for a non-terminal).
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_device_encoding(fd: usize) -> usize {
+    finish(
+        c_int(fd).and_then(|fd| match device_encoding(fd) {
+            None => Ok(0),
+            Some(std::borrow::Cow::Borrowed(name)) => {
+                Ok(StrOwner::into_raw(crate::sys::canonical(name)) as usize)
+            }
+            Some(std::borrow::Cow::Owned(name)) => {
+                super::text::try_owned_string(&name).map(|owner| StrOwner::into_raw(owner) as usize)
+            }
+        }),
+        0,
+    )
+}
+
 /// Return false for both non-terminals and invalid descriptors.
 pub(crate) fn isatty(fd: i32) -> bool {
     // SAFETY: isatty checks the descriptor and retains no pointers.

@@ -36,7 +36,9 @@ impl References<'_> {
     fn invokes_index(&self, call: &ast::ExprCall) -> bool {
         let arity = match self.graph.resolve(self.module, &call.func) {
             Some(Binding::Intrinsic(
-                intrinsic @ (Intrinsic::SysSetRecursionLimit | Intrinsic::SysGetFrameModuleName),
+                intrinsic @ (Intrinsic::SysSetRecursionLimit
+                    | Intrinsic::SysGetFrameModuleName
+                    | Intrinsic::Fd(crate::ir::FdOperation::DeviceEncoding)),
             )) => {
                 return match (
                     call.arguments.args.as_ref(),
@@ -44,8 +46,11 @@ impl References<'_> {
                 ) {
                     ([arg], []) => !matches!(arg, ast::Expr::Starred(_)),
                     ([], [kw]) => {
-                        intrinsic == Intrinsic::SysGetFrameModuleName
-                            && kw.arg.as_deref() == Some("depth")
+                        match intrinsic {
+                            Intrinsic::SysGetFrameModuleName => kw.arg.as_deref() == Some("depth"),
+                            Intrinsic::Fd(_) => kw.arg.as_deref() == Some("fd"),
+                            _ => false,
+                        }
                     }
                     _ => false,
                 };

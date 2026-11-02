@@ -17,6 +17,34 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "device_encoding": """
+        import locale
+        import os
+        import sys
+
+        class Descriptor:
+            number: int
+            calls: int
+
+            def __init__(self, number: int) -> None:
+                self.number = number
+                self.calls = 0
+
+            def __index__(self) -> int:
+                self.calls += 1
+                return self.number
+
+        master, slave = os.openpty()
+        try:
+            fd = Descriptor(slave)
+            expected = "utf-8" if sys.flags.utf8_mode else locale.getencoding()
+            assert os.device_encoding(fd=fd) == expected
+            assert fd.calls == 1
+        finally:
+            os.close(master)
+            os.close(slave)
+        assert os.device_encoding(slave) is None
+    """,
     "binary_update_path_builtin": """
         with open("checked-update.bin", "wb+") as stream:
             stream.write(b"payload")

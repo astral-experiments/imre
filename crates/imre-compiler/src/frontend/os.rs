@@ -155,7 +155,7 @@ impl Checker<'_> {
         }
         let param = |name: &str| Parameter {
             name: name.into(),
-            kind: if matches!(op, Close | Dup2) {
+            kind: if matches!(op, Close | DeviceEncoding | Dup2) {
                 ParameterKind::PositionalOrKeyword
             } else {
                 ParameterKind::PositionalOnly
@@ -183,6 +183,9 @@ impl Checker<'_> {
         }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             let mut value = checker.expr(arg)?;
+            if op == DeviceEncoding {
+                return checker.index_word(value, arg, false);
+            }
             if (op == SetBlocking && index == 1) || (op == Dup2 && index == 2) {
                 value = checker.truth_value(value);
             }
@@ -201,6 +204,7 @@ impl Checker<'_> {
             Read => Type::Bytes,
             Pipe | Pipe2 | OpenPty => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
+            DeviceEncoding => self.types.optional(Type::Str),
         };
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
     }

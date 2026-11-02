@@ -1,3 +1,4 @@
+import locale
 import os
 import posix
 import sys
@@ -5,16 +6,20 @@ from os import chown, mkfifo, supports_dir_fd, supports_effective_ids, supports_
 
 
 def current():
+    assert os.device_encoding is posix.device_encoding
     assert os.openpty is posix.openpty
     master, slave = os.openpty()
     try:
         assert os.isatty(master) and os.isatty(slave)
+        expected = "utf-8" if sys.flags.utf8_mode else locale.getencoding()
+        assert os.device_encoding(master) == posix.device_encoding(fd=slave) == expected
         assert not os.get_inheritable(master) and not os.get_inheritable(slave)
         assert os.write(slave, b"pty") == 3
         assert os.read(master, 3) == b"pty"
     finally:
         os.close(slave)
         os.close(master)
+    assert os.device_encoding(slave) is None
     assert os.listdir in os.supports_fd
     capabilities = (supports_dir_fd, supports_fd, supports_follow_symlinks, supports_effective_ids)
     operations = (os.lstat, os.open, os.rmdir, os.stat, os.unlink, os.remove, os.fstat)
