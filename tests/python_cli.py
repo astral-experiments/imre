@@ -2717,6 +2717,7 @@ def report(text):
             "boxed_os_eventfd.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
+            "boxed_os_lockf.py",
             "boxed_os_pread.py",
             "boxed_os_pwrite.py",
             "boxed_os_readinto.py",
@@ -3031,6 +3032,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_posix_rtld_flags.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sysconf.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_device.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

@@ -19,6 +19,10 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     #[cfg(target_os = "linux")]
     {
         let constant = match name {
+            "F_LOCK" => Some(libc::F_LOCK),
+            "F_TLOCK" => Some(libc::F_TLOCK),
+            "F_ULOCK" => Some(libc::F_ULOCK),
+            "F_TEST" => Some(libc::F_TEST),
             "POSIX_FADV_NORMAL" => Some(libc::POSIX_FADV_NORMAL),
             "POSIX_FADV_SEQUENTIAL" => Some(libc::POSIX_FADV_SEQUENTIAL),
             "POSIX_FADV_RANDOM" => Some(libc::POSIX_FADV_RANDOM),
@@ -131,6 +135,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "DirEntry" if cfg!(any(target_os = "linux", target_os = "macos")) => {
             Intrinsic::ObjectRuntimeExport("posix.DirEntry")
         }
+        "major" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.major"),
+        "minor" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.minor"),
+        "makedev" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.makedev"),
         #[cfg(target_os = "linux")]
         "EFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::EFD_CLOEXEC)),
         #[cfg(target_os = "linux")]
@@ -161,6 +168,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
         "read" => Intrinsic::Fd(FdOperation::Read),
         "readinto" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readinto"),
+        "lockf" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.lockf"),
         "pread" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pread"),
         "pwrite" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pwrite"),
         "write" => Intrinsic::Fd(FdOperation::Write),

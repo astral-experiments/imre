@@ -19,6 +19,7 @@ except ImportError:
     pass
 
 if sys.platform == "linux":
+    from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
     import posix as _posix
     from posix import pipe2
@@ -35,6 +36,7 @@ if sys.platform == "linux":
         sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
     )
+    from posix import major, makedev, minor
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
 
 if sys.platform == "linux":
