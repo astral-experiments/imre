@@ -1822,7 +1822,7 @@ def _alias_type_arg(arg, message="Parameters to generic types must be types."):
 
 
 def _is_parameterized_typing_alias(value):
-    return type(value) in (_typing._GenericAlias, _typing._CallableGenericAlias, _typing._LiteralGenericAlias)
+    return _typing_runtime._get_alias_kind(value) == "typing"
 
 
 def _named_alias_bases(alias, bases):

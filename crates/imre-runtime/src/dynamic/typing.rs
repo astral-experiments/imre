@@ -2431,12 +2431,11 @@ pub(super) fn call(
         }
         ("_get_alias_kind", [value]) => Ok(match ctx.heap.get(*value) {
             Value::GenericAlias(alias) => {
-                let kind = if alias.is_builtin_alias() {
-                    "builtin"
-                } else if alias.kind == AliasKind::Unpack {
-                    "unpack"
-                } else {
-                    "typing"
+                let kind = match alias.kind {
+                    AliasKind::Builtin | AliasKind::AbcCallable => "builtin",
+                    AliasKind::Generic | AliasKind::Callable | AliasKind::Literal(_) => "typing",
+                    AliasKind::Concatenate => "concatenate",
+                    AliasKind::Unpack => "unpack",
                 };
                 ctx.text(kind)
             }
