@@ -366,6 +366,7 @@ pub(crate) enum IntrinsicModule {
     Array,
     Imp,
     Ast,
+    Atexit,
     Marshal,
     Gc,
     Pickle,
@@ -840,6 +841,7 @@ impl IntrinsicModule {
             "array" => Some(Self::Array),
             "_imp" => Some(Self::Imp),
             "ast" => Some(Self::Ast),
+            "atexit" => Some(Self::Atexit),
             "marshal" => Some(Self::Marshal),
             "gc" => Some(Self::Gc),
             "pickle" => Some(Self::Pickle),
@@ -1029,6 +1031,13 @@ impl IntrinsicModule {
             (Self::Imp, "_override_multi_interp_extensions_check") => {
                 Intrinsic::ObjectRuntimeExport("_imp._override_multi_interp_extensions_check")
             }
+            (Self::Atexit, "register") => Intrinsic::ObjectRuntimeExport("atexit.register"),
+            (Self::Atexit, "unregister") => Intrinsic::ObjectRuntimeExport("atexit.unregister"),
+            (Self::Atexit, "_run_exitfuncs") => {
+                Intrinsic::ObjectRuntimeExport("atexit._run_exitfuncs")
+            }
+            (Self::Atexit, "_ncallbacks") => Intrinsic::ObjectRuntimeExport("atexit._ncallbacks"),
+            (Self::Atexit, "_clear") => Intrinsic::ObjectRuntimeExport("atexit._clear"),
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
@@ -1584,6 +1593,7 @@ impl IntrinsicModule {
             (Self::WeakRef, "WeakKeyDictionary") => {
                 Intrinsic::ObjectRuntimeExport("weakref.WeakKeyDictionary")
             }
+            (Self::WeakRef, "finalize") => Intrinsic::ObjectRuntimeExport("weakref.finalize"),
             (Self::WeakRef, "ref") => Intrinsic::ObjectRuntimeExport("weakref.ref"),
             (Self::WeakRef, "WeakMethod") => Intrinsic::ObjectRuntimeExport("weakref.WeakMethod"),
             (Self::WeakRef, "WeakSet") => Intrinsic::ObjectRuntimeExport("weakref.WeakSet"),
@@ -4139,6 +4149,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Ast
+                    | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
                     | IntrinsicModule::ImportlibBootstrapExternal
