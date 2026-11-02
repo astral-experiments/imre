@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::{
     Context, builtins,
-    value::{Error, FALSE, Id, NONE, Result, TRUE, Value},
+    value::{self, Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 use crate::objects::interpreter_stdlib as system;
 
