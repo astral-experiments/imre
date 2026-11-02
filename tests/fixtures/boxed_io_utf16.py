@@ -91,7 +91,12 @@ def native_utf32():
         assert stream.seek(cookie) == cookie and stream.read() == '😀\n\ufeffZ'
         assert stream.seek(0) == 0 and stream.read() == 'A😀\n\ufeffZ'
 
-    assert io.TextIOWrapper(io.BytesIO(), encoding='u32').read() == ''
+    stream = io.TextIOWrapper(io.BytesIO(), encoding='u32')
+    assert stream.readline() == '' and stream.tell() == 0
+    stream = io.TextIOWrapper(io.BytesIO(b'\xff'), encoding='utf-32', errors='replace')
+    assert stream.readline() == '\ufffd'
+    stream.reconfigure(encoding='ascii')
+    assert stream.tell() == 1
     for data, expected in ((b'\0' * 4, 'Stream does not start with BOM'),
                            (b'\0', 'truncated data')):
         stream = io.TextIOWrapper(io.BytesIO(data), encoding='utf-32')

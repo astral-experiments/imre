@@ -584,6 +584,13 @@ impl Wrapper {
             if !all {
                 let nonempty = input.final_chunk_has_text();
                 input.decoded_chunk_nonempty = (!line || !end || nonempty).then_some(nonempty);
+                if line && end {
+                    if nonempty {
+                        // The decoder can still emit a pending CR or an error replacement at EOF.
+                        continue;
+                    }
+                    input.clear_snapshot();
+                }
             }
             if end {
                 let part = input
