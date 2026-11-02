@@ -15,10 +15,11 @@ mod exception_forwarders;
 mod exceptions;
 mod inheritance;
 mod init_hooks;
+mod init_mappings;
 mod record_hash;
 pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
-pub(crate) use exception_forwarders::ForwardingInitializer;
+pub(crate) use exception_forwarders::{ForwardingInitializer, mangle_fields, private_field};
 pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::{direct_base_init, super_init, super_method};
 
@@ -87,6 +88,10 @@ pub(crate) struct Class {
 }
 
 impl Class {
+    pub(crate) fn has_literal_hook(&self, name: &str) -> bool {
+        self.init_hooks.get(name).is_some_and(|hook| hook.writes.is_empty())
+    }
+
     /// The ABI slot stays in the root layout when a subclass adds Python fields.
     pub(crate) fn exception_argument_slot(&self) -> usize {
         self.fields
@@ -806,7 +811,7 @@ fn collect_class(
                 }
                 let mut method = method.clone();
                 if forwarder.is_some() {
-                    exception_forwarders::mangle_fields(node.name.as_str(), &mut method);
+                    mangle_fields(node.name.as_str(), &mut method, |_| true);
                 }
                 methods.push(method);
                 method_kinds.push(kind);
@@ -1014,6 +1019,7 @@ fn collect_class(
         let infer = fields.len() == inherited_fields.len();
         inheritance::annotated_fields(graph, definition.module, &mut methods[init], &mut fields);
         if infer {
+            init_mappings::infer(graph, definition.module, init, &mut methods, &mut fields);
             inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields);
             // A write to inherited or local class data creates an instance shadow.
             fields.retain(|f| {
@@ -1538,10 +1544,16 @@ fn check_initializer(
         let mut self_use = SelfUse(receiver, None, &initialized);
         self_use.visit_expr(&assignment.value);
         if let Some(expression) = self_use.1 {
-            return Err(module.error(
-                expression,
-                "__init__ cannot expose self before construction or read an uninitialized field",
-            ));
+            if let Some(name) = init_hooks::receiver_call(&assignment.value, receiver, true)
+                && matches!(lookup(name), Some(Ok(writes)) if writes.is_empty())
+            {
+                hooks.entry(name.to_owned()).or_default();
+            } else {
+                return Err(module.error(
+                    expression,
+                    "__init__ cannot expose self before construction or read an uninitialized field",
+                ));
+            }
         }
         let mut targets = Vec::new();
         for target in &assignment.targets {
@@ -1551,6 +1563,22 @@ fn check_initializer(
             if let ast::Expr::Name(name) = target {
                 if name.id == receiver {
                     return Err(module.error(target, "an initializer cannot rebind its receiver"));
+                }
+                continue;
+            }
+            if let ast::Expr::Subscript(item) = target
+                && let ast::Expr::Attribute(field) = &*item.value
+                && matches!(&*field.value, ast::Expr::Name(name) if name.id == receiver)
+                && declared.contains(field.attr.as_str())
+            {
+                // Storing an item reads the container and its index. It initializes no field.
+                let mut use_self = SelfUse(receiver, None, &initialized);
+                use_self.visit_expr(target);
+                if let Some(expr) = use_self.1 {
+                    return Err(module.error(
+                        expr,
+                        "a subscript assignment cannot expose self or read an uninitialized field",
+                    ));
                 }
                 continue;
             }

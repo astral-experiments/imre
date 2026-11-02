@@ -92,6 +92,7 @@ pub(in crate::dynamic) struct Pattern {
     pub(in crate::dynamic) flags: i64,
     bytes: bool,
     engine_source: String,
+    surrogate_literals: Option<Box<Pattern>>,
     regex: Matcher,
     assertions: Vec<(String, Guard)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
@@ -116,6 +117,13 @@ impl Pattern {
                 })
         {
             return false;
+        }
+        // Scalar-only subjects cannot match any surrogate literal. The alternate
+        // program distinguishes the actual code points on surrogate-bearing subjects.
+        match (&self.surrogate_literals, &other.surrogate_literals) {
+            (None, None) => {}
+            (Some(a), Some(b)) if a.same_program(b) => {}
+            _ => return false,
         }
         if self.engine_source == other.engine_source {
             return true;
@@ -384,6 +392,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
             if c == '(' && !in_class && chars.peek() == Some(&'?') {
                 let mut group = chars.clone();
                 group.next();
+                prefer_translation |= group.peek() == Some(&'#');
                 let mut prefer_python_flags = false;
                 while let Some(flag) = group.next_if(|c| "aiLmsux-".contains(*c)) {
                     prefer_python_flags |= matches!(flag, 'a' | 'u' | 'i' | 'x');
@@ -474,7 +483,14 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
     use regex_syntax::ast::{ErrorKind, parse::ParserBuilder};
     use std::borrow::Cow;
 
-    let text: Cow<'_, str> = match ctx.heap.get(source) {
+    let text: Cow<'_, str> = match ctx.heap.get(ctx.scalar_value(source)) {
+        // Preserve one parser position per original Python code point.
+        Value::SurrogateStr(points) => Cow::Owned(
+            points
+                .iter()
+                .map(|&p| char::from_u32(p).unwrap_or('\u{fffd}'))
+                .collect(),
+        ),
         Value::Bytes(bytes) => Cow::Owned(bytes.iter().copied().map(char::from).collect()),
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
@@ -485,6 +501,10 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
     if let Some(error) = group_names::diagnostic(
         &text,
         matches!(ctx.heap.get(source), Value::Bytes(_)),
+        match ctx.heap.get(ctx.scalar_value(source)) {
+            Value::SurrogateStr(points) => Some(points),
+            _ => None,
+        },
         &parsed,
     ) {
         return Some(error);
@@ -709,20 +729,44 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             "unsupported native regular expression flags",
         ));
     }
+    let prepare = |spelling: &[u8]| {
+        let (spelling, flags) = leading_match_flags(spelling, flags);
+        let repeated = repeated_literal_capture(spelling, flags, bytes);
+        let spelling = repeated.as_deref().unwrap_or(spelling);
+        let source = if bytes {
+            byte_pattern(spelling)
+        } else {
+            std::str::from_utf8(spelling)
+                .expect("text pattern")
+                .to_owned()
+        };
+        (flags, source)
+    };
+    if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(id)) {
+        let (plain, encoded) = surrogate::literal_patterns(points)?;
+        let (flags, source) = prepare(encoded.as_bytes());
+        let encoded = compile_source(ctx, id, false, flags, source)?;
+        let (flags, source) = prepare(plain.as_bytes());
+        let mut pattern = compile_source(ctx, id, false, flags, source)?;
+        pattern.surrogate_literals = Some(Box::new(encoded));
+        return Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))));
+    }
     let spelling = match ctx.heap.get(ctx.scalar_value(id)) {
         Value::Bytes(value) => value.as_slice(),
         _ => ctx.str_value(id)?.as_bytes(),
     };
-    let (spelling, flags) = leading_match_flags(spelling, flags);
-    let repeated = repeated_literal_capture(spelling, flags, bytes);
-    let spelling = repeated.as_deref().unwrap_or(spelling);
-    let source = if bytes {
-        byte_pattern(spelling)
-    } else {
-        std::str::from_utf8(spelling)
-            .expect("text pattern")
-            .to_owned()
-    };
+    let (flags, source) = prepare(spelling);
+    let pattern = compile_source(ctx, id, bytes, flags, source)?;
+    Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))))
+}
+
+fn compile_source(
+    ctx: &mut Context,
+    id: Id,
+    bytes: bool,
+    flags: i64,
+    source: String,
+) -> Result<Pattern> {
     let ascii = bytes || flags & ASCII != 0;
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
     // the literal guard without extending Python's word-category membership.
@@ -743,7 +787,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         Ok((source, matcher))
     };
     let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
-    let global_verbose = source.starts_with("(?x)");
+    let global_verbose = imre_regex::leading_verbose(&source);
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
             if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, false) {
@@ -896,17 +940,18 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
     } else {
         flags
     };
-    Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
+    Ok(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },
         bytes,
         engine_source,
+        surrogate_literals: None,
         regex,
         assertions,
         full: OnceCell::new(),
         close_order: OnceCell::new(),
         split_retry: OnceCell::new(),
-    }))))
+    })
 }
 
 pub(super) fn module_call(
@@ -1170,6 +1215,58 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
     }
 }
 
+/// The engine searches bytes, while matches on code-point strings index the original subject.
+struct SearchSubject {
+    id: Id,
+    bytes_pattern: bool,
+    projection: Option<surrogate::Projection>,
+}
+
+impl SearchSubject {
+    fn new(ctx: &Context, pattern: &Pattern, id: Id, method: &str) -> Result<Self> {
+        let projection = match ctx.heap.get(ctx.scalar_value(id)) {
+            Value::SurrogateStr(points)
+                if matches!(ctx.heap.get(ctx.scalar_value(pattern.source)), Value::SurrogateStr(_)) =>
+            {
+                Some(surrogate::Projection::for_literals(method, points)?)
+            }
+            Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
+                ctx.str_value(pattern.source).ok(),
+                &pattern.regex,
+                method,
+                points,
+            )?),
+            _ => None,
+        };
+        Ok(Self {
+            id,
+            bytes_pattern: pattern.bytes,
+            projection,
+        })
+    }
+
+    fn bytes<'a>(&'a self, ctx: &'a Context) -> Result<&'a [u8]> {
+        match &self.projection {
+            Some(p) => Ok(p.text.as_bytes()),
+            None => subject_bytes(ctx, self.id, self.bytes_pattern),
+        }
+    }
+
+    fn original(&self, span: Span) -> Span {
+        self.projection.as_ref().map_or(span, |p| p.original(span))
+    }
+
+    fn slice(&self, ctx: &mut Context, span: Span) -> Result<Id> {
+        if let Some(p) = &self.projection {
+            let points = ctx.string_codepoints(self.id)?;
+            let slice = crate::dynamic::copy_ids(&points[p.original(span).range()])?;
+            return Ok(ctx.text_codepoints(slice));
+        }
+        let data = &subject_bytes(ctx, self.id, self.bytes_pattern)?[span.range()];
+        Ok(ctx.alloc(group_value(data, self.bytes_pattern)))
+    }
+}
+
 /// Convert the Python character bounds before searching the original UTF-8 text.
 pub(super) fn search(
     ctx: &mut Context,
@@ -1215,19 +1312,13 @@ pub(super) fn search(
             ));
         }
     };
-    let projection = match ctx.heap.get(ctx.scalar_value(string)) {
-        Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
-            ctx.str_value(pattern.source).ok(),
-            &pattern.regex,
-            method,
-            points,
-        )?),
-        _ => None,
+    let pattern = if matches!(ctx.heap.get(ctx.scalar_value(string)), Value::SurrogateStr(_)) {
+        pattern.surrogate_literals.as_deref().unwrap_or(&pattern)
+    } else {
+        &pattern
     };
-    let text = match &projection {
-        Some(p) => p.text.as_bytes(),
-        None => subject_bytes(ctx, string, pattern.bytes)?,
-    };
+    let subject = SearchSubject::new(ctx, pattern, string, method)?;
+    let text = subject.bytes(ctx)?;
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
             i.min(text.len())
@@ -1245,7 +1336,7 @@ pub(super) fn search(
     if method == "findall" {
         // Keep the prefix for anchors and word boundaries before pos.
         let text = text[..end].to_vec();
-        return findall(ctx, &pattern, &text, start);
+        return findall(ctx, pattern, &text, start);
     }
     if matches!(method, "scanner" | "finditer") {
         let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
@@ -1300,7 +1391,7 @@ pub(super) fn search(
     }
     let last = pattern.last_capture(&text[..end], &captures);
     let spans = group_spans(&captures)
-        .map(|span| span.map(|s| projection.as_ref().map_or(s, |p| p.original(s))))
+        .map(|span| span.map(|s| subject.original(s)))
         .collect();
     Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
         last,

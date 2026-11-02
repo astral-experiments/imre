@@ -438,8 +438,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "_imre_tempfile",
-            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "check_text_options"
-            | "open_named" | "finish_named" | "keep_named",
+            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "finalize_at_shutdown",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
@@ -539,6 +538,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("_typing", "_get_args") => ctx.builtin("typing.get_args"),
+        ("_typing", "_get_origin") => ctx.builtin("typing.get_origin"),
         ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
@@ -572,8 +573,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_overloads"
             | "clear_overloads"
             | "_overload_dummy"
-            | "get_args"
-            | "get_origin"
             | "_GenericAlias"
             | "_CallableGenericAlias"
             | "_LiteralGenericAlias",
@@ -700,7 +699,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin("posix._path_splitroot_ex")
         }
         ("posix", "environ") => os::environment(ctx),
-        ("posix", "_create_environ" | "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
+        ("posix", "_create_environ" | "putenv" | "unsetenv") => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }

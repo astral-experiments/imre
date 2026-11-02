@@ -451,9 +451,7 @@ impl Context {
         if self.scope_name(scope, "__qualname__").is_none() {
             self.bind_local(scope, "__qualname__", name);
         }
-        if self.scope_name(scope, "__annotate_func__").is_some() {
-            self.enable_class_annotation_provider(scope);
-        }
+        self.enable_class_annotation_provider(scope);
         if metaclass.is_some() {
             let original = self.scope_name(scope, "__orig_bases__");
             super::typing::class_parameters(self, scope, original, &bases)?;

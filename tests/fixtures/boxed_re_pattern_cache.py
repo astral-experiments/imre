@@ -5,6 +5,10 @@ class Text(str):
     pass
 
 
+class Binary(bytes):
+    pass
+
+
 class Unhashable(str):
     __hash__ = None
 
@@ -48,4 +52,9 @@ def current():
     assert plain == grouped and hash(plain) == hash(grouped)
     assert compile_fresh('(?=a).') != compile_fresh('(?=b).')
     assert compile_fresh('(?P<x>a)') == compile_fresh('(?P<y>a)')
+    binary = Binary(b'abc')
+    assert re.compile(binary).pattern is binary and re.fullmatch(binary, b'abc')
+    high = compile_fresh(chr(0xd800))
+    assert high != compile_fresh(chr(0xdfff))
+    assert high.fullmatch(chr(0xd800)) and high.fullmatch(chr(0xdfff)) is None
     print('pattern cache and comparison passed')

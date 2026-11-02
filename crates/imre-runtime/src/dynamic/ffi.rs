@@ -447,7 +447,10 @@ impl Context {
                 Ok(a)
             }
             "annotate" => {
-                if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
+                if self.scope_data(a).class_body.is_some() {
+                    let mapping = self.lookup_class_local(a, "__annotations__")?;
+                    self.put_item(mapping, b, c)?;
+                } else if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
@@ -841,7 +844,15 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             status
         }
         Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
-            ctx.report_os_error(error);
+            if stdlib::traceback::chain_link(&error).is_some() {
+                stdlib::traceback::report_chain(&mut ctx, error);
+            } else {
+                ctx.report_os_error(error);
+            }
+            1
+        }
+        Err(error) if stdlib::traceback::chain_link(&error).is_some() => {
+            stdlib::traceback::report_chain(&mut ctx, error);
             1
         }
         Err(mut error) => {
@@ -866,6 +877,15 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     };
     ctx.workers.join_before_exit_callbacks();
     atexit::run(&mut ctx);
+    if let Err(error) = ctx.finalize_shutdown_resources() {
+        super::unraisable::report(
+            &mut ctx,
+            error,
+            false,
+            None,
+            "Exception ignored during resource cleanup",
+        );
+    }
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::disable();
     if status == 0 && stdlib::io::has_pending_callback_write(&ctx) {
@@ -873,7 +893,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
 
         let _ = writeln!(
             std::io::stderr().lock(),
-            "NotImplementedError: BufferedWriter has unflushed bytes at shutdown; explicitly flush or close Python-backed writers"
+            "NotImplementedError: buffered stream has unflushed bytes at shutdown; explicitly flush or close Python-backed writers"
         );
         return 1;
     }

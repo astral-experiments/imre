@@ -148,6 +148,7 @@ enum Body<'a> {
     AnnotationValue(&'a ast::Expr),
     AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
+    YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
     Generator(&'a [ast::Comprehension], &'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
@@ -313,7 +314,7 @@ impl Output {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
-            Body::GeneratorFunction(_) => {}
+            Body::GeneratorFunction(_) | Body::YieldingLambda(_) => {}
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::Unsupported(stmt, reason) => {

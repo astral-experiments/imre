@@ -164,6 +164,68 @@ fn call_with_active_exception<const N: usize>(
     ctx.call(function, vec![exception], options)
 }
 
+/// Find the exception that precedes this one in its displayed traceback.
+pub(in crate::dynamic) fn chain_link(error: &Error) -> Option<(Id, &'static str)> {
+    match error.trace.as_ref().and_then(|trace| trace.cause) {
+        Some(NONE) => None,
+        Some(cause) => Some((
+            cause,
+            "\nThe above exception was the direct cause of the following exception:\n\n",
+        )),
+        None if error.context != NONE => Some((
+            error.context,
+            "\nDuring handling of the above exception, another exception occurred:\n\n",
+        )),
+        None => None,
+    }
+}
+
+/// Render an uncaught chain before shutdown releases its Python exception objects.
+pub(in crate::dynamic) fn report_chain(ctx: &mut Context, error: Error) {
+    use std::io::Write;
+
+    let mark = ctx.heap.temporary_mark();
+    let exception = ctx.raised_instance(error);
+    ctx.heap.keep(exception);
+    if print_uncaught(ctx, exception).is_err() {
+        // stderr itself may be gone or unwritable. Keep the exception's arguments
+        // visible on fd 2 without calling its Python string hook a second time.
+        let mut stderr = std::io::stderr().lock();
+        let _ = writeln!(stderr, "object type name: {}", ctx.type_name(exception));
+        let _ = writeln!(stderr, "object repr     : {}", ctx.repr(exception));
+        let _ = writeln!(stderr, "lost sys.stderr");
+    }
+    ctx.heap.release_temporaries_since(mark);
+}
+
+fn print_uncaught(ctx: &mut Context, exception: Id) -> Result<Id> {
+    let file = ctx
+        .sys_binding("stderr")?
+        .ok_or_else(|| Error::new_static("RuntimeError", "lost sys.stderr"))?;
+    if file == NONE {
+        return Ok(NONE);
+    }
+    ctx.heap.keep(file);
+    // The interpreter selects the innermost frames for a positive limit.
+    let limit = ctx
+        .sys_binding("tracebacklimit")?
+        .and_then(|id| ctx.as_int(id).ok())
+        .map_or(i64::MAX, |n| {
+            n.to_i64().unwrap_or_else(|| {
+                if n.big().sign() == num_bigint::Sign::Minus {
+                    0
+                } else {
+                    i64::MAX
+                }
+            })
+        });
+    let options = [
+        ("file".to_owned(), file),
+        ("limit".to_owned(), ctx.int(-limit.max(0))),
+    ];
+    print(ctx, &[exception], &options)
+}
+
 fn render(
     ctx: &mut Context,
     args: &[Id],
@@ -236,21 +298,10 @@ fn render(
         let Value::Raised(error) = ctx.heap.get(current) else {
             break;
         };
-        let (prior, message) =
-            if let Some(cause) = error.trace.as_ref().and_then(|trace| trace.cause) {
-                (
-                    cause,
-                    "\nThe above exception was the direct cause of the following exception:\n\n",
-                )
-            } else if error.context != NONE {
-                (
-                    error.context,
-                    "\nDuring handling of the above exception, another exception occurred:\n\n",
-                )
-            } else {
-                break;
-            };
-        if prior == NONE || !seen.insert(prior) {
+        let Some((prior, message)) = chain_link(error) else {
+            break;
+        };
+        if !seen.insert(prior) {
             break;
         }
         current = prior;

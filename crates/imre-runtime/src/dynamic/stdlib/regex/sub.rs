@@ -51,6 +51,13 @@ fn substitute(
             })
         });
     }
+    if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(repl))
+        && !points.contains(&u32::from(b'\\'))
+    {
+        return expanded_sub(ctx, &pattern, receiver, string, limit, false, |_, _| {
+            Ok(repl)
+        });
+    }
     let replacement_is_bytes = replacement_is_bytes(ctx, repl)?;
     let replacement = if replacement_is_bytes {
         ctx.native_buffer_bytes(repl)?
@@ -63,6 +70,14 @@ fn substitute(
             expanded_sub(ctx, &pattern, receiver, string, limit, false, |ctx, m| {
                 template.expand(ctx, &m)
             })
+        });
+    }
+    if matches!(
+        ctx.heap.get(ctx.scalar_value(string)),
+        Value::SurrogateStr(_)
+    ) {
+        return expanded_sub(ctx, &pattern, receiver, string, limit, false, |_, _| {
+            Ok(repl)
         });
     }
     let text = subject_bytes(ctx, string, pattern.bytes)?;
@@ -301,7 +316,8 @@ fn expanded_sub(
     exposes_match: bool,
     mut expand: impl FnMut(&mut Context, Match) -> Result<Id>,
 ) -> Result<(Id, isize)> {
-    let length = subject_bytes(ctx, string, pattern.bytes)?.len();
+    let subject = SearchSubject::new(ctx, pattern, string, "sub")?;
+    let length = subject.bytes(ctx)?.len();
     let mut pieces = Vec::new();
     let mut add = |item| -> Result<()> {
         pieces
@@ -315,19 +331,18 @@ fn expanded_sub(
     let mut cursor = 0;
     let mut count = 0;
     while limit == 0 || count < limit {
-        let text = subject_bytes(ctx, string, pattern.bytes)?;
+        let text = subject.bytes(ctx)?;
         let span = match split::next_span(pattern, text, 0, previous, &mut caps) {
             Ok(Some(span)) => span,
             Ok(None) => break,
             Err(message) => return Err(pattern.match_error(ctx, message)),
         };
         if cursor < span.start {
-            let gap = group_value(&text[cursor..span.start], pattern.bytes);
-            add(ctx.alloc(gap))?;
+            add(subject.slice(ctx, Span::from(cursor..span.start))?)?;
         }
         let mark = ctx.heap.temporary_mark();
         let last = if exposes_match {
-            pattern.last_capture(subject_bytes(ctx, string, pattern.bytes)?, &caps)
+            pattern.last_capture(subject.bytes(ctx)?, &caps)
         } else {
             LastCapture::Unavailable
         };
@@ -335,7 +350,9 @@ fn expanded_sub(
             last,
             pattern: receiver,
             subject: string,
-            spans: group_spans(&caps).collect(),
+            spans: group_spans(&caps)
+                .map(|span| span.map(|s| subject.original(s)))
+                .collect(),
         };
         let item = expand(ctx, matched)?;
         ctx.heap.release_temporaries_since(mark);
@@ -347,15 +364,16 @@ fn expanded_sub(
         cursor = span.end;
         count += 1;
     }
-    if previous.is_none() && matches!(ctx.heap.get(string), Value::Str(_) | Value::Bytes(_)) {
+    if previous.is_none()
+        && matches!(
+            ctx.heap.get(string),
+            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+        )
+    {
         return Ok((string, 0));
     }
     if cursor < length {
-        let tail = group_value(
-            &subject_bytes(ctx, string, pattern.bytes)?[cursor..],
-            pattern.bytes,
-        );
-        add(ctx.alloc(tail))?;
+        add(subject.slice(ctx, Span::from(cursor..length))?)?;
     }
 
     let invalid = |ctx: &Context, i: usize, item: Id| {

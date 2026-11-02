@@ -260,13 +260,10 @@ impl Context {
     }
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
-        if let Some(&dictionary) = self.native_type_dicts.get(&class) {
-            return self
-                .dict_entries(dictionary)?
-                .iter()
-                .find_map(|&(key, value)| {
-                    (self.str_value(key).ok() == Some(name)).then_some(value)
-                });
+        if let Some(&dictionary) = self.native_type_dicts.get(&class)
+            && let Some(value) = self.dict_named_item(dictionary, name)
+        {
+            return Some(value);
         }
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
@@ -1849,6 +1846,10 @@ impl Context {
         if name == "__dict__"
             && let Some(&dictionary) = self.native_type_dicts.get(&obj)
         {
+            if matches!(self.heap.get(obj), Value::Native(symbol) if symbol == "typing._GenericAlias")
+            {
+                typing::include_generic_alias_methods(self, obj, dictionary)?;
+            }
             return Ok(self.alloc(Value::MappingProxy(dictionary)));
         }
         if name == "__new__" {
@@ -2788,7 +2789,7 @@ impl Context {
                 owner,
                 name: field,
                 ..
-            } if matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
+            } if matches!(owner, "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
@@ -2813,7 +2814,10 @@ impl Context {
                     }
                     "__get__" | "__set__" | "__delete__"
                         if name == "__get__"
-                            || matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
+                            || matches!(
+                                owner,
+                                "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS
+                            )
                             || HashState::is_provider_class(owner) =>
                     {
                         let symbol = format!("getset_descriptor.{name}");
@@ -3541,10 +3545,8 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "bool"
-                    && matches!(
-                        name,
-                        "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
-                    ) =>
+                    && (builtins::real_methods("int").contains(&name)
+                        || matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes")) =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -3608,11 +3610,14 @@ impl Context {
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
                     || (class == "int"
-                        && matches!(
-                            name,
-                            "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
-                        ))
-                    || (class == "float" && matches!(name, "__trunc__" | "as_integer_ratio"))
+                        && (builtins::real_methods("int").contains(&name)
+                            || matches!(
+                                name,
+                                "__add__" | "__index__" | "bit_length" | "to_bytes"
+                            )))
+                    || (class == "float"
+                        && (builtins::real_methods(class).contains(&name)
+                            || name == "as_integer_ratio"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -3709,6 +3714,7 @@ impl Context {
                     return Ok(self.class_dictionary(scope));
                 }
                 if matches!(name, "__annotations__" | "__annotate__")
+                    && metaclass_member.is_none()
                     && self.has_class_annotation_provider(scope)
                 {
                     return self.class_annotation_attr(obj, scope, name);
@@ -4222,10 +4228,12 @@ impl Context {
             }
             Value::Class { scope, .. } => {
                 if matches!(name, "__annotations__" | "__annotate__")
+                    && member.is_none()
                     && self.has_class_annotation_provider(scope)
                 {
                     return self.update_class_annotation_attr(scope, name, None);
                 }
+                let annotations = self.scope_data(scope).class_namespace.as_ref();
                 let error = match name {
                     "__name__" | "__qualname__" | "__bases__" | "__type_params__"
                     | "__module__" | "__doc__" => Error::new(
@@ -4240,15 +4248,12 @@ impl Context {
                         format!("attribute '{name}' of 'type' objects is not writable"),
                     ),
                     "__base__" => Error::new("AttributeError", "readonly attribute"),
-                    "__annotate__" => {
+                    "__annotate__" if member.is_none() => {
                         Error::new("TypeError", "cannot delete __annotate__ attribute")
                     }
                     "__annotations__"
-                        if self
-                            .scope_data(scope)
-                            .class_namespace
-                            .as_ref()
-                            .is_some_and(|namespace| namespace.annotation_sites.is_some()) =>
+                        if member.is_none()
+                            && annotations.is_some_and(|ns| ns.annotation_sites.is_some()) =>
                     {
                         Error::new("AttributeError", "__annotations__")
                     }
@@ -5050,6 +5055,7 @@ impl Context {
                 }
                 let scope = *scope;
                 if matches!(name, "__annotations__" | "__annotate__")
+                    && member.is_none()
                     && self.has_class_annotation_provider(scope)
                 {
                     return self.update_class_annotation_attr(scope, name, Some(value));
@@ -5196,12 +5202,18 @@ impl Context {
     }
 
     /// These native layouts inherit object.__new__ for bare instance allocation.
-    fn uses_object_new(&self, base: Option<Id>) -> bool {
+    pub(super) fn uses_object_new(&self, base: Option<Id>) -> bool {
         base == self.builtins.get("object").copied()
             || base.is_some_and(|base| {
                 matches!(
                     self.heap.get(base).io_kind(),
-                    Some(stdlib::io::NEWLINE_DECODER | "BufferedRWPair" | "BufferedReader")
+                    Some(
+                        stdlib::io::NEWLINE_DECODER
+                            | "BufferedRWPair"
+                            | "BufferedReader"
+                            | "IOBase"
+                            | "BufferedIOBase"
+                    )
                 )
             })
     }
@@ -5643,11 +5655,13 @@ impl Context {
                             | "float.__getformat__"
                             | "bool.__repr__"
                             | "float.__repr__"
-                            | "float.__trunc__"
                             | "float.as_integer_ratio"
                             | "getset_descriptor.__set__"
                             | "getset_descriptor.__delete__"
                     )
+                    || name.strip_prefix("float.").is_some_and(|method| {
+                        builtins::real_methods("float").contains(&method)
+                    })
                     || !name.contains('.')
                     || matches!(
                         name.split('.').next(),
@@ -6716,7 +6730,7 @@ impl Context {
             self.bind(scope, "__type_params__", params);
         }
         let annotations = self.dict(Vec::new());
-        if bindings.postponed_annotations || self.namedtuple_base(&bases).is_none() {
+        if bindings.postponed_annotations || typed_dict_meta.is_some() {
             self.bind_local(scope, "__annotations__", annotations);
         }
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
@@ -6746,18 +6760,6 @@ impl Context {
                 || self.class_attr(meta, "__init__").is_some())
         {
             let namespace = self.active_class_namespace(scope);
-            // A deferred class annotator owns these fields. Its scratch entries are placeholders.
-            if self.dict_named_item(namespace, "__annotations__") == Some(annotations)
-                && (self
-                    .dict_named_item(namespace, "__annotate_func__")
-                    .is_some()
-                    || self
-                        .dict_entries(annotations)
-                        .is_some_and(|items| items.is_empty()))
-            {
-                let key = self.text("__annotations__");
-                self.delete_item(namespace, key)?;
-            }
             if bindings.needs_dict_cell {
                 let dict_cell = self.class_annotation_dict_cell(scope);
                 let key = self.text("__classdictcell__");
@@ -6890,17 +6892,11 @@ impl Context {
         } else {
             None
         };
-        if typed_dict_meta.is_none() && self.scope_name(scope, "__annotate_func__").is_some() {
-            self.enable_class_annotation_provider(scope);
-            if self.scope_name(scope, "__annotations__") == Some(annotations) {
-                let key = self.heap.code_name("__annotations__");
-                self.remove_binding(scope, "__annotations__", key)?;
-            }
-        }
         if let Some(original) = original {
             self.bind(scope, "__orig_bases__", original);
         }
         if typed_dict_meta.is_none() {
+            self.enable_class_annotation_provider(scope);
             super::typing::class_parameters(self, scope, original, &bases)?;
         }
         if bases.iter().any(|&base| self.is_abc_metaclass(base))

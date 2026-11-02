@@ -244,6 +244,27 @@ impl Calendar {
         })
     }
 
+    /// Resolve a local clock to the system offset on its side of a fold or gap.
+    pub(crate) fn system_offset(&self) -> Result<Self, Error> {
+        with(&self.0, |value| {
+            let Value::Date { local, fold, .. } = value else {
+                unreachable!()
+            };
+            let micros = conversion::naive_offset(*local, *fold != 0)?;
+            Ok(Self(owner(Value::Delta(micros))))
+        })
+    }
+
+    /// Obtain the fixed offset and abbreviation in effect at these UTC fields.
+    pub(crate) fn system_zone_at_utc(&self) -> Result<(Self, Option<String>), Error> {
+        let micros = self.wall_microseconds() - (EPOCH_ORD - 1) * DAY;
+        let seconds = (micros.div_euclid(1_000_000)) as i64;
+        let parts = super::super::time::ClockParts::from_int(&Int::from(seconds), false)?;
+        let offset = owner(Value::Delta(i128::from(parts.offset) * 1_000_000));
+        let name = parts.zone.as_ref().map(|name| name.as_str().to_owned());
+        Ok((Self(make_zone(offset, parts.zone)?), name))
+    }
+
     pub(crate) fn timestamp_with_offset(&self, offset: i128) -> f64 {
         total_seconds(self.wall_microseconds() - (EPOCH_ORD - 1) * DAY - offset)
     }

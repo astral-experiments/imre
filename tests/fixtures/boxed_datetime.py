@@ -168,6 +168,21 @@ def test_time_fromisoformat():
             raise AssertionError(text)
 
 
+def test_time_strptime():
+    class Clock(time):
+        pass
+
+    value = Clock().strptime("4:05:06.123 -0130", "%H:%M:%S.%f %z")
+    assert type(value) is Clock
+    assert value.isoformat() == "04:05:06.123000-01:30"
+    try:
+        time.strptime("25", "%H")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid hour")
+
+
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
@@ -767,6 +782,7 @@ def current():
     test_subclass_construction()
     test_now()
     test_time_fromisoformat()
+    test_time_strptime()
     test_time_of_day()
     test_http_date()
     test_module_exports()
@@ -870,8 +886,15 @@ def test_timestamp():
             os.environ["TZ"] = "EST+05EDT,M3.2.0,M11.1.0"
             clock.tzset()
             for fold, gap, repeat in ((0, 1331451000, 1352007000), (1, 1331447400, 1352010600)):
-                assert dt(2012, 3, 11, 2, 30, fold=fold).timestamp() == gap
-                assert dt(2012, 11, 4, 1, 30, fold=fold).timestamp() == repeat
+                missing = dt(2012, 3, 11, 2, 30, fold=fold)
+                repeated = dt(2012, 11, 4, 1, 30, fold=fold)
+                assert missing.timestamp() == gap
+                assert repeated.timestamp() == repeat
+                local = repeated.astimezone()
+                assert (local.tzname(), local.fold) == (("EDT", "EST")[fold], 0)
+                assert repeated.astimezone(UTC) == dt.fromtimestamp(repeat, UTC)
+                assert missing.astimezone(UTC) == dt.fromtimestamp(gap, UTC)
+                assert missing.astimezone().hour == (3, 1)[fold]
         finally:
             if saved is None:
                 del os.environ["TZ"]

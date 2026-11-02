@@ -357,6 +357,32 @@ fn reference_id(
         .ok_or_else(|| "unknown regex group name".into())
 }
 
+/// Comments before an initial global verbose flag do not consume a pattern atom.
+pub fn leading_verbose(mut pattern: &str) -> bool {
+    while let Some(body) = pattern.strip_prefix("(?#") {
+        let mut chars = body.chars();
+        if skip_comment(&mut chars).is_err() {
+            return false;
+        }
+        pattern = chars.as_str();
+    }
+    pattern.starts_with("(?x)")
+}
+
+fn skip_comment(input: &mut impl Iterator<Item = char>) -> Result<(), String> {
+    // The closing parenthesis must be unescaped, even inside verbose patterns.
+    loop {
+        match input.next() {
+            Some(')') => return Ok(()),
+            Some('\\') => {
+                input.next().ok_or("bad escape (end of pattern)")?;
+            }
+            Some(_) => {}
+            None => return Err("missing ), unterminated comment".into()),
+        }
+    }
+}
+
 fn tokenize(
     pattern: &str,
     mut verbose: bool,
@@ -393,6 +419,10 @@ fn tokenize(
         let atom_width = match c {
             '(' => {
                 let extension = input.next_if_eq(&'?').is_some();
+                if extension && input.next_if_eq(&'#').is_some() {
+                    skip_comment(&mut input)?;
+                    continue;
+                }
                 if literal_guards
                     && escapes.alphabet != Alphabet::UnicodeIgnoreCase
                     && extension
