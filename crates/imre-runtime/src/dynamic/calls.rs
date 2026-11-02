@@ -95,6 +95,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => {
             Some((module, function))
         }
+        #[cfg(unix)]
+        "_imre_ssl" if !function.contains('.') => Some((module, function)),
         "_hashlib" if !function.contains('.') => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
