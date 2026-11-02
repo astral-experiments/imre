@@ -1454,7 +1454,10 @@ pub(super) fn call(
     }
     if matches!(
         name,
-        os::scandir::ENTRY | os::scandir::ITER | super::value::TEMPLATE_ITER_TYPE
+        "_io._BytesIOBuffer"
+            | os::scandir::ENTRY
+            | os::scandir::ITER
+            | super::value::TEMPLATE_ITER_TYPE
     ) {
         return Err(Error::new(
             "TypeError",

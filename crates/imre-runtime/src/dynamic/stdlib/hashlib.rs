@@ -85,9 +85,12 @@ pub(super) fn call_openssl(
 
 /// Borrows the bytes of a boxed hash input, including mutable buffers.
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
-    match ctx.buffer_storage(id)? {
-        Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
-        Value::Array(array) => Ok(array.as_bytes()),
+    match ctx.heap.get(ctx.scalar_value(id)) {
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::MemoryView { .. }
+        | Value::BytesIoBuffer { .. }
+        | Value::Array(_) => ctx.native_buffer_bytes(id),
         Value::Str(_) => Err(Error::new(
             "TypeError",
             "Strings must be encoded before hashing",
@@ -316,21 +319,6 @@ fn update_from_file(ctx: &mut Context, file: Id, factory: Id, size: Option<Id>) 
         return Ok(digest);
     }
     let native_hash = matches!(ctx.heap.get(digest), Value::Hash(_));
-    if let Some(class) = ctx.heap.get(file).instance_class()
-        && ctx.heap.get(class).io_kind() == Some("BytesIO")
-    {
-        // A native digest consumes this snapshot synchronously. A Python update
-        // callback can observe the exported view and must take the getbuffer path.
-        if !native_hash {
-            return Err(Error::new(
-                "NotImplementedError",
-                "BytesIO.getbuffer requires a writable memoryview",
-            ));
-        }
-        let data = super::io::call(ctx, class, "getvalue", &[file], &[])?;
-        method(ctx, "hash.update", &[digest, data])?;
-        return Ok(digest);
-    }
     let readable = if has_attr(ctx, file, "readinto")? && has_attr(ctx, file, "readable")? {
         let read = ctx.lookup_attr(file, "readable")?;
         let value = ctx.call(read, Vec::new(), Vec::new())?;
