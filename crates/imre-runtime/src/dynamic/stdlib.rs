@@ -1004,10 +1004,7 @@ pub(super) fn call(
         let (_, frame) = ctx
             .active_frame(depth.max(0) as usize)?
             .ok_or_else(|| Error::new("ValueError", "call stack is not deep enough"))?;
-        if !ctx.audit_hooks.is_empty() {
-            let event = ctx.text("sys._getframe");
-            audit::emit(ctx, &[event, frame], &[])?;
-        }
+        audit::event(ctx, "sys._getframe", &[frame])?;
         return Ok(frame);
     }
     if name == "sys.audit" {

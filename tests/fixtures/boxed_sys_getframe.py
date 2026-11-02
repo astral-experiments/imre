@@ -31,6 +31,8 @@ def current():
 
     observed = []
     def hook(event, arguments):
+        if event == 'object.__getattr__' and arguments == (frame, 'f_code'):
+            raise PermissionError('blocked frame code')
         if event == 'sys._getframe':
             observed.extend(arguments)
             raise PermissionError('blocked frame')
@@ -41,3 +43,9 @@ def current():
         assert str(exc) == 'blocked frame' and observed == [frame]
     else:
         raise AssertionError('audit hook veto ignored')
+    try:
+        frame.f_code
+    except PermissionError as exc:
+        assert str(exc) == 'blocked frame code'
+    else:
+        raise AssertionError('frame code audit hook veto ignored')
