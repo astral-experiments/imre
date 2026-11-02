@@ -52,6 +52,7 @@ const FUNCTIONS: &[&str] = &[
     "issubclass",
     "getattr",
     "globals",
+    "vars",
     "setattr",
     "delattr",
     "hasattr",
@@ -1160,6 +1161,27 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             Ok(boolean(ctx.callable(args[0])))
+        }
+        "vars" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("vars() takes no keyword arguments"));
+            }
+            match args {
+                [object] => match ctx.lookup_attr(*object, "__dict__") {
+                    Err(error) if ctx.is_attribute_error(&error) => {
+                        Err(type_error("vars() argument must have __dict__ attribute"))
+                    }
+                    result => result,
+                },
+                [] => Err(Error::new(
+                    "NotImplementedError",
+                    "vars() requires caller locals",
+                )),
+                _ => Err(type_error(format!(
+                    "vars expected at most 1 argument, got {}",
+                    args.len()
+                ))),
+            }
         }
         "globals" => {
             if !kwargs.is_empty() {
