@@ -208,19 +208,32 @@ impl BoxedPopen {
         cleanup()
     }
 
-    pub(crate) fn communicate(
+    pub(crate) fn begin_communication(
         &self,
         input: &[u8],
         seconds: Option<f64>,
         select: bool,
-    ) -> Result<BoxedCommunication> {
-        let mut process = self.0.borrow_mut();
-        let (streams, timed_out, wait_budget) = match process.communicate(
-            input,
-            seconds.map(Deadline::Float).as_ref(),
-            false,
-            select,
-        )? {
+    ) -> Result<communicate::PendingExchange> {
+        self.0
+            .borrow_mut()
+            .begin_exchange(input, seconds, false, select)
+    }
+
+    pub(crate) fn finish_communication<E: From<Error>>(
+        &self,
+        pending: communicate::PendingExchange,
+        check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<BoxedCommunication, E> {
+        let exchange = pending.finish(
+            |timeout, select| {
+                self.0
+                    .borrow_mut()
+                    .exchange_pipes(&[], timeout, false, select)
+            },
+            check,
+        )?;
+        let process = self.0.borrow();
+        let (streams, timed_out, wait_budget) = match exchange {
             communicate::Exchange::Done([out, err]) => (
                 [
                     process.pipes[1].as_ref().map(|_| out),

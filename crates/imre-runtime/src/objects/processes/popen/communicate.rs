@@ -17,6 +17,53 @@ pub(super) enum Exchange {
     Timeout([Option<Vec<u8>>; 2], Option<f64>),
 }
 
+pub(super) enum PipeProgress {
+    Drained([Vec<u8>; 2]),
+    Timeout([Option<Vec<u8>>; 2]),
+    Interrupted,
+}
+
+/// A boxed handler can reenter Popen. Suspend the pipe borrow before calling it
+/// and resume from the saved input offset and output, on the same deadline.
+pub(crate) struct PendingExchange {
+    progress: PipeProgress,
+    control: Arc<ChildControl>,
+    start: Instant,
+    timeout: Option<f64>,
+    select: bool,
+}
+
+impl PendingExchange {
+    pub(super) fn finish<E: From<Error>>(
+        self,
+        mut resume: impl FnMut(Option<f64>, bool) -> Result<PipeProgress>,
+        mut check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Exchange, E> {
+        let remaining = || self.timeout.map(|t| t - self.start.elapsed().as_secs_f64());
+        let mut progress = self.progress;
+        let streams = loop {
+            match progress {
+                PipeProgress::Drained(streams) => break streams,
+                PipeProgress::Timeout(streams) => return Ok(Exchange::Timeout(streams, None)),
+                PipeProgress::Interrupted => {
+                    check()?;
+                    progress = resume(remaining(), self.select)?;
+                }
+            }
+        };
+        let budget = remaining();
+        if self
+            .control
+            .wait_with(budget.map(Deadline::Float).as_ref(), check)?
+            .is_none()
+        {
+            // A timeout raised by the final wait has no captured streams.
+            return Ok(Exchange::Timeout([None, None], budget));
+        }
+        Ok(Exchange::Done(streams))
+    }
+}
+
 /// Decode the rooted input using the stream mode chosen at the call site.
 unsafe fn input_bytes<'a>(input: *const (), text: bool) -> &'a [u8] {
     if input.is_null() {
@@ -171,9 +218,9 @@ fn copy(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 impl Communication {
-    fn timeout(&self) -> Result<Exchange> {
+    fn timeout(&self) -> Result<PipeProgress> {
         let snapshot = |i: usize| self.observed[i].then(|| copy(&self.output[i])).transpose();
-        Ok(Exchange::Timeout([snapshot(0)?, snapshot(1)?], None))
+        Ok(PipeProgress::Timeout([snapshot(0)?, snapshot(1)?]))
     }
 }
 
@@ -185,6 +232,42 @@ impl Popen {
         text: bool,
         select: bool,
     ) -> Result<Exchange> {
+        self.begin_exchange(
+            input,
+            deadline.map(Deadline::seconds).transpose()?,
+            text,
+            select,
+        )?
+        .finish(
+            |timeout, select| self.exchange_pipes(&[], timeout, false, select),
+            crate::objects::stdlib::check_interrupt,
+        )
+    }
+
+    pub(super) fn begin_exchange(
+        &mut self,
+        input: &[u8],
+        timeout: Option<f64>,
+        text: bool,
+        select: bool,
+    ) -> Result<PendingExchange> {
+        let start = Instant::now();
+        Ok(PendingExchange {
+            progress: self.exchange_pipes(input, timeout, text, select)?,
+            control: self.control.clone(),
+            start,
+            timeout,
+            select,
+        })
+    }
+
+    pub(super) fn exchange_pipes(
+        &mut self,
+        input: &[u8],
+        timeout: Option<f64>,
+        text: bool,
+        select: bool,
+    ) -> Result<PipeProgress> {
         let data = &mut self.communication;
         if data.started && !input.is_empty() {
             return Err(Error::new(
@@ -193,7 +276,7 @@ impl Popen {
             ));
         }
         let mut out = [Vec::new(), Vec::new()];
-        if deadline.is_none() && !data.started && self.pipes.iter().flatten().count() <= 1 {
+        if timeout.is_none() && !data.started && self.pipes.iter().flatten().count() <= 1 {
             if let Some(stdin) = &self.pipes[0] {
                 file(stdin, |f| f.communicate_stdin(input, true))?;
             } else {
@@ -211,12 +294,10 @@ impl Popen {
                     }
                 }
             }
-            self.wait(None)?;
-            return Ok(Exchange::Done(out));
+            return Ok(PipeProgress::Drained(out));
         }
 
         let start = Instant::now();
-        let timeout = deadline.map(Deadline::seconds).transpose()?;
         if !data.started {
             data.started = true;
             if let Some(stdin) = &self.pipes[0] {
@@ -248,7 +329,7 @@ impl Popen {
                 return data.timeout();
             }
             if !selector::wait(select, &mut pollfds, remaining)? {
-                continue;
+                return Ok(PipeProgress::Interrupted);
             }
             if timeout.is_some_and(|t| start.elapsed().as_secs_f64() >= t) {
                 return data.timeout();
@@ -269,7 +350,8 @@ impl Popen {
                     if n < 0 {
                         let error = io::Error::last_os_error();
                         match error.kind() {
-                            io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock => continue,
+                            io::ErrorKind::Interrupted => return Ok(PipeProgress::Interrupted),
+                            io::ErrorKind::WouldBlock => continue,
                             io::ErrorKind::BrokenPipe => true,
                             _ => return Err(errno_error(error)),
                         }
@@ -283,13 +365,11 @@ impl Popen {
                     let n = unsafe { libc::read(poll.fd, bytes.as_mut_ptr().cast(), bytes.len()) };
                     if n < 0 {
                         let error = io::Error::last_os_error();
-                        if matches!(
-                            error.kind(),
-                            io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
-                        ) {
-                            continue;
+                        match error.kind() {
+                            io::ErrorKind::Interrupted => return Ok(PipeProgress::Interrupted),
+                            io::ErrorKind::WouldBlock => continue,
+                            _ => return Err(errno_error(error)),
                         }
-                        return Err(errno_error(error));
                     }
                     data.observed[index - 1] = true;
                     append_output(&mut data.output[index - 1], &bytes[..n as usize])
@@ -303,15 +383,7 @@ impl Popen {
                 }
             }
         }
-        let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
-        if self
-            .wait(remaining.map(Deadline::Float).as_ref())?
-            .is_none()
-        {
-            // A timeout raised by wait itself has no captured streams.
-            return Ok(Exchange::Timeout([None, None], remaining));
-        }
-        Ok(Exchange::Done([
+        Ok(PipeProgress::Drained([
             copy(&self.communication.output[0])?,
             copy(&self.communication.output[1])?,
         ]))
