@@ -4711,13 +4711,8 @@ impl<'a> Checker<'a> {
                 if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func)
                         == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
-                    && call
-                        .arguments
-                        .keywords
-                        .iter()
-                        .any(|kw| kw.arg.as_ref().is_some_and(|name| name == "stdout"))
                 {
-                    Some(Statement::Expr(self.process_to_stderr(call)?))
+                    Some(Statement::Expr(self.process_run(call, true)?))
                 } else if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::AssertNever))
                 {
@@ -9236,7 +9231,7 @@ impl<'a> Checker<'a> {
             self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
         ) {
-            return self.process_run(call);
+            return self.process_run(call, false);
         }
         if let Some(Binding::Intrinsic(Intrinsic::ShellOutput { status })) =
             self.resolve(&call.func)

@@ -1083,55 +1083,6 @@ fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result
     Ok(argv)
 }
 
-/// Runs a child with its output forwarded directly to the parent's stderr.
-///
-/// # Safety
-/// The caller roots an exact list[str] until launch and checks pending on return.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u32) {
-    let run = || -> Result<ExitStatus> {
-        popen::cleanup();
-        let streams = 4;
-        let config = popen::LaunchConfig::basic(
-            args.cast(),
-            5,
-            std::ptr::null(),
-            std::ptr::null(),
-            streams,
-            0,
-        );
-        // SAFETY: the caller roots the exact argv list through launch.
-        let child = unsafe {
-            let cmd = WordKind::new(5).acquire(args as usize);
-            launch_error::spawn(&cmd, &config, streams, Default::default(), true, |_| {
-                Ok(ChildAttributes::default())
-            })
-        }?;
-        ChildGuard {
-            child,
-            reaped: false,
-        }
-        .wait()
-        .map_err(os_error)
-    };
-    let absent = || OwnedWord {
-        word: 0,
-        kind: WordKind::new(0),
-    };
-    match run() {
-        Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
-            positional_streams: false,
-            // SAFETY: the original list remains rooted while acquiring our owner.
-            cmd: unsafe { WordKind::new(5).acquire(args as usize) },
-            returncode: returncode(status),
-            stdout: absent(),
-            stderr: absent(),
-        }),
-        Ok(_) => {}
-        Err(error) => error.raise(),
-    }
-}
-
 /// Validate rooted language arguments and materialize an independent native launch.
 unsafe fn prepare_process(
     args: *const Object,
