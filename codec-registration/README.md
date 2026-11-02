@@ -21,3 +21,5 @@ PR #4034 merged as e64c7815dbdd35d7261edfb9c78bac90df29cbad from independently r
 Public O0 completed its first 37 original bodies with 25 success callbacks, 7 errors and 5 failures. All twelve exception traces lead into the original bodies. The live checkpoint predates the outcome of module ordinal 482.
 
 A clean build of merged #4034 at e64c7815 passed all eight view controls at both native optimization levels. The unchanged combined registry fixture passed at ordinary O0. The O3 class on 0c9885cf independently reproduced the first #445 and #446 body errors and the #447 success callback.
+
+Both original public class invocations registered the same 82 IDs and completed 65 in order. Both had 35 success callbacks, 21 errors, eight failures, and one original with unsuccessful subtests. All 30 first exceptions arose in the original test bodies. Both processes reached the 180-second no-callback bound in the 1,000-iteration cyclic-stream original test_rwpair_cleared_before_textio (module ordinal 510), with no adopted children or directory residue. Canonical class timeouts and subsequent disjoint selections are counted separately.
