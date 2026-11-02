@@ -5,6 +5,18 @@ def current():
 
     assert "getproxies" in request.__all__ and "AbstractHTTPHandler" not in request.__all__
     opener = request.build_opener(request.ProxyHandler({}))
+    if hasattr(http.client, "HTTPSConnection"):
+        context = object()
+        handler = request.HTTPSHandler(context=context)
+        assert handler._context is context and "HTTPSHandler" in request.__all__
+    else:
+        from urllib.error import URLError
+        try:
+            opener.open("https://example.invalid/")
+        except URLError as error:
+            assert error.reason == "unknown url type: https"
+        else:
+            raise AssertionError("unexpected HTTPS transport")
     connection = http.client.HTTPConnection
     client, peer = socket.socketpair()
 
