@@ -1,7 +1,7 @@
 use super::{Expr, Visitor, ast, resolve, visitor};
 use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
-/// Python sources used only by the boxed importer.
+/// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
         "linecache" => {
@@ -171,7 +171,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/_bootstrap_external.py",
             include_str!("../../stdlib/importlib/source_loader.py"),
         )),
-        _ => None,
+        _ => crate::modules::bundled_runtime_source(name),
     }
 }
 
