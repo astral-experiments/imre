@@ -4744,7 +4744,8 @@ impl Context {
         }
         let method = if matches!(
             (name, self.heap.get(obj)),
-            ("__xor__" | "__rxor__", Value::Set { .. })
+            ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
+                | ("__xor__" | "__rxor__", Value::Set { .. })
                 | (
                     "__or__" | "__ror__",
                     Value::Dict(_) | Value::DefaultDict { .. }
@@ -5084,7 +5085,11 @@ impl Context {
         }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
+                if matches!(op, "<" | "<=" | ">" | ">=")
+                    && matches!(self.heap.get(id), Value::Deque(_))
+                {
+                    self.builtins.get(deque::CLASS).copied()
+                } else if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
                     self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None

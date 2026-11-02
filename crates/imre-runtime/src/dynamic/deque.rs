@@ -38,8 +38,12 @@ impl Member {
 // The implemented members in CPython 3.14.5 type dictionary order, with their clinic metadata.
 const MEMBERS: &[Member] = &[
     Member::new("__repr__", "Return repr(self).", "($self, /)"),
+    Member::new("__lt__", "Return self<value.", "($self, value, /)"),
+    Member::new("__le__", "Return self<=value.", "($self, value, /)"),
     Member::new("__eq__", "Return self==value.", "($self, value, /)"),
     Member::new("__ne__", "Return self!=value.", "($self, value, /)"),
+    Member::new("__gt__", "Return self>value.", "($self, value, /)"),
+    Member::new("__ge__", "Return self>=value.", "($self, value, /)"),
     Member::new("__iter__", "Implement iter(self).", "($self, /)"),
     Member::new(
         "__init__",
@@ -746,6 +750,44 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
     result
 }
 
+/// Order the live iterators by their first unequal elements, or by which one ends first.
+fn order(ctx: &mut Context, op: &str, left: Id, right: Id) -> Result<bool> {
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(left);
+    ctx.heap.keep(right);
+    let result = ctx.with_slot_depth("maximum recursion depth exceeded in comparison", |ctx| {
+        let a = ctx.iterator(left)?;
+        ctx.heap.keep(a);
+        let b = ctx.iterator(right)?;
+        ctx.heap.keep(b);
+        let step = ctx.heap.temporary_mark();
+        loop {
+            ctx.heap.release_temporaries_since(step);
+            let x = ctx.next_item(a)?;
+            if let Some(x) = x {
+                ctx.heap.keep(x);
+            }
+            let y = ctx.next_item(b)?;
+            let (Some(x), Some(y)) = (x, y) else {
+                return Ok(match op {
+                    "<" => y.is_some(),
+                    "<=" => x.is_none(),
+                    ">" => x.is_some(),
+                    ">=" => y.is_none(),
+                    _ => unreachable!(),
+                });
+            };
+            ctx.heap.keep(y);
+            if !ctx.checked_equal(x, y)? {
+                let result = ctx.binary(op, x, y)?;
+                return ctx.truth(result);
+            }
+        }
+    });
+    ctx.heap.release_temporaries_since(roots);
+    result
+}
+
 /// Keep the element alive while its equality and truth hooks run.
 fn element_matches(ctx: &mut Context, item: Id, value: Id) -> Result<bool> {
     if item == value {
@@ -923,10 +965,19 @@ pub(super) fn method(
         initialize(ctx, receiver, rest, kwargs)?;
         return Ok(NONE);
     }
+    let comparison = match name {
+        "__lt__" => Some("<"),
+        "__le__" => Some("<="),
+        "__eq__" => Some("=="),
+        "__ne__" => Some("!="),
+        "__gt__" => Some(">"),
+        "__ge__" => Some(">="),
+        _ => None,
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            if matches!(
+            if comparison.is_some() || matches!(
                 name,
                 "__add__" | "__iadd__" | "__contains__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__"
             ) {
@@ -974,14 +1025,24 @@ pub(super) fn method(
     if name == "index" {
         return index(ctx, storage, rest);
     }
-    match (name, rest) {
-        ("__eq__" | "__ne__", [other]) => {
-            if !matches!(ctx.heap.get(ctx.scalar_value(*other)), Value::Deque(_)) {
-                return Ok(super::value::NOT_IMPLEMENTED);
-            }
-            let op = if name == "__eq__" { "==" } else { "!=" };
-            return compare(ctx, op, receiver, *other).map(builtins::boolean);
+    if let Some(op) = comparison {
+        let [other] = rest else {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
+        };
+        if !matches!(ctx.heap.get(ctx.scalar_value(*other)), Value::Deque(_)) {
+            return Ok(super::value::NOT_IMPLEMENTED);
         }
+        let result = if matches!(op, "==" | "!=") {
+            compare(ctx, op, receiver, *other)?
+        } else {
+            order(ctx, op, receiver, *other)?
+        };
+        return Ok(builtins::boolean(result));
+    }
+    match (name, rest) {
         ("__mul__" | "__rmul__" | "__imul__", [item]) => {
             let (_, n) = ctx.sequence_multiplier(*item, true)?;
             return repeat(ctx, receiver, n, name == "__imul__");
@@ -1003,7 +1064,7 @@ pub(super) fn method(
             extend(ctx, receiver, *item, false)?;
             return Ok(receiver);
         }
-        ("__getitem__" | "__delitem__" | "__add__" | "__iadd__" | "__contains__" | "__eq__" | "__ne__", _) => {
+        ("__getitem__" | "__delitem__" | "__add__" | "__iadd__" | "__contains__", _) => {
             return Err(Error::new(
                 "TypeError",
                 format!("expected 1 argument, got {}", rest.len()),

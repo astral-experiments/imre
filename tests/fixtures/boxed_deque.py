@@ -4,6 +4,37 @@ from collections import deque
 from types import MappingProxyType
 
 
+def check_ordering():
+    events = []
+
+    class Item:
+        def __eq__(self, other):
+            events.append("eq")
+            return False
+
+        def __lt__(self, other):
+            events.append("lt")
+            return self
+
+        def __bool__(self):
+            events.append("bool")
+            return True
+
+    left, right = deque([Item()]), deque([Item()])
+    assert (left < right) is True and events == ["eq", "lt", "bool"]
+    assert left >= left and not left > left
+    assert deque([1]) <= deque([1, 0]) and deque([1, 0]) > deque([1])
+    assert deque.__lt__(left, []) is NotImplemented
+
+    marker = object()
+
+    class Reflected(deque):
+        def __gt__(self, other):
+            return marker
+
+    assert (left < Reflected()) is marker
+
+
 def check_weakrefs():
     class Slotted(deque):
         __slots__ = ()
@@ -39,6 +70,7 @@ def check_weakrefs():
 
 
 def current():
+    check_ordering()
     check_weakrefs()
     marker = []
     queue = deque((item for item in (marker, "middle", 3)))
