@@ -562,6 +562,15 @@ impl Error {
         self.kind == kind
     }
 
+    /// Preserve the native parser's description, complete document, and character offset
+    /// when constructing a fresh boxed decoder's Python exception.
+    pub(crate) fn json_decode_fields(&self) -> Option<(&str, &str, usize)> {
+        match &self.payload {
+            Some(Payload::Json(error)) => Some((&error.msg, &error.doc, error.pos)),
+            _ => None,
+        }
+    }
+
     pub(super) fn json_decode(
         msg: &str,
         doc: StrOwner,

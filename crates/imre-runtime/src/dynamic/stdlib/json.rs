@@ -10,13 +10,14 @@ use crate::objects::{
 };
 use crate::{Str, StrOwner};
 
-pub(super) fn loads(ctx: &mut Context, input: Id) -> Result<Id> {
-    match ctx.heap.get(input) {
+pub(super) fn loads(ctx: &mut Context, input: Id, raise_error: Option<Id>) -> Result<Id> {
+    let result = match ctx.heap.get(input) {
         Value::Str(text) => {
             let text = Str::try_new(text).map_err(|_| crate::Error::allocation())?;
             if text.starts_with('\u{feff}') {
                 let document = StrOwner::try_new(text).map_err(|_| crate::Error::allocation())?;
-                return Err(crate::objects::json_bom_error(document).into());
+                let error = crate::objects::json_bom_error(document);
+                return Err(decode_error(ctx, input, raise_error, true, error));
             }
             parse(ctx, &text)
         }
@@ -24,19 +25,48 @@ pub(super) fn loads(ctx: &mut Context, input: Id) -> Result<Id> {
             let owner = owned_bytes_input(bytes)?;
             parse(ctx, &decode_json_bytes(&owner)?)
         }
-        _ => Err(Error::new(
-            "TypeError",
-            format!(
-                "the JSON object must be str, bytes or bytearray, not {}",
-                ctx.type_name(input)
-            ),
-        )),
-    }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "the JSON object must be str, bytes or bytearray, not {}",
+                    ctx.type_name(input)
+                ),
+            ));
+        }
+    };
+    result.map_err(|error| decode_error(ctx, input, raise_error, false, error))
 }
 
-fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
+/// Raise the class owned by the calling package, retaining the Python document's identity.
+fn decode_error(
+    ctx: &mut Context,
+    input: Id,
+    raise_error: Option<Id>,
+    bom: bool,
+    error: crate::Error,
+) -> Error {
+    let (Some(callback), Some((message, document, position))) =
+        (raise_error, error.json_decode_fields())
+    else {
+        return error.into();
+    };
+    let message = ctx.text(message);
+    let document = if matches!(ctx.heap.get(input), Value::Str(_)) {
+        input
+    } else {
+        ctx.text(document)
+    };
+    let position = ctx.int(position as i64);
+    let bom = if bom { TRUE } else { FALSE };
+    ctx.call(callback, vec![message, document, position, bom], Vec::new())
+        .err()
+        .unwrap_or_else(|| Error::new("SystemError", "JSON error callback returned"))
+}
+
+fn parse(ctx: &mut Context, text: &str) -> std::result::Result<Id, crate::Error> {
     let mut keys = HashMap::new();
-    Ok(decode_json(
+    decode_json(
         text,
         || Str::try_new(text).ok().map(StrOwner::new),
         |value| {
@@ -70,7 +100,7 @@ fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
                 }
             })
         },
-    )?)
+    )
 }
 
 #[derive(Default)]
