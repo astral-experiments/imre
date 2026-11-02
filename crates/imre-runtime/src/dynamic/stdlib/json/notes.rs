@@ -42,6 +42,11 @@ pub(super) fn noted_instance(
     if raised != exception {
         ctx.heap.keep(raised);
     }
+    live_error(ctx, raised)
+}
+
+/// Propagate the exception's current state after running user callbacks.
+pub(super) fn live_error(ctx: &Context, raised: Id) -> Error {
     let Value::Raised(error) = ctx.heap.get(raised) else {
         unreachable!("annotated exception")
     };

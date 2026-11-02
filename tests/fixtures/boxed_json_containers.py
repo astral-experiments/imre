@@ -160,7 +160,7 @@ def current():
         def __del__(self):
             row[1] = "updated"
 
-    def default(obj):
+    def replacement(obj=None):
         result = Replacement("first")
         if keep:
             retained.append(result)
@@ -168,8 +168,37 @@ def current():
 
     for keep, second in [(False, "updated"), (True, "initial")]:
         row[1] = "initial"
-        assert json.dumps(row, default=default) == '["first", "' + second + '"]'
+        assert json.dumps(row, default=replacement) == '["first", "' + second + '"]'
         retained.clear()
         assert row[1] == "updated"
+
+    class ProjectedList(list):
+        def __iter__(self):
+            return iter([replacement()])
+
+    class ProjectedDict(dict):
+        def items(self):
+            return [("k", replacement())]
+
+    for value, encoded in [(ProjectedList([0]), '["first"]'),
+                           (ProjectedDict(k=0), '{"k": "first"}')]:
+        row[0] = value
+        for keep, second in [(False, "updated"), (True, "initial")]:
+            row[1] = "initial"
+            assert json.dumps(row) == '[' + encoded + ', "' + second + '"]'
+            retained.clear()
+            assert row[1] == "updated"
+
+    original_quote = json.encoder.encode_basestring_ascii
+    def quote(value):
+        text = original_quote(value)
+        return Replacement(text) if value == "first" else text
+
+    try:
+        json.encoder.encode_basestring_ascii = quote
+        row[:] = ["first", "initial"]
+        assert json.dumps(row) == '["first", "updated"]'
+    finally:
+        json.encoder.encode_basestring_ascii = original_quote
 
     print("encoded container subclasses")
