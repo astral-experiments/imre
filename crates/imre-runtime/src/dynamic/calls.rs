@@ -1458,20 +1458,11 @@ impl Context {
             return self
                 .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
         }
-        let class = match *self.heap.get(obj) {
-            Value::Instance { class, .. }
-            | Value::Class {
-                metaclass: Some(class),
-                ..
-            }
-            | Value::Module {
-                constructor: Some(class),
-                ..
-            } => class,
-            Value::Module { scope, .. } => {
+        let Some(class) = self.heap.get(obj).instance_class() else {
+            if let Value::Module { scope, .. } = *self.heap.get(obj) {
                 return self.module_get_attribute(obj, scope, name, original);
             }
-            _ => return self.default_get_attr(obj, name),
+            return self.default_get_attr(obj, name);
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
             self.attribute_hook(hook, obj, class, name, original)
