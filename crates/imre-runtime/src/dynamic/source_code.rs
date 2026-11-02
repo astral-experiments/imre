@@ -1557,50 +1557,44 @@ impl Program {
                     }
                 }
                 Stmt::AnnAssign(s) if function || (self.class_attributes.is_some() && s.simple) => {
-                    if let ast::Expr::Name(name) = &*s.target {
-                        if let Some((kind, _)) = self.directives.get(name.id.as_str()) {
+                    let name = s.target.as_name_expr().map(|name| name.id.to_string());
+                    if let Some(name) = &name {
+                        if name == "__debug__" {
+                            return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+                        }
+                        if let Some((kind, _)) = self.directives.get(name) {
                             return Err(Error::new(
                                 "SyntaxError",
-                                format!("annotated name '{}' can't be {}", name.id, kind.keyword()),
+                                format!("annotated name '{name}' can't be {}", kind.keyword()),
                             ));
                         }
-                        self.locals.insert(name.id.to_string());
+                        self.locals.insert(name.clone());
                     } else if s.value.is_none() {
                         return Err(unsupported("annotated assignment target"));
                     }
-                    annotations::validate(
-                        &s.annotation,
-                        matches!(s.target.as_ref(), ast::Expr::Name(_)),
-                    )?;
-                    if !function {
-                        let name = s
-                            .target
-                            .as_name_expr()
-                            .expect("simple annotation target")
-                            .id
-                            .to_string();
-                        if let Some(value) = s.value {
-                            self.instructions
-                                .push((line, Instruction::Assign(vec![*s.target], *value)));
-                        }
-                        if self.string_annotations() {
-                            Instruction::StringAnnotation(
-                                name,
-                                annotations::string_literal(&s.annotation),
-                            )
-                        } else if let Some(entries) = &mut fields {
-                            entries.push((name, *s.annotation));
-                            continue;
-                        } else {
-                            return Err(unsupported("conditional class annotation"));
-                        }
-                    } else {
-                        // Function-local annotations don't evaluate the annotation expression.
-                        let Some(value) = s.value else { continue };
-                        match self.lower_suspension(*value, line, function)? {
+                    annotations::validate(&s.annotation, name.is_some())?;
+                    if let Some(value) = s.value {
+                        let op = match self.lower_suspension(*value, line, function)? {
                             Some(value) => Instruction::Assign(vec![*s.target], value),
                             None => Instruction::BindSent(vec![*s.target]),
-                        }
+                        };
+                        self.instructions.push((line, op));
+                    }
+                    // Function-local annotations never evaluate the annotation expression.
+                    if function {
+                        continue;
+                    }
+                    let name = name.expect("simple class annotation");
+                    if self.string_annotations() {
+                        Instruction::StringAnnotation(
+                            name,
+                            annotations::string_literal(&s.annotation),
+                        )
+                    } else if let Some(entries) = &mut fields {
+                        entries.push((name, *s.annotation));
+                        continue;
+                    } else {
+                        return Err(unsupported("conditional class annotation"));
                     }
                 }
                 Stmt::Delete(s) => {
@@ -4035,13 +4029,17 @@ impl Context {
             Instruction::StringAnnotation(name, expression) => {
                 let key = self.heap.code_name(name);
                 let spelling = self.source_expr(code, scope, expression)?;
-                self.op("annotate", scope, key, spelling)?;
+                let annotations = self.lookup(scope, "__annotations__")?;
+                self.put_item(annotations, key, spelling)?;
             }
             Instruction::ClassAnnotator(provider) => {
                 let annotate = self.source_annotator(provider, owner, scope)?;
                 self.bind(scope, "__annotate_func__", annotate);
             }
             Instruction::ClassStart => {
+                if code.string_annotations() {
+                    self.enable_class_annotation_provider(scope);
+                }
                 let first = self.int(i64::from(code.first_line));
                 self.bind(scope, "__firstlineno__", first);
                 if let Some(doc) = code.doc {

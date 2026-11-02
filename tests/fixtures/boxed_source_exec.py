@@ -223,6 +223,15 @@ def source_annotations():
     future = ns["F"].f
     assert future.__annotate__.__closure__ is None
     assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
+    fallback = {"__annotations__": {}}
+    exec("""from __future__ import annotations
+class Fields:
+    first: int
+    del __annotations__
+    second: Missing
+""", fallback)
+    assert fallback["__annotations__"] == {"second": "Missing"}
+    assert fallback["Fields"].__annotate__ is None
     for expr in ("(tmp := int)", "(yield int)", "(await T)"):
         for source in ("def f(arg: " + expr + "): pass",
                        "def f(obj): obj.field: " + expr + " = 1",
