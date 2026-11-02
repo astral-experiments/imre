@@ -75,7 +75,10 @@ def __hash_new(name, *args, **kwargs):
             # Imre also supports OpenSSL's MD5 aliases with its portable backend.
             name = 'md5'
         return __get_builtin_constructor(name)(*args, **kwargs)
-    return _native_new(name, *args, **kwargs)
+    try:
+        return _native_new(name, *args, **kwargs)
+    except ValueError:
+        return __get_builtin_constructor(name)(*args, **kwargs)
 
 
 new = __hash_new
