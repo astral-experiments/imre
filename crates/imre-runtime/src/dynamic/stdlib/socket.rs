@@ -64,6 +64,8 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.builtin(&format!("socket.{name}"));
         ctx.bind(scope, name, value);
     }
+    let pair = ctx.builtin("_socket.socketpair");
+    ctx.bind(scope, "socketpair", pair);
     let resolver = ctx.builtin("_socket.getaddrinfo");
     ctx.bind(scope, "getaddrinfo", resolver);
     let socket_type = attribute(ctx, "socket")?;
@@ -669,6 +671,19 @@ pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     Ok(NONE)
 }
 
+pub(super) fn socketpair(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    check_args("socketpair", args, kwargs, 3, &[])?;
+    let mut values = [libc::AF_UNIX, libc::SOCK_STREAM, 0];
+    for (value, &arg) in values.iter_mut().zip(args) {
+        *value = ctx.index_c_int(arg)?;
+    }
+    let [family, kind, proto] = values;
+    let (left, right) = native::socketpair(family, kind, proto)?;
+    let left = ctx.alloc(Value::Socket(left));
+    let right = ctx.alloc(Value::Socket(right));
+    Ok(ctx.alloc(Value::Tuple(vec![left, right])))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -791,6 +806,10 @@ pub(super) fn call(
         "__enter__" => return Ok(*receiver),
         "__exit__" | "close" => native::close(&s)?,
         "fileno" => return Ok(ctx.int(i64::from(native::fd(&s)))),
+        "get_inheritable" => {
+            let enabled = crate::objects::os::INHERITABLE.enabled(native::fd(&s))?;
+            return Ok(if enabled { super::TRUE } else { super::FALSE });
+        }
         "bind" => native::bind(
             &s,
             &address(ctx, native::family(&s), argument(args, 0)?, method)?,
@@ -809,7 +828,12 @@ pub(super) fn call(
             let child = ctx.alloc(Value::Socket(child));
             return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
         }
-        "getsockname" => return pack_address(ctx, &native::sockname(&s)?),
+        "getsockname" | "getpeername" => {
+            return match native::socket_name(&s, method == "getpeername")? {
+                Some(addr) => pack_address(ctx, &addr),
+                None => Ok(ctx.text("")),
+            };
+        }
         "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
         "getblocking" => {
             return Ok(if native::imre_socket_getblocking(&s) {
