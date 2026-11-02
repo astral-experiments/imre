@@ -2577,6 +2577,11 @@ impl Context {
                 self.heap.keep(subject);
                 let subject_mark = self.heap.temporary_mark();
                 let mut target = *end;
+                // CPython compiles a single trailing wildcard as the default suite.
+                let default = cases
+                    .last()
+                    .is_some_and(|case| matches!(case.pattern, SourcePattern::Wildcard));
+                let subject_cases = cases.len() - usize::from(default);
                 for (index, case) in cases.iter().enumerate() {
                     self.heap.set_statement_line(match_line + case.line_offset);
                     let matched = match &case.pattern {
@@ -2604,7 +2609,7 @@ impl Context {
                         SourcePattern::Wildcard => true,
                     };
                     // Only later cases need the subject while a guard executes.
-                    let live = if index + 1 < cases.len() {
+                    let live = if index + 1 < subject_cases {
                         subject_mark
                     } else {
                         mark
