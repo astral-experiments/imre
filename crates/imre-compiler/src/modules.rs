@@ -1912,6 +1912,7 @@ impl IntrinsicModule {
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
             (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
+            (Self::Builtins, "oct") => Intrinsic::ScopedObjectExport("builtins.oct"),
             (Self::Builtins, "exec") => Intrinsic::ScopedObjectExport("builtins.exec"),
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
