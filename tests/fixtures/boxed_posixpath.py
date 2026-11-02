@@ -5,7 +5,7 @@ import posix
 import posixpath
 from os import altsep, fspath, linesep, pathsep, sep
 from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
-from posixpath import abspath, ismount, normpath
+from posixpath import abspath, commonpath, ismount, normpath
 
 
 class Path:
@@ -40,7 +40,26 @@ class Raises:
         raise RuntimeError("method call")
 
 
+def check_commonpath():
+    assert commonpath is posixpath.commonpath is os.path.commonpath
+    assert commonpath(paths=(Path(p) for p in ("//a/./../x", "/a/../y"))) == "/a/.."
+    assert commonpath((Path(b"a/b"), b"a/c")) == b"a"
+    for paths, error, message in (
+        (iter(()), ValueError, "commonpath() arg is an empty sequence"),
+        (("a", "/b"), ValueError, "Can't mix absolute and relative paths"),
+        (("/a", b"b"), TypeError, "Can't mix strings and bytes in path components"),
+        ((Path("a"), Raises()), RuntimeError, "method call"),
+    ):
+        try:
+            commonpath(paths)
+        except error as caught:
+            assert str(caught) == message
+        else:
+            raise AssertionError("commonpath should have raised")
+
+
 def current():
+    check_commonpath()
     assert normpath is os.path.normpath is posix._path_normpath
     assert normpath.__name__ == "_path_normpath" and normpath.__self__ is posix
     for value, expected in (
