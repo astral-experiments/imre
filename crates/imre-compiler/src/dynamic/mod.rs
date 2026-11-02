@@ -346,7 +346,7 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
 
 pub(crate) enum ObjectOperation<'a> {
     Builtin,
-    ConditionalMethods(&'a crate::modules::SourceGraph),
+    ClassBody(&'a crate::modules::SourceGraph),
 }
 
 pub(crate) fn compile(
@@ -478,7 +478,7 @@ pub(crate) fn compile(
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
             && match operation {
-                Some(ObjectOperation::ConditionalMethods(graph)) => owner == "__main__"
+                Some(ObjectOperation::ClassBody(graph)) => owner == "__main__"
                     || graph.modules.iter().any(|m| m.name == owner),
                 _ => true,
             }
