@@ -1,4 +1,4 @@
-//! Stateless UTF-16 and UTF-32 decoding into Python code points.
+//! UTF-16 and UTF-32 decoding into Python code points.
 use super::{Context, DecodeIssue, Id, Result, resume_decode};
 use crate::objects::{FixedUnicode, Utf16Order};
 use FixedUnicode::{Utf16, Utf32Be, Utf32Le};
@@ -11,34 +11,30 @@ pub(super) fn decode(
     format: FixedUnicode,
     bom: bool,
 ) -> Result<Id> {
-    if let Utf16(order) = format {
-        let sign = match (bom, order) {
-            (true, _) => 0,
-            (false, Little) => -1,
-            (false, Big) => 1,
-        };
-        let (text, _, _) = super::utf16::decode(ctx, input, errors, sign, true)?;
-        return Ok(text);
-    }
-    let data = ctx.bytes_like(input)?;
-    let (little, start) = match (bom, data) {
-        (true, [0xff, 0xfe, 0, 0, ..]) => (true, 4),
-        (true, [0, 0, 0xfe, 0xff, ..]) => (false, 4),
-        _ => (matches!(format, Utf32Le), 0),
-    };
-    utf32_chunk(ctx, input, errors, little, start, true).map(|(text, _)| text)
+    let order = if bom { 0 } else { format.byte_order() };
+    decode_chunk(ctx, input, errors, format, order, true).map(|(text, _, _)| text)
 }
 
-/// Decode full code units and report the trailing byte offset to an incremental reader.
-pub(in crate::dynamic::stdlib) fn utf32_chunk(
+/// Decode complete units and report both the consumed bytes and the detected byte order.
+/// An order of zero remains undecided until a BOM is consumed.
+pub(in crate::dynamic::stdlib) fn decode_chunk(
     ctx: &mut Context,
     input: Id,
     errors: &str,
-    little: bool,
-    start: usize,
+    format: FixedUnicode,
+    order: i32,
     final_chunk: bool,
-) -> Result<(Id, usize)> {
+) -> Result<(Id, usize, i32)> {
+    if let Utf16(_) = format {
+        return super::utf16::decode(ctx, input, errors, order, final_chunk);
+    }
     let data = ctx.bytes_like(input)?;
+    let (order, start) = match (order, data.first_chunk::<4>()) {
+        (0, Some([0xff, 0xfe, 0, 0])) => (-1, 4),
+        (0, Some([0, 0, 0xfe, 0xff])) => (1, 4),
+        _ => (order, 0),
+    };
+    let little = matches!(Utf16Order::from_sign(order), Little);
     let size = data.len();
     let mut points = Vec::new();
     let (mut consumed, issue) = utf32_prefix(little, &mut points, data, start, final_chunk)?;
@@ -52,7 +48,7 @@ pub(in crate::dynamic::stdlib) fn utf32_chunk(
     } else {
         ctx.text_codepoints(points)
     };
-    Ok((text, if final_chunk { size } else { consumed }))
+    Ok((text, if final_chunk { size } else { consumed }, order))
 }
 
 fn utf32_unit(little: bool, data: &[u8]) -> Option<u32> {

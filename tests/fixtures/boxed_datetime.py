@@ -438,6 +438,21 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_fromordinal():
+    class Stamp(dt):
+        pass
+
+    class Parts(date):
+        def __new__(cls, *fields):
+            return fields
+
+    bound = Stamp(2000, 1, 1).fromordinal
+    value = bound(731319)
+    assert type(value) is Stamp and value == dt(2003, 4, 14)
+    assert date.fromordinal(True) == date(1, 1, 1)
+    assert Parts.fromordinal(2**31 - 1) == (5879611, 7, 11)
+
+
 def test_date_clock_constructors():
     import time as clock
 
@@ -831,6 +846,7 @@ def current():
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
     test_timedelta_remainder()
+    test_fromordinal()
     test_date_clock_constructors()
     test_subclass_construction()
     test_now()
