@@ -128,6 +128,7 @@ pub(crate) struct Context {
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
+    zip_path_importers: Id,
     codec_entries: stdlib::codecs::Registry,
     frozen_override: i32,
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
@@ -135,6 +136,9 @@ pub(crate) struct Context {
     import_missing: Id,
     // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
     bootstrap_globals: Id,
+    bootstrap_file_spec: Id,
+    // The native path finder stays installed across fresh public bootstrap imports.
+    finder_external: Id,
     classes: HashMap<String, Id>,
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
@@ -1255,7 +1259,9 @@ impl Context {
         if let Some(values) = self.enum_values(id) {
             if let Some(ordered) = self.float_enum_names(id) {
                 let names = self.lookup_attr(id, "_member_map_")?;
-                return self.items(ordered)?.into_iter()
+                return self
+                    .items(ordered)?
+                    .into_iter()
                     .map(|key| self.get_item(names, key))
                     .collect();
             }
@@ -1562,7 +1568,10 @@ impl Context {
         let Some(body) = frame.namespace else {
             return Ok(None);
         };
-        let annotation_cell = frame.class_namespace.as_ref().and_then(|ns| ns.annotation_dict_cell);
+        let annotation_cell = frame
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.annotation_dict_cell);
         let names: indexmap::IndexMap<String, Id> = self
             .dict_entries(body)
             .expect("class body dictionary")
@@ -1586,7 +1595,10 @@ impl Context {
             let key = self.text("__classdictcell__");
             self.put_item(body, key, cell)?;
         }
-        Ok(Some(ExposedClassBody { mapping: body, annotation_cell }))
+        Ok(Some(ExposedClassBody {
+            mapping: body,
+            annotation_cell,
+        }))
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
@@ -1906,9 +1918,21 @@ impl Context {
                     });
                     self.builtins.insert(format!("int.{field}"), descriptor);
                 }
-                &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"]
+                &[
+                    "__add__",
+                    "bit_length",
+                    "from_bytes",
+                    "to_bytes",
+                    "__format__",
+                    "__repr__",
+                ]
             }
-            "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
+            "float" => &[
+                "__format__",
+                "__getformat__",
+                "as_integer_ratio",
+                "__repr__",
+            ],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -2078,7 +2102,9 @@ impl Context {
         let modules = self.public_modules()?;
         if matches!(self.heap.get(modules), Value::Dict(_)) {
             let (_, index) = self.find_dictionary_key(modules, name, None)?;
-            return Ok(index.map_or(default.unwrap_or(NONE), |i| self.stored_entries(modules)[i].1));
+            return Ok(index.map_or(default.unwrap_or(NONE), |i| {
+                self.stored_entries(modules)[i].1
+            }));
         }
         let get = self.lookup_attr(modules, "get")?;
         let args = match default {
@@ -2102,7 +2128,8 @@ impl Context {
             };
             self.heap.reserve_temporaries(1)?;
             self.heap.keep(module);
-            let initializing = self.lookup_attr(module, "__spec__")
+            let initializing = self
+                .lookup_attr(module, "__spec__")
                 .and_then(|spec| self.lookup_attr(spec, "_initializing"));
             match initializing {
                 Ok(flag) if self.truth(flag)? => break self.public_registered_module(key)?,
@@ -2144,14 +2171,18 @@ impl Context {
     }
 
     /// Resolve registered and filesystem modules against the current import path.
-    fn find_module(&mut self, mut name: &str) -> Result<Option<Id>> {
+    fn find_module(&mut self, name: &str) -> Result<Option<Id>> {
+        self.find_module_from(name, NONE)
+    }
+
+    fn find_module_from(&mut self, mut name: &str, source_globals: Id) -> Result<Option<Id>> {
         let mut parents = Vec::new();
         let mut module = loop {
             if let Some(id) = self.cached_import(name)? {
                 break Some(id);
             }
             let Some((parent, child)) = name.rsplit_once('.') else {
-                break self.load_module(name, None)?;
+                break self.load_module(name, None, source_globals)?;
             };
             // Each unresolved parent consumes three importlib frames.
             self.check_call_depth(3 * (parents.len() + 1))?;
@@ -2163,13 +2194,18 @@ impl Context {
         };
         for (name, parent, child) in parents.into_iter().rev() {
             let id = module.ok_or_else(|| Self::missing_module(parent))?;
-            module = self.load_module(name, Some((id, child)))?;
+            module = self.load_module(name, Some((id, child)), source_globals)?;
         }
         Ok(module)
     }
 
     /// Run a module initializer after its parent has been resolved.
-    fn load_module(&mut self, name: &str, parent: Option<(Id, &str)>) -> Result<Option<Id>> {
+    fn load_module(
+        &mut self,
+        name: &str,
+        parent: Option<(Id, &str)>,
+        source_globals: Id,
+    ) -> Result<Option<Id>> {
         if parent.is_some() {
             let key = self.text(name);
             let child = self.public_module_get(key, None)?;
@@ -2294,7 +2330,14 @@ impl Context {
         let key = self.text(name);
         let modules = self.public_modules()?;
         self.put_item(modules, key, module)?;
-        if let Err(error) = self.run_initializer(name, module, scope, name_id, origin, source) {
+        if let Err(error) = self.run_initializer(
+            name,
+            module,
+            scope,
+            name_id,
+            source_globals,
+            source.map(|(path, body)| (path, body, origin)),
+        ) {
             // The executing script remains importable during interpreter shutdown.
             if name == "__main__" {
                 return Err(error);
@@ -2331,11 +2374,14 @@ impl Context {
                 }
                 let exception = self.raised_instance(error);
                 self.with_import_exception(exception, |ctx| {
-                    ctx.warn_child_binding(&format!(
-                        "Cannot set an attribute on {} for child module {}",
-                        string_repr(parent_name),
-                        string_repr(child)
-                    ))
+                    ctx.warn_child_binding(
+                        source_globals,
+                        &format!(
+                            "Cannot set an attribute on {} for child module {}",
+                            string_repr(parent_name),
+                            string_repr(child)
+                        ),
+                    )
                 })?;
             }
         }
@@ -2369,8 +2415,8 @@ impl Context {
         module: Id,
         scope: Id,
         name_id: Id,
-        origin: Option<Id>,
-        source: Option<(PathBuf, importlib::SourceBody)>,
+        source_globals: Id,
+        source: Option<(PathBuf, importlib::SourceBody, Option<Id>)>,
     ) -> Result<()> {
         if name == "_thread" && source.is_none() {
             let rlock = self.builtin(thread_rlock::CLASS);
@@ -2381,6 +2427,21 @@ impl Context {
             self.bind(scope, "BlockingIOError", error);
         }
         match name {
+            "_frozen_importlib_external" | "importlib._bootstrap_external" => {
+                let finder = if self.finder_external == NONE {
+                    module
+                } else {
+                    self.finder_external
+                };
+                self.bind(scope, "_finder_external", finder);
+            }
+            "_imre_importlib" => {
+                // All bootstrap instances invalidate the finders used by the native path search.
+                if self.zip_path_importers == NONE {
+                    self.zip_path_importers = self.dict(Vec::new());
+                }
+                self.bind(scope, "_zip_path_importers", self.zip_path_importers);
+            }
             "itertools" => {
                 for attr in [
                     "count",
@@ -2520,7 +2581,7 @@ impl Context {
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "socket"
                 if source.is_none()
-                    || source.as_ref().is_some_and(|(path, _)| {
+                    || source.as_ref().is_some_and(|(path, _, _)| {
                         self.config["bundled_root"].as_str().is_some_and(|root| {
                             path == &std::path::Path::new(root).join("socket.py")
                         })
@@ -2539,7 +2600,14 @@ impl Context {
                 if self.bootstrap_globals == NONE {
                     self.bootstrap_globals = self.module_globals(scope)?;
                 }
-                let external = self.module("_frozen_importlib_external")?;
+                let key = self.text("_frozen_importlib_external");
+                let cached = self.public_module_get(key, Some(self.import_missing))?;
+                let external = if cached == self.import_missing {
+                    self.find_module("_frozen_importlib_external")?
+                        .ok_or_else(|| Self::missing_module("_frozen_importlib_external"))?
+                } else {
+                    cached
+                };
                 self.bind(scope, "_bootstrap_external", external);
             }
             "io" => stdlib::io::install(self, scope),
@@ -2665,11 +2733,12 @@ impl Context {
                 self.bind(scope, "get_native_id", id);
             }
         }
-        if let Some((path, body)) = source {
+        if let Some((path, body, origin)) = source {
             let result = match body {
                 importlib::SourceBody::Namespace if self.sources.contains_key("importlib") => {
-                    self.lookup_attr(module, "__path__")
-                        .and_then(|locations| self.namespace_spec(name_id, locations, module))
+                    self.lookup_attr(module, "__path__").and_then(|locations| {
+                        self.namespace_spec(name_id, locations, module, source_globals)
+                    })
                 }
                 importlib::SourceBody::Namespace => Ok(NONE),
                 importlib::SourceBody::Zip(loader) => self.initialize_source(
@@ -2681,10 +2750,14 @@ impl Context {
                 ),
                 importlib::SourceBody::Compiled(_)
                     if let Some(origin) = origin
-                        && name != "__main__"
-                        && !stdlib::is_module(name)
-                        && self.sources.contains_key("importlib")
-                        && path.is_absolute() =>
+                        && ((matches!(
+                            name,
+                            "importlib" | "importlib._bootstrap" | "importlib._bootstrap_external"
+                        ) && self.bootstrap_file_spec != NONE)
+                            || (name != "__main__"
+                                && !stdlib::is_module(name)
+                                && self.sources.contains_key("importlib")
+                                && path.is_absolute())) =>
                 {
                     self.initialize_source(module, scope, name_id, origin, NONE)
                 }
@@ -2703,10 +2776,20 @@ impl Context {
             };
             *initializing = false;
             result?;
-            if name == "importlib"
-                && let Some(external) = self.scope_name(scope, "_bootstrap_external")
+            if self.finder_external == NONE
+                && matches!(
+                    name,
+                    "_frozen_importlib_external" | "importlib._bootstrap_external"
+                )
             {
-                self.publish_module("importlib._bootstrap_external", external)?;
+                self.finder_external = module;
+            }
+            if name == "importlib"
+                && self.bootstrap_file_spec == NONE
+                && let Some(make_spec) = self.scope_name(scope, "_file_spec")
+            {
+                // Fresh bootstrap imports run while the replacement package is still initializing.
+                self.bootstrap_file_spec = make_spec;
             }
             if name == "itertools"
                 && let Some(owner) = self.scope_name(scope, "batched")

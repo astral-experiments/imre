@@ -1,8 +1,32 @@
 """Legacy direct loading with a SourceFileLoader, including replacement modules."""
 
 import sys
-from _imre_importlib import warn_legacy_load as _warn_legacy_load
+from _imre_importlib import import_module as _native_import, warn_legacy_load as _warn_legacy_load
 from os import altsep, sep
+
+
+_NEEDS_LOADING = object()
+
+
+def _warning_module():
+    import warnings
+    return warnings
+
+
+_is_frozen = __name__ == "_frozen_importlib"
+if not _is_frozen:
+    _bootstrap_external = None
+
+
+def _setup(sys_module, _imp_module):
+    # Importer state and module locking are owned by the native resolver.
+    global sys, _imp
+    sys = sys_module
+    _imp = _imp_module
+
+
+def _find_and_load(name, import_):
+    return _native_import(name, None if _is_frozen else globals())
 
 
 def _new_module(name):
@@ -46,7 +70,7 @@ def _move_to_end(spec):
 
 
 def _load_module_shim(loader, fullname):
-    _warn_legacy_load()
+    _warn_legacy_load(None if _is_frozen else globals())
     spec = _loader_spec(fullname, loader)
     if fullname in sys.modules:
         module = sys.modules[fullname]

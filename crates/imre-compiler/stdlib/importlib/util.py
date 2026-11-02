@@ -1,6 +1,6 @@
 """Finder operations for the standalone native source registry."""
 
-from _frozen_importlib_external import cache_from_source, source_from_cache
+from ._bootstrap_external import cache_from_source, source_from_cache
 from _imre_importlib import find_spec as _find_spec
 from importlib import _resolve_relative
 from ._abc import Loader
