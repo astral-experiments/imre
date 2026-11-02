@@ -188,7 +188,8 @@ impl Header {
 mod tests {
     use super::*;
     use crate::objects::records::{
-        RecordBatch, descriptor, imre_record_cached_result, imre_record_new, imre_record_release,
+        RecordBatch, descriptor, imre_record_new, imre_record_release,
+        imre_record_try_cached_result,
     };
 
     #[test]
@@ -241,7 +242,7 @@ mod tests {
                 let first = WeakRecord::new(original);
                 let second = WeakRecord::new(original);
                 assert!(std::ptr::eq(descriptor(original), &layout));
-                let next = imre_record_cached_result(original);
+                let next = imre_record_try_cached_result(original);
                 assert_ne!(original, next);
                 let retained = second.upgrade().unwrap();
                 assert_eq!(retained, original.cast_const());
