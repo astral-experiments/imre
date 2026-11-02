@@ -58,16 +58,15 @@ class _TypedDictMeta(type):
     __instancecheck__ = __subclasscheck__
 
 
-def _typeddict_forward_ref(arg, module=None, owner=None):
+def _typeddict_forward_ref(arg, module=None, owner=None, *, is_class=False):
     from annotationlib import ForwardRef
-    from ast import parse
     # typing._make_forward_ref eagerly checks the syntax, without resolving names.
     source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
     try:
-        parse(source, "<string>", "eval")
+        _typing._validate_forward_ref(source)
     except SyntaxError:
         raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
-    return ForwardRef(arg, module=module, owner=owner)
+    return ForwardRef(arg, module=module, owner=owner, is_class=is_class)
 
 
 def _typeddict_field(value, module, owner=None):
