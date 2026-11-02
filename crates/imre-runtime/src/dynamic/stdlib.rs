@@ -373,7 +373,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(unix)]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
+        ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
@@ -1228,7 +1228,7 @@ pub(super) fn call(
         );
     }
     if let Some(operation) = name.strip_prefix("math.") {
-        return math::round(ctx, operation, args, kwargs);
+        return math::call(ctx, operation, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
