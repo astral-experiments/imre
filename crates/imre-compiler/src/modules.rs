@@ -1397,6 +1397,15 @@ impl IntrinsicModule {
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
             }
+            (Self::ImportlibUtil, "module_from_spec") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.module_from_spec")
+            }
+            (Self::ImportlibUtil, "spec_from_file_location") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.spec_from_file_location")
+            }
+            (Self::ImportlibUtil, "spec_from_loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.spec_from_loader")
+            }
             (Self::ImportlibUtil, "find_spec") => {
                 Intrinsic::RegisteredImport("importlib.util.find_spec")
             }
