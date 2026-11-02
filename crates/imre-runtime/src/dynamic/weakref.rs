@@ -539,13 +539,15 @@ pub(super) fn call(
                     ),
                 ));
             };
-            let entries = ctx.dict_entries(dict).expect("dict storage");
-            if let Some(&(_, value)) = entries.iter().find(|(stored, _)| ctx.equal(*stored, *key)) {
+            if let Some(index) = ctx.find_dictionary_key(dict, *key, None)?.1 {
+                let value = ctx.dict_entries(dict).expect("dict storage")[index].1;
                 let Some(reference) = ctx.heap.get(value).weak_reference() else {
                     return Err(error("not a weakref"));
                 };
                 if reference.target.is_none() {
-                    ctx.delete_item(dict, *key)?;
+                    // A second key lookup could call Python and replace the dead reference.
+                    super::builtins::remove_table_entry(ctx, dict, index)?;
+                    ctx.finalize_removed_dict_value(value);
                 }
             }
             Ok(NONE)
