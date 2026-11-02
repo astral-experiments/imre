@@ -82,6 +82,7 @@ impl BuiltinDescriptor {
                     || matches!(
                         name,
                         "__reversed__"
+                            | "__getinitargs__"
                             | "__reduce__"
                             | "__reduce_ex__"
                             | "__fspath__"
@@ -341,6 +342,10 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
+                    ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
+                    ("__getinitargs__", "__doc__") if self.owner == "datetime.timezone" => "pickle support",
+                    ("__getinitargs__", _) if self.owner == "datetime.timezone" => "($self, /)",
                     ("__getstate__" | "__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
                     ("__getstate__" | "__reduce__", _) if self.owner == "object" => "($self, /)",
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",

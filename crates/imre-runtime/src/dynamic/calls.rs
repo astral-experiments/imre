@@ -159,6 +159,24 @@ impl Context {
         }
         let attr = self.find_in_mro(class, |base| self.own_class_attr(base, name));
         if attr.is_none()
+            && matches!(name, "__reduce__" | "__reduce_ex__" | "__getstate__")
+            && let Value::Native(kind) = self.heap.get(class)
+            && matches!(
+                kind.as_str(),
+                stdlib::datetime::TZINFO | "datetime.timezone"
+            )
+        {
+            let parent = if kind == stdlib::datetime::TZINFO {
+                "object"
+            } else {
+                stdlib::datetime::TZINFO
+            };
+            return self
+                .builtins
+                .get(parent)
+                .and_then(|&base| self.class_attr(base, name));
+        }
+        if attr.is_none()
             && name == "__reduce_ex__"
             && self.own_class_attr(class, "__reduce__").is_some()
         {

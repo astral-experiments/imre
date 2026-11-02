@@ -366,7 +366,7 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.runtime_imports = true;
         }
-        if matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "__reduce__" | "__reduce_ex__" | "__getstate__"))
+        if matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "__reduce__" | "__reduce_ex__" | "__getstate__" | "__getinitargs__"))
             || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
             || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
@@ -471,6 +471,7 @@ pub(crate) fn compile(
             "__import__",
             "__reduce",
             "__getstate__",
+            "__getinitargs__",
             "templatelib",
         ]
         .iter()
