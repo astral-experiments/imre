@@ -8,8 +8,9 @@ import typing as _typing
 from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from _collections_abc import Reversible as _Reversible, Sized as _Sized
-from collections import ChainMap as _ChainMap, Counter as _Counter, OrderedDict as _OrderedDict
-from collections import defaultdict as _defaultdict, deque as _deque
+from collections.abc import ByteString as _ByteString
+from collections import Counter as _Counter, defaultdict as _defaultdict
+from collections import ChainMap as _ChainMap, OrderedDict as _OrderedDict, deque as _deque
 from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
@@ -554,6 +555,8 @@ class _TypedDictSymbol:
                  *self.__operand__(right, precedence + 1)), precedence)
         return binary
 
+    __add__ = _binary("+", 10)
+    __radd__ = _binary("+", 10, reverse=True)
     __or__ = _binary("|", 6)
     __ror__ = _binary("|", 6, reverse=True)
     __eq__ = _binary("==", 5, comparison=True)
@@ -1878,6 +1881,21 @@ class _SpecialGenericAlias(_NotIterable):
         return _typing.Union[other, self]
 
 
+class _DeprecatedGenericAlias(_SpecialGenericAlias):
+    def __init__(
+        self, origin, nparams, *, removal_version, inst=True, name=None
+    ):
+        super().__init__(origin, nparams, inst=inst, name=name)
+        self._removal_version = removal_version
+
+    def __instancecheck__(self, inst):
+        import warnings
+        warnings._deprecated(
+            f"{self.__module__}.{self._name}", remove=self._removal_version
+        )
+        return super().__instancecheck__(inst)
+
+
 class _TupleType(_SpecialGenericAlias):
     __module__ = __name__
 
@@ -1944,6 +1962,7 @@ MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
 Reversible = _SpecialGenericAlias(_Reversible, 1)
 Sized = _SpecialGenericAlias(_Sized, 0)
+ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))
 
 
 # Reconstruction callables and arguments used by CPython's typing alias reducers.
@@ -2213,11 +2232,11 @@ def _hint_scope(params, globalns, localns, is_class):
     return globalns, localns
 
 
-def _resolve_hint(value, globalns, localns, owner, seen, include_extras, forwardrefs=False):
-    from annotationlib import ForwardRef
-    from types import GenericAlias
+def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format, parent_ref=None):
+    from annotationlib import Format, ForwardRef
+    from types import GenericAlias, ModuleType
     if isinstance(value, str):
-        value = ForwardRef(value, is_class=isinstance(owner, type))
+        value = ForwardRef(value, is_argument=not isinstance(owner, (type, ModuleType)), is_class=isinstance(owner, type))
     if isinstance(value, ForwardRef):
         expr = value.__forward_arg__
         if expr in seen:
@@ -2227,22 +2246,25 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, forward
             module = sys.modules.get(value.__forward_module__)
             if module is not None:
                 globalns = module.__dict__
-        source = f'({expr},)[0]' if expr.lstrip().startswith('*') else expr
-        try:
-            result = _typing._eval_type_expression(source, globalns, localns)
-        except NameError as error:
-            if forwardrefs and error.name == expr:
-                from inspect import _signature_identifier
-                if _signature_identifier(expr):
-                    return value
-            raise
-        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, forwardrefs)
+        result = value.evaluate(globals=globalns, locals=localns, type_params=(), owner=owner, format=format)
+        if format == Format.FORWARDREF and isinstance(result, ForwardRef):
+            return result
+        if isinstance(result, str):
+            result = ForwardRef(result, module=value.__forward_module__, owner=owner or value.__owner__,
+                                is_argument=value.__forward_is_argument__, is_class=value.__forward_is_class__)
+        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, format, value)
 
     origin = _typing.get_origin(value)
     if origin is None or origin is Literal:
         return value
     args = getattr(value, '__args__', ())
-    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, forwardrefs) for a in args)
+    values = args
+    if type(value) is GenericAlias:
+        # Strings inside builtin aliases are type arguments, even in class annotations.
+        module = getattr(parent_ref, '__forward_module__', None)
+        ref_owner = getattr(parent_ref, '__owner__', None)
+        values = tuple(ForwardRef(arg, module=module, owner=ref_owner) if isinstance(arg, str) else arg for arg in args)
+    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, format) for a in values)
     if isinstance(value, _AnnotatedAlias):
         if not include_extras:
             return resolved[0]
@@ -2251,6 +2273,8 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, forward
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):
                 return resolved[0]
+    if type(value) is GenericAlias and value.__unpacked__:
+        return Unpack[GenericAlias(origin, resolved)]
     if resolved == args:
         return value
     if origin is _typing.Union:
@@ -2267,20 +2291,17 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
     """Resolve annotations in the defining namespace, including inherited class annotations."""
     if getattr(obj, '__no_type_check__', None):
         return {}
-    from annotationlib import Format, _get_value_annotations
-    from types import FunctionType
-    forwardrefs = format == Format.FORWARDREF and isinstance(obj, FunctionType)
-    if format is not None and format != Format.VALUE and not forwardrefs:
-        if format == Format.VALUE_WITH_FAKE_GLOBALS:
-            raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
-        if format not in (Format.STRING, Format.FORWARDREF):
-            raise ValueError(f"Unsupported format {format!r}")
-        raise NotImplementedError('only the VALUE annotation format is supported')
+    from annotationlib import Format, get_annotations
+    if format is None:
+        format = Format.VALUE
     if isinstance(obj, type):
         import sys
         hints = {}
         for base in reversed(getattr(obj, '__mro__', (obj,))):
-            ann = _get_value_annotations(base)
+            ann = get_annotations(base, format=format)
+            if format == Format.STRING:
+                hints.update(ann)
+                continue
             if not ann:
                 continue
             base_globals = globalns
@@ -2293,23 +2314,13 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
             base_globals, base_locals = _hint_scope(getattr(base, '__type_params__', ()),
                                                     base_globals, base_locals, True)
             for name, value in ann.items():
-                result = _resolve_hint(value, base_globals, base_locals, obj, (), include_extras)
+                result = _resolve_hint(value, base_globals, base_locals, obj, (), include_extras, format)
                 hints[name] = type(None) if result is None else result
         return hints
 
-    if forwardrefs:
-        try:
-            hints = _get_value_annotations(obj)
-        except Exception:
-            annotate = obj.__annotate__
-            if annotate is None:
-                raise
-            hints = annotate(format)
-            if not isinstance(hints, dict):
-                raise ValueError(f"{obj!r}.__annotate__ returned a non-dict")
-            hints = dict(hints)
-    else:
-        hints = _get_value_annotations(obj)
+    hints = get_annotations(obj, format=format)
+    if format == Format.STRING:
+        return hints
     if globalns is None:
         from types import ModuleType
         if isinstance(obj, ModuleType):
@@ -2327,7 +2338,7 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
         localns = globalns
     globalns, localns = _hint_scope(getattr(obj, '__type_params__', ()), globalns, localns, False)
     for name, value in hints.items():
-        result = _resolve_hint(value, globalns, localns, obj, (), include_extras, forwardrefs)
+        result = _resolve_hint(value, globalns, localns, obj, (), include_extras, format)
         hints[name] = type(None) if result is None else result
     return hints
 

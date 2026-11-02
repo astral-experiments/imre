@@ -937,7 +937,7 @@ pub(super) enum Value {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<HashMap<Id, Id>>,
+        member_values: Option<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -2232,6 +2232,11 @@ impl Frame {
 }
 
 impl Heap {
+    /// Bytes reserved beside each boxed value in a slab slot, including alignment.
+    pub(super) fn size_overhead() -> usize {
+        size_of::<Slot>() - size_of::<Value>()
+    }
+
     pub fn new() -> Self {
         let mut heap = Self {
             slots: vec![
@@ -3630,12 +3635,40 @@ impl Heap {
         owner: Id,
         roots: impl Iterator<Item = Id>,
     ) -> Result<WeakCallbacks> {
+        self.clear_owner_weakrefs(owner, roots, true)
+    }
+
+    /// After a strong edge is released, expire this target only if it stayed unreachable.
+    /// A finalizer can resurrect it, and an uncollected cycle can still own it.
+    pub(super) fn clear_released_weakrefs(
+        &mut self,
+        owner: Id,
+        roots: impl Iterator<Item = Id>,
+    ) -> Result<WeakCallbacks> {
+        self.clear_owner_weakrefs(owner, roots, false)
+    }
+
+    fn clear_owner_weakrefs(
+        &mut self,
+        owner: Id,
+        roots: impl Iterator<Item = Id>,
+        deallocating: bool,
+    ) -> Result<WeakCallbacks> {
         if !self.weak.contains_key(&owner) {
             return Ok(Vec::new());
         }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let callbacks = self.clear_weak_targets(None, Some(owner));
+        let reachable = self.slots[owner as usize].marked();
+        let callbacks = if deallocating || !reachable {
+            if !reachable {
+                // Weakrefs in the owner's dictionary are still live during its deallocation.
+                self.mark(std::iter::once(owner));
+            }
+            self.clear_weak_targets(None, Some(owner))
+        } else {
+            Vec::new()
+        };
         for slot in &self.slots {
             slot.trace.set(UNMARKED);
         }

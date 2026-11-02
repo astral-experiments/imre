@@ -18,6 +18,10 @@ pub(super) fn call(
         .filter(|_| kwargs.is_empty())
         .ok_or_else(|| Error::new("TypeError", "expected a dictionary"))?;
     match (op, args) {
+        ("sizeof", []) => {
+            let bytes = ctx.dictionary_size(owner, storage, true)?;
+            Ok(ctx.alloc(Value::Int(crate::Int::from_usize(bytes))))
+        }
         ("setitem", [key, value]) => {
             ctx.set_ordered_dictionary_key(storage, *key, *value)?;
             Ok(NONE)

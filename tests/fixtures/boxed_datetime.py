@@ -675,6 +675,9 @@ def test_explicit_zone_conversion():
     child = Child(2000, 1, 2)
     assert child.fromtimestamp(0, Hook()) == (Child, True, 0)
     assert type(child.combine(child, time())) is Child
+    shifted = Child(2000, 1, 1, 23, 45, tzinfo=zone).utctimetuple()
+    assert tuple(shifted) == (2000, 1, 2, 0, 15, 0, 6, 2, 0)
+    assert shifted.tm_zone is shifted.tm_gmtoff is None
 
 
 def test_astimezone_subtype():

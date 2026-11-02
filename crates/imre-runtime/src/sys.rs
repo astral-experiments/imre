@@ -293,41 +293,56 @@ pub extern "C" fn imre_sys_platform() -> *const Str {
     StrOwner::into_raw(StrOwner::new(Str::new(platform)))
 }
 
-/// Return a field of sys.thread_info from the target that runs the program.
-/// A null pointer represents an unknown library version or thread provider.
+/// Field selectors 0 and 1 retain the original name and version ABI.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_sys_thread_text(version: u32) -> *const Str {
-    if version != 0 {
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
-        {
-            let mut buffer = [0u8; 256];
-            // SAFETY: confstr writes at most buffer.len() bytes, including the terminating nul.
-            let length = unsafe {
-                libc::confstr(
-                    libc::_CS_GNU_LIBPTHREAD_VERSION,
-                    buffer.as_mut_ptr().cast(),
-                    buffer.len(),
-                )
-            };
-            if (2..=buffer.len()).contains(&length)
-                && let Ok(value) = std::str::from_utf8(&buffer[..length - 1])
-            {
-                return StrOwner::into_raw(StrOwner::new(Str::new(value)));
-            }
-        }
-        return std::ptr::null();
-    }
+pub extern "C" fn imre_sys_thread_text(field: u32) -> *const Str {
+    let text = match field {
+        0 => thread_name().map(Str::new),
+        1 => thread_version().map(Str::new),
+        2 => thread_lock_backend().map(Str::new),
+        _ => None,
+    };
+    text.map_or(std::ptr::null(), |text| {
+        StrOwner::into_raw(StrOwner::new(text))
+    })
+}
 
-    let name = if cfg!(windows) {
-        "nt"
+pub(crate) fn thread_name() -> Option<&'static str> {
+    if cfg!(windows) {
+        Some("nt")
     } else if cfg!(all(unix, not(target_family = "wasm")))
         || cfg!(all(target_os = "emscripten", target_feature = "atomics"))
     {
-        "pthread"
+        Some("pthread")
     } else {
-        return std::ptr::null();
-    };
-    StrOwner::into_raw(StrOwner::new(Str::new(name)))
+        None
+    }
+}
+
+pub(crate) fn thread_lock_backend() -> Option<&'static str> {
+    // PrimitiveLock waits on a condition variable while holding its state mutex.
+    (thread_name() == Some("pthread")).then_some("mutex+cond")
+}
+
+pub(crate) fn thread_version() -> Option<String> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        let mut buffer = [0u8; 256];
+        // SAFETY: confstr writes at most buffer.len() bytes, including the terminating nul.
+        let length = unsafe {
+            libc::confstr(
+                libc::_CS_GNU_LIBPTHREAD_VERSION,
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+            )
+        };
+        if (2..=buffer.len()).contains(&length)
+            && let Ok(value) = std::str::from_utf8(&buffer[..length - 1])
+        {
+            return Some(value.to_owned());
+        }
+    }
+    None
 }
 
 /// Return the OS interface Python exposes on the target that built this runtime.

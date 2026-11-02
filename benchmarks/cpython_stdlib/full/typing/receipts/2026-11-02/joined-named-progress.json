@@ -3,9 +3,33 @@
   "input_ledger_sha256": "35f09b0b99e51bfac53fa2e99d5ca18f6b6599af517d8fcfd67d47619701d78a",
   "input_pairs": 129,
   "historical_unidentified_floor": 107,
-  "worker_pairs": 19,
+  "worker_pairs": 25,
   "overlap": [],
   "additional_keys": [
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+      1
+    ],
     [
       "test.test_typing.ConcatenateTests.test_basics",
       1
@@ -83,9 +107,75 @@
       1
     ]
   ],
-  "union_pairs": 148,
+  "union_pairs": 154,
   "whole": false,
   "details": [
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_frozenset",
+      "occurrence": 1,
+      "stock_ordinal": 71,
+      "receipt": "sets-1791943-paired.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 72,
+      "receipt": "sets-1791943-paired.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 86,
+      "receipt": "sets-1791943-paired.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 89,
+      "receipt": "sets-1791943-paired.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_set",
+      "occurrence": 1,
+      "stock_ordinal": 95,
+      "receipt": "sets-1791943-paired.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 96,
+      "receipt": "sets-1791943-paired.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3"
+      ]
+    },
     {
       "id": "test.test_typing.ConcatenateTests.test_basics",
       "occurrence": 1,

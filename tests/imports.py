@@ -16,6 +16,23 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "optional_import_keeps_typed_call_check": ({
+        "main.py": (
+            "import http.client\n"
+            "try:\n    import ssl\nexcept ImportError:\n    ssl = None\n"
+            "from urllib.request import urlopen\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(urlopen('data:,hello').read(), typed('wrong'))\n"
+        ),
+    }, "invalid-argument-type"),
+    "optional_presence_keeps_later_call_check": ({
+        "main.py": (
+            "try:\n    import sys as available\nexcept ImportError:\n    available = None\n"
+            "import helper\nassert available is not None\n"
+            "getattr(helper, 'hidd' + 'en')()\n"
+        ),
+        "helper.py": HELPER,
+    }, "unknown function or unsupported builtin arguments"),
     "urlopen_keeps_typed_call_check": ({
         "main.py": (
             "from urllib.request import urlopen\n"
@@ -259,6 +276,14 @@ REJECTED = {
         "main.py": "import helper\n", "helper.py": "labels = [1]\nlabels = [2]\nimport os\n",
     }, "imports must precede"),
     "library_computed_before_import": ({"main.py": "import package\n", "package/__init__.py": "metadata = str(7)\nfrom .child import f\n", "package/child.py": HELPER}, "imports must precede"),
+    "module_attribute_guard_keeps_argument_checks": ({
+        "feature.py": "available = True\n",
+        "main.py": (
+            "import http.client\nimport urllib.request\nimport feature\n"
+            "if not feature.available:\n    raise RuntimeError('missing feature')\n"
+            "def typed(value: int) -> int: return value\ntyped('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
     "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
     "namespace_preserves_annotation": ({
@@ -373,6 +398,24 @@ ACCEPTED = {
             "patcher = patch.object\nwith patcher(Owner, 'value', 2):\n    assert Owner.value == 2\n"
             "assert Owner.value == 1\n"
         ),
+    },
+    "entry_module_attribute_guard": {
+        "feature.py": "import sys\navailable = 'deny' not in sys.argv\nprint('feature loaded')\n",
+        "main.py": (
+            "import feature\nif not feature.available:\n    raise ValueError('guard fired')\n"
+            "def value() -> int:\n    print('initializer')\n    return 17\n"
+            "after = value()\ndef read() -> int:\n    return after\nprint(read())\n"
+        ),
+    },
+    "optional_stdlib_entry_import": {
+        "main.py": (
+            "try:\n    import sys as available\nexcept ImportError:\n    available = None\n"
+            f"try:\n    import {'pwd' if os.name == 'nt' else 'winreg'} as missing\n"
+            "except ImportError:\n    missing = None\n"
+            "import after\nassert available is not None\nassert missing is None\n"
+            "print(available is after.sys, missing is None)\n"
+        ),
+        "after.py": "import sys\nprint('after')\n",
     },
     "optional_import_error_alternatives": {
         "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",
@@ -1056,6 +1099,12 @@ def main() -> None:
                 result = run([str(executable)], temporary)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
+                if name == "entry_module_attribute_guard":
+                    denied = run([str(executable), "deny"], temporary)
+                    expected = run([args.python, "-E", "-m", "main", "deny"], case)
+                    assert denied.returncode == expected.returncode == 1
+                    assert denied.stdout == expected.stdout == "feature loaded\n"
+                    assert denied.stderr.splitlines()[-1] == expected.stderr.splitlines()[-1]
                 checks += 1
 
         late_import = temporary / "late_import.py"

@@ -7,6 +7,7 @@ import _locale
 import io
 import locale
 import os
+import weakref
 
 
 class Wrapper(io.TextIOWrapper):
@@ -53,6 +54,39 @@ def current():
         assert error.args == ("underlying buffer has been detached",)
     else:
         raise AssertionError("detached wrapper accepted a write")
+
+    raw = io.BytesIO()
+    with io.TextIOWrapper(raw, encoding="latin-1", errors="replace", newline="\n") as text:
+        text.write("é\n")
+        assert raw.getvalue() == b""
+        text.reconfigure(encoding="utf-8-sig", newline="\r\n", write_through=True)
+        assert raw.getvalue() == b"\xe9\n" and text.errors == "strict"
+        text.write("é\n")
+        assert raw.getvalue() == b"\xe9\n\xc3\xa9\r\n"
+
+    class Encoding(str):
+        pass
+
+    with io.TextIOWrapper(io.BytesIO()) as text:
+        observed = []
+        encoding = Encoding("ascii")
+        ref = weakref.ref(encoding, lambda _: observed.append((text.encoding, text.errors)))
+        text.reconfigure(encoding=encoding, errors="replace")
+        del encoding
+        assert ref() is text.encoding
+        text.reconfigure(encoding="latin-1", errors="ignore")
+        assert ref() is None and observed == [("latin-1", "replace")]
+
+    with io.TextIOWrapper(io.BytesIO(b"a\rb"), encoding="ascii") as text:
+        assert text.read(1) == "a"
+        text.reconfigure(line_buffering=True)
+        try:
+            text.reconfigure(newline=None)
+        except io.UnsupportedOperation:
+            pass
+        else:
+            raise AssertionError("newline changed while decoded text was buffered")
+        assert text.read() == "\nb"
 
     with io.TextIOWrapper(io.BytesIO(b"a\r\n\xff"), encoding="utf-8", errors="replace") as text:
         underlying = text.buffer

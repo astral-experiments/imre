@@ -152,6 +152,24 @@ impl Entries {
         Ok(self.values.remove(index))
     }
 
+    /// Reserved table buffers excluding Python key and value referents.
+    pub(super) fn table_bytes(&self) -> usize {
+        self.values.capacity() * size_of::<(Id, Id)>()
+            + self
+                .positions
+                .as_ref()
+                .map_or(0, |p| p.capacity() * size_of::<usize>())
+            + self.index.as_ref().map_or(0, keys::Index::buffer_bytes)
+    }
+
+    pub(super) fn order_bytes(&self) -> usize {
+        self.order.as_ref().map_or(0, |order| {
+            size_of::<Order>()
+                + order.keys.capacity() * size_of::<(Id, i64)>()
+                + order.by_dense.capacity() * size_of::<Option<usize>>()
+        })
+    }
+
     /// The accelerated OrderedDict's key nodes, independent of base dict entries.
     pub(super) fn ordered_nodes(&self) -> &[(Id, i64)] {
         self.order.as_ref().map_or(&[], |order| &order.keys)

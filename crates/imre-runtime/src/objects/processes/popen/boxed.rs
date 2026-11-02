@@ -28,7 +28,6 @@ impl From<Error> for BoxedLaunchError {
 pub(crate) struct BoxedCommunication {
     pub(crate) streams: [Option<Vec<u8>>; 2],
     pub(crate) timed_out: bool,
-    pub(crate) wait_budget: Option<f64>,
 }
 
 impl PreparedHandles {
@@ -208,34 +207,45 @@ impl BoxedPopen {
         cleanup()
     }
 
-    pub(crate) fn communicate(
+    pub(crate) fn begin_communication(
         &self,
         input: &[u8],
         seconds: Option<f64>,
         select: bool,
-    ) -> Result<BoxedCommunication> {
-        let mut process = self.0.borrow_mut();
-        let (streams, timed_out, wait_budget) = match process.communicate(
+    ) -> Result<communicate::PendingExchange> {
+        self.0.borrow_mut().begin_exchange(
             input,
             seconds.map(Deadline::Float).as_ref(),
             false,
             select,
-        )? {
+        )
+    }
+
+    pub(crate) fn finish_communication<E: From<Error>>(
+        &self,
+        pending: communicate::PendingExchange,
+        check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<BoxedCommunication, E> {
+        let exchange = pending.drain(
+            |timeout, select| {
+                self.0
+                    .borrow_mut()
+                    .exchange_pipes(&[], timeout, false, select)
+            },
+            check,
+        )?;
+        let process = self.0.borrow();
+        let (streams, timed_out) = match exchange {
             communicate::Exchange::Done([out, err]) => (
                 [
                     process.pipes[1].as_ref().map(|_| out),
                     process.pipes[2].as_ref().map(|_| err),
                 ],
                 false,
-                None,
             ),
-            communicate::Exchange::Timeout(streams, budget) => (streams, true, budget),
+            communicate::Exchange::Timeout(streams, _) => (streams, true),
         };
-        Ok(BoxedCommunication {
-            streams,
-            timed_out,
-            wait_budget,
-        })
+        Ok(BoxedCommunication { streams, timed_out })
     }
 }
 

@@ -1,6 +1,7 @@
 """POSIX process handles for runtime-loaded Imre modules."""
 import _imre_subprocess as _process
 from _weakref import ref as _ref
+from time import monotonic as _time
 import io
 import selectors
 
@@ -154,53 +155,83 @@ class Popen:
         return _process.status(self._handle, True)
 
     def wait(self, timeout=None):
+        endtime = None if timeout is None else _time() + timeout
+        try:
+            return self._wait(timeout=timeout)
+        except KeyboardInterrupt:
+            self._wait_after_keyboard_interrupt(endtime)
+            raise
+
+    def _wait(self, timeout):
         result = _process.wait(self._handle, timeout)
         if result is None:
             raise TimeoutExpired(self.args, timeout)
         return result
 
+    def _wait_after_keyboard_interrupt(self, endtime):
+        # The child may also have received SIGINT. Share one brief wait with
+        # __exit__ and respect the caller's original deadline.
+        grace = self._sigint_wait_secs
+        self._sigint_wait_secs = 0
+        if endtime is not None:
+            grace = min(grace, endtime - _time())
+        try:
+            self._wait(timeout=grace)
+        except TimeoutExpired:
+            pass
+
     def communicate(self, input=None, timeout=None):
-        use_select = _PopenSelector is not selectors.PollSelector
-        if use_select and _PopenSelector is not getattr(selectors, "SelectSelector", None):
-            raise NotImplementedError("unsupported subprocess selector")
-        if self.text_mode:
-            if self._communication_started and input:
-                raise ValueError("Cannot send input after starting communication")
-            if self.stdin is None or self._communication_started:
-                input = None
-        single_pipe = (timeout is None and not self._communication_started
-                       and (self.stdin is None) + (self.stdout is None) + (self.stderr is None) >= 2)
-        same_stdin = self._stdin_ref is None if self.stdin is None else (
-            self._stdin_ref is not None and self._stdin_ref() is self.stdin)
-        replaced = self._replacement_output is not None or (not self._communication_started and not same_stdin)
-        if single_pipe:
-            reader = self.stdout or self.stderr
-            if reader:
-                data = reader.read()
-                reader.close()
-                self.wait()
-                return (data, None) if reader is self.stdout else (None, data)
-            if isinstance(self.stdin, io.TextIOWrapper) or (replaced and self.stdin):
+        if self._communication_started and input:
+            raise ValueError("Cannot send input after starting communication")
+        if (timeout is None and not self._communication_started
+                and (self.stdin is None) + (self.stdout is None) + (self.stderr is None) >= 2):
+            out = err = None
+            if self.stdin:
                 if input:
                     try:
                         self.stdin.write(input)
                     except BrokenPipeError:
                         pass
-                if replaced:
-                    try:
-                        self.stdin.close()
-                    except BrokenPipeError:
-                        pass
-                # The native path flushes and closes the original shared binary pipe.
-                input = None
-            if replaced:
-                self.wait()
-                return None, None
-        elif replaced:
-            return self._communicate_replaced_stdin(input, timeout)
-        else:
+                try:
+                    self.stdin.close()
+                except BrokenPipeError:
+                    pass
+            elif self.stdout:
+                out = self.stdout.read()
+                self.stdout.close()
+            elif self.stderr:
+                err = self.stderr.read()
+                self.stderr.close()
+            self.wait()
+            return out, err
+
+        endtime = None if timeout is None else _time() + timeout
+        try:
+            stdout, stderr = self._communicate(input, endtime, timeout)
+        except KeyboardInterrupt:
+            self._wait_after_keyboard_interrupt(endtime)
+            raise
+        finally:
             self._communication_started = True
-            if self.text_mode and input is not None:
+        try:
+            self.wait(timeout=None if endtime is None else endtime - _time())
+        except TimeoutExpired as exc:
+            exc.timeout = timeout
+            raise
+        return stdout, stderr
+
+    def _communicate(self, input, endtime, orig_timeout):
+        use_select = _PopenSelector is not selectors.PollSelector
+        if use_select and _PopenSelector is not getattr(selectors, "SelectSelector", None):
+            raise NotImplementedError("unsupported subprocess selector")
+        same_stdin = self._stdin_ref is None if self.stdin is None else (
+            self._stdin_ref is not None and self._stdin_ref() is self.stdin)
+        if self._replacement_output is not None or (not self._communication_started and not same_stdin):
+            return self._communicate_replaced_stdin(input, endtime, orig_timeout)
+        if self.text_mode:
+            if self.stdin is None or self._communication_started:
+                input = None
+            if input is not None:
                 # A false input closes stdin before encoding. A BOM produced
                 # from an empty string is still validated, but the pipe is closed.
                 if not input:
@@ -213,24 +244,25 @@ class Popen:
                     input = None
                 elif not isinstance(input, (bytes, bytearray)):
                     input = memoryview(input)
-        out, err, expired, remaining = _process.communicate(self._handle, input, timeout, use_select)
+        timeout = None if endtime is None else endtime - _time()
+        out, err, expired = _process.communicate(self._handle, input, timeout, use_select)
         if expired:
-            error = TimeoutExpired(self.args, timeout if remaining is None else remaining,
-                                   output=out, stderr=err)
-            error.timeout = timeout
-            raise error
-        if self.text_mode and not single_pipe:
+            raise TimeoutExpired(self.args, orig_timeout, output=out, stderr=err)
+        try:
+            self.wait(timeout=None if endtime is None else endtime - _time())
+        except TimeoutExpired as exc:
+            exc.timeout = orig_timeout
+            raise
+        if self.text_mode:
             out, err = _decode(out, self.stdout), _decode(err, self.stderr)
         return out, err
 
-    def _communicate_replaced_stdin(self, input, timeout):
+    def _communicate_replaced_stdin(self, input, deadline, timeout):
         # The process handle still owns its original pipe. Use the public stream's
         # descriptor for readiness and writes, and leave the original pipe alone.
         import os
         import select
-        import time
 
-        deadline = None if timeout is None else time.monotonic() + timeout
         if self._replacement_output is None:
             self._replacement_output = [[], []]
             self._replacement_input = b""
@@ -273,9 +305,9 @@ class Popen:
                     selector.register(stream.fileno(), selectors.EVENT_READ, stream)
                     pending += 1
             while pending:
-                remaining = None if deadline is None else deadline - time.monotonic()
+                remaining = None if deadline is None else deadline - _time()
                 ready = selector.select(remaining) if remaining is None or remaining > 0 else []
-                if deadline is not None and time.monotonic() >= deadline:
+                if deadline is not None and _time() >= deadline:
                     raise TimeoutExpired(self.args, timeout,
                                          output=b"".join(output[0]) if output[0] else None,
                                          stderr=b"".join(output[1]) if output[1] else None)
@@ -299,7 +331,7 @@ class Popen:
                     key.data.close()
                     pending -= 1
         try:
-            self.wait(timeout=None if deadline is None else deadline - time.monotonic())
+            self.wait(timeout=None if deadline is None else deadline - _time())
         except TimeoutExpired as exc:
             exc.timeout = timeout
             raise
@@ -334,7 +366,10 @@ class Popen:
                 # The child may already have received SIGINT. Give it a brief chance
                 # to exit without holding the caller in an unbounded wait.
                 if self._sigint_wait_secs > 0:
-                    _process.wait(self._handle, self._sigint_wait_secs)
+                    try:
+                        self._wait(timeout=self._sigint_wait_secs)
+                    except TimeoutExpired:
+                        pass
                 self._sigint_wait_secs = 0
             else:
                 self.wait()

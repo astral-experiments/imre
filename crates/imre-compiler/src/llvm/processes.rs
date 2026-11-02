@@ -664,8 +664,14 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::Executable => self.call("imre_sys_executable", Type::Str, &[]),
-            ProcessOperation::EnvironIndex => {
-                self.call("imre_environ_index", Type::Str, &[&args[0].value])
+            ProcessOperation::EnvironKeys => self.call("imre_environ_keys", returns, &[]),
+            ProcessOperation::EnvironIndex { bytes } => {
+                let function = if bytes {
+                    "imre_environb_index"
+                } else {
+                    "imre_environ_index"
+                };
+                self.call(function, returns, &[&args[0].value])
             }
             ProcessOperation::EnvironDelete { bytes } => {
                 self.checked_line(format!(

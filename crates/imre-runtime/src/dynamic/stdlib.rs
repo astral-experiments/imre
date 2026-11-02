@@ -60,6 +60,7 @@ pub(super) mod signal;
 mod socket;
 mod structure;
 mod subprocess;
+mod system_size;
 pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
@@ -533,6 +534,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_ordered_dict_popitem"
             | "_ordered_dict_repr"
             | "_ordered_dict_setdefault"
+            | "_ordered_dict_sizeof"
             | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
@@ -561,6 +563,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_ConcatenateGenericAlias"
+            | "_get_type_annotations"
             | "_eval_type_expression"
             | "_protocol_mro"
             | "_protocol_member"
@@ -739,7 +742,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
-        | ("_imre_json", "loads" | "surrogate_text" | "encoder_state" | "encoder_call")
+        | ("_imre_json", "scan_once" | "surrogate_text" | "encoder_state" | "encoder_call")
         | ("_imre_linecache", "source_lines")
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
@@ -1207,6 +1210,9 @@ pub(super) fn call(
     }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
+    }
+    if name == "sys.getsizeof" {
+        return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
     if name == "sys.getrecursionlimit" {
         if !kwargs.is_empty() {
@@ -2250,7 +2256,7 @@ pub(super) fn call(
         "_imre_json.encoder_state" => return json::encoder_state(ctx, args, kwargs),
         "_imre_json.encoder_call" => return json::encoder_call(ctx, args, kwargs),
         "_imre_json.surrogate_text" => (1, &[]),
-        "_imre_json.loads" => (2, &[]),
+        "_imre_json.scan_once" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -2507,7 +2513,12 @@ pub(super) fn call(
                 NONE
             }
         }
-        "_imre_json.loads" => json::loads(ctx, argument(args, 0)?, argument(args, 1)?)?,
+        "_imre_json.scan_once" => json::scan_once(
+            ctx,
+            argument(args, 0)?,
+            argument(args, 1)?,
+            argument(args, 2)?,
+        )?,
         "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools._cache_wrapper" => functools::make_cache(
             ctx,
@@ -2596,8 +2607,8 @@ pub(super) fn call(
                 regex::match_groups(ctx, receiver, default)
             };
         }
-        name if name.starts_with("pattern.") || name.starts_with("match.") => {
-            return regex::call(ctx, name, args);
+        "match.group" | "match.start" | "match.end" | "match.span" => {
+            return regex::match_method(ctx, name, args);
         }
         _ => {
             return Err(Error::new(
