@@ -1800,6 +1800,12 @@ pub(super) fn call(
     if name == "_imre_itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
     }
+    if name == "_imre_itertools._starmap_allocate" {
+        return itertools::starmap_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._starmap_next" {
+        return itertools::starmap_next(ctx, args, kwargs);
+    }
     if name == "_imre_itertools._filterfalse_allocate" {
         return itertools::filterfalse_allocate(ctx, args, kwargs);
     }

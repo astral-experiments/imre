@@ -2774,6 +2774,8 @@ impl Context {
                 for attr in [
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_starmap_allocate",
+                    "_starmap_next",
                     "_filterfalse_allocate",
                     "_filterfalse_state",
                     "_chain_allocate",
@@ -3253,6 +3255,17 @@ impl Context {
             {
                 // Fresh bootstrap imports run while the replacement package is still initializing.
                 self.bootstrap_file_spec = make_spec;
+            }
+            if name == "itertools"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("itertools.py"))
+                && let Some(class) = self.scope_name(scope, "starmap")
+                && let Value::Class { scope, .. } = *self.heap.get(class)
+                && let Value::Scope(frame) = self.heap.get_mut(scope)
+                && let Some(layout) = &mut frame.class_namespace
+            {
+                layout.itertools_layout = Some("itertools.starmap");
             }
             if name == "itertools"
                 && let Some(owner) = self.scope_name(scope, "batched")
