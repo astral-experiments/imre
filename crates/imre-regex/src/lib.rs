@@ -714,7 +714,7 @@ fn tokenize(
                 can_repeat = false;
                 Width::fixed(0)
             }
-            '\\' if lookahead && push_octal_escape(&mut input, &mut output, false)? => {
+            '\\' if lookahead && push_octal_escape(&mut input, &mut output, false)?.is_some() => {
                 can_repeat = true;
                 Width::fixed(1)
             }
@@ -1063,7 +1063,10 @@ fn guarded_class(
     let mut excluded = String::new();
     loop {
         match next_token(input, verbose)? {
-            Some('\\') if escaped(input, &mut excluded, false, escapes)? == Escape::Scalar => {}
+            Some('\\')
+                if escaped(input, &mut excluded, false, escapes)?
+                    .scalar()
+                    .is_some() => {}
             Some(c) if !r"\.^$*+?{}[]()|".contains(c) => literal(&mut excluded, c),
             _ => return Err(unsupported.into()),
         }
@@ -1135,9 +1138,18 @@ fn literal(output: &mut String, c: char) {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Escape {
-    Scalar,
+    Scalar(char),
     Class,
     Anchor,
+}
+
+impl Escape {
+    fn scalar(self) -> Option<char> {
+        match self {
+            Self::Scalar(value) => Some(value),
+            _ => None,
+        }
+    }
 }
 
 /// Consume a Python pattern octal and emit one scalar (or one octet in a bytes pattern).
@@ -1146,9 +1158,9 @@ fn push_octal_escape(
     input: &mut Input<'_>,
     output: &mut String,
     in_class: bool,
-) -> Result<bool, String> {
+) -> Result<Option<char>, String> {
     let Some(&first @ '0'..='7') = input.peek() else {
-        return Ok(false);
+        return Ok(None);
     };
     let mut digits = input.clone();
     let mut value = 0u16;
@@ -1160,7 +1172,7 @@ fn push_octal_escape(
         count += 1;
     }
     if !in_class && first != '0' && count < 3 {
-        return Ok(false);
+        return Ok(None);
     }
     if value > 0xff {
         return Err(format!(
@@ -1169,7 +1181,7 @@ fn push_octal_escape(
     }
     *input = digits;
     write!(output, r"\x{value:02x}").unwrap();
-    Ok(true)
+    Ok(Some(char::from(value as u8)))
 }
 
 fn escaped(
@@ -1178,8 +1190,8 @@ fn escaped(
     in_class: bool,
     escapes: &mut Escapes,
 ) -> Result<Escape, String> {
-    if push_octal_escape(input, output, in_class)? {
-        return Ok(Escape::Scalar);
+    if let Some(value) = push_octal_escape(input, output, in_class)? {
+        return Ok(Escape::Scalar(value));
     }
     let c = input.next().ok_or("incomplete regex escape")?;
     let ascii = escapes.alphabet.ascii();
@@ -1255,7 +1267,7 @@ fn escaped(
             if c == 'x' {
                 // The same escape denotes a scalar in text and a single octet in bytes.
                 write!(output, "\\x{result:02x}").unwrap();
-                return Ok(Escape::Scalar);
+                return Ok(Escape::Scalar(char::from(result as u8)));
             }
             char::from_u32(result).ok_or("regex escape is not a Unicode scalar")?
         }
@@ -1263,10 +1275,58 @@ fn escaped(
         _ => return Err(format!("unsupported Python regex escape \\{c}")),
     };
     literal(output, value);
-    Ok(Escape::Scalar)
+    Ok(Escape::Scalar(value))
 }
 
 fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> Result<(), String> {
+    parse_class(input, output, escapes, None)
+}
+
+/// Inspect one class in its original spelling before the backend expands Python categories.
+/// CPython computes the position from tokenizer heads, even for multi-digit escapes.
+pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usize)> {
+    let mut input = source.strip_prefix('[')?.chars().peekable();
+    let mut escapes = Escapes {
+        alphabet: if bytes {
+            Alphabet::Bytes
+        } else {
+            Alphabet::Unicode
+        },
+        bracketed_word: false,
+    };
+    let mut from_end = 0;
+    let error = parse_class(
+        &mut input,
+        &mut String::new(),
+        &mut escapes,
+        Some(&mut from_end),
+    )
+    .err()?;
+    if from_end == 0 {
+        return None;
+    }
+    let position = source.chars().count() - from_end;
+    if bytes && !error.is_ascii() {
+        // Tokenizer.error uses ASCII backslash replacement after calculating the offset.
+        let mut message = String::new();
+        for c in error.chars() {
+            if c.is_ascii() {
+                message.push(c);
+            } else {
+                write!(message, r"\x{:02x}", c as u32).unwrap();
+            }
+        }
+        return Some((message, position));
+    }
+    Some((error, position))
+}
+
+fn parse_class(
+    input: &mut Input<'_>,
+    output: &mut String,
+    escapes: &mut Escapes,
+    from_end: Option<&mut usize>,
+) -> Result<(), String> {
     output.push('[');
     // An immediate second '[' is CPython's possible nested set (FutureWarning).
     if input.peek() == Some(&'[') {
@@ -1278,9 +1338,13 @@ fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> R
     let mut first = true;
     // Only a standalone atom can begin a range. Once both endpoints are
     // consumed, a following hyphen starts a new atom and is literal.
-    let mut left_atom: Option<bool> = None;
-    let mut range_pending = false;
+    let mut left_atom = None;
+    let mut range_start = None;
     while let Some(c) = input.next() {
+        if from_end.is_some() {
+            // Diagnostics only need the current atom's decoded value.
+            output.clear();
+        }
         if c == ']' && !first {
             output.push(']');
             return Ok(());
@@ -1288,29 +1352,38 @@ fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> R
         if !first && matches!(c, '&' | '~' | '|' | '-') && input.peek() == Some(&c) {
             return Err("nested or ambiguous regex character class is not supported".into());
         }
-        if c == '-'
-            && let Some(scalar) = left_atom
-            && input.peek() != Some(&']')
-        {
-            if !scalar {
-                return Err("regex range requires scalar endpoints".into());
-            }
+        if c == '-' && left_atom.is_some() && input.peek() != Some(&']') {
             output.push('-');
-            left_atom = None;
-            range_pending = true;
+            range_start = left_atom.take();
             continue;
         }
-        let scalar = if c == '\\' {
-            escaped(input, output, true, escapes)? == Escape::Scalar
+        let mut second = None;
+        let value = if c == '\\' {
+            second = input.peek().copied();
+            escaped(input, output, true, escapes)?.scalar()
         } else {
             literal(output, c);
-            true
+            Some(c)
         };
-        if range_pending && !scalar {
-            return Err("regex range requires scalar endpoints".into());
+        if let Some((low, left, extra)) = range_start.take() {
+            if !matches!((low, value), (Some(low), Some(high)) if low <= high) {
+                // Python's tokenizer reads one token past the right endpoint.
+                if input.peek() == Some(&'\\') && input.clone().nth(1).is_none() {
+                    return Err("incomplete regex escape".into());
+                }
+                let range: String = std::iter::once(left)
+                    .chain(extra)
+                    .chain(['-', c])
+                    .chain(second)
+                    .collect();
+                if let Some(offset) = from_end {
+                    *offset = input.clone().count() + range.chars().count();
+                }
+                return Err(format!("bad character range {range}"));
+            }
+        } else {
+            left_atom = Some((value, c, second));
         }
-        left_atom = (!range_pending).then_some(scalar);
-        range_pending = false;
         first = false;
     }
     Err("unclosed regex character class".into())
