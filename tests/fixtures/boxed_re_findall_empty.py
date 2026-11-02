@@ -2,6 +2,35 @@ import re
 
 
 def current():
+    source = b":x::"
+    view = memoryview(source)
+    other = memoryview(view)
+    assert type(view) is memoryview and other.obj is source
+    assert other is not view and other.readonly and len(other) == 4
+    assert view == source == other and hash(view) == hash(source)
+    assert view != source[1:] and re.findall(b":+", view) == [b":", b"::"]
+    match = re.search(b":+", view)
+    memoryview.release(view)
+    assert match.span() == (0, 1) and bytes(other) == source
+    try:
+        match.group()
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("released subject remained readable")
+    class Exporter(bytes):
+        def __buffer__(self, flags):
+            return memoryview(b"override")
+
+    source = Exporter(b"abc")
+    assert bytes(source) == b"abc"
+    for acquire in (lambda: bytes(memoryview(source)), lambda: re.findall(b".+", source)[0]):
+        try:
+            result = acquire()
+        except NotImplementedError as error:
+            assert "buffer hooks" in str(error)
+        else:
+            assert result == b"override", result
     for pattern, text in (
         ('a*', 'a'),
         ('a*?', 'a'),

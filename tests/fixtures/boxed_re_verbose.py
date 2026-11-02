@@ -22,6 +22,10 @@ def current():
     print(pattern.fullmatch("# #\n") is None, pattern.fullmatch("# #").groups())
     print(pattern.match("é# #").group("optional"))
     print(re.match(r"a \s # ignored", "a\x1c", re.X).groups())
+    for flags in (0, re.VERBOSE, re.ASCII | re.IGNORECASE):
+        guarded = re.compile(r"(?:(?!x|:)[^!])+", flags)
+        assert guarded.search("aXbc").group() == ("a" if int(flags & re.I) != 0 else "aXbc")
+        assert guarded.fullmatch("abc").group() == "abc"
     for flags in (0, re.VERBOSE):
         magic = re.compile(b"([*?[])", flags)
         assert magic.search(b"name[1]").group(1) == b"["

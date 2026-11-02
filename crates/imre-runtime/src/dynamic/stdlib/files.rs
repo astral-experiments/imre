@@ -173,35 +173,6 @@ fn dirname(path: &str) -> &str {
     }
 }
 
-fn abspath(path: &str) -> std::io::Result<String> {
-    let path = if path.starts_with('/') {
-        path.to_owned()
-    } else {
-        let cwd = std::env::current_dir()?;
-        join(
-            cwd.to_str()
-                .ok_or_else(|| std::io::Error::other("non-UTF-8 working directory"))?,
-            path,
-        )
-    };
-    let prefix = if path.starts_with("//") && !path.starts_with("///") {
-        "//"
-    } else {
-        "/"
-    };
-    let mut parts = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(part),
-        }
-    }
-    Ok(format!("{prefix}{}", parts.join("/")))
-}
-
 fn run_process(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let command = argument(args, 0)?;
     let items = ctx.items(command)?;
@@ -324,7 +295,6 @@ pub(super) fn call(
             }
             return Ok(ctx.text(path));
         }
-        "os.path.abspath" => return Ok(ctx.text(abspath(ctx.str_value(first)?).map_err(os_error)?)),
         "os.path.dirname" => return Ok(ctx.text(dirname(ctx.str_value(first)?).to_owned())),
         "subprocess.run" => return run_process(ctx, args, kwargs),
         _ => {}

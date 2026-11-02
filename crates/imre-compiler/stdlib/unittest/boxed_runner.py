@@ -88,9 +88,9 @@ def _streamAttribute(self, name):
 def _boxedRunnerInit(self, stream=None, descriptions=True, verbosity=1, failfast=False,
                      buffer=False, resultclass=None, warnings=None, *, tb_locals=False,
                      durations=None):
-    if buffer or tb_locals or warnings is not None or durations is not None:
+    if buffer or tb_locals or durations is not None:
         raise NotImplementedError("native TextTestRunner does not yet support output buffering, "
-                                  "local variables in tracebacks, warning filters or durations")
+                                  "local variables in tracebacks or durations")
     self.stream = _WritelnDecorator(sys.stderr if stream is None else stream)
     self.descriptions = descriptions
     self.verbosity = verbosity
@@ -120,26 +120,29 @@ def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, d
     self.durations = durations
 
 
-from unittest.signals import registerResult as _registerRunnerResult
+from unittest import runner as _runnerModule
 
 
 def _runWithResult(self, test):
     result = self._makeResult()
-    _registerRunnerResult(result)
+    _runnerModule.registerResult(result)
     result.failfast = self.failfast
     result.buffer = self.buffer
     result.tb_locals = self.tb_locals
-    started = time.time()
-    start = getattr(result, "startTestRun", None)
-    if start is not None:
-        start()
-    try:
-        test(result)
-    finally:
-        stop = getattr(result, "stopTestRun", None)
-        if stop is not None:
-            stop()
-    elapsed = time.time() - started
+    with _runnerModule.warnings.catch_warnings():
+        if self.warnings:
+            _runnerModule.warnings.simplefilter(self.warnings)
+        started = time.time()
+        start = getattr(result, "startTestRun", None)
+        if start is not None:
+            start()
+        try:
+            test(result)
+        finally:
+            stop = getattr(result, "stopTestRun", None)
+            if stop is not None:
+                stop()
+        elapsed = time.time() - started
     result.printErrors()
     if hasattr(result, "separator2"):
         self.stream.writeln(result.separator2)

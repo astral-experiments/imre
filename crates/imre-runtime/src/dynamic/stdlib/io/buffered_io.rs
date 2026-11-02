@@ -2,7 +2,7 @@
 
 use super::{Context, Error, Id, NONE, Result, Value};
 
-pub(super) const METHODS: &[&str] = &["read", "read1", "readinto", "readinto1", "detach"];
+pub(super) const METHODS: &[&str] = &["read", "read1", "readinto", "readinto1", "write", "detach"];
 
 pub(super) fn call(
     ctx: &mut Context,
@@ -16,23 +16,6 @@ pub(super) fn call(
             "TypeError",
             format!("{name}() takes no keyword arguments"),
         ));
-    }
-    if matches!(name, "read" | "read1") {
-        if args.len() > 1 {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() takes at most 1 argument ({} given)", args.len()),
-            ));
-        }
-        if let Some(&id) = args.first() {
-            ctx.index_integer(id)?
-                .to_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?;
-        }
-        return Err(Error::new("UnsupportedOperation", name));
     }
     let [buffer] = args else {
         return Err(Error::new(

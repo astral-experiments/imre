@@ -353,7 +353,9 @@ impl Checker<'_> {
         }
         if matches!(
             self.collection_binding(expression),
-            Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+            Some(Binding::Intrinsic(
+                Intrinsic::Mapping | Intrinsic::TYPING_MAPPING
+            ))
         ) {
             let mut classes = vec![InstanceType::Dict];
             classes.extend(

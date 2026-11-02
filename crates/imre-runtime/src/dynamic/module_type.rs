@@ -5,14 +5,19 @@ pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a stri
 impl Context {
     /// Copy live exports from a module in their original order. A failing lookup
     /// leaves earlier bindings visible, just like successive assignments.
-    pub(super) fn import_star(&mut self, scope: Id, module: Id, custom_hook: bool) -> Result<Id> {
+    pub(super) fn import_star(
+        &mut self,
+        scope: Id,
+        module: Id,
+        fromlist_handled: bool,
+    ) -> Result<Id> {
         self.heap.reserve_temporaries(1)?;
         self.heap.keep(module);
         let (names, implicit) = match self.lookup_attr(module, "__all__") {
             Ok(names) => {
-                // Custom import hooks have already handled the fromlist. The native importer
-                // does not yet preload package children named by __all__.
-                if !custom_hook
+                // Static imports and absolute imports through the default hook do not
+                // preload package children named by __all__.
+                if !fromlist_handled
                     && let Value::Module { scope, .. } = *self.heap.get(module)
                     && self.scope_name(scope, "__path__").is_some()
                 {

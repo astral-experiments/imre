@@ -72,6 +72,32 @@ impl Seek for Descriptor {
     }
 }
 
+/// Return buffered bytes first, or perform one raw read without reading ahead.
+fn read_once(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Vec<u8>> {
+    let size = usize::try_from(size).unwrap_or(reader.capacity());
+    let buffered = reader.buffer();
+    if !buffered.is_empty() {
+        let count = size.min(buffered.len());
+        let mut bytes = builtins::zeroed_bytes(count as i64)?;
+        bytes.copy_from_slice(&buffered[..count]);
+        reader.consume(count);
+        return Ok(bytes);
+    }
+    let mut bytes = builtins::zeroed_bytes(size as i64)?;
+    if !bytes.is_empty() {
+        loop {
+            match reader.get_mut().read(&mut bytes) {
+                Ok(count) => bytes.truncate(count),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => bytes.clear(),
+                Err(error) => return Err(os_error(error)),
+            }
+            break;
+        }
+    }
+    Ok(bytes)
+}
+
 enum Buffer {
     Reader(BufReader<Descriptor>),
     Writer(BufWriter<Descriptor>),
@@ -181,7 +207,14 @@ impl BufferedFd {
             return Ok(NONE);
         }
         let closed = || Error::new("ValueError", "I/O operation on closed file.");
-        let size = if matches!(name, "read" | "readline") {
+        let size = if let ("read1", [n]) = (name, args) {
+            Some(ctx.index_integer(*n)?.to_i64().ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?)
+        } else if matches!(name, "read" | "readline") {
             Some(files::read_length(ctx, args.first().copied())?)
         } else {
             None
@@ -235,11 +268,14 @@ impl BufferedFd {
                     .seek(seek.expect("validated seek"))
                     .map_err(os_error)? as i64,
             )),
-            "read" | "readline" => {
+            "read" | "read1" | "readline" => {
                 let Buffer::Reader(r) = buffer else {
                     return Err(Error::new("UnsupportedOperation", "read"));
                 };
                 let size = size.unwrap_or(-1);
+                if name == "read1" {
+                    return Ok(ctx.alloc(Value::Bytes(read_once(r, size)?)));
+                }
                 if name == "read" && size < -1 {
                     return Err(Error::new(
                         "ValueError",

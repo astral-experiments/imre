@@ -55,6 +55,7 @@ impl Emitter<'_, '_> {
                     TextPredicate::Digit => "imre_str_isdigit",
                     TextPredicate::Space => "imre_str_isspace",
                     TextPredicate::Lower => "imre_str_is_lower",
+                    TextPredicate::Title => "imre_str_is_title",
                     TextPredicate::Upper => "imre_str_is_upper",
                 };
                 let bit = self.instruction(format!("call i32 @{symbol}(ptr {source})"));
@@ -70,9 +71,18 @@ impl Emitter<'_, '_> {
                 "call ptr @imre_str_expandtabs(ptr {source}, i64 {})",
                 args[1].value.operand,
             )),
+            TextOperation::ZFill { copy } => self.checked_instruction(format!(
+                "call ptr @imre_str_zfill(ptr {source}, i64 {}, i32 {})",
+                args[1].value.operand,
+                u32::from(copy),
+            )),
             TextOperation::Normalize => self.checked_instruction(format!(
                 "call ptr @imre_unicode_normalize(ptr {source}, ptr {})",
                 args[1].value.operand,
+            )),
+            TextOperation::CaseMap { title } => self.checked_instruction(format!(
+                "call ptr @imre_str_case_map(ptr {source}, i32 {})",
+                u32::from(title),
             )),
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))

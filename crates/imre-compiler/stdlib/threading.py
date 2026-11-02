@@ -8,7 +8,7 @@ from itertools import count
 import _imre_thread
 
 
-__all__ = ["Thread", "Lock", "TIMEOUT_MAX", "local", "get_ident",
+__all__ = ["Thread", "Lock", "RLock", "TIMEOUT_MAX", "local", "get_ident",
            "main_thread", "current_thread", "enumerate", "active_count"]
 try:
     from _thread import get_native_id
@@ -174,6 +174,26 @@ def active_count():
 
 
 # CPython 3.14.5, Lib/threading.py. See stdlib/docstrings/LICENSE.
+def RLock(*args, **kwargs):
+    """Factory function that returns a new reentrant lock.
+
+    A reentrant lock must be released by the thread that acquired it. Once a
+    thread has acquired a reentrant lock, the same thread may acquire it again
+    without blocking; the thread must release it once for each time it has
+    acquired it.
+
+    """
+    if args or kwargs:
+        import warnings
+        warnings.warn(
+            'Passing arguments to RLock is deprecated and will be removed in 3.15',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if _CRLock is None:
+        return _PyRLock(*args, **kwargs)
+    return _CRLock(*args, **kwargs)
+
 class _RLock:
     """This class implements reentrant lock objects.
 

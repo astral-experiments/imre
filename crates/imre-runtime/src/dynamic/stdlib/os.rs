@@ -18,7 +18,8 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "unlink", "utime",
+                "access", "chmod", "link", "lstat", "mkdir", "open", "readlink", "rmdir", "stat",
+                "symlink", "unlink", "utime",
             ][..],
         ),
         (
@@ -28,13 +29,15 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_follow_symlinks",
             &[
+                "access",
                 #[cfg(target_os = "macos")]
                 "chmod",
+                "link",
                 "stat",
                 "utime",
             ][..],
         ),
-        ("supports_effective_ids", &[][..]),
+        ("supports_effective_ids", &["access"][..]),
     ] {
         let set = ctx.alloc(Value::Set {
             entries: Default::default(),
@@ -320,6 +323,7 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
+mod links;
 mod unlink;
 mod utime;
 
@@ -327,7 +331,9 @@ mod utime;
 pub(super) fn is_descriptor_function(name: &str) -> bool {
     matches!(
         name,
-        "open"
+        "access"
+            | "open"
+            | "waitpid"
             | "readlink"
             | "scandir"
             | "remove"
@@ -348,6 +354,8 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_blocking"
             | "get_inheritable"
             | "set_inheritable"
+            | "link"
+            | "symlink"
     )
 }
 
@@ -466,6 +474,59 @@ fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     Ok(ctx.text_codepoints(codec.decode_filesystem(&target)?))
 }
 
+/// Bind two required positional-or-keyword operands followed by keyword-only options.
+fn bind_two_positional<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    if args.len() > 2 && args.len() + kwargs.len() <= N {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() takes exactly 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    builtins::bind_builtin_arguments(name, args, kwargs, names, 2)
+}
+
+/// Test filesystem access using the credentials and link policy requested by the caller.
+fn access(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["path", "mode", "dir_fd", "effective_ids", "follow_symlinks"];
+    let [Some(path), Some(mode), dir_fd, effective, follow] =
+        bind_two_positional("access", args, kwargs, names)?
+    else {
+        unreachable!("access requires path and mode")
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        "access: path should be string, bytes or os.PathLike",
+    )?;
+    let path = c_path(ctx, path, "access: embedded null character in path")?;
+    let mode = c_int(ctx, mode)?;
+    let dir_fd = directory_fd(ctx, dir_fd)?;
+    let effective = effective
+        .map(|v| ctx.truth(v))
+        .transpose()?
+        .unwrap_or(false);
+    let follow = follow.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
+    let flags = (if effective { libc::AT_EACCESS } else { 0 })
+        | (if follow { 0 } else { libc::AT_SYMLINK_NOFOLLOW });
+    // SAFETY: path is NUL-terminated and remains live through the synchronous check.
+    let status = unsafe {
+        if dir_fd == libc::AT_FDCWD && flags == 0 {
+            libc::access(path.as_ptr(), mode)
+        } else {
+            libc::faccessat(dir_fd, path.as_ptr(), mode, flags)
+        }
+    };
+    Ok(builtins::boolean(status == 0))
+}
+
 /// Create a directory relative to dir_fd using the caller's mode and process umask.
 fn mkdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let names = ["path", "mode", "dir_fd"];
@@ -545,6 +606,15 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "access" {
+        return access(ctx, args, kwargs);
+    }
+    if name == "symlink" {
+        return links::symlink(ctx, args, kwargs);
+    }
+    if name == "link" {
+        return links::link(ctx, args, kwargs);
+    }
     if name == "scandir" {
         return scandir::open(ctx, args, kwargs);
     }
@@ -599,6 +669,25 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    if name == "waitpid" {
+        let [pid, options] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("waitpid expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let pid = c_int(ctx, *pid)?;
+        let options = c_int(ctx, *options)?;
+        // Reserve the result before consuming a child status from the kernel.
+        let mut result = Vec::new();
+        result
+            .try_reserve_exact(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for value in native::waitpid(pid, options)? {
+            result.push(ctx.int(i64::from(value)));
+        }
+        return Ok(ctx.alloc(Value::Tuple(result)));
     }
     if name == "pipe" {
         if !args.is_empty() {

@@ -1909,7 +1909,9 @@ fn annotation_with_aliases(
         ast::Expr::Subscript(subscript)
             if matches!(
                 graph.resolve_type(module, &subscript.value),
-                Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+                Some(Binding::Intrinsic(
+                    Intrinsic::Mapping | Intrinsic::TYPING_MAPPING
+                ))
             ) =>
         {
             if let ast::Expr::Tuple(types) = &*subscript.slice
@@ -2572,6 +2574,9 @@ impl<'a> Checker<'a> {
     ) -> Result<(Expr, usize, Type), String> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
+        }
+        if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
+            return Err(self.object_builtin_error("binary file metadata", attribute));
         }
         if attribute.attr.as_str() == "readinto"
             && matches!(receiver.ty, Type::BinaryIO | Type::BytesIO)
@@ -4709,13 +4714,8 @@ impl<'a> Checker<'a> {
                 if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func)
                         == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
-                    && call
-                        .arguments
-                        .keywords
-                        .iter()
-                        .any(|kw| kw.arg.as_ref().is_some_and(|name| name == "stdout"))
                 {
-                    Some(Statement::Expr(self.process_to_stderr(call)?))
+                    Some(Statement::Expr(self.process_run(call, true)?))
                 } else if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::AssertNever))
                 {
@@ -5392,6 +5392,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
             Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
+            Some(Binding::Intrinsic(Intrinsic::HError)) => Some(72),
             Some(Binding::Intrinsic(Intrinsic::BinasciiError)) => Some(69),
             Some(Binding::Intrinsic(Intrinsic::BinasciiIncomplete)) => Some(70),
             Some(Binding::Intrinsic(Intrinsic::PackageNotFoundError)) => Some(71),
@@ -6275,6 +6276,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
                 }
+                Intrinsic::Stdin => return Err(self.object_runtime_export("sys.stdin", expression)),
                 Intrinsic::Stdout => return Ok(self.stdout_value()),
                 Intrinsic::OriginalStdout | Intrinsic::Stderr => {
                     return Ok(Expr {
@@ -7703,9 +7705,15 @@ impl<'a> Checker<'a> {
                 if matches!(
                     receiver.ty,
                     Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
-                ) && ir::StrDescriptor::named(attribute.attr.as_str())
-                    .is_some_and(ir::StrDescriptor::is_predicate)
-                {
+                ) && ir::StrDescriptor::named(attribute.attr.as_str()).is_some_and(|method| {
+                    method.is_predicate()
+                        || matches!(
+                            method,
+                            ir::StrDescriptor::ZFill
+                                | ir::StrDescriptor::Title
+                                | ir::StrDescriptor::SwapCase
+                        )
+                }) {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
                         attribute,
@@ -9234,7 +9242,7 @@ impl<'a> Checker<'a> {
             self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
         ) {
-            return self.process_run(call);
+            return self.process_run(call, false);
         }
         if let Some(Binding::Intrinsic(Intrinsic::ShellOutput { status })) =
             self.resolve(&call.func)
@@ -9568,6 +9576,15 @@ impl<'a> Checker<'a> {
             {
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
+            if attribute.attr.as_str() == "zfill"
+                && matches!(
+                    receiver.ty,
+                    Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
+                )
+            {
+                let copy = matches!(receiver.ty, Type::StrEnum(_));
+                return self.zfill(Self::string_value(receiver), call, copy);
+            }
             let receiver = Self::enum_text(receiver);
             if matches!(receiver.ty, Type::Document(_)) {
                 return self.document_method(call, attribute, receiver);
@@ -9676,16 +9693,19 @@ impl<'a> Checker<'a> {
             if matches!(
                 attribute.attr.as_str(),
                 "splitlines"
+                    | "title"
+                    | "swapcase"
                     | "isalnum"
                     | "isascii"
                     | "isalpha"
                     | "isdigit"
                     | "isspace"
                     | "islower"
+                    | "istitle"
                     | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.splitlines_or_predicate(
+                return self.splitlines_or_unary_text(
                     Self::string_value(receiver),
                     attribute.attr.as_str(),
                     call,
@@ -10989,6 +11009,14 @@ mod tests {
         assert_eq!(super::recursive_call_root(&graph), None);
         graph.last_mut().unwrap().insert(0);
         assert_eq!(super::recursive_call_root(&graph), Some(0));
+    }
+
+    #[test]
+    fn typing_mapping_alias_checks_without_boxed_lowering() {
+        crate::check(include_str!(
+            "../../../tests/fixtures/classes/mapping_alias.py"
+        ))
+        .unwrap();
     }
 
     #[test]

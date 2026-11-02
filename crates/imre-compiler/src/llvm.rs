@@ -8704,6 +8704,7 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_excl = external constant i64
 @imre_os_o_trunc = external constant i64
 @imre_os_o_cloexec = external constant i64
+@imre_os_wnohang = external constant i64
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
@@ -9411,7 +9412,9 @@ declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
+declare ptr @imre_str_zfill(ptr, i64, i32)
 declare ptr @imre_unicode_normalize(ptr, ptr)
+declare ptr @imre_str_case_map(ptr, i32)
 declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
@@ -9464,7 +9467,6 @@ declare ptr @imre_shlex_quote(ptr)
 declare ptr @imre_sys_executable()
 declare ptr @imre_popen_selector_class(i32)
 declare void @imre_popen_set_selector(ptr)
-declare void @imre_subprocess_to_stderr(ptr, i32)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
@@ -9518,6 +9520,7 @@ declare ptr @imre_frozenset_strings(ptr)
 declare ptr @imre_sys_stdlib_module_names()
 declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
+declare i32 @imre_str_is_title(ptr)
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)

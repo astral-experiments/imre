@@ -566,6 +566,7 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
     let kind = match errno {
         libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
+        libc::ECHILD => Kind::ChildProcessError,
         libc::ESHUTDOWN => Kind::BrokenPipeError,
         _ => os_error_kind(error.kind()),
     };

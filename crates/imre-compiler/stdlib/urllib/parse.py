@@ -1,6 +1,8 @@
 # URL helpers from CPython 3.14.5 Lib/urllib/parse.py (PSF-2.0).
 
 from collections import namedtuple
+import re
+import warnings
 from urllib.parse import unquote
 
 
@@ -64,6 +66,199 @@ DefragResultBytes._decoded_counterpart = DefragResult
 
 
 _WHATWG_C0_CONTROL_OR_SPACE = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f '
+
+
+def splittype(url):
+    warnings.warn("urllib.parse.splittype() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splittype(url)
+
+
+_typeprog = None
+def _splittype(url):
+    """splittype('type:opaquestring') --> 'type', 'opaquestring'."""
+    global _typeprog
+    if _typeprog is None:
+        _typeprog = re.compile('([^/:]+):(.*)', re.DOTALL)
+
+    match = _typeprog.match(url)
+    if match:
+        scheme, data = match.groups()
+        return scheme.lower(), data
+    return None, url
+
+
+def splithost(url):
+    warnings.warn("urllib.parse.splithost() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splithost(url)
+
+
+_hostprog = None
+def _splithost(url):
+    """splithost('//host[:port]/path') --> 'host[:port]', '/path'."""
+    global _hostprog
+    if _hostprog is None:
+        _hostprog = re.compile('//([^/#?]*)(.*)', re.DOTALL)
+
+    match = _hostprog.match(url)
+    if match:
+        host_port, path = match.groups()
+        if path and path[0] != '/':
+            path = '/' + path
+        return host_port, path
+    return None, url
+
+
+def splituser(host):
+    warnings.warn("urllib.parse.splituser() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splituser(host)
+
+
+def _splituser(host):
+    """splituser('user[:passwd]@host[:port]') --> 'user[:passwd]', 'host[:port]'."""
+    user, delim, host = host.rpartition('@')
+    return (user if delim else None), host
+
+
+def splitpasswd(user):
+    warnings.warn("urllib.parse.splitpasswd() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitpasswd(user)
+
+
+def _splitpasswd(user):
+    """splitpasswd('user:passwd') -> 'user', 'passwd'."""
+    user, delim, passwd = user.partition(':')
+    return user, (passwd if delim else None)
+
+
+def splitport(host):
+    warnings.warn("urllib.parse.splitport() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitport(host)
+
+
+_portprog = None
+def _splitport(host):
+    """splitport('host:port') --> 'host', 'port'."""
+    global _portprog
+    if _portprog is None:
+        _portprog = re.compile('(.*):([0-9]*)', re.DOTALL)
+
+    match = _portprog.fullmatch(host)
+    if match:
+        host, port = match.groups()
+        if port:
+            return host, port
+    return host, None
+
+
+def splitnport(host, defport=-1):
+    warnings.warn("urllib.parse.splitnport() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitnport(host, defport)
+
+
+def _splitnport(host, defport=-1):
+    """Split host and port, returning numeric port.
+    Return given default port if no ':' found; defaults to -1.
+    Return numerical port if a valid number is found after ':'.
+    Return None if ':' but not a valid number."""
+    host, delim, port = host.rpartition(':')
+    if not delim:
+        host = port
+    elif port:
+        if port.isdigit() and port.isascii():
+            nport = int(port)
+        else:
+            nport = None
+        return host, nport
+    return host, defport
+
+
+def splitquery(url):
+    warnings.warn("urllib.parse.splitquery() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitquery(url)
+
+
+def _splitquery(url):
+    """splitquery('/path?query') --> '/path', 'query'."""
+    path, delim, query = url.rpartition('?')
+    if delim:
+        return path, query
+    return url, None
+
+
+def splittag(url):
+    warnings.warn("urllib.parse.splittag() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splittag(url)
+
+
+def _splittag(url):
+    """splittag('/path#tag') --> '/path', 'tag'."""
+    path, delim, tag = url.rpartition('#')
+    if delim:
+        return path, tag
+    return url, None
+
+
+def splitattr(url):
+    warnings.warn("urllib.parse.splitattr() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitattr(url)
+
+
+def _splitattr(url):
+    """splitattr('/path;attr1=value1;attr2=value2;...') ->
+        '/path', ['attr1=value1', 'attr2=value2', ...]."""
+    words = url.split(';')
+    return words[0], words[1:]
+
+
+def splitvalue(attr):
+    warnings.warn("urllib.parse.splitvalue() is deprecated as of 3.8, "
+                  "use urllib.parse.parse_qsl() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitvalue(attr)
+
+
+def _splitvalue(attr):
+    """splitvalue('attr=value') --> 'attr', 'value'."""
+    attr, delim, value = attr.partition('=')
+    return attr, (value if delim else None)
+
+
+def to_bytes(url):
+    warnings.warn("urllib.parse.to_bytes() is deprecated as of 3.8",
+                  DeprecationWarning, stacklevel=2)
+    return _to_bytes(url)
+
+
+def _to_bytes(url):
+    """to_bytes(u"URL") --> 'URL'."""
+    # Most URL schemes require ASCII. If that changes, the conversion
+    # can be relaxed.
+    # XXX get rid of to_bytes()
+    if isinstance(url, str):
+        try:
+            url = url.encode("ASCII").decode()
+        except UnicodeError:
+            raise UnicodeError("URL " + repr(url) +
+                               " contains non-ASCII characters")
+    return url
 
 
 def unwrap(url):
@@ -149,3 +344,106 @@ def unquote_plus(string, encoding='utf-8', errors='replace'):
     """
     string = string.replace('+', ' ')
     return unquote(string, encoding, errors)
+
+
+_hexdig = '0123456789ABCDEFabcdef'
+_hextobyte = None
+
+
+def unquote_to_bytes(string):
+    """Decode percent escapes and return the resulting bytes."""
+    if not string:
+        # Is it a string-like object?
+        string.split
+        return b''
+    if isinstance(string, str):
+        string = string.encode('utf-8')
+    bits = string.split(b'%')
+    if len(bits) == 1:
+        return bytes(string)
+    res = bytearray(bits[0])
+    append = res.extend
+    # Delay the initialization of the table to not waste memory
+    # if the function is never called
+    global _hextobyte
+    if _hextobyte is None:
+        _hextobyte = {(a + b).encode(): bytes.fromhex(a + b)
+                      for a in _hexdig for b in _hexdig}
+    for item in bits[1:]:
+        try:
+            append(_hextobyte[item[:2]])
+            append(item[2:])
+        except KeyError:
+            append(b'%')
+            append(item)
+    return bytes(res)
+
+
+def parse_qs(qs, keep_blank_values=False, strict_parsing=False,
+             encoding='utf-8', errors='replace', max_num_fields=None, separator='&'):
+    """Parse a query into lists of values grouped by name."""
+    result = {}
+    for name, value in parse_qsl(qs, keep_blank_values, strict_parsing, encoding=encoding,
+                                 errors=errors, max_num_fields=max_num_fields,
+                                 separator=separator, _stacklevel=2):
+        if name in result:
+            result[name].append(value)
+        else:
+            result[name] = [value]
+    return result
+
+
+def parse_qsl(qs, keep_blank_values=False, strict_parsing=False,
+              encoding='utf-8', errors='replace', max_num_fields=None, separator='&', *, _stacklevel=1):
+    """Parse a query into name/value pairs in field order."""
+    if not separator or not isinstance(separator, (str, bytes)):
+        raise ValueError('Separator must be of type string or bytes.')
+    text = isinstance(qs, str)
+    if text:
+        if not isinstance(separator, str):
+            separator = str(separator, 'ascii')
+
+        def _unquote(s):
+            return unquote_plus(s, encoding=encoding, errors=errors)
+    elif qs is None:
+        return []
+    else:
+        # A memoryview may be strided; take its bytes in logical order.
+        if isinstance(qs, memoryview):
+            qs = bytes(qs)
+        try:
+            # Latin-1 maps each octet to one character and reads the buffer
+            # directly, bypassing __bytes__ on subclasses.
+            qs = str(qs, 'latin-1')
+        except TypeError:
+            if qs:
+                raise
+            warnings.warn(f"Accepting {type(qs).__name__} objects with "
+                          "false value in urllib.parse.parse_qsl() is deprecated as of 3.14",
+                          DeprecationWarning, stacklevel=_stacklevel + 1)
+            return []
+        if isinstance(separator, str):
+            separator = bytes(separator, 'ascii')
+        separator = str(separator, 'latin-1')
+
+        def _unquote(s):
+            return unquote_to_bytes(s.replace('+', ' ').encode('latin-1'))
+
+    if not qs:
+        return []
+    if max_num_fields is not None and max_num_fields < 1 + qs.count(separator):
+        raise ValueError('Max number of fields exceeded')
+
+    result = []
+    for field in qs.split(separator):
+        if field or strict_parsing:
+            name, has_eq, value = field.partition('=')
+            if not has_eq and strict_parsing:
+                if not text:
+                    field = field.encode('latin-1')
+                raise ValueError('bad query field: %r' % (field,))
+            if value or keep_blank_values:
+                name = _unquote(name)
+                value = _unquote(value)
+                result.append((name, value))
+    return result

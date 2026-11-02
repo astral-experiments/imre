@@ -277,7 +277,9 @@ pub(crate) fn mapping_base(graph: &SourceGraph, module: usize, expression: &ast:
     };
     matches!(
         graph.resolve(module, origin),
-        Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+        Some(Binding::Intrinsic(
+            Intrinsic::Mapping | Intrinsic::TYPING_MAPPING
+        ))
     )
 }
 
@@ -373,7 +375,8 @@ fn collect_class(
             })
         });
     if node.type_params.is_some() {
-        return Err(module.error(node, "class type parameters are unsupported"));
+        graph.needs_object_runtime.set(true);
+        return Err(module.error(node, "class type parameters require the object runtime"));
     }
     if is_enum && http.is_none() && !node.decorator_list.is_empty() {
         return Err(module.error(node, "decorated StrEnum declarations are unsupported"));
