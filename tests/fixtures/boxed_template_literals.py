@@ -6,7 +6,12 @@ def current():
     assert type(empty) is Template
     assert empty.strings == ("",)
     assert empty.interpolations == empty.values == ()
+    assert empty.values is empty.interpolations is empty.values
     assert t"literal {{text}}".strings == ("literal {text}",)
+
+    text = "".join(["dynamic", " segment"])
+    assert Template("", text).strings[0] is text
+    assert Template(text, "").strings[0] is text
 
     item = []
     template = t"prefix{item}{item!r:>4}suffix"

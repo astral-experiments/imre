@@ -3417,11 +3417,7 @@ impl Context {
         let boundary = left.len() - 1;
         let mut strings = concat_ids(left, &right[1..])?;
         let (last, first) = (strings[boundary], right[0]);
-        strings[boundary] = match (self.heap.get(last), self.heap.get(first)) {
-            (Value::Str(s), Value::Str(_) | Value::SurrogateStr(_)) if s.is_empty() => first,
-            (Value::Str(_) | Value::SurrogateStr(_), Value::Str(s)) if s.is_empty() => last,
-            _ => self.concat_strings(last, first)?,
-        };
+        strings[boundary] = self.concat_template_strings(last, first)?;
         let interpolations = self.binary("+", left_interpolations, right_interpolations)?;
         let strings = self.alloc(Value::Tuple(strings));
         Ok(self.alloc(Value::Template {

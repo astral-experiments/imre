@@ -51,6 +51,7 @@ pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
+const EMPTY_TUPLE: Id = 5;
 
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
@@ -1778,6 +1779,7 @@ impl Heap {
                 Slot::new(Value::Bool(true)),
                 Slot::new(Value::Ellipsis),
                 Slot::new(Value::NotImplemented),
+                Slot::new(Value::Tuple(Vec::new())),
             ],
             gc_order: GcOrder::EMPTY,
             full_collection: None,
@@ -1957,6 +1959,9 @@ impl Heap {
     /// Even an untracked child tuple has a GC type. A folded literal belongs to
     /// the code constants and cannot itself be garbage owned by a cycle.
     pub(super) fn packed_tuple(&mut self, items: Vec<Id>, constant: bool) -> Id {
+        if items.is_empty() {
+            return EMPTY_TUPLE;
+        }
         let untracked = constant
             || items.iter().all(|&child| {
                 !matches!(self.get(child), Value::Tuple(_) | Value::Native(_))
@@ -2377,7 +2382,7 @@ impl Heap {
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut MarkQueue<'_>) {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned
                 .values()

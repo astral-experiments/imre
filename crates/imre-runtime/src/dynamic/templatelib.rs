@@ -82,6 +82,20 @@ impl Context {
         }))
     }
 
+    pub(super) fn concat_template_strings(&mut self, left: Id, right: Id) -> Result<Id> {
+        // PyUnicode_Concat can retain an exact string operand, but must copy a subclass.
+        match (self.heap.get(left), self.heap.get(right)) {
+            (Value::Str(s), Value::Str(_) | Value::SurrogateStr(_)) if s.is_empty() => {
+                return Ok(right);
+            }
+            (Value::Str(_) | Value::SurrogateStr(_), Value::Str(s)) if s.is_empty() => {
+                return Ok(left);
+            }
+            _ => {}
+        }
+        self.concat_strings(left, right)
+    }
+
     pub(super) fn template_literal(&mut self, parts: &[Id]) -> Result<Id> {
         let empty = self.heap.string_literal("")?;
         let mut strings = Vec::new();
@@ -100,7 +114,7 @@ impl Context {
         for &part in parts {
             if self.string_storage(part).is_some() {
                 pending = Some(match pending {
-                    Some(prefix) => self.concat_strings(prefix, part)?,
+                    Some(prefix) => self.concat_template_strings(prefix, part)?,
                     None => part,
                 });
             } else if matches!(self.heap.get(part), Value::Interpolation { .. }) {
