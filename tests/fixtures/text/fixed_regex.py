@@ -70,6 +70,10 @@ for text in ["ab", ""]:
         print(empty.end())
         print(capture(empty.group(0)))
 
+magic = re.compile("([*?[])")
+assert magic.search("name[1]").group(1) == "["
+assert magic.search("name]") is None
+
 # Spaces and hashes inside a class stay literal in verbose mode.
 if literal := re.compile(r"[ #]+\ \#", re.VERBOSE).search("é#  #"):
     print(literal.group())

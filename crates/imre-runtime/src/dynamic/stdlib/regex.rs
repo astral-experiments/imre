@@ -207,6 +207,11 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
             if c == '[' && !in_class {
                 in_class = true;
                 result.push('[');
+                // Leave the warning-producing leading "[[" to the existing parser.
+                if chars.next_if_eq(&'[').is_some() {
+                    result.push('[');
+                    continue;
+                }
                 if chars.next_if_eq(&'^').is_some() {
                     result.push('^');
                 }
@@ -216,7 +221,10 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
                 }
                 continue;
             }
-            if c == ']' {
+            if c == '[' && in_class {
+                // Python treats this class member as a scalar, including in ranges.
+                result.push('\\');
+            } else if c == ']' {
                 in_class = false;
             }
             result.push(c);
