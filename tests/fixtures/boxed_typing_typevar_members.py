@@ -1,6 +1,6 @@
 from inspect import getattr_static
 from types import MappingProxyType
-from typing import Generic, TypeVar, Unpack
+from typing import TypeVar, Unpack
 
 
 def current():
@@ -91,6 +91,8 @@ def current():
         assert parameter.has_default() is (default is not NoDefault)
         assert parameter.evaluate_default(Format.VALUE) is default
     assert variable.evaluate_default(Format.VALUE) is NoDefault
+
+    from typing import Generic
 
     required = TypeVar("U")
     defaulted = TypeVar("D", default=None)
