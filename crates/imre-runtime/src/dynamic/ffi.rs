@@ -208,10 +208,7 @@ impl Context {
             "lookup" | "lookup_class_local" => {
                 let name = copy_label(self.str_value(b)?)?;
                 if op == "lookup_class_local" {
-                    if let Some(value) = self.scope_name(a, &name) {
-                        return Ok(value);
-                    }
-                    return self.lookup(self.root_scope(a), &name);
+                    return self.lookup_class_local(a, &name);
                 }
                 self.lookup(a, &name)
             }
@@ -420,7 +417,7 @@ impl Context {
                 Ok(a)
             }
             "annotate" => {
-                if let Some(mapping) = self.scope_name(a, "__annotations__") {
+                if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
@@ -1436,6 +1433,7 @@ impl Context {
         let data = self.scope_data(scope);
         data.exec_locals.is_some()
             || data.exec_globals.is_some()
+            || data.class_body_mapping().is_some()
             || self
                 .scope_name(scope, name)
                 .is_some_and(|old| old != value && self.heap.could_own_finalizer(old, false))
