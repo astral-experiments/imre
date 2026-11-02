@@ -963,11 +963,17 @@ impl Program {
                     let module = s.module.as_ref().map_or("", |module| module.as_str());
                     let mut names = vec![];
                     for alias in &s.names {
-                        if alias.name.as_str() == "*" {
-                            return Err(unsupported("star import"));
-                        }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-                        self.locals.insert(local.clone());
+                        if alias.name.as_str() == "*" {
+                            if function || self.class_attributes.is_some() {
+                                return Err(Error::new(
+                                    "SyntaxError",
+                                    "import * only allowed at module level",
+                                ));
+                            }
+                        } else {
+                            self.locals.insert(local.clone());
+                        }
                         names.push((alias.name.to_string(), local));
                     }
                     Instruction::From(module.to_owned(), s.level, names)
@@ -2473,7 +2479,7 @@ impl Context {
         Err(Error::new("TypeError", indices))
     }
 
-    /// Call the current scope's import hook with the globals and locals of the source frame.
+    /// Return the imported object and the hook that processed its fromlist.
     fn import_source_module(
         &mut self,
         owner: Id,
@@ -2481,7 +2487,7 @@ impl Context {
         module: &str,
         names: Option<&[(String, String)]>,
         level: u32,
-    ) -> Result<Id> {
+    ) -> Result<(Id, Id)> {
         let mut root = scope;
         while let Some(parent) = self.scope_data(root).parent {
             root = parent;
@@ -2513,11 +2519,12 @@ impl Context {
         } else {
             NONE
         };
-        self.call(
+        let imported = self.call(
             importer,
             vec![modname, globals, locals, fromlist, level],
             Vec::new(),
-        )
+        )?;
+        Ok((imported, importer))
     }
 
     /// Keep the iterator's backing sequence available when the final pull drops it.
@@ -2839,7 +2846,7 @@ impl Context {
                 }));
             }
             Instruction::Import { module, alias } => {
-                let mut imported = self.import_source_module(owner, scope, module, None, 0)?;
+                let (mut imported, _) = self.import_source_module(owner, scope, module, None, 0)?;
                 let mut parts = module.split('.');
                 let first = parts.next().expect("nonempty module name");
                 if alias.is_some() {
@@ -2851,8 +2858,14 @@ impl Context {
                 self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
             }
             Instruction::From(module, level, names) => {
-                let m = self.import_source_module(owner, scope, module, Some(names), *level)?;
+                let (m, importer) =
+                    self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
+                    if name == "*" {
+                        let custom_hook = importer != self.builtin("__import__");
+                        self.import_star(scope, m, custom_hook)?;
+                        continue;
+                    }
                     let name = self.text(name);
                     let v = self.op("from", m, name, NONE)?;
                     self.bind_source_name(scope, local, v)?;
