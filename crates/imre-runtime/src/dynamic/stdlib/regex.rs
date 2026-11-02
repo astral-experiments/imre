@@ -302,6 +302,19 @@ fn pattern_error(ctx: &mut Context, source: Id, flags: i64, message: String) -> 
     }
 }
 
+/// A plain literal capture always participates and has exactly one possible spelling.
+fn repeats_literal_capture(pattern: &[u8], flags: i64) -> bool {
+    let Some(body) = pattern
+        .strip_prefix(b"(")
+        .and_then(|p| p.strip_suffix(br")\1"))
+    else {
+        return false;
+    };
+    flags & (IGNORECASE | LOCALE | VERBOSE) == 0
+        && !body.is_empty()
+        && !body.iter().any(|byte| br"\.^$*+?{}[]|()".contains(byte))
+}
+
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
@@ -347,10 +360,18 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             "unsupported native regular expression flags",
         ));
     }
-    let source = match ctx.heap.get(id) {
-        Value::Bytes(value) => byte_pattern(value),
-        _ => ctx.str_value(id)?.to_owned(),
+    let (mut source, spelling): (String, &[u8]) = match ctx.heap.get(id) {
+        Value::Bytes(value) => (byte_pattern(value), value),
+        _ => {
+            let text = ctx.str_value(id)?;
+            (text.to_owned(), text.as_bytes())
+        }
     };
+    if repeats_literal_capture(spelling, flags) {
+        // Keep group 1 and repeat its engine spelling, including any escaped high bytes.
+        source.truncate(source.len() - br"\1".len());
+        source.extend_from_within(1..source.len() - 1);
+    }
     let ascii = bytes || flags & ASCII != 0;
     let engine_source = if flags & VERBOSE != 0 {
         let mut source =
