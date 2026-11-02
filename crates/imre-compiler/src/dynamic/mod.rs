@@ -679,6 +679,7 @@ pub(crate) fn compile(
         "__hello__",
         "_tokenize",
         "abc",
+        "annotationlib",
         "ast",
         "codecs",
         "copyreg",

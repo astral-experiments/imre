@@ -5,7 +5,7 @@ import functools
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
-from annotationlib import ForwardRef
+from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
 from typing import Any, Callable, Generic, Protocol, TypeVar
 
@@ -60,22 +60,11 @@ class _TypedDictMeta(type):
     __instancecheck__ = __subclasscheck__
 
 
-def _typeddict_forward_ref(arg, module=None, owner=None, *, is_class=False):
-    from annotationlib import ForwardRef
-    # typing._make_forward_ref eagerly checks the syntax, without resolving names.
-    source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
-    try:
-        _typing._validate_forward_ref(source)
-    except SyntaxError:
-        raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
-    return ForwardRef(arg, module=module, owner=owner, is_class=is_class)
-
-
 def _typeddict_field(value, module, owner=None):
     if value is None:
         return type(None)
     if isinstance(value, str):
-        return _typeddict_forward_ref(value, module, owner)
+        return _make_forward_ref(value, module, owner)
     message = "TypedDict('Name', {f0: t0, f1: t1, ...}); each t must be a type"
     return _type_check(value, message)
 
@@ -849,7 +838,7 @@ def _type_check(arg, message, *, allow_special_forms=False):
 def _typeddict_qualifier_alias(form, parameters):
     item = _type_check(parameters, f"{form._name} accepts only a single type.")
     if isinstance(item, str):
-        item = _typeddict_forward_ref(item)
+        item = _make_forward_ref(item)
     return _typing._GenericAlias(form, (type(None) if item is None else item,))
 
 
@@ -1273,7 +1262,7 @@ def Annotated(self, *parameters):
         raise TypeError("Annotated[...] should not be used with an unpacked TypeVarTuple")
     origin = _type_check(origin, "Annotated[t, ...]: t must be a type.", allow_special_forms=True)
     if isinstance(origin, str):
-        origin = _typeddict_forward_ref(origin, is_class=True)
+        origin = _make_forward_ref(origin, is_class=True)
     return _AnnotatedAlias(type(None) if origin is None else origin, parameters[1:])
 
 
