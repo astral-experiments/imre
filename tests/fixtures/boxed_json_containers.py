@@ -54,4 +54,31 @@ def current():
     else:
         raise AssertionError("incomparable keys")
 
+    # A Python string can contain both raw surrogate halves and scalar values.
+    key = "é\ud800\udfff"
+    value = '\ufffd"\n\udc0d'
+    doc = {key: [value]}
+    escaped = '{"\\u00e9\\ud800\\udfff": ["\\ufffd\\"\\n\\udc0d"]}'
+    raw = '{"é\ud800\udfff": ["\ufffd\\"\\n\udc0d"]}'
+    for ascii, want in ((True, escaped), (False, raw)):
+        assert json.dumps(doc, ensure_ascii=ascii, skipkeys=True) == want
+        stream = StringIO()
+        json.dump(doc, stream, ensure_ascii=ascii)
+        assert stream.getvalue() == want
+
+    chunks = []
+    class Writer:
+        def write(self, chunk):
+            chunks.append(chunk)
+            if chunk == '"\udfff"':
+                raise ValueError("writer stopped")
+
+    try:
+        json.dump({key: '\udfff', 'other': object()}, Writer(), ensure_ascii=False, default=reject)
+    except ValueError as error:
+        assert str(error) == "writer stopped"
+    else:
+        raise AssertionError("writer exception")
+    assert chunks == ['{', '"' + key + '"', ': ', '"\udfff"']
+
     print("encoded container subclasses")
