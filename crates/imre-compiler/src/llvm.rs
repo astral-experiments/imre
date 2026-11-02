@@ -9276,7 +9276,6 @@ declare i1 @imre_seq_mock_call_list(ptr, i1) nounwind
 declare i64 @imre_seq_get(ptr, i64)
 declare void @imre_seq_set(ptr, i64, i64, i32)
 declare i64 @imre_seq_get_index(ptr, i64)
-declare i64 @imre_seq_borrow_index_proven(ptr, i64) nounwind
 declare i64 @imre_seq_take_index_proven(ptr, i64) nounwind
 declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
