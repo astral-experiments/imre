@@ -278,8 +278,22 @@ impl Checker<'_> {
         key: Type,
         value: Type,
     ) -> Result<Expr, String> {
-        let mapping = self.types.dict(key, value);
         let mut args = vec![receiver];
+        self.mapping_update_sources(call, key, value, &mut args)?;
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::DictUpdate, args),
+        })
+    }
+
+    pub(super) fn mapping_update_sources(
+        &mut self,
+        call: &ast::ExprCall,
+        key: Type,
+        value: Type,
+        args: &mut Vec<Expr>,
+    ) -> Result<(), String> {
+        let mapping = self.types.dict(key, value);
         match call.arguments.args.as_ref() {
             [] => {}
             [source] => args.push(self.expr_expected(source, mapping)?),
@@ -287,17 +301,14 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     call,
-                    "dict.update expects at most one positional mapping",
+                    "update expects at most one positional mapping",
                 ));
             }
         }
         if !call.arguments.keywords.is_empty() {
             args.push(self.keyword_dictionary(call, Some((key, value)))?);
         }
-        Ok(Expr {
-            ty: Type::None,
-            kind: ExprKind::Builtin(Builtin::DictUpdate, args),
-        })
+        Ok(())
     }
 
     /// Capture ordinary fields and expanded elements in source order. Keeping

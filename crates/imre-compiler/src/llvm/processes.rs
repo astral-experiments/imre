@@ -885,11 +885,13 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::EnvironUpdate { bytes } => {
-                self.checked_line(format!(
-                    "call void @imre_environ_update(ptr {}, i32 {})",
-                    args[0].value.operand,
-                    u8::from(bytes)
-                ));
+                for source in args {
+                    self.checked_line(format!(
+                        "call void @imre_environ_update(ptr {}, i32 {})",
+                        source.value.operand,
+                        u8::from(bytes)
+                    ));
+                }
                 none()
             }
             ProcessOperation::CheckReturnCode => {
