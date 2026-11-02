@@ -703,6 +703,10 @@ def _namedtuple_mro_entries(bases):
 NamedTuple.__mro_entries__ = _namedtuple_mro_entries
 
 
+def _namedtuple_generic_getitem(cls, args):
+    return _specialize_generic_alias(_typing._GenericAlias(cls, cls.__parameters__), args)
+
+
 def _namedtuple_annotate(original):
     # Check field types at declaration time, even if a name is still undefined.
     def annotate(format):

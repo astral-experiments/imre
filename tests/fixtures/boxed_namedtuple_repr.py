@@ -1,5 +1,5 @@
 from selectors import SelectorKey
-from typing import NamedTuple
+from typing import Generic, NamedTuple
 
 
 class Entry(NamedTuple):
@@ -27,12 +27,28 @@ def current():
         pending: Later = None
 
     assert hits == [1]
+    assert Row.__bases__ == (tuple,)
+    assert Row.__orig_bases__ == (NamedTuple,)
+    assert Row[bytes].__origin__ is Row
     assert Row._fields == ("value", "pending")
     assert Row._field_defaults == {"pending": None}
     assert Row(b"x").pending is None
     Later = int
     assert Row.__annotations__ == {"value": bytes, "pending": int}
     assert hits == [1, 1]
+
+    class Group[T](NamedTuple):
+        value: T
+
+    assert Group.__mro__ == (Group, tuple, Generic, object)
+    assert Group[bytes].__origin__ is Group
+    assert type(Group[bytes](b"item")) is Group
+    try:
+        Group[int, str]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted surplus NamedTuple type arguments")
 
     for invalid in ("_private", "for", 1):
         try:

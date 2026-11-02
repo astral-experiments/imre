@@ -1792,17 +1792,39 @@ impl Context {
             .map(super::builtins::boolean)
     }
 
-    /// Freeze the declared field names or inherit the first named-tuple layout in the MRO.
+    /// Identify the marker substituted by typing.NamedTuple.__mro_entries__.
+    pub(super) fn namedtuple_base(&self, bases: &[Id]) -> Option<Id> {
+        self.builtins.get("typing.NamedTuple").copied().filter(|marker| bases.contains(marker))
+    }
+
+    /// Freeze the fields of a new declaration and replace its marker with the actual tuple base.
     fn namedtuple_layout(
         &mut self,
         name: &str,
-        bases: &[Id],
-        ancestors: &[Id],
+        bases: &mut [Id],
         scope: Id,
     ) -> Result<Option<std::rc::Rc<[String]>>> {
-        if bases.iter().any(|&base| {
-            matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
-        }) {
+        if let Some(marker) = self.namedtuple_base(bases) {
+            let generic = self.classes.get("typing.Generic").copied();
+            if bases.iter().any(|&base| base != marker && Some(base) != generic) {
+                return Err(Error::new(
+                    "TypeError",
+                    "can only inherit from a NamedTuple type and Generic",
+                ));
+            }
+            let tuple = self.builtin("tuple");
+            for base in bases.iter_mut() {
+                if *base == marker {
+                    *base = tuple;
+                }
+            }
+            if generic.is_some_and(|g| bases.contains(&g))
+                && self.scope_name(scope, "__class_getitem__").is_none()
+            {
+                let getitem = self.module_value("typing", "_namedtuple_generic_getitem")
+                    .ok_or_else(|| Error::new("RuntimeError", "missing NamedTuple subscription hook"))?;
+                self.bind_local(scope, "__class_getitem__", getitem);
+            }
             let fields = self.scope_name(scope, "__annotations__");
             let (fields, provider) = if fields.is_none()
                 && let Some(original) = self.scope_name(scope, "__annotate_func__")
@@ -1861,14 +1883,7 @@ impl Context {
             super::namedtuple::bind_fields(self, scope, &named_fields);
             return Ok(Some(named_fields.into()));
         }
-        Ok(ancestors
-            .iter()
-            .find_map(|&base| match self.heap.get(base) {
-                Value::Class {
-                    namedtuple_fields, ..
-                } => namedtuple_fields.clone(),
-                _ => None,
-            }))
+        Ok(None)
     }
 
     pub(super) fn declared_slot_names(
@@ -1905,11 +1920,19 @@ impl Context {
         bases: Vec<Id>,
         layout: ClassLayout,
     ) -> Result<Id> {
-        let bases = self.validate_class_bases(bases, layout)?;
+        let mut bases = self.validate_class_bases(bases, layout)?;
+        let declared_fields = self.namedtuple_layout(&name, &mut bases, scope)?;
         let ancestors = self.linearized_bases(&bases, false)?;
         let layout_base = self.member_layout_base(&bases)?;
         let slots = self.declared_slot_names(self.scope_name(scope, "__slots__"), layout_base)?;
-        self.allocate_prepared_class(name, scope, bases, ancestors, layout, slots)
+        let class = self.allocate_prepared_class(name, scope, bases, ancestors, layout, slots)?;
+        if let Some(fields) = declared_fields {
+            let Value::Class { namedtuple_fields, .. } = self.heap.get_mut(class) else {
+                unreachable!()
+            };
+            *namedtuple_fields = Some(fields);
+        }
+        Ok(class)
     }
 
     pub(super) fn validate_class_bases(
@@ -2057,7 +2080,10 @@ impl Context {
         } else {
             Vec::new()
         };
-        let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
+        let namedtuple_fields = ancestors.iter().find_map(|&base| match self.heap.get(base) {
+            Value::Class { namedtuple_fields, .. } => namedtuple_fields.clone(),
+            _ => None,
+        });
         // type.__new__ wraps plain functions only, before the class becomes observable.
         for name in ["__init_subclass__", "__class_getitem__"] {
             if let Some(function) = self.namespace_binding(self.scope_data(scope), name)
