@@ -1,6 +1,30 @@
-# Reader and Writer from CPython 3.14.5, Lib/io.py. See stdlib/docstrings/LICENSE.
+# Public I/O ABCs and protocols from CPython 3.14.5, Lib/io.py. See stdlib/docstrings/LICENSE.
+import _io
 import abc
+from _io import (BytesIO, DEFAULT_BUFFER_SIZE, FileIO, StringIO, TextIOWrapper,
+                 UnsupportedOperation, open, open_code, text_encoding)
 from _collections_abc import _check_methods
+
+class IOBase(_io._IOBase, metaclass=abc.ABCMeta):
+    __doc__ = _io._IOBase.__doc__
+
+class RawIOBase(_io._RawIOBase, IOBase):
+    __doc__ = _io._RawIOBase.__doc__
+
+class BufferedIOBase(_io._BufferedIOBase, IOBase):
+    __doc__ = _io._BufferedIOBase.__doc__
+
+class TextIOBase(_io._TextIOBase, IOBase):
+    __doc__ = _io._TextIOBase.__doc__
+
+RawIOBase.register(FileIO)
+
+for klass in (BytesIO, *_buffered_types):
+    BufferedIOBase.register(klass)
+
+for klass in (StringIO, TextIOWrapper):
+    TextIOBase.register(klass)
+del klass, _buffered_types
 
 GenericAlias = type(list[int])
 

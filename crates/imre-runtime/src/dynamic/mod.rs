@@ -2190,17 +2190,7 @@ impl Context {
             "io" => stdlib::io::install(self, scope),
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
-            "_io" => {
-                self.module("io")?;
-                let open = self.builtin("open");
-                self.bind(scope, "open", open);
-                let text_encoding = self.builtin("_io.text_encoding");
-                self.bind(scope, "text_encoding", text_encoding);
-                for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
-                    let class = self.builtins[&format!("_io.{name}")];
-                    self.bind(scope, name, class);
-                }
-            }
+            "_io" => stdlib::io::install_native(self, scope),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => {
                 stdlib::readiness::initialize(self, scope)?;
