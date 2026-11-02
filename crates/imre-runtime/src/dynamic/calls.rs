@@ -918,7 +918,10 @@ impl Context {
         if let Value::GenericAlias(alias) = self.heap.get(parent) {
             return Err(alias.kind.class_check_error("issubclass"));
         }
-        if let Some(check) = self.bound_slot(parent, "__subclasscheck__")? {
+        if let Some(check) = self.bound_slot(parent, "__subclasscheck__")?
+            && self.slot(parent, "__subclasscheck__")
+                != self.builtins.get("abc.__subclasscheck__").copied()
+        {
             let result = self.call(check, vec![child], Vec::new())?;
             return self.truth(result);
         }
@@ -5529,28 +5532,6 @@ impl Context {
                 metaclass,
                 ..
             } => {
-                if self.builtins.get("abc.ABCMeta") == Some(&callable) {
-                    let parameters = ["name", "bases", "namespace"];
-                    let [name, bases, namespace] = args.as_slice() else {
-                        let function = "ABCMeta.__new__";
-                        return Err(if args.len() < parameters.len() {
-                            missing_arguments_error(
-                                function,
-                                "positional",
-                                &parameters[args.len()..],
-                            )
-                        } else {
-                            excess_positional_error(function, 4, 0, args.len() + 1, 0)
-                        });
-                    };
-                    return self.type_from_namespace(
-                        Some(callable),
-                        *name,
-                        *bases,
-                        *namespace,
-                        &kwargs,
-                    );
-                }
                 if let Some(meta) = metaclass
                     && let Some(slot) = self.class_attr(meta, "__call__")
                 {
@@ -6065,6 +6046,33 @@ impl Context {
         Ok(())
     }
 
+    /// Bind ABCMeta.__new__'s positional-only parameters for direct and cooperating calls.
+    pub(super) fn abc_new(&mut self, args: &[Id], keywords: &[(String, Id)]) -> Result<Id> {
+        let [meta, name, bases, namespace] = args else {
+            const PARAMETERS: [&str; 4] = ["mcls", "name", "bases", "namespace"];
+            let name = "ABCMeta.__new__";
+            return Err(if args.len() < PARAMETERS.len() {
+                missing_arguments_error(name, "positional", &PARAMETERS[args.len()..])
+            } else {
+                excess_positional_error(name, 4, 0, args.len(), 0)
+            });
+        };
+        self.abc_new_from_namespace(*meta, *name, *bases, *namespace, keywords.to_vec())
+    }
+
+    /// Pass the actual namespace through the winning ABC metaclass before allocating the class.
+    pub(super) fn call_abc_new(
+        &mut self,
+        meta: Id,
+        name: Id,
+        bases: Id,
+        namespace: Id,
+        keywords: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        let new = self.lookup_attr(meta, "__new__")?;
+        self.call(new, vec![meta, name, bases, namespace], keywords)
+    }
+
     /// Select the most derived compatible metaclass before executing a boxed class body.
     pub(super) fn select_class_metaclass(
         &mut self,
@@ -6097,7 +6105,7 @@ impl Context {
             )
         };
         for &base in bases {
-            let meta = if self.is_bundled_abc(base) {
+            let meta = if self.heap.get(base).instance_class().is_none() && self.is_bundled_abc(base) {
                 self.abc_meta()
             } else {
                 self.exact_type(base)?
@@ -6147,12 +6155,14 @@ impl Context {
             ));
         }
         // User metaclasses can customize their instances' calls and attributes while
-        // inheriting type's normal namespace preparation, allocation, and MRO.
+        // inheriting type's namespace preparation and MRO. ABCMeta subclasses can also
+        // override __new__ and delegate allocation to ABCMeta.__new__.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (["__prepare__", "__new__", "__init__"]
-                .iter()
-                .any(|name| self.class_attr(winner, name).is_some())
+            && ((!self.is_abc_metaclass(winner) && self.class_attr(winner, "__new__").is_some())
+                || ["__prepare__", "__init__"]
+                    .iter()
+                    .any(|name| self.class_attr(winner, name).is_some())
                 || self
                     .class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
@@ -6176,16 +6186,6 @@ impl Context {
         parameterized: bool,
     ) -> Result<Id> {
         let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
-        if self
-            .builtins
-            .get("abc.ABCMeta")
-            .is_some_and(|meta| bases.contains(meta))
-        {
-            return Err(Error::new(
-                "NotImplementedError",
-                "subclassing ABCMeta is unsupported",
-            ));
-        }
         let typed_dict_meta = self
             .module_value("typing", "_TypedDictMeta")
             .filter(|meta| {
@@ -6231,6 +6231,11 @@ impl Context {
         struct ClassBindings {
             #[serde(default)]
             scope_nonlocals: std::collections::HashSet<String>,
+            #[serde(default)]
+            needs_class_cell: bool,
+            #[serde(default)]
+            needs_dict_cell: bool,
+            static_attributes: Option<Vec<String>>,
         }
         let parameters = self.code_object(code).parameters;
         let bindings: ClassBindings = serde_json::from_str(self.str_value(parameters)?)
@@ -6257,14 +6262,18 @@ impl Context {
                 .unwrap_or_else(|| self.text("builtins"))
         };
         self.bind(scope, "__module__", module_name);
+        if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
+            self.bind(scope, "__qualname__", qualname);
+        }
+        if bindings.static_attributes.is_some() {
+            let first = self.int(i64::from(self.code_object(code).first_line));
+            self.bind(scope, "__firstlineno__", first);
+        }
         if parameterized {
             let params = self
                 .scope_name(parent, ".type_params")
                 .expect("class parameter scope");
             self.bind(scope, "__type_params__", params);
-        }
-        if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
-            self.bind(scope, "__qualname__", qualname);
         }
         let annotations = self.dict(Vec::new());
         self.bind_local(scope, "__annotations__", annotations);
@@ -6272,6 +6281,55 @@ impl Context {
             frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
+        if let Some(names) = bindings.static_attributes {
+            let names = names.iter().map(|name| self.heap.code_name(name)).collect();
+            let attrs = self.alloc(Value::Tuple(names));
+            self.bind(scope, "__static_attributes__", attrs);
+        }
+        if let Some(meta) = class_meta
+            && self.is_abc_metaclass(meta)
+            && self.builtins.get("abc.ABCMeta") != Some(&meta)
+        {
+            let namespace = self.active_class_namespace(scope);
+            // A deferred class annotator owns these fields. Its scratch entries are placeholders.
+            if self.dict_named_item(namespace, "__annotations__") == Some(annotations)
+                && (self.dict_named_item(namespace, "__annotate_func__").is_some()
+                    || self.dict_entries(annotations).is_some_and(|items| items.is_empty()))
+            {
+                let key = self.text("__annotations__");
+                self.delete_item(namespace, key)?;
+            }
+            if bindings.needs_dict_cell {
+                let dict_cell = self.class_annotation_dict_cell(scope);
+                let key = self.text("__classdictcell__");
+                self.put_item(namespace, key, dict_cell)?;
+            }
+            if bindings.needs_class_cell {
+                let key = self.text("__classcell__");
+                self.put_item(namespace, key, cell)?;
+            }
+            if let Some(original) = original {
+                let key = self.text("__orig_bases__");
+                self.put_item(namespace, key, original)?;
+            }
+            let class_name = self.text(&name);
+            let bases = self.alloc(Value::Tuple(bases));
+            let class = self.call_abc_new(meta, class_name, bases, namespace, keywords)?;
+            if bindings.needs_class_cell && matches!(self.heap.get(class), Value::Class { .. }) {
+                match self.heap.get(cell) {
+                    Value::Cell(Some(contents)) if *contents == class => {}
+                    Value::Cell(None) => return Err(Error::new(
+                        "RuntimeError",
+                        "__class__ not set: was __classcell__ propagated to type.__new__()?",
+                    )),
+                    _ => return Err(Error::new(
+                        "TypeError",
+                        "__class__ set to a different class during class creation",
+                    )),
+                }
+            }
+            return Ok(class);
+        }
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
         let exposed_body = self.finish_class_namespace(scope)?;
@@ -6363,6 +6421,13 @@ impl Context {
         }
         if typed_dict_meta.is_none() {
             super::typing::class_parameters(self, scope, original, &bases)?;
+        }
+        if bases.iter().any(|&base| self.is_abc_metaclass(base))
+            && let Some(new) = self.namespace_binding(self.scope_data(scope), "__new__")
+            && matches!(self.heap.get(new), Value::Function { .. })
+        {
+            let new = super::method_decorator::static_method(self, new)?;
+            self.bind_local(scope, "__new__", new);
         }
         let float_enum = enum_kind
             .filter(|kind| kind.scalar_base().is_none())

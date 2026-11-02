@@ -1,5 +1,5 @@
 import typing
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import Mapping, Sized
 from typing import Protocol, get_protocol_members, is_protocol
 
@@ -29,6 +29,11 @@ def current():
     print(typing.TYPE_CHECKING is False, typing.Protocol is Protocol)
     print(Protocol.__bases__ == (typing.Generic,), HasHTML.__mro__[1:3] == (Protocol, typing.Generic))
     assert is_protocol(HasHTML) and typing.is_protocol(Abstract)
+    # The base ABC check can recognize a declared non-runtime protocol;
+    # the public isinstance operation below still enforces @runtime_checkable.
+    assert ABCMeta.__subclasscheck__(HasHTML, Concrete)
+    assert ABCMeta.__instancecheck__(HasHTML, Concrete())
+
     for rejected in (Protocol, typing.Generic, Concrete, Concrete(), int, 1):
         assert not is_protocol(rejected)
     class FalsyMarker:
