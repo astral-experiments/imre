@@ -1973,6 +1973,11 @@ def report(text):
                 compare("-IB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_json_module_doc.py":
                 compare("-IOOB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_interactive.py":
+                for stdio in ("utf-8:strict", "utf-8:surrogateescape", "ascii:surrogateescape",
+                              "cp1251:surrogateescape", "utf-8-sig:strict"):
+                    compare("-B", "-c", imports + "arithmetic.original_stream()",
+                            extra={"PYTHONIOENCODING": stdio})
             if fixture == "boxed_recursive_repr.py":
                 for limit in (640, 4300, 0):
                     compare(

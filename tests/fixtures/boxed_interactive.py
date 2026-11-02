@@ -72,5 +72,25 @@ def current():
         raise AssertionError("expected a single interactive input")
 
 
+def original_stream():
+    class Render:
+        def __repr__(self):
+            return text
+
+    for text in (chr(0xd800), chr(0xdc80)):
+        sys.stdout.write("pending")
+        sys.__displayhook__(Render())
+        sys.stdout.flush()
+
+    text = "A" + chr(0xdc80) + chr(0x100) + chr(0xdc81) + "Z"
+    try:
+        count = sys.stdout.write(text)
+    except UnicodeEncodeError as error:
+        assert error.object is text
+        print(error.encoding, error.start, error.end)
+    else:
+        assert count == len(text)
+
+
 if __name__ == "__main__":
     current()

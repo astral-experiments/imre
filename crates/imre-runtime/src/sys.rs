@@ -32,7 +32,7 @@ impl Write for StderrOutput {
     }
 
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if matches!(self.codec, Codec::Utf8 { signature: false }) {
+        if matches!(self.codec, Codec::Utf8 { signature: false }) || self.stream.signature_emitted {
             return self.stream.write_all(bytes);
         }
         let text = std::str::from_utf8(bytes).map_err(io::Error::other)?;
@@ -44,7 +44,7 @@ impl Write for StderrOutput {
             })?;
         if matches!(self.codec, Codec::Utf8 { signature: true }) {
             // The incremental encoder emits its signature once, even for an empty first write.
-            self.codec = Codec::Utf8 { signature: false };
+            self.stream.signature_emitted = true;
         }
         self.stream.write_encoded(&encoded, text.as_bytes())
     }
@@ -176,14 +176,67 @@ pub(super) fn flush_standard(stderr: bool) -> io::Result<()> {
     }
 }
 
+/// Non-scalar Python strings are encoded by the boxed codec. Successful writes
+/// still share the original text buffer and its incremental UTF-8 signature.
+pub(crate) fn write_standard_encoded(
+    stderr: bool,
+    bytes: &[u8],
+    newline: bool,
+) -> super::Result<()> {
+    fn write<W: Write>(out: &mut Output<W>, mut bytes: &[u8], newline: bool) -> io::Result<()> {
+        if !out.captures.is_empty() {
+            return out.write_all(bytes);
+        }
+        if matches!(
+            encoding::settings(false, None).codec,
+            Codec::Utf8 { signature: true }
+        ) {
+            if out.signature_emitted {
+                bytes = bytes
+                    .strip_prefix(b"\xef\xbb\xbf")
+                    .expect("UTF-8-SIG encoder supplies the signature");
+            }
+            out.signature_emitted = true;
+        }
+        out.text
+            .write(&mut out.raw, bytes, out.line_buffered && newline)
+    }
+    if stderr {
+        let mut err = STDERR.lock().unwrap_or_else(|p| p.into_inner());
+        write(&mut err.stream, bytes, newline)
+    } else {
+        let mut out = OUTPUT.lock().unwrap_or_else(|p| p.into_inner());
+        write(&mut out, bytes, newline)
+    }
+    .map_err(errno_error)
+}
+
+/// Write through the binary layer without flushing previously buffered text.
+pub(crate) fn write_standard_buffer(stderr: bool, bytes: &[u8]) -> super::Result<()> {
+    if stderr {
+        STDERR
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .stream
+            .raw
+            .write_all(bytes)
+    } else {
+        OUTPUT
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .raw
+            .write_all(bytes)
+    }
+    .map_err(errno_error)
+}
+
 /// Escaped displayhook bytes go to stdout.buffer ahead of any previously buffered text.
 pub(super) fn write_escaped_stdout(text: &str) -> super::Result<()> {
     let settings = encoding::settings(false, None);
     let bytes = settings
         .codec
         .encode(text, Some("backslashreplace"), || error_text(text))?;
-    let mut out = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
-    out.raw.write_all(&bytes).map_err(errno_error)
+    write_standard_buffer(false, &bytes)
 }
 
 /// Return the Python platform name of the target that built this runtime.

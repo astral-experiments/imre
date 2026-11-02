@@ -608,17 +608,34 @@ pub(super) fn text_method(
         "closed" => Ok(crate::dynamic::builtins::boolean(file.closed())),
         "read" | "readline" => Ok(ctx.text(file.read(name == "readline")?.into_string())),
         "write" => {
-            let Value::Str(value) = ctx.heap.get(args[0]) else {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "write() argument must be str, not {}",
-                        ctx.type_name(args[0])
-                    ),
-                ));
+            let input = args[0];
+            let count = match ctx.heap.get(ctx.scalar_value(input)) {
+                Value::Str(text) => {
+                    file.write(text)?;
+                    text.chars().count()
+                }
+                Value::SurrogateStr(points) => {
+                    let count = points.len();
+                    let newline = points.iter().any(|&p| matches!(p, 10 | 13));
+                    let stderr = file.standard_writer()?;
+                    let fd = if stderr { 2 } else { 1 };
+                    let encoding = ctx.text(crate::sys::standard_field(fd, false).as_str());
+                    ctx.heap.keep(encoding);
+                    let errors = ctx.text(crate::sys::standard_field(fd, true).as_str());
+                    ctx.heap.keep(errors);
+                    let bytes =
+                        super::codecs::encode_text(ctx, input, Some(encoding), Some(errors))?;
+                    crate::sys::write_standard_encoded(stderr, &bytes, newline)?;
+                    count
+                }
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("write() argument must be str, not {}", ctx.type_name(input)),
+                    ));
+                }
             };
-            file.write(value)?;
-            Ok(ctx.int(value.chars().count() as i64))
+            Ok(ctx.int(count as i64))
         }
         "isatty" => Ok(if file.isatty()? { TRUE } else { FALSE }),
         "flush" => {

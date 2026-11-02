@@ -115,17 +115,18 @@ impl TextFile {
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().write(value)) }
     }
 
-    pub(crate) fn has_encoding(&self) -> bool {
-        // SAFETY: reading the retained encoding presence cannot call Python.
-        unsafe { self.0.0.with(|storage| storage.file().has_encoding()) }
+    pub(crate) fn encoding(&self) -> Option<crate::StrOwner> {
+        // SAFETY: the retained encoding is cloned without running Python code.
+        unsafe { self.0.0.with(|storage| storage.file().encoding.clone()) }
     }
 
-    pub(crate) fn write_escaped_display(&self, value: &str) -> Result<()> {
-        // SAFETY: the caller finished rendering before taking this exclusive file borrow.
+    /// Identify the still-open original stream, even when Python retained an alias.
+    pub(crate) fn standard_writer(&self) -> Result<bool> {
+        // SAFETY: checking the file state does not reenter Python.
         unsafe {
             self.0
                 .0
-                .with_mut(|storage| storage.file_mut().write_escaped_display(value))
+                .with_mut(|storage| storage.file_mut().standard_writer())
         }
     }
 

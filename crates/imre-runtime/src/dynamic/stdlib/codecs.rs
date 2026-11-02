@@ -273,6 +273,12 @@ pub(in crate::dynamic) fn encode_text(
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
+        StrEncoder::Registered(codec)
+            if matches!(errors.as_str(), "strict" | "surrogateescape")
+                && !ctx.codec_entries.handlers.contains_key(&errors) =>
+        {
+            ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
+        }
         StrEncoder::Registered(codec) if errors == "backslashreplace" => {
             // Escape lone surrogates first, then encode the remaining scalars and the
             // replacements in the target code page.
