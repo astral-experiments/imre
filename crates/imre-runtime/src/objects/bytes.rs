@@ -590,20 +590,35 @@ pub(crate) fn repeat_bytes(bytes: &[u8], count: &Int) -> Result<Option<Bytes>> {
     Ok(Some(result))
 }
 
-pub(crate) fn rstrip_bytes(data: &[u8], chars: &[u8]) -> Result<Option<Bytes>> {
+/// Trim a set of byte values, preserving unchanged exact bytes but copying other receivers.
+pub(crate) fn strip_bytes(
+    data: &[u8],
+    chars: &[u8],
+    left: bool,
+    right: bool,
+    reuse: bool,
+) -> Result<Option<Bytes>> {
     let mut remove = [false; 256];
     for &byte in chars {
         remove[usize::from(byte)] = true;
     }
-    let end = data
-        .iter()
-        .rposition(|&byte| !remove[usize::from(byte)])
-        .map_or(0, |last| last + 1);
-    if end == data.len() {
+    let mut start = 0;
+    let mut end = data.len();
+    if left {
+        while start < end && remove[usize::from(data[start])] {
+            start += 1;
+        }
+    }
+    if right {
+        while end > start && remove[usize::from(data[end - 1])] {
+            end -= 1;
+        }
+    }
+    if reuse && start == 0 && end == data.len() {
         return Ok(None);
     }
-    let mut result = allocate(end)?;
-    result.extend_from_slice(&data[..end]);
+    let mut result = allocate(end - start)?;
+    result.extend_from_slice(&data[start..end]);
     Ok(Some(result))
 }
 
