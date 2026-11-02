@@ -1270,6 +1270,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.get_type_hints")
             }
             (Self::Typing, "List") => Intrinsic::ObjectRuntimeExport("typing.List"),
+            (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,

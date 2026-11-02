@@ -1453,6 +1453,8 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        final_fixture = fixtures / "boxed_typing_final.py"
+        compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py"):
