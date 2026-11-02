@@ -217,3 +217,15 @@ with BlockedRaw(b"abcdefgh") as raw:
     f.flush()
     assert raw.getvalue() == b"abcX01234"
     f.close()
+
+# Older native TemporaryFile wrappers own their descriptor internally.
+# A refused detach must leave the stream alive and closeable.
+temporary = tempfile.TemporaryFile("w+b")
+try:
+    raw = temporary.detach()
+except io.UnsupportedOperation:
+    assert not temporary.closed
+    temporary.close()
+else:
+    assert not raw.closed
+    raw.close()

@@ -94,6 +94,12 @@ pub(super) fn call(
                 };
                 return Ok(ctx.alloc(Value::Bytes(data)));
             }
+            "detach" => {
+                if !args.is_empty() || !kwargs.is_empty() {
+                    return Err(Error::new("TypeError", "detach() takes no arguments"));
+                }
+                return Err(Error::new("UnsupportedOperation", "detach"));
+            }
             "closed" => return Ok(builtins::boolean(file.borrow().closed())),
             "name" => return Ok(*path),
             "mode" => return Ok(ctx.text("rb+")),
