@@ -1848,6 +1848,7 @@ def report(text):
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
+            "boxed_exception_notes.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
             "boxed_oserror.py",
