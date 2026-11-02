@@ -1,3 +1,4 @@
+import errno
 import os
 import tempfile
 from io import BytesIO
@@ -37,6 +38,44 @@ def current():
         except ValueError as error:
             print(str(error))
     print(other.closed)
+
+    original_open = os.open
+    original_unlink = os.unlink
+    try_tmpfile = tempfile._O_TMPFILE_WORKS
+    created = []
+
+    def track_open(path, flags, mode):
+        fd = original_open(path, flags, mode)
+        created.append((fd, path))
+        return fd
+
+    def interrupted_unlink(path):
+        assert path == created[0][1]
+        raise KeyboardInterrupt("unlink interrupted")
+
+    try:
+        tempfile._O_TMPFILE_WORKS = False
+        os.open = track_open
+        os.unlink = interrupted_unlink
+        try:
+            with TemporaryFile(dir="."):
+                raise AssertionError("unlink interruption was lost")
+        except KeyboardInterrupt as error:
+            assert str(error) == "unlink interrupted"
+    finally:
+        os.open = original_open
+        os.unlink = original_unlink
+        tempfile._O_TMPFILE_WORKS = try_tmpfile
+        for fd, path in created:
+            original_unlink(path)
+    assert len(created) == 1
+    try:
+        os.fstat(created[0][0])
+    except OSError as error:
+        assert error.errno == errno.EBADF
+    else:
+        os.close(created[0][0])
+        raise AssertionError("interrupted unlink leaked its file descriptor")
 
     # The comparison runner removes the created directories and files.
     for directory, prefix in (
