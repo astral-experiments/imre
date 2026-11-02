@@ -582,6 +582,9 @@ impl Context {
                 if check_special && let Some(result) = self.binary_special("==", a, b)? {
                     break 'current self.truth(result)?;
                 }
+                if let Some(equal) = stdlib::datetime::comparison::compare(self, a, b, "==")? {
+                    break 'current equal;
+                }
                 if matches!(self.heap.get(a), Value::Method { .. })
                     && matches!(self.heap.get(b), Value::Method { .. })
                 {
@@ -1085,6 +1088,11 @@ impl Context {
 
     /// Return the scalar ordering or the comparison result of the first unequal elements.
     fn order(&mut self, op: &str, original_a: Id, original_b: Id) -> Result<Id> {
+        if let Some(result) =
+            stdlib::datetime::comparison::compare(self, original_a, original_b, op)?
+        {
+            return Ok(builtins::boolean(result));
+        }
         let (a, b) = (self.scalar_value(original_a), self.scalar_value(original_b));
         let int_float = |integer, float| -> Result<Option<Ordering>> {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
@@ -1250,6 +1258,9 @@ impl Context {
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
     pub(super) fn checked_format(&mut self, root: Id, quoted: bool) -> Result<String> {
+        if !quoted && let Some(text) = super::stdlib::datetime::render::exact(self, root, false)? {
+            return self.str_value(text).map(str::to_owned);
+        }
         if !quoted && let Some(value) = self.single_exception_str(root)? {
             return self.str_value(value).map(str::to_owned);
         }
@@ -1374,6 +1385,9 @@ impl Context {
 
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
+        if let Some(text) = super::stdlib::datetime::render::exact(self, id, true)? {
+            return Ok(Some(text));
+        }
         if let Some(result) = super::paramspec::repr(self, id) {
             return result.map(Some);
         }
@@ -1421,7 +1435,11 @@ impl Context {
         ancestors: &[Id],
         sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
+        let calendar_repr = matches!(lookup, FormatLookup::Repr)
+            && matches!(self.heap.get(id), Value::Calendar { .. })
+            && super::stdlib::datetime::render::custom_zone(self, id).is_some();
         if !matches!(lookup, FormatLookup::MethodName)
+            && !calendar_repr
             && self.format_slot(id, "__repr__").is_none()
             && (matches!(lookup, FormatLookup::Repr) || self.format_slot(id, "__str__").is_none())
         {
