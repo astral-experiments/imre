@@ -256,11 +256,12 @@ struct WarningVisitor<'a> {
     literals: &'a mut Vec<usize>,
     valid_name: fn(&str, bool) -> bool,
     emit: &'a mut dyn FnMut(ClassWarning) -> bool,
-    condition: Option<&'a mut ConditionDiagnostic>,
+    reference: Option<&'a mut ReferenceDiagnostic>,
 }
 
-struct ConditionDiagnostic {
+struct ReferenceDiagnostic {
     digit_limit: usize,
+    report_open: bool,
     error: Option<(String, usize)>,
 }
 
@@ -281,7 +282,7 @@ pub fn visit_class_warnings(
         literals: &mut literals,
         valid_name,
         emit: &mut emit,
-        condition: None,
+        reference: None,
     };
     let _ = tokenize(
         pattern,
@@ -305,8 +306,32 @@ pub fn numeric_condition_diagnostic(
     valid_name: fn(&str, bool) -> bool,
     digit_limit: usize,
 ) -> Option<(String, usize)> {
-    let mut condition = ConditionDiagnostic {
+    group_reference_diagnostic(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        scoped_verbose,
+        valid_name,
         digit_limit,
+        false,
+    )
+}
+
+/// Diagnose the first invalid reference in source order, optionally including open backreferences.
+pub fn group_reference_diagnostic(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    scoped_verbose: fn(&str, bool, bool) -> Option<bool>,
+    valid_name: fn(&str, bool) -> bool,
+    digit_limit: usize,
+    report_open: bool,
+) -> Option<(String, usize)> {
+    let mut condition = ReferenceDiagnostic {
+        digit_limit,
+        report_open,
         error: None,
     };
     let mut visitor = WarningVisitor {
@@ -314,7 +339,7 @@ pub fn numeric_condition_diagnostic(
         literals: &mut Vec::new(),
         valid_name,
         emit: &mut |_| true,
-        condition: Some(&mut condition),
+        reference: Some(&mut condition),
     };
     let _ = tokenize(
         pattern,
@@ -449,6 +474,25 @@ fn check_reference(id: usize, open: &[GroupState]) -> Result<(), String> {
     Ok(())
 }
 
+fn check_backreference(
+    id: usize,
+    open: &[GroupState],
+    visitor: Option<&mut WarningVisitor<'_>>,
+    at: usize,
+) -> Result<(), String> {
+    let result = check_reference(id, open);
+    if result.is_err()
+        && let Some(probe) = visitor.and_then(|v| v.reference.as_deref_mut())
+        && probe.report_open
+        && open
+            .iter()
+            .any(|g| matches!(g.scope, Scope::Capture(n) if n == id))
+    {
+        probe.error = Some(("cannot refer to an open group".into(), at));
+    }
+    result
+}
+
 fn reference_name(input: &mut Input<'_>) -> Result<String, String> {
     let name: String = std::iter::from_fn(|| input.next_if(|c| *c != ')')).collect();
     if input.next() != Some(')') {
@@ -551,9 +595,10 @@ fn tokenize(
                 if lookahead && extension && input.clone().take(2).eq(['P', '=']) {
                     input.next();
                     input.next();
+                    let at = input.position;
                     let name = reference_name(&mut input)?;
                     let id = reference_id(&name, &groups, false)?;
-                    check_reference(id, &outer_prefixes)?;
+                    check_backreference(id, &outer_prefixes, warnings.as_deref_mut(), at)?;
                     has_reference = true;
                     write!(output, r"\k<{id}>").unwrap();
                     can_repeat = true;
@@ -603,7 +648,7 @@ fn tokenize(
                         let start = input.position;
                         let name = reference_name(&mut input)?;
                         if let Some(probe) =
-                            warnings.as_mut().and_then(|v| v.condition.as_deref_mut())
+                            warnings.as_mut().and_then(|v| v.reference.as_deref_mut())
                             && !name.is_empty()
                             && name.bytes().all(|c| c.is_ascii_digit())
                         {
@@ -882,6 +927,7 @@ fn tokenize(
                 Width::fixed(1)
             }
             '\\' if lookahead && matches!(input.peek(), Some('1'..='9')) => {
+                let at = input.position - 1;
                 let first = input.next().unwrap();
                 let mut id = (first as u8 - b'0') as usize;
                 if let Some(second) = input.next_if(char::is_ascii_digit) {
@@ -890,7 +936,7 @@ fn tokenize(
                 if id >= groups.len() {
                     return Err("invalid regex group reference".into());
                 }
-                check_reference(id, &outer_prefixes)?;
+                check_backreference(id, &outer_prefixes, warnings.as_deref_mut(), at)?;
                 has_reference = true;
                 write!(output, r"\k<{id}>").unwrap();
                 can_repeat = true;
@@ -972,7 +1018,7 @@ fn tokenize(
     }
     if highest_condition >= groups.len() {
         if outer_prefixes.is_empty()
-            && let Some(probe) = warnings.as_mut().and_then(|v| v.condition.as_deref_mut())
+            && let Some(probe) = warnings.as_mut().and_then(|v| v.reference.as_deref_mut())
             && let Some((group, start)) = pending_conditions
                 .into_iter()
                 .find(|(g, _)| *g >= groups.len())

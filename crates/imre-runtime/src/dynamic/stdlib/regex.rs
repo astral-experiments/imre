@@ -889,8 +889,11 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
     ) {
         Ok(pattern) => pattern,
         Err(message) => {
-            if spelling.windows(3).any(|w| w == b"(?(")
-                && let Some((msg, offset)) = imre_regex::numeric_condition_diagnostic(
+            let may_reference = spelling.windows(3).any(|w| w == b"(?(")
+                || spelling.windows(4).any(|w| w == b"(?P=")
+                || spelling.windows(2).any(|w| w[0] == b'\\' && matches!(w[1], b'1'..=b'9'));
+            if may_reference
+                && let Some((msg, offset)) = imre_regex::group_reference_diagnostic(
                     &flags::original_spelling(spelling, bytes),
                     flags & VERBOSE != 0,
                     alphabet(bytes, bytes || flags & ASCII != 0, flags),
@@ -898,6 +901,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
                     flags::scoped_verbose,
                     group_names::valid,
                     crate::integer_text::decimal_digit_limit() as usize,
+                    true,
                 )
             {
                 let original = pattern_spelling(ctx, id, &projections)?;
