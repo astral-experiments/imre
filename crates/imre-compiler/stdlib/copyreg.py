@@ -113,7 +113,7 @@ def __newobj_ex__(cls, args, kwargs):
     """
     return cls.__new__(cls, *args, **kwargs)
 
-def _namedtuple_newobj(self, arguments, extended):
+def _reduce_newobj(self, arguments, extended):
     """Build the binary-protocol reduction from the bound new-argument hook."""
     kwargs = None
     if extended:

@@ -49,8 +49,14 @@ fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     )
 }
 
-/// Named tuples have a tuple payload in addition to any state supplied by a subclass.
-fn namedtuple_reduce(ctx: &mut Context, receiver: Id, class: Id, protocol: i32) -> Result<Id> {
+/// Preserve the native base for legacy reductions and consult constructor hooks for newer protocols.
+fn native_layout_reduce(
+    ctx: &mut Context,
+    receiver: Id,
+    class: Id,
+    protocol: i32,
+    cursor: Option<(Id, &'static str)>,
+) -> Result<Id> {
     let copyreg = ctx.module("copyreg")?;
     if protocol < 2 {
         let reducer = ctx.lookup_attr(copyreg, "_reduce_ex_with_base")?;
@@ -58,12 +64,12 @@ fn namedtuple_reduce(ctx: &mut Context, receiver: Id, class: Id, protocol: i32) 
         let reported_class = ctx.lookup_attr(receiver, "__class__")?;
         ctx.heap.keep(reported_class);
         let protocol = ctx.int(i64::from(protocol));
-        // The declared NamedTuple base still represents a native tuple layout.
-        // An unrelated reported class must choose its own legacy reconstructor base.
         let base = if ctx.namedtuple_fields(reported_class).is_some() {
             ctx.builtin("tuple")
         } else {
-            NONE
+            ctx.allocation_base(reported_class)
+                .filter(|&base| ctx.itertools_layout(base).is_some())
+                .unwrap_or(NONE)
         };
         return ctx.call(
             reducer,
@@ -73,14 +79,13 @@ fn namedtuple_reduce(ctx: &mut Context, receiver: Id, class: Id, protocol: i32) 
     }
     let extended = ctx.class_attr(class, "__getnewargs_ex__");
     let hook = extended.or_else(|| ctx.class_attr(class, "__getnewargs__"));
-    let args = if let Some(hook) = hook {
-        let method = ctx.bind_attribute(hook, receiver, class)?;
-        ctx.call(method, Vec::new(), Vec::new())?
-    } else {
-        ctx.alloc(Value::Tuple(Vec::new()))
+    let Some(hook) = hook else {
+        return reduce_without_newargs(ctx, receiver, class, cursor);
     };
+    let method = ctx.bind_attribute(hook, receiver, class)?;
+    let args = ctx.call(method, Vec::new(), Vec::new())?;
     ctx.heap.keep(args);
-    let reducer = ctx.lookup_attr(copyreg, "_namedtuple_newobj")?;
+    let reducer = ctx.lookup_attr(copyreg, "_reduce_newobj")?;
     let extended = super::super::builtins::boolean(extended.is_some());
     ctx.call(reducer, vec![receiver, args, extended], Vec::new())
 }
@@ -90,8 +95,11 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
     let Value::Instance { class, .. } = *ctx.heap.get(receiver) else {
         return Err(unsupported_reducer(ctx, receiver));
     };
-    if ctx.namedtuple_fields(class).is_some() {
-        return namedtuple_reduce(ctx, receiver, class, protocol);
+    let cursor = ctx
+        .allocation_base(class)
+        .and_then(|base| ctx.itertools_layout(base).map(|name| (base, name)));
+    if cursor.is_some() || ctx.namedtuple_fields(class).is_some() {
+        return native_layout_reduce(ctx, receiver, class, protocol, cursor);
     }
     // A native base may have state beyond the Python dictionary and slots.
     let Value::Class { ancestors, .. } = ctx.heap.get(class) else {
@@ -119,12 +127,35 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
         return Err(unsupported_reducer(ctx, receiver));
     }
 
+    reduce_without_newargs(ctx, receiver, class, None)
+}
+
+fn reduce_without_newargs(
+    ctx: &mut Context,
+    receiver: Id,
+    class: Id,
+    cursor: Option<(Id, &'static str)>,
+) -> Result<Id> {
     let copyreg = ctx.module("copyreg")?;
     let newobj = ctx.lookup_attr(copyreg, "__newobj__")?;
     ctx.heap.keep(newobj);
-    let class = ctx.exact_type(receiver)?;
     let args = ctx.alloc(Value::Tuple(vec![class]));
     let getstate = ctx.lookup_attr(receiver, "__getstate__")?;
+    if let Some((base, name)) = cursor
+        && matches!(*ctx.heap.get(getstate), Value::Method { callable, receiver: bound, .. }
+            if bound == receiver && ctx.builtins.get("object.__getstate__") == Some(&callable))
+    {
+        // The default Python state cannot reconstruct the saved iterator and callable.
+        let name = if class == base {
+            name
+        } else {
+            ctx.type_name(receiver)
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("cannot pickle '{name}' object"),
+        ));
+    }
     let state = ctx.call(getstate, Vec::new(), Vec::new())?;
     Ok(ctx.alloc(Value::Tuple(vec![newobj, args, state, NONE, NONE])))
 }

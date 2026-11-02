@@ -90,3 +90,34 @@ def current():
                 raise AssertionError("unsafe bare allocation of a starmap generation")
     finally:
         sys.modules["itertools"] = saved_module
+
+    for owner in (old, fresh):
+        class Child(owner):
+            pass
+
+        for obj in (owner(pow, [(2, 3)]), Child(pow, [(2, 3)])):
+            for protocol in (0, 1, 2, 5):
+                for reducer in (obj.__reduce_ex__, lambda p: object.__reduce_ex__(obj, p)):
+                    try:
+                        reducer(protocol)
+                    except TypeError:
+                        pass
+                    else:
+                        raise AssertionError("generic reduction lost the private cursor state")
+            try:
+                object.__reduce__(obj)
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("legacy reduction lost the private cursor state")
+            assert next(obj) == 8
+
+        class Restorable(owner):
+            def __getnewargs__(self):
+                return (pow, [(4, 2)])
+
+        obj = Restorable(pow, [(3, 3)])
+        builder, args, state, listitems, dictitems = obj.__reduce_ex__(4)
+        assert state is listitems is dictitems is None
+        assert list(builder(*args)) == [16]
+        assert list(obj) == [27]

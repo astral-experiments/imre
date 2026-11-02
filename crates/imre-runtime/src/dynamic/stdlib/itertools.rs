@@ -238,9 +238,14 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
 }
 
 impl Context {
-    pub(in crate::dynamic) fn is_starmap_type(&self, class: Id) -> bool {
-        matches!(self.heap.get(class), Value::Class { scope, .. } if
-            self.scope_data(*scope).class_namespace.as_ref().is_some_and(|ns| ns.starmap_layout))
+    pub(in crate::dynamic) fn itertools_layout(&self, class: Id) -> Option<&'static str> {
+        let Value::Class { scope, .. } = *self.heap.get(class) else {
+            return None;
+        };
+        self.scope_data(scope)
+            .class_namespace
+            .as_ref()?
+            .itertools_layout
     }
 }
 
@@ -256,7 +261,7 @@ pub(super) fn starmap_allocate(
         ));
     };
     if !kwargs.is_empty()
-        || !ctx.is_starmap_type(*base)
+        || ctx.itertools_layout(*base) != Some("itertools.starmap")
         || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
             if (*class == *base || ancestors.contains(base))
                 && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
@@ -273,7 +278,7 @@ pub(super) fn starmap_allocate(
 pub(super) fn starmap_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if kwargs.is_empty()
         && let [base, receiver] = args
-        && ctx.is_starmap_type(*base)
+        && ctx.itertools_layout(*base) == Some("itertools.starmap")
         && let Value::Instance {
             member_values: Some(values),
             ..

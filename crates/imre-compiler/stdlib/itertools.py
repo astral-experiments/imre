@@ -186,18 +186,6 @@ def _make_starmap(_allocate, _advance):
         def __next__(self):
             return _advance(__class__, self)
 
-        def __reduce__(self):
-            if type(self) is __class__:
-                raise TypeError("cannot pickle 'starmap' object")
-            return object.__reduce__(self)
-
-        def __reduce_ex__(self, protocol, /):
-            if type(self) is not __class__:
-                return object.__reduce_ex__(self, protocol)
-            if _index(protocol) < 2:
-                return self.__reduce__()
-            raise TypeError("cannot pickle 'itertools.starmap' object")
-
     starmap.__qualname__ = "starmap"
     return starmap
 

@@ -3244,7 +3244,7 @@ impl Context {
                 && let Value::Scope(frame) = self.heap.get_mut(scope)
                 && let Some(layout) = &mut frame.class_namespace
             {
-                layout.starmap_layout = true;
+                layout.itertools_layout = Some("itertools.starmap");
             }
             if name == "itertools"
                 && let Some(owner) = self.scope_name(scope, "batched")
