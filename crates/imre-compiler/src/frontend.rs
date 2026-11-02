@@ -2521,6 +2521,11 @@ impl<'a> Checker<'a> {
             return Ok((receiver, field, ty));
         }
         if let Type::Class(class) = receiver.ty {
+            if self.native_mock(class) && attribute.attr.as_str() == "return_value" {
+                return Err(
+                    self.object_runtime_export("unittest.mock return value assignment", attribute)
+                );
+            }
             let declaration = &self.classes.declarations.definitions[class];
             if self.classes.parsers.namespace(class) {
                 return Err(error(
@@ -4403,7 +4408,7 @@ impl<'a> Checker<'a> {
                 } else if empty_list && later.iter().any(|s| matches!(s, ast::Stmt::Assign(a)
                     if matches!(&*a.value, ast::Expr::Name(value) if value.id == name.id)
                     && a.targets.iter().any(|target| matches!(target, ast::Expr::Subscript(sub)
-                        if matches!(&*sub.slice, ast::Expr::Slice(_)) && self.assignment_context(target) == Some(self.types.list(documents::ANY)))))) {
+                        if matches!(&*sub.slice, ast::Expr::Slice(_)) && self.assignment_context(target, None) == Some(self.types.list(documents::ANY)))))) {
                     Some(self.types.list(documents::ANY))
                 } else if (empty_list || empty_set)
                     && let Some(value) = inference::first_insertion(name.id.as_str(), if empty_list { "append" } else { "add" }, later)
@@ -8088,6 +8093,11 @@ impl<'a> Checker<'a> {
                 {
                     return Err(self.object_runtime_export("unittest.mock.patch.object", attribute));
                 }
+                if matches!(attribute.attr.as_str(), "args" | "kwargs")
+                    && self.mock_call_record(receiver.ty)
+                {
+                    return Err(self.object_runtime_export("unittest.mock call tuple", attribute));
+                }
                 if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
                     return self.read_setup_field(receiver, attribute, field);
                 }
@@ -10715,6 +10725,12 @@ impl<'a> Checker<'a> {
                     }
                 });
             }
+        }
+        if name.id == "len"
+            && let [value] = args.as_slice()
+            && self.mock_call_record(value.ty)
+        {
+            return Err(self.object_runtime_export("unittest.mock call tuple", call));
         }
         if name.id == "len"
             && let [value] = args.as_slice()

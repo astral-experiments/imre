@@ -107,6 +107,7 @@ const FUNCTIONS: &[&str] = &[
     "format",
     "compile",
     "exec",
+    "eval",
     "iter",
     "next",
 ];
@@ -205,7 +206,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(owner, "object" | "float" | "int" | "str") || is_exception(owner)).then_some(owner)
+    (matches!(owner, "object" | "dict" | "float" | "int" | "str") || is_exception(owner))
+        .then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -300,6 +302,7 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__new__",
     "__repr__",
     "__init__",
     "__len__",
@@ -369,6 +372,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "index",
     "isalnum",
     "isascii",
     "isalpha",
@@ -420,8 +424,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
+        Value::Bool(_) if attr == "__repr__" => "bool",
+        Value::Int(_) if attr == "__repr__" => "int",
         Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "bit_length" | "to_bytes") => "int",
-        Value::Float(_) if attr == "as_integer_ratio" => "float",
+        Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::DictIterator(iter) if DictIterator::METHODS.contains(&attr) => iter.class_name(),
@@ -598,6 +604,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "read"
                     | "fileno"
                     | "readline"
+                    | "readlines"
                     | "readinto"
                     | "write"
                     | "flush"
@@ -926,6 +933,10 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        if scope != NONE && matches!(self.heap.get(callable), Value::Native(name) if name == "eval")
+        {
+            return self.eval_source(scope, &args, &kwargs);
+        }
         if scope != NONE
             && args.is_empty()
             && kwargs.is_empty()
@@ -1130,7 +1141,7 @@ pub(super) fn call(
                 translation::translate(ctx, owner, args, kwargs)
             }
             "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
-            "str" | "bytes" | "bytearray" if method == "__repr__" => {
+            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
@@ -1255,6 +1266,10 @@ pub(super) fn call(
             let class = ctx.builtin("object");
             Ok(ctx.instance(class, None))
         }
+        "mappingproxy" => {
+            let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
+            ctx.mapping_proxy(mapping.expect("required mapping"))
+        }
         "type" => {
             let [object] = args else {
                 return Err(if args.len() == 3 {
@@ -1280,8 +1295,9 @@ pub(super) fn call(
         "compile" => {
             positional(name, kwargs)?;
             arity(name, args, 3, 3)?;
-            ctx.compile_source(args[0], args[1], args[2])
+            ctx.compile_source(args[0], args[1], args[2], false)
         }
+        "eval" => ctx.eval_source(ctx.heap.current_scope(), args, kwargs),
         "exec" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;

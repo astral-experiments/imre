@@ -3,9 +3,10 @@ import abc
 import sys
 import posixpath as path
 from _collections_abc import _check_methods
-from _collections_abc import MutableMapping as _MutableMapping
-from posix import access, chdir, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
+from posix import access, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
+from posix import chdir
 
 
 curdir = path.curdir
@@ -224,31 +225,46 @@ class PathLike(abc.ABC):
     __class_getitem__ = classmethod(GenericAlias)
 
 
+_env_encoding = sys.getfilesystemencoding()
+
+
 def _encode_env(value):
     if not isinstance(value, str):
         raise TypeError("str expected, not %s" % type(value).__name__)
-    return value.encode("utf-8", "surrogateescape")
+    return value.encode(_env_encoding, "surrogateescape")
+
+
+def _decode_env(value):
+    return value.decode(_env_encoding, "surrogateescape")
+
+
+def _check_bytes(value):
+    if not isinstance(value, bytes):
+        raise TypeError("bytes expected, not %s" % type(value).__name__)
+    return value
 
 
 class _Environ(_MutableMapping):
-    def __init__(self, data):
+    def __init__(self, data, encode, decode):
         self._data = data
+        self._encode = encode
+        self._decode = decode
 
     def __getitem__(self, key):
         try:
-            value = self._data[_encode_env(key)]
+            value = self._data[self._encode(key)]
         except KeyError:
             raise KeyError(key) from None
-        return value.decode("utf-8", "surrogateescape")
+        return self._decode(value)
 
     def __setitem__(self, key, value):
-        key = _encode_env(key)
-        value = _encode_env(value)
+        key = self._encode(key)
+        value = self._encode(value)
         putenv(key, value)
         self._data[key] = value
 
     def __delitem__(self, key):
-        encoded = _encode_env(key)
+        encoded = self._encode(key)
         unsetenv(encoded)
         try:
             del self._data[encoded]
@@ -257,17 +273,53 @@ class _Environ(_MutableMapping):
 
     def __iter__(self):
         for key in list(self._data):
-            yield key.decode("utf-8", "surrogateescape")
+            yield self._decode(key)
 
     def __len__(self):
         return len(self._data)
 
+    def __repr__(self):
+        formatted_items = ", ".join(
+            f"{self._decode(key)!r}: {self._decode(value)!r}"
+            for key, value in self._data.items()
+        )
+        return f"environ({{{formatted_items}}})"
+
     def copy(self):
         return dict(self)
 
+    def setdefault(self, key, value):
+        if key not in self:
+            self[key] = value
+        return self[key]
 
-environ = _Environ(_environ)
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def __or__(self, other):
+        if not isinstance(other, _Mapping):
+            return NotImplemented
+        new = dict(self)
+        new.update(other)
+        return new
+
+    def __ror__(self, other):
+        if not isinstance(other, _Mapping):
+            return NotImplemented
+        new = dict(other)
+        new.update(self)
+        return new
+
+
+environ = _Environ(_environ, _encode_env, _decode_env)
+supports_bytes_environ = True
+environb = _Environ(_environ, _check_bytes, bytes)
 
 
 def getenv(key, default=None):
     return environ.get(key, default)
+
+
+def getenvb(key, default=None):
+    return environb.get(key, default)

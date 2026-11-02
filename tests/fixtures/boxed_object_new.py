@@ -24,6 +24,7 @@ def current():
         def load(self):
             pass
 
+    check_default_state()
     child = Child.__new__(Child, path='pkg')
     child.path = 'new'
     assert type(child) is Child and child.path == 'new'
@@ -66,3 +67,45 @@ def current():
             print(str(exc))
         else:
             raise AssertionError('invalid allocation succeeded')
+
+
+def check_default_state():
+    class Slots:
+        __slots__ = ("__private", "missing")
+
+    class Mixed(Slots):
+        def __getattribute__(self, name):
+            if name == "__dict__":
+                raise AssertionError("read the public __dict__")
+            return super().__getattribute__(name)
+
+    obj = Mixed()
+    assert obj.__getstate__() is None
+    obj._Slots__private = 3
+    obj.extra = [4]
+    state, slots = obj.__getstate__()
+    assert state is object.__getattribute__(obj, "__dict__")
+    assert state == {"extra": [4]} and slots == {"_Slots__private": 3}
+    assert slots is not obj.__getstate__()[1]
+    assert Mixed.__dict__["__slotnames__"] == ["_Slots__private", "missing"]
+
+    class Changing:
+        __slotnames__ = ["value"]
+
+        @property
+        def value(self):
+            self.__slotnames__.append("next")
+            return 7
+
+    try:
+        object.__getstate__(Changing())
+    except RuntimeError as error:
+        assert str(error) == "__slotnames__ changed size during iteration"
+    else:
+        raise AssertionError("ignored a slot cache size change")
+
+    class Custom(Mixed):
+        def __getstate__(self):
+            return super().__getstate__(), "custom"
+
+    assert Custom().__getstate__() == (None, "custom")

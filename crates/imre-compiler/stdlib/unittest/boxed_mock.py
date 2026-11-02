@@ -1,3 +1,20 @@
+from types import MethodType
+
+
+class _ANY:
+    def __eq__(self, other):
+        return True
+
+    def __ne__(self, other):
+        return False
+
+    def __repr__(self):
+        return "<ANY>"
+
+
+ANY = _ANY()
+
+
 # Boxed calls keep their actual arguments. The fixed-layout frontend supplies
 # preformatted scalar arguments to the same assertion and reset machinery.
 class _Call(tuple):
@@ -12,6 +29,41 @@ class _Call(tuple):
     def kwargs(self):
         return self[1]
 
+    def __eq__(self, other):
+        try:
+            size = len(other)
+        except TypeError:
+            return NotImplemented
+
+        # Recorded call_args has no name and accepts the abbreviated call tuples.
+        args, kwargs = (), {}
+        if size == 1:
+            value, = other
+            if isinstance(value, tuple):
+                args = value
+            elif not isinstance(value, str):
+                kwargs = value
+        elif size == 2:
+            first, second = other
+            if not isinstance(first, str):
+                args, kwargs = first, second
+            elif isinstance(second, tuple):
+                args = second
+            else:
+                kwargs = second
+        elif size == 3:
+            _, args, kwargs = other
+        elif size != 0:
+            return False
+        # Let the expected arguments' comparison hooks run first.
+        return (args, kwargs) == (self.args, self.kwargs)
+
+    def __ne__(self, other):
+        equal = self.__eq__(other)
+        if equal is NotImplemented:
+            return NotImplemented
+        return not equal
+
     def _format(self, name):
         parts = [repr(value) for value in self.args]
         parts.extend(key + "=" + repr(value) for key, value in self.kwargs.items())
@@ -25,11 +77,26 @@ _FixedMock = Mock
 _unset_return = object()
 
 
+def _is_exception(value):
+    return isinstance(value, BaseException) or isinstance(value, type) and issubclass(value, BaseException)
+
+
+def _callable(value):
+    if isinstance(value, type):
+        return True
+    if isinstance(value, (staticmethod, classmethod, MethodType)):
+        return _callable(value.__func__)
+    # Some boxed native callables lack a visible __call__ wrapper. An explicit
+    # __call__ of None still makes an iterable the source of successive effects.
+    return getattr(value, "__call__", callable(value) or None) is not None
+
+
 class Mock(_FixedMock):
     _mock_sealed = False
 
     def __init__(self, *, name=None, side_effect=None, return_value=_unset_return, **attrs):
-        super().__init__(name=name, side_effect=side_effect)
+        super().__init__(name=name)
+        self.side_effect = side_effect
         if return_value is not _unset_return:
             self.return_value = return_value
         if attrs:
@@ -108,6 +175,12 @@ class Mock(_FixedMock):
 
     @side_effect.setter
     def side_effect(self, effect):
+        if effect is not None and not _is_exception(effect) and not _callable(effect):
+            try:
+                effect = iter(effect)
+            except TypeError:
+                # Like CPython, keep a non-iterable value until the mock is called.
+                pass
         self._node.side_effect = effect
 
     @property
@@ -138,9 +211,14 @@ class Mock(_FixedMock):
             ancestor.calls.append((ancestor.prefix, call))
         effect = node.side_effect
         if effect is not None:
-            if isinstance(effect, BaseException) or isinstance(effect, type) and issubclass(effect, BaseException):
+            if _is_exception(effect):
                 raise effect
-            result = effect(*args, **kwargs)
+            if _callable(effect):
+                result = effect(*args, **kwargs)
+            else:
+                result = next(effect)
+                if _is_exception(result):
+                    raise result
             if result is not DEFAULT:
                 return result
         return self.return_value
@@ -178,7 +256,13 @@ class Mock(_FixedMock):
         self._assert_called_once_with(args, kwargs)
 
     def assert_any_call(self, /, *args, **kwargs):
-        self._assert_any_call(args, kwargs)
+        expected = _Call(args, kwargs)
+        # Equality hooks may record more calls. Check only the history at entry.
+        for actual in list(self._node.call_args_list):
+            assert len(expected) == len(actual)
+            if all([left == right for left, right in zip(expected, actual)]):
+                return
+        raise AssertionError(expected._format(self._name()) + " call not found")
 
 
 class MagicMock(Mock):

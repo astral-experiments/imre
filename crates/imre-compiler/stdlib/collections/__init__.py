@@ -1,7 +1,7 @@
 """Dictionary and mapping classes for the runtime collections module."""
 
 import operator as _operator
-from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_move_to_end, _ordered_dict_popitem, _ordered_dict_repr, _ordered_dict_view
+from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_move_to_end, _ordered_dict_pop, _ordered_dict_popitem, _ordered_dict_repr, _ordered_dict_setdefault, _ordered_dict_view
 from _collections_abc import MutableMapping as _MutableMapping, MutableSequence as _MutableSequence
 from itertools import repeat as _repeat
 
@@ -48,6 +48,9 @@ def _combine_counts(left, right, op):
     return result
 
 
+_ordered_dict_missing = object()
+
+
 class OrderedDict(dict):
     def __iter__(self):
         return iter(_ordered_dict_view(self, "keys"))
@@ -76,6 +79,19 @@ class OrderedDict(dict):
 
     def move_to_end(self, /, key, last=True):
         return _ordered_dict_move_to_end(self, key, last)
+
+    def pop(self, /, key, default=_ordered_dict_missing):
+        if default is _ordered_dict_missing:
+            return _ordered_dict_pop(self, key)
+        return _ordered_dict_pop(self, key, default)
+
+    def setdefault(self, /, key, default=None):
+        if type(self) is OrderedDict:
+            return _ordered_dict_setdefault(self, key, default)
+        if key in self:
+            return self[key]
+        self[key] = default
+        return default
 
     def popitem(self, /, last=True):
         return _ordered_dict_popitem(self, last)

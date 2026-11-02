@@ -50,7 +50,17 @@ def check_command_stdin(imre, run):
         "assert buffer.read1() == b''\n"
         "signal.alarm(0)\n"
     )
+    last_input_reference = (
+        "import sys, weakref\n"
+        "wrapper = weakref.ref(sys.stdin)\n"
+        "buffer = sys.stdin.buffer\n"
+        "sys.stdin = None\n"
+        "assert wrapper() is sys.__stdin__ and not buffer.closed\n"
+        "vars(sys)['__stdin__'] = None\n"
+        "assert wrapper() is None and buffer.closed\n"
+    )
     cases = [
+        (last_input_reference, b""),
         ("import sys; print(repr(sys.stdin.read()))", b""),
         (source, "one\r\ntwo\nλtail".encode()),
     ]
@@ -1310,6 +1320,8 @@ def main():
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
+        static_fixture = Path(__file__).with_name("fixtures") / "boxed_getattr_static.py"
+        compare("-IB", static_fixture, native_args=("run", static_fixture, "--runtime-imports", "--quiet"))
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
         (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
         inspect_entry = root / "inspect_views.py"
@@ -1734,7 +1746,7 @@ def report(text):
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
-            "boxed_threading_condition_event.py",
+            "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
@@ -1765,13 +1777,32 @@ def report(text):
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
+        compare(
+            "-IB", "-c",
+            "import sys\n"
+            "print(2 | 4, 'typing' in sys.modules)\n"
+            "union = int\n"
+            "union |= str\n"
+            "union |= 'C'\n"
+            "reference = union.__args__[-1]\n"
+            "print(type(reference).__name__, reference.__forward_arg__)",
+        )
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
+        call_args = fixtures / "unittest_mock_call_args.py"
+        compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
+        boxed_call_args = fixtures / "boxed_unittest_call_args.py"
+        compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
+        for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py"):
+            fixture = fixtures / name
+            compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
+            compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
+            "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
@@ -1878,7 +1909,9 @@ def report(text):
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
+            "boxed_os_environb.py",
             "boxed_os_file_descriptors.py",
+            "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_waitpid.py",
             "boxed_os_stat.py",
@@ -1906,6 +1939,7 @@ def report(text):
             "boxed_global.py",
             "boxed_configparser.py",
             "boxed_logging.py",
+            "boxed_logging_manager.py",
             "boxed_logging_formatter.py",
             "boxed_logging_file.py",
             "boxed_logging_adapter.py",
@@ -2023,6 +2057,7 @@ def report(text):
             "boxed_source_coroutine.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",
+            "boxed_doctest_suite.py",
             "boxed_slice.py",
             "boxed_binascii.py",
             "boxed_zlib.py",
@@ -2091,6 +2126,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             shim = root / "secrets_entropy.so"

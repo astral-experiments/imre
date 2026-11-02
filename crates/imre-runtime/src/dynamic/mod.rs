@@ -25,6 +25,7 @@ mod namedtuple;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
+mod object_state;
 mod operators;
 mod os_error;
 mod property;
@@ -240,7 +241,8 @@ impl Context {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
-            ("int", Value::Int(_) | Value::Bool(_))
+            ("bool", Value::Bool(_))
+            | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
@@ -1509,20 +1511,21 @@ impl Context {
         if let Some(order) = &mut data.class_body {
             order.retain(|member| member != name);
         }
-        let previous = data.names.shift_remove(name);
-        if previous.is_some()
-            && name != "__qualname__"
-            && let Some(dictionary) = data
-                .class_namespace
-                .as_ref()
-                .and_then(|class| class.dictionary)
+        let Some(previous) = data.names.shift_remove(name) else {
+            return Ok(false);
+        };
+        let dictionary = data
+            .class_namespace
+            .as_ref()
+            .and_then(|class| class.dictionary);
+        // Deleting the class dictionary entry can collect the removed value.
+        self.heap.weak_edge_removed(previous);
+        if name != "__qualname__"
+            && let Some(dictionary) = dictionary
         {
             self.delete_item(dictionary, key)?;
         }
-        if let Some(value) = previous {
-            self.heap.weak_edge_removed(value);
-        }
-        Ok(previous.is_some())
+        Ok(true)
     }
 
     /// Bind a parameter in a fresh function scope using checked name and table storage.
@@ -1713,6 +1716,7 @@ impl Context {
                 "__hash__",
                 "__format__",
                 "__init_subclass__",
+                "__getstate__",
                 "__reduce__",
                 "__reduce_ex__",
             ],
@@ -1740,8 +1744,9 @@ impl Context {
             }
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
-            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__"],
-            "float" => &["__format__", "__getformat__", "as_integer_ratio"],
+            "bool" => &["__repr__"],
+            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"],
+            "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS

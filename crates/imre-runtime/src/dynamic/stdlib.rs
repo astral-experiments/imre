@@ -16,6 +16,8 @@ mod contextvars;
 mod csv;
 pub(super) mod datetime;
 mod email;
+#[cfg(target_os = "linux")]
+mod fcntl;
 mod files;
 pub(super) mod fixed_structseq;
 pub(super) mod flags;
@@ -60,6 +62,25 @@ pub(super) mod urllib;
 mod warnings;
 mod zipimport;
 
+/// Format a type for CPython diagnostics, including a non-default module and its qualname.
+fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
+    let name = match ctx.own_class_attr(class, "__qualname__") {
+        Some(name) => name,
+        None => ctx.text(ctx.class_name(class).to_owned()),
+    };
+    let Some(module) = ctx.own_class_attr(class, "__module__") else {
+        return Ok(name);
+    };
+    if ctx.string_storage(module).is_none()
+        || matches!(ctx.str_value(module), Ok("builtins" | "__main__"))
+    {
+        return Ok(name);
+    }
+    let dot = ctx.text(".");
+    let prefix = ctx.concat_strings(module, dot)?;
+    ctx.concat_strings(prefix, name)
+}
+
 /// The JIT observer is a sys attribute with its own namespace, outside the import cache.
 pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
     let class = ctx.builtin("module");
@@ -90,7 +111,7 @@ pub(super) fn is_module(name: &str) -> bool {
 pub(super) fn has_lazy_attributes(name: &str) -> bool {
     if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport")
         || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
-        || cfg!(target_os = "linux") && name == "resource"
+        || cfg!(target_os = "linux") && matches!(name, "resource" | "fcntl")
     {
         return true;
     }
@@ -370,6 +391,12 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
 }
 
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
+    #[cfg(target_os = "linux")]
+    if module == "fcntl"
+        && let Some(value) = fcntl::constant(name)
+    {
+        return Ok(ctx.int(i64::from(value)));
+    }
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
@@ -464,6 +491,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "traceback",
             "clear_frames" | "format_exc" | "format_exception" | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
+        ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
@@ -484,8 +512,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_count_elements"
             | "_ordered_dict_equal"
             | "_ordered_dict_move_to_end"
+            | "_ordered_dict_pop"
             | "_ordered_dict_popitem"
             | "_ordered_dict_repr"
+            | "_ordered_dict_setdefault"
             | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
@@ -512,6 +542,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_UnpackGenericAlias"
             | "_eval_type_expression"
             | "_validate_forward_ref"
+            | "_finish_field_ref"
             | "Any"
             | "Callable"
             | "cast"
@@ -529,8 +560,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("datetime", "UTC") => datetime::utc(ctx),
         (
             "time",
-            "time" | "time_ns" | "monotonic" | "perf_counter" | "gmtime" | "localtime" | "mktime"
-            | "strftime" | "ctime" | "struct_time",
+            "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
+            | "mktime" | "strftime" | "ctime" | "struct_time",
         ) => ctx.builtin(&format!("time.{name}")),
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
@@ -547,6 +578,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("hashlib", "algorithms_available" | "algorithms_guaranteed") => {
             return hashlib::algorithms(ctx);
         }
+        #[cfg(target_os = "linux")]
+        ("fcntl", "fcntl") => ctx.builtin("fcntl.fcntl"),
         #[cfg(target_os = "linux")]
         ("resource", "getrlimit") => ctx.builtin("resource.getrlimit"),
         #[cfg(target_os = "linux")]
@@ -743,6 +776,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "inspect",
             "iscoroutinefunction"
             | "markcoroutinefunction"
+            | "_static_member"
             | "_signature_identifier"
             | "_signature_mapping"
             | "_signature_layout",
@@ -1244,6 +1278,10 @@ pub(super) fn call(
         });
     }
     #[cfg(target_os = "linux")]
+    if name == "fcntl.fcntl" {
+        return fcntl::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "resource.getrlimit" {
         return resource::getrlimit(ctx, args, kwargs);
     }
@@ -1742,29 +1780,7 @@ pub(super) fn call(
                     return Ok(ctx.dict(entries));
                 }
             }
-            ("metadata", [mapping], []) => {
-                let mapping = *mapping;
-                // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
-                let supported = match ctx.heap.get(ctx.scalar_value(mapping)) {
-                    Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
-                    Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => false,
-                    Value::Dict(_) | Value::DefaultDict { .. } | Value::MappingProxy(_)
-                    | Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::ByteArray(_)
-                    | Value::Array(_) | Value::Range(_) | Value::MemoryView { .. }
-                    | Value::Context(_) => true,
-                    _ => {
-                        ctx.dict_storage(mapping).is_some()
-                            || ctx.slot(mapping, "__getitem__").is_some()
-                            || ctx.enum_values(mapping).is_some()
-                    }
-                };
-                if !supported {
-                    return Err(Error::new("TypeError", format!(
-                        "mappingproxy() argument must be a mapping, not {}", ctx.type_name(mapping)
-                    )));
-                }
-                return Ok(ctx.alloc(Value::MappingProxy(mapping)));
-            }
+            ("metadata", [mapping], []) => return ctx.mapping_proxy(*mapping),
             _ => {}
         }
         return Err(Error::new(
@@ -2088,7 +2104,7 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "file.read" | "file.read1" | "file.readline"
+        "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),

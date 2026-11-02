@@ -145,6 +145,7 @@ pub(super) fn call(
     let function = match name {
         "time" => "time.time",
         "time_ns" => "time.time_ns",
+        "sleep" => "time.sleep",
         "monotonic" => "time.monotonic",
         "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
@@ -157,6 +158,52 @@ pub(super) fn call(
         ));
     }
     match name {
+        "sleep" => {
+            let [seconds] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "time.sleep() takes exactly one argument ({} given)",
+                        args.len()
+                    ),
+                ));
+            };
+            audit::event(ctx, "time.sleep", args)?;
+            if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
+                crate::objects::time::sleep_float(*value)?;
+            } else {
+                let overflow = || {
+                    Error::new(
+                        "OverflowError",
+                        "timestamp too large to convert to C PyTime_t",
+                    )
+                };
+                let seconds = match ctx.index_integer(*seconds) {
+                    Ok(seconds) => seconds,
+                    Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+                        let class = ctx.exact_type(*seconds)?;
+                        let name = super::qualified_type(ctx, class)?;
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "'{}' object cannot be interpreted as an integer or float",
+                                ctx.str_value(name)?
+                            ),
+                        ));
+                    }
+                    Err(error) if ctx.is_builtin_error(&error, "OverflowError") => {
+                        return Err(overflow());
+                    }
+                    Err(error) => return Err(error),
+                };
+                let nanos = seconds
+                    .to_i64()
+                    .and_then(|n| n.checked_mul(1_000_000_000))
+                    .ok_or_else(overflow)?;
+                crate::objects::time::sleep_ns(nanos)?;
+            }
+            Ok(NONE)
+        }
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),
         "time_ns" if args.is_empty() => {
             let nanos = i64::try_from(wall_time_ns()).map_err(|_| {
