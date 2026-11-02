@@ -1926,12 +1926,13 @@ class _SpecialGenericAlias(_NotIterable):
             return self._getitem(params)
 
     def copy_with(self, params):
-        cls = type(self)
-        if cls is _typing._UnpackGenericAlias:
-            return cls(self.__origin__, params)
-        if cls is _typing._CallableGenericAlias:
-            return cls(self.__origin__, params, name=self._name, inst=self._inst)
-        return _typing._GenericAlias(self.__origin__, params, name=self._name, inst=self._inst)
+        if isinstance(self, _SpecialGenericAlias):
+            cls = _typing._GenericAlias
+        else:
+            cls = type(self)
+            if cls is _typing._UnpackGenericAlias:
+                return cls(self.__origin__, params)
+        return cls(self.__origin__, params, name=self._name, inst=self._inst)
 
     def __instancecheck__(self, value):
         return self.__subclasscheck__(type(value))
