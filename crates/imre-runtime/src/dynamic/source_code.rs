@@ -672,6 +672,22 @@ impl<'a> CompiledStrings<'a, '_> {
                     }
                     self.heap.code_name(name.id.as_str());
                 }
+                ast::Expr::Call(call) if call.arguments.keywords.len() > 1 => {
+                    let mut seen = HashSet::new();
+                    for name in call
+                        .arguments
+                        .keywords
+                        .iter()
+                        .filter_map(|kw| kw.arg.as_ref())
+                    {
+                        if !seen.insert(name.as_str()) {
+                            return Err(Error::new(
+                                "SyntaxError",
+                                format!("keyword argument repeated: {name}"),
+                            ));
+                        }
+                    }
+                }
                 ast::Expr::Attribute(attr) => {
                     self.heap.code_name(attr.attr.as_str());
                 }
@@ -3995,6 +4011,84 @@ impl Context {
         Ok(())
     }
 
+    fn source_keyword_mapping(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        callable: Id,
+        keywords: &[ast::Keyword],
+    ) -> Result<Id> {
+        let merged = self.dict(Vec::new());
+        self.heap.keep(merged);
+        // Merge each ** mapping immediately, but evaluate adjacent named arguments as a group.
+        for group in keywords.chunk_by(|left, right| left.arg.is_some() && right.arg.is_some()) {
+            let mapping = if group[0].arg.is_none() {
+                self.source_expr(code, scope, &group[0].value)?
+            } else {
+                let named = self.dict(Vec::new());
+                self.heap.keep(named);
+                for item in group {
+                    let key = self
+                        .heap
+                        .code_name(item.arg.as_ref().expect("named keyword").as_str());
+                    let value = self.source_expr(code, scope, &item.value)?;
+                    self.put_item(named, key, value)?;
+                }
+                named
+            };
+            self.op("keywords", merged, mapping, callable)?;
+        }
+        Ok(merged)
+    }
+
+    fn extend_source_call_args(
+        &mut self,
+        args: &mut Vec<Id>,
+        iterable: Id,
+        sole_star_callable: Option<Id>,
+    ) -> Result<()> {
+        let iter = match self.iterator(iterable) {
+            Err(error)
+                if error.kind == "TypeError"
+                    && self.slot(iterable, "__iter__").is_none()
+                    && self.slot(iterable, "__getitem__").is_none() =>
+            {
+                let prefix = if let Some(callable) = sole_star_callable {
+                    format!("{} argument after *", self.keyword_callable(callable)?)
+                } else {
+                    "Value after *".into()
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{prefix} must be an iterable, not {}",
+                        self.type_name(iterable)
+                    ),
+                ));
+            }
+            other => other?,
+        };
+        self.heap.keep(iter);
+        if sole_star_callable.is_none() {
+            let default = self.int(8);
+            let hint = self.length_hint(iterable, Some(default))?;
+            let hint = self.as_integer(hint)? as usize;
+            if hint <= isize::MAX as usize - args.len() {
+                args.try_reserve(hint)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+            }
+        }
+        while let Some(item) = self.next_item(iter)? {
+            args.try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            // Further arguments may clear the iterable and invoke Python callbacks.
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(item);
+            args.push(item);
+        }
+        Ok(())
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -4220,19 +4314,37 @@ impl Context {
                 } else {
                     eval(self, &v.func)?
                 };
-                let args = v
-                    .arguments
-                    .args
-                    .iter()
-                    .map(|a| eval(self, a))
-                    .collect::<Result<Vec<_>>>()?;
+                let mut args = Vec::new();
+                let mut sole_star = None;
+                for arg in &v.arguments.args {
+                    if let Expr::Starred(star) = arg {
+                        let value = eval(self, &star.value)?;
+                        if v.arguments.args.len() == 1 {
+                            // CALL_FUNCTION_EX consumes a sole iterable after evaluating keywords.
+                            sole_star = Some(value);
+                        } else {
+                            self.extend_source_call_args(&mut args, value, None)?;
+                        }
+                    } else {
+                        args.push(eval(self, arg)?);
+                    }
+                }
+                let keywords = &v.arguments.keywords;
                 let mut kwargs = Vec::new();
-                for item in &v.arguments.keywords {
-                    let key = item
-                        .arg
-                        .as_ref()
-                        .ok_or_else(|| unsupported("keyword unpack"))?;
-                    kwargs.push((key.to_string(), eval(self, &item.value)?));
+                let mapping = if keywords.iter().any(|item| item.arg.is_none()) {
+                    Some(self.source_keyword_mapping(code, scope, f, keywords)?)
+                } else {
+                    for item in keywords {
+                        let key = item.arg.as_ref().expect("named keyword");
+                        kwargs.push((key.to_string(), eval(self, &item.value)?));
+                    }
+                    None
+                };
+                if let Some(value) = sole_star {
+                    self.extend_source_call_args(&mut args, value, Some(f))?;
+                }
+                if let Some(mapping) = mapping {
+                    kwargs = self.keyword_args(mapping)?;
                 }
                 let result = self.call_in_scope(scope, f, args, kwargs)?;
                 self.finish_call_operands(mark, result);
