@@ -1,0 +1,29 @@
+{
+  "suite": "test.test_logging",
+  "lane": "stock",
+  "cp_reference": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "entry": "/workspace/scratch/imre-logging-buffering/intact/stage/entry.py",
+  "original": "/workspace/scratch/imre-logging-buffering/intact/stage/test/test_logging.py",
+  "entry_sha256": "7b991b6760ecf896db5af3d9c9cadf1d7b6974562930c681e762886f46570371",
+  "original_sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563",
+  "argv": [
+    "/workspace/scratch/imre-resources/cpython/python",
+    "-I",
+    "-B",
+    "/workspace/scratch/imre-logging-buffering/intact/stage/entry.py"
+  ],
+  "executable_sha256": "30a3da42f5c021f375b20dbd966cd558864aff054a669f243c0cef1fac79ffd6",
+  "cwd": "/workspace/scratch/imre-logging-buffering/intact/run/stock",
+  "tmpdir": "/dev/shm/imre-logging-leaf-public/buffering-intact/stock/tmp",
+  "started": "2026-11-02T12:45:21.118235+00:00",
+  "deadline_seconds": 1800,
+  "pid": 217210,
+  "finished": "2026-11-02T12:45:53.369089+00:00",
+  "elapsed_seconds": 32.65084751800168,
+  "status": 0,
+  "exit": 0,
+  "signal": null,
+  "timed_out": false,
+  "stdout_sha256": "bef61a75bcd66e10edb14de5f776df0885181b7da30d1143779582280b7de1e1",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

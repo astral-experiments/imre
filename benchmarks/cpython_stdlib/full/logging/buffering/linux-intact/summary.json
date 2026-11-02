@@ -1,0 +1,112 @@
+{
+  "role": "guarded, intact TestLoader.loadTestsFromModule(test.test_logging) TestSuite; separate from selected-family results",
+  "source_reference": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "public_imre": "8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce",
+  "public_pr": "https://github.com/astral-experiments/imre/pull/4083",
+  "entry_sha256": "7b991b6760ecf896db5af3d9c9cadf1d7b6974562930c681e762886f46570371",
+  "source_sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563",
+  "comparison": {
+    "same_native_order_and_verdicts": true,
+    "same_native_per_parent_callback_and_subtest_tags": true,
+    "same_native_terminal_details": true
+  },
+  "processes": {
+    "stock": {
+      "complete": true,
+      "pid": 217210,
+      "status": 0,
+      "exit": 0,
+      "signal": null,
+      "timed_out": false,
+      "time_seconds": 32.65084751800168,
+      "discovered": [
+        "272"
+      ],
+      "parent_events": {
+        "DISCOVERED": 1,
+        "RUN_START": 1,
+        "START": 272,
+        "PASS": 269,
+        "STOP": 272,
+        "SUBPASS": 16,
+        "SKIP": 3,
+        "RUN_STOP": 1,
+        "TOTAL": 1
+      },
+      "total": [
+        "272 0 0 3"
+      ],
+      "foreign_events": {},
+      "crosswalk_sha256": "7750c87af4bc36e669c76c9f35447bc3373e30b2cd921eeb01acd8abbfeb8b17",
+      "receipt_sha256": "d0c47b7980007561a68d9b2afe453ba48bed2fa401cbe85a7c564ca932419e87",
+      "unexpected_handlers_parent_failures": 0
+    },
+    "O0": {
+      "complete": true,
+      "pid": 218042,
+      "status": 1,
+      "exit": 1,
+      "signal": null,
+      "timed_out": false,
+      "time_seconds": 5640.418133398001,
+      "discovered": [
+        "272"
+      ],
+      "parent_events": {
+        "DISCOVERED": 1,
+        "RUN_START": 1,
+        "START": 272,
+        "ERROR": 19,
+        "STOP": 272,
+        "PASS": 134,
+        "SKIP": 5,
+        "SUBPASS": 10,
+        "SUBERROR": 6,
+        "FAIL": 113,
+        "RUN_STOP": 1,
+        "TOTAL": 1
+      },
+      "total": [
+        "272 117 21 5"
+      ],
+      "foreign_events": {},
+      "crosswalk_sha256": "4227285c38da17505666256ab350722fa0f9e2c0f171b0f2b1313bb39b88a245",
+      "receipt_sha256": "e43d3912a1715f6f27a598088633fb309f33c41e6a2cf85fe355a2b55d25fcbf",
+      "unexpected_handlers_parent_failures": 112
+    },
+    "O3": {
+      "complete": true,
+      "pid": 219683,
+      "status": 1,
+      "exit": 1,
+      "signal": null,
+      "timed_out": false,
+      "time_seconds": 5440.830999365004,
+      "discovered": [
+        "272"
+      ],
+      "parent_events": {
+        "DISCOVERED": 1,
+        "RUN_START": 1,
+        "START": 272,
+        "ERROR": 19,
+        "STOP": 272,
+        "PASS": 134,
+        "SKIP": 5,
+        "SUBPASS": 10,
+        "SUBERROR": 6,
+        "FAIL": 113,
+        "RUN_STOP": 1,
+        "TOTAL": 1
+      },
+      "total": [
+        "272 117 21 5"
+      ],
+      "foreign_events": {},
+      "crosswalk_sha256": "4227285c38da17505666256ab350722fa0f9e2c0f171b0f2b1313bb39b88a245",
+      "receipt_sha256": "7afb394e789c2e5d1bcc0122cf7e1559ccf7c0ea5d68ac85860f0ac5150a4820",
+      "unexpected_handlers_parent_failures": 112
+    }
+  },
+  "per_parent_tsv_sha256": "e272ae69032bee7b989e904c318c988c9ae490d71a953b485ed91d96e935b726"
+}

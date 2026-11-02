@@ -1,0 +1,73 @@
+{
+  "lane": "stock",
+  "pid": 217210,
+  "status": 0,
+  "exit": 0,
+  "signal": null,
+  "timed_out": false,
+  "time_seconds": 32.65084751800168,
+  "deadline_seconds": 1800,
+  "discovered": [
+    "272"
+  ],
+  "total": [
+    "272 0 0 3"
+  ],
+  "parent_events": {
+    "DISCOVERED": 1,
+    "RUN_START": 1,
+    "START": 272,
+    "PASS": 269,
+    "STOP": 272,
+    "SUBPASS": 16,
+    "SKIP": 3,
+    "RUN_STOP": 1,
+    "TOTAL": 1
+  },
+  "foreign_events": {},
+  "started": 272,
+  "stopped": 272,
+  "paired_start_stops": 272,
+  "subtests": 16,
+  "last_events": [
+    [
+      "START",
+      "test.test_logging.WarningsTest.test_warnings"
+    ],
+    [
+      "PASS",
+      "test.test_logging.WarningsTest.test_warnings"
+    ],
+    [
+      "STOP",
+      "test.test_logging.WarningsTest.test_warnings"
+    ],
+    [
+      "START",
+      "test.test_logging.WarningsTest.test_warnings_no_handlers"
+    ],
+    [
+      "PASS",
+      "test.test_logging.WarningsTest.test_warnings_no_handlers"
+    ],
+    [
+      "STOP",
+      "test.test_logging.WarningsTest.test_warnings_no_handlers"
+    ],
+    [
+      "RUN_STOP",
+      ""
+    ],
+    [
+      "TOTAL",
+      "272 0 0 3"
+    ]
+  ],
+  "synthetic_terminal_events": [],
+  "stderr_bytes": 0,
+  "complete": true,
+  "source_sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563",
+  "entry_sha256": "7b991b6760ecf896db5af3d9c9cadf1d7b6974562930c681e762886f46570371",
+  "receipt_sha256": "d0c47b7980007561a68d9b2afe453ba48bed2fa401cbe85a7c564ca932419e87",
+  "crosswalk_sha256": "7750c87af4bc36e669c76c9f35447bc3373e30b2cd921eeb01acd8abbfeb8b17"
+}

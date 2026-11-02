@@ -1,0 +1,79 @@
+{
+  "lane": "O0",
+  "pid": 218042,
+  "status": 1,
+  "exit": 1,
+  "signal": null,
+  "timed_out": false,
+  "time_seconds": 5640.418133398001,
+  "deadline_seconds": 1800,
+  "discovered": [
+    "272"
+  ],
+  "total": [
+    "272 117 21 5"
+  ],
+  "parent_events": {
+    "DISCOVERED": 1,
+    "RUN_START": 1,
+    "START": 272,
+    "ERROR": 19,
+    "STOP": 272,
+    "PASS": 134,
+    "SKIP": 5,
+    "SUBPASS": 10,
+    "SUBERROR": 6,
+    "FAIL": 113,
+    "RUN_STOP": 1,
+    "TOTAL": 1
+  },
+  "foreign_events": {},
+  "started": 272,
+  "stopped": 272,
+  "paired_start_stops": 272,
+  "subtests": 16,
+  "last_events": [
+    [
+      "START",
+      "test.test_logging.WarningsTest.test_warnings"
+    ],
+    [
+      "FAIL",
+      "test.test_logging.WarningsTest.test_warnings AssertionError 'Unexpected handlers: [<StreamHandler (NOTSET)>]'"
+    ],
+    [
+      "STOP",
+      "test.test_logging.WarningsTest.test_warnings"
+    ],
+    [
+      "START",
+      "test.test_logging.WarningsTest.test_warnings_no_handlers"
+    ],
+    [
+      "FAIL",
+      "test.test_logging.WarningsTest.test_warnings_no_handlers AssertionError 'Unexpected handlers: [<StreamHandler (NOTSET)>]'"
+    ],
+    [
+      "STOP",
+      "test.test_logging.WarningsTest.test_warnings_no_handlers"
+    ],
+    [
+      "RUN_STOP",
+      ""
+    ],
+    [
+      "TOTAL",
+      "272 117 21 5"
+    ]
+  ],
+  "synthetic_terminal_events": [],
+  "stderr_bytes": 405,
+  "complete": true,
+  "source_sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563",
+  "entry_sha256": "7b991b6760ecf896db5af3d9c9cadf1d7b6974562930c681e762886f46570371",
+  "receipt_sha256": "e43d3912a1715f6f27a598088633fb309f33c41e6a2cf85fe355a2b55d25fcbf",
+  "crosswalk_sha256": "4227285c38da17505666256ab350722fa0f9e2c0f171b0f2b1313bb39b88a245",
+  "initial_deadline_extended": true,
+  "effective_deadline": "allowed to finish naturally under pidfd observation",
+  "extension_sha256": "42c3f6ff8b1d182a60436f4a82b03c9e921e740c9b85697354e09eba7868f17e"
+}

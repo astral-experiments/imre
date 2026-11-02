@@ -1,0 +1,56 @@
+{
+  "suite": "test.test_logging",
+  "lane": "O0",
+  "cp_reference": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "entry": "/workspace/scratch/imre-logging-buffering/intact/stage/entry.py",
+  "original": "/workspace/scratch/imre-logging-buffering/intact/stage/test/test_logging.py",
+  "entry_sha256": "7b991b6760ecf896db5af3d9c9cadf1d7b6974562930c681e762886f46570371",
+  "original_sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563",
+  "imre_head": "8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce",
+  "freeze": {
+    "head": "8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce",
+    "parents": [
+      "3010b0e582a0562f4904a9ff76c28442c6e15c0b"
+    ],
+    "source": "/workspace/scratch/imre-logging-buffering/public/source-8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce",
+    "source_status": "clean",
+    "cp_reference": {
+      "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "version": "Python 3.14.5 (tags/v3.14.5:5607950, Nov  2 2026, 02:30:54) [GCC 14.2.0]",
+      "executable": "/workspace/scratch/imre-resources/cpython/python"
+    },
+    "compiler_cargo_opt_level": "0",
+    "runtime_cargo_opt_level": "2",
+    "compiler": {
+      "sha256": "2976b377946522b3db9e54b80aca3da0fa9ad4b55b5f7961f8d79ae67f8c5bc7",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/imre"
+    },
+    "runtime": {
+      "sha256": "932f372198da45c715818d6e8cb00cddff6d19876eed55c9a4fed1bc60c4b471",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/libimre_runtime.a"
+    },
+    "clang": {
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "path": "/workspace/scratch/imre-logging-buffering/public/bin-8d3fe99e55c190cc72bfd78d2b5afe46de48e8ce/imre-toolchain/bin/clang"
+    }
+  },
+  "freeze_sha256": "cf81ef7cef591fb132d2a60e4be40c6ddf0ac078b50d35142b2d56446490cefb",
+  "compile_receipt_sha256": "85dcec74d6533bee28001b6fdc710c9cd86c0f5194378e251876d718e5e8f7c0",
+  "argv": [
+    "/dev/shm/imre-logging-leaf-public/buffering-intact/O0/intact-suite"
+  ],
+  "executable_sha256": "a77b810e0f91d74b711c6f04526c71c73abadb029debb58b9b51689efa6923b1",
+  "cwd": "/workspace/scratch/imre-logging-buffering/intact/run/O0",
+  "tmpdir": "/dev/shm/imre-logging-leaf-public/buffering-intact/O0/tmp",
+  "started": "2026-11-02T12:47:17.278344+00:00",
+  "deadline_seconds": 1800,
+  "pid": 218042,
+  "finished": "2026-11-02T14:21:17.450174+00:00",
+  "elapsed_seconds": 5640.418133398001,
+  "status": 1,
+  "exit": 1,
+  "signal": null,
+  "timed_out": false,
+  "stdout_sha256": "c973ee52122dbd609928d1e142a3864ff64664540c896cf2b109503c74017236",
+  "stderr_sha256": "58c7e7e8fe22554daff30286a8346497e81666247a99228df79227c2cd5926c3"
+}
