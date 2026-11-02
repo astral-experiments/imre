@@ -2156,6 +2156,7 @@ impl Context {
                 &[
                     "__add__",
                     "__index__",
+                    "__trunc__",
                     "bit_length",
                     "from_bytes",
                     "to_bytes",
@@ -2166,6 +2167,7 @@ impl Context {
             "float" => &[
                 "__format__",
                 "__getformat__",
+                "__trunc__",
                 "as_integer_ratio",
                 "__repr__",
             ],
