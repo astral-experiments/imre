@@ -22,6 +22,8 @@ CASES = {
         ["prefix", "++no-mode"], ["prefix", "/v"], ["prefix", "--help"],
     ],
     "mutually_exclusive": [
+        ["suppressed", "--help"], ["suppressed"], ["suppressed", "--spam", "x", "--secret", "y"],
+        ["suppressed", "--secret", "x", "--visible", "y"],
         [], ["-aaa"], ["-ab"], ["-ba"], ["-hba"], ["-ahb"], ["-abh"], ["-hab=2"],
         ["-ahi"], ["-ahi", "bad"], ["-abi", "bad"], ["-a", "--integer", "bad"],
         ["-a", "--integer", "3"], ["-i", "3", "-i", "4"], ["-a", "--pick"],

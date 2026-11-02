@@ -463,11 +463,11 @@ impl Parser {
         let Some(commands) = &mut self.subcommands else {
             return Ok(());
         };
-        let count = self
+        let positionals = self
             .options
             .iter()
-            .filter(|option| option.positional())
-            .count();
+            .filter(|option| option.positional() && option.help.is_some());
+        let count = positionals.clone().count();
         let mut parts = Vec::new();
         if count != 0 {
             parts
@@ -475,7 +475,7 @@ impl Parser {
                 .map_err(|_| Error::allocation())?;
             parts.push((len(&self.prog), Cow::Borrowed(self.prog.as_str())));
         }
-        for option in self.options.iter().filter(|o| o.positional()) {
+        for option in positionals {
             let label = option.prefix_label()?;
             parts.push((len(&label), label));
         }
@@ -599,7 +599,12 @@ impl Parser {
         positionals: &mut Vec<(usize, String)>,
     ) {
         let mut grouped = vec![Vec::new(); self.mutex_required.len()];
-        for (slot, option) in self.options.iter().enumerate() {
+        let visible = self
+            .options
+            .iter()
+            .enumerate()
+            .filter(|(_, option)| option.help.is_some());
+        for (slot, option) in visible.clone() {
             if !option.positional()
                 && let Some(id) = option.mutex
             {
@@ -608,7 +613,7 @@ impl Parser {
         }
         let mut used = vec![false; self.options.len()];
         for positional in [true, false] {
-            for (slot, option) in self.options.iter().enumerate() {
+            for (slot, option) in visible.clone() {
                 if option.positional() != positional || used[slot] {
                     continue;
                 }
@@ -710,10 +715,11 @@ impl Parser {
         let mut positionals = Vec::new();
         let mut grouped: Vec<_> = self.groups.iter().map(|_| Vec::new()).collect();
         for option in &self.options {
+            let Some(help) = &option.help else { continue };
             let row = (
                 option.label(false, false),
                 option.label(false, color),
-                ActionHelp::new(&option.help, &self.prog, Some(option)),
+                ActionHelp::new(help, &self.prog, Some(option)),
             );
             if let Some(group) = option.group {
                 grouped[group].push(row);

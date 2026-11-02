@@ -644,6 +644,7 @@ pub(crate) enum Intrinsic {
     SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
+    ArgparseSuppress,
     BooleanOptionalAction,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
@@ -1886,6 +1887,7 @@ impl IntrinsicModule {
             (Self::Errno, _) => Intrinsic::ErrnoAttribute,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
+            (Self::Argparse, "SUPPRESS") => Intrinsic::ArgparseSuppress,
             (Self::Argparse, "BooleanOptionalAction") => Intrinsic::BooleanOptionalAction,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
