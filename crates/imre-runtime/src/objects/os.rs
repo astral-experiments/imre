@@ -446,7 +446,12 @@ pub unsafe extern "C" fn imre_os_write(fd: usize, bytes: *const crate::Bytes) ->
     let bytes = unsafe { &*bytes };
     finish(
         c_int(fd)
-            .and_then(|fd| transfer(|| try_write(fd, bytes), super::stdlib::check_interrupt))
+            .and_then(|fd| {
+                transfer(
+                    || try_write(fd, bytes, None),
+                    super::stdlib::check_interrupt,
+                )
+            })
             .map(|n| Int::from_usize(n).into_raw()),
         0,
     )
@@ -549,13 +554,28 @@ pub(crate) fn try_readinto(fd: i32, dst: &mut [u8]) -> Result<Option<usize>> {
     transferred(unsafe { libc::read(fd, dst.as_mut_ptr().cast(), length) })
 }
 
-pub(crate) fn try_write(fd: i32, data: &[u8]) -> Result<Option<usize>> {
+/// Attempt one write, returning None if a pending signal must be dispatched.
+pub(crate) fn try_write(
+    fd: i32,
+    data: &[u8],
+    offset: Option<libc::off_t>,
+) -> Result<Option<usize>> {
     crate::initialize_io();
     let length = data.len();
     #[cfg(target_os = "macos")]
-    let length = length.min(i32::MAX as usize);
-    // SAFETY: write borrows the descriptor; the byte slice stays live for each call.
-    transferred(unsafe { libc::write(fd, data.as_ptr().cast(), length) })
+    let length = if offset.is_none() {
+        length.min(i32::MAX as usize)
+    } else {
+        length
+    };
+    // SAFETY: both syscalls borrow fd and read at most length bytes from the live slice.
+    let count = unsafe {
+        match offset {
+            Some(offset) => libc::pwrite(fd, data.as_ptr().cast(), length, offset),
+            None => libc::write(fd, data.as_ptr().cast(), length),
+        }
+    };
+    transferred(count)
 }
 
 /// Return a new non-inheritable descriptor for the same open file description.
