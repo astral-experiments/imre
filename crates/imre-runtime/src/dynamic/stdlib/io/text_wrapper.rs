@@ -537,11 +537,12 @@ impl Wrapper {
                 input.record(snapshot, byte_count, count, telling);
                 let nonempty = count != 0;
                 input.decoded_chunk_nonempty = (!line || !end || nonempty).then_some(nonempty);
+                if nonempty && end {
+                    // An empty binary read may release a pending CR or replacement.
+                    // As long as the decoder emitted text, check the line/size limit normally.
+                    continue;
+                }
                 if line && end {
-                    if nonempty {
-                        // The decoder can still emit a pending CR or an error replacement at EOF.
-                        continue;
-                    }
                     input.clear_snapshot();
                 }
             }
@@ -783,7 +784,7 @@ pub(super) fn call(
                 w.drain(ctx, receiver)?;
                 invoke(ctx, receiver, "flush", vec![])?;
                 let pos = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
-                return Wrapper::from_receiver(ctx, receiver)?.position(ctx, pos);
+                return Wrapper::position(ctx, receiver, pos);
             }
             let mut cookie = args[0];
             let seek = ctx.index_integer(cookie)?;

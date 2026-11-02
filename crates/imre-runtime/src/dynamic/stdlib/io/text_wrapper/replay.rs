@@ -27,13 +27,20 @@ fn count(
 }
 
 impl Wrapper {
-    pub(super) fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
-        if !self.readable.get() {
+    pub(super) fn position(ctx: &mut Context, receiver: Id, end: Id) -> Result<Id> {
+        let w = Self::from_receiver(ctx, receiver)?;
+        if !w.readable.get() || w.input.borrow().snapshot.is_none() {
             return Ok(end);
         }
-        let input = self.input.borrow();
+        // Coercing a raw position can run Python and consume more text or replace this stream.
+        let offset = ctx
+            .index_integer(end)?
+            .to_i64()
+            .ok_or_else(|| Error::new("OverflowError", "int too big to convert"))?;
+        let w = Self::from_receiver(ctx, receiver)?;
+        let input = w.input.borrow();
         let Some(snapshot) = input.snapshot.clone() else {
-            return Ok(end);
+            return Ok(ctx.int(offset));
         };
         let needed = input.used_in_chunk();
         let ratio = input.bytes_per_char;
@@ -42,10 +49,7 @@ impl Wrapper {
 
         let bytes = snapshot.input.as_slice();
         let cookie = Cookie {
-            start: ctx
-                .index_integer(end)?
-                .to_i64()
-                .ok_or_else(|| Error::new("OverflowError", "int too big to convert"))?
+            start: offset
                 .checked_sub(bytes.len() as i64)
                 .ok_or_else(overflow)?,
             flags: snapshot.flags,
@@ -55,16 +59,16 @@ impl Wrapper {
             return Ok(cookie.value(ctx));
         }
 
-        let decoder = self.decoder.get();
+        let decoder = w.decoder.get();
         ctx.heap.keep(decoder.errors);
-        let newline = self.decoder_newline.get();
+        let newline = w.decoder_newline.get();
         let replay = RefCell::new(Reader::default());
         replay.borrow_mut().seen = seen;
 
         let result = reconstruct(ctx, &replay, decoder, newline, cookie, bytes, needed, ratio);
         // Restoring IncrementalNewlineDecoder's saved flags leaves its newline
         // history as observed during the replay, even if decoding failed.
-        self.input.borrow_mut().seen = replay.borrow().seen;
+        w.input.borrow_mut().seen = replay.borrow().seen;
         result.map(|cookie| cookie.value(ctx))
     }
 }

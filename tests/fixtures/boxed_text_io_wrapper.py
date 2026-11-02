@@ -210,6 +210,15 @@ def current():
         else:
             raise AssertionError("restored a cookie without enough decoded characters")
 
+    class Chunks(io.BytesIO):
+        def read1(self, size):
+            return self.parts.pop(0)
+
+    raw = Chunks()
+    raw.parts = [b"\xe2", b"", b"Z"]
+    with io.TextIOWrapper(raw, encoding="utf-8", errors="replace") as text:
+        assert text.read(2) == "\ufffdZ" and raw.parts == []
+
     class InvalidReplay(io.BytesIO):
         def read(self, size):
             return bytearray()
