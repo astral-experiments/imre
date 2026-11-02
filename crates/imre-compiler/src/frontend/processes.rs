@@ -1429,11 +1429,16 @@ impl Checker<'_> {
                 "os.environ accepts copy() or get(key, default=None)",
             ));
         }
-        Ok(operation(
-            ProcessOperation::EnvironCopy,
-            self.types.dict(Type::Str, Type::Str),
+        Ok(self.environ_copy(false))
+    }
+
+    pub(super) fn environ_copy(&self, bytes: bool) -> Expr {
+        let field = if bytes { Type::Bytes } else { Type::Str };
+        operation(
+            ProcessOperation::EnvironCopy { bytes },
+            self.types.dict(field, field),
             vec![],
-        ))
+        )
     }
 
     pub(super) fn process_attribute(

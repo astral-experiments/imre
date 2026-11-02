@@ -78,6 +78,19 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         mut shape: Option<(Type, Type)>,
     ) -> Result<Expr, String> {
+        if call.arguments.keywords.is_empty()
+            && let [source] = call.arguments.args.as_ref()
+            && let Some(Binding::Intrinsic(kind @ (Intrinsic::Environ | Intrinsic::EnvironBytes))) =
+                self.resolve(source)
+        {
+            let bytes = kind == Intrinsic::EnvironBytes;
+            let field = if bytes { Type::Bytes } else { Type::Str };
+            if let Some((key, value)) = shape {
+                self.expect(key, field, source)?;
+                self.expect(value, field, source)?;
+            }
+            return Ok(self.environ_copy(bytes));
+        }
         if let Some(zip) = self.dict_from_zip(call)? {
             return Ok(zip);
         }
