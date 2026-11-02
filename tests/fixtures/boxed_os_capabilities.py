@@ -1,7 +1,7 @@
 import os
 import posix
 import sys
-from os import mkfifo, supports_dir_fd, supports_effective_ids, supports_fd, supports_follow_symlinks
+from os import chown, mkfifo, supports_dir_fd, supports_effective_ids, supports_fd, supports_follow_symlinks
 
 
 def current():
@@ -18,6 +18,9 @@ def current():
             assert getattr(posix, function.__name__) is function
             assert (function in functions) == member
 
+    assert chown is posix.chown and all(chown in table for table in capabilities[:3])
+    assert os.getgroups is posix.getgroups and all(type(gid) is int for gid in os.getgroups())
+    assert os.fchown is posix.fchown and os.lchown is posix.lchown
     assert os.utime is posix.utime and all(os.utime in table for table in capabilities[:3])
     assert os.chmod is posix.chmod and os.chmod in supports_fd and os.chmod in supports_dir_fd
     assert (os.chmod in supports_follow_symlinks) == (sys.platform == "darwin")
@@ -71,6 +74,7 @@ def current():
             dangling = child + b".dangling"
             os.symlink(dangling + b".missing", dangling, dir_fd=fd)
             try:
+                assert chown(dangling, -1, -1, dir_fd=fd, follow_symlinks=False) is None
                 assert not os.access(dangling, os.F_OK, dir_fd=fd)
                 assert os.access(dangling, os.F_OK, dir_fd=fd, follow_symlinks=False)
             finally:
@@ -80,6 +84,15 @@ def current():
             child_fd = os.open(child, os.O_RDONLY, dir_fd=fd)
             try:
                 assert os.fstat(child_fd).st_mode & 0o777 == 0o710
+                owner = os.fstat(child_fd)
+                assert chown(child, owner.st_uid, -1, dir_fd=fd) is None
+                assert posix.fchown(child_fd, -1, owner.st_gid) is None
+                try:
+                    chown(child_fd, -1, -1, follow_symlinks=False)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError("chown accepted a no-follow flag with an open fd")
                 stamps = (1_234_567_890_123_456_789, 1_345_678_901_234_567_891)
                 assert os.utime(child_fd, ns=stamps) is None
                 changed = os.stat(child, dir_fd=fd)

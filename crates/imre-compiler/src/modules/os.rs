@@ -69,6 +69,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "chdir" if cfg!(unix) => Intrinsic::Chdir,
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
         "fchmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchmod"),
+        "chown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chown"),
+        "fchown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchown"),
+        "lchown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.lchown"),
         "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
         "mkfifo" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkfifo"),
         "sched_param" if cfg!(target_os = "linux") => {
@@ -87,6 +90,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             Intrinsic::ObjectRuntimeExport("posix.waitstatus_to_exitcode")
         }
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
+        "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
         "scandir" if cfg!(any(target_os = "linux", target_os = "macos")) => {
             Intrinsic::ObjectRuntimeExport("posix.scandir")

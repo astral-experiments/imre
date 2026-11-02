@@ -702,7 +702,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posix", "_create_environ" | "putenv" | "unsetenv") => {
             ctx.builtin(&format!("posix.{name}"))
         }
-        ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
+        ("os" | "posix", "getpid" | "getuid" | "getgid" | "getgroups" | "urandom")
+            if cfg!(unix) =>
+        {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os", "name") => ctx.text("posix"),
@@ -1313,6 +1315,9 @@ pub(super) fn call(
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
             | "posix.getpid"
+            | "posix.getuid"
+            | "posix.getgid"
+            | "posix.getgroups"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
@@ -1351,6 +1356,15 @@ pub(super) fn call(
             }
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
+            "posix.getuid" => ctx.alloc(Value::Int(crate::objects::os::getuid())),
+            "posix.getgid" => ctx.alloc(Value::Int(crate::objects::os::getgid())),
+            "posix.getgroups" => {
+                let groups = crate::objects::os::getgroups()?
+                    .into_iter()
+                    .map(|group| ctx.alloc(Value::Int(group)))
+                    .collect();
+                ctx.alloc(Value::List(groups))
+            }
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
                 ctx.int(i64::from(crate::integer_text::decimal_digit_limit()))

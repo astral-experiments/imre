@@ -20,7 +20,7 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
+                "access", "chmod", "chown", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
                 "rename", "rmdir", "stat", "symlink", "unlink", "utime",
             ][..],
         ),
@@ -29,6 +29,7 @@ pub(in crate::dynamic) fn install_capabilities(
             &[
                 "chdir",
                 "chmod",
+                "chown",
                 "listdir",
                 "scandir",
                 "stat",
@@ -43,6 +44,7 @@ pub(in crate::dynamic) fn install_capabilities(
                 "access",
                 #[cfg(target_os = "macos")]
                 "chmod",
+                "chown",
                 "link",
                 "stat",
                 "utime",
@@ -326,6 +328,7 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
+mod chown;
 mod links;
 mod mkfifo;
 #[cfg(target_os = "linux")]
@@ -352,6 +355,9 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkfifo"
             | "chmod"
             | "fchmod"
+            | "chown"
+            | "fchown"
+            | "lchown"
             | "chdir"
             | "utime"
             | "dup"
@@ -700,6 +706,9 @@ pub(super) fn descriptor(
     }
     if name == "chdir" {
         return chdir(ctx, args, kwargs);
+    }
+    if matches!(name, "chown" | "fchown" | "lchown") {
+        return chown::call(ctx, name, args, kwargs);
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
