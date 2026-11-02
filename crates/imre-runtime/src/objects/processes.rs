@@ -311,15 +311,6 @@ impl CStrings {
         Ok(Self { strings, pointers })
     }
 
-    /// Replace the process with its current environment, returning the errno on failure.
-    pub(crate) fn execv(&self, executable: &CStr) -> Error {
-        let _guard = ENVIRONMENT.lock().unwrap();
-        // SAFETY: the path and all argv entries remain live and NUL-terminated,
-        // and the environment lock excludes runtime changes to libc's environ.
-        unsafe { libc::execv(executable.as_ptr(), self.pointers.as_ptr()) };
-        super::errno_error(io::Error::last_os_error())
-    }
-
     /// Spawn a waitable child, optionally searching the parent's PATH for the executable.
     #[cfg(target_os = "linux")]
     pub(crate) fn spawn(
@@ -356,6 +347,15 @@ impl CStrings {
         } else {
             Err(io::Error::from_raw_os_error(result))
         }
+    }
+
+    /// Replace the process with its current environment, returning the errno on failure.
+    pub(crate) fn execv(&self, executable: &CStr) -> Error {
+        let _guard = ENVIRONMENT.lock().unwrap();
+        // SAFETY: the path and all argv entries remain live and NUL-terminated,
+        // and the environment lock excludes runtime changes to libc's environ.
+        unsafe { libc::execv(executable.as_ptr(), self.pointers.as_ptr()) };
+        super::errno_error(io::Error::last_os_error())
     }
 
     fn from_environment(env: StringPairs) -> Result<Self> {

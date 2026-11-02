@@ -104,6 +104,35 @@ pub(super) fn fs_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     c_path(ctx, path, "embedded null byte")
 }
 
+/// Convert argv slots in order, allowing each path conversion to mutate the list.
+#[cfg(unix)]
+pub(super) fn fs_arguments(ctx: &mut Context, argv: Id, count: usize) -> Result<Vec<CString>> {
+    let mut arguments = Vec::new();
+    arguments
+        .try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        // A path conversion may mutate argv. Fetch and root just the current item.
+        let mark = ctx.heap.temporary_mark();
+        let index = ctx.int(i as i64);
+        let argument = ctx.get_item(argv, index).and_then(|item| {
+            ctx.heap.keep(item);
+            fs_argument(ctx, item)
+        });
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        if let Err(error) = &argument {
+            for root in error.roots() {
+                ctx.heap.keep(root);
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+        arguments.push(argument?);
+    }
+    Ok(arguments)
+}
+
 /// Encode a filesystem spelling without imposing a C string's NUL restriction.
 pub(super) fn encoded_path(ctx: &mut Context, path: Id) -> Result<Vec<u8>> {
     match ctx.heap.get(ctx.scalar_value(path)) {
@@ -147,35 +176,6 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
 
 pub(super) fn is_process_function(name: &str) -> bool {
     cfg!(unix) && matches!(name, "execv" | "WIFSTOPPED")
-}
-
-/// Convert argv slots in order, allowing each path conversion to mutate the list.
-#[cfg(unix)]
-pub(super) fn fs_arguments(ctx: &mut Context, argv: Id, count: usize) -> Result<Vec<CString>> {
-    let mut arguments = Vec::new();
-    arguments
-        .try_reserve_exact(count)
-        .map_err(|_| Error::new("MemoryError", ""))?;
-    for i in 0..count {
-        // A path conversion may mutate argv. Fetch and root just the current item.
-        let mark = ctx.heap.temporary_mark();
-        let index = ctx.int(i as i64);
-        let argument = ctx.get_item(argv, index).and_then(|item| {
-            ctx.heap.keep(item);
-            fs_argument(ctx, item)
-        });
-        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
-        if let Err(error) = &argument {
-            for root in error.roots() {
-                ctx.heap.keep(root);
-            }
-        }
-        if collect {
-            ctx.collect_unreachable();
-        }
-        arguments.push(argument?);
-    }
-    Ok(arguments)
 }
 
 /// Resolve arguments before auditing, then replace this process using the captured bytes.
