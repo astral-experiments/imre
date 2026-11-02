@@ -2,7 +2,7 @@
 
 use super::counted;
 use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type};
-use crate::reductions::{integer, literal};
+use crate::reductions::literal;
 use crate::types::Types;
 use std::collections::{HashMap, HashSet};
 
@@ -36,14 +36,17 @@ fn specialize_block(statements: &mut [Statement], locals: &[Type], types: &Types
         };
         let within = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(vec![limit.clone(), integer(period)], vec![Compare::Less]),
+            kind: ExprKind::Compare(
+                vec![limit.clone(), Expr::integer(period)],
+                vec![Compare::Less],
+            ),
         };
         *args = vec![Expr {
             ty: Type::Int,
             kind: ExprKind::Conditional(
                 Box::new(within),
                 Box::new(limit.clone()),
-                Box::new(integer(period)),
+                Box::new(Expr::integer(period)),
             ),
         }];
         let Statement::For { args, .. } = &mut tail else {
@@ -53,7 +56,7 @@ fn specialize_block(statements: &mut [Statement], locals: &[Type], types: &Types
             ty: Type::Int,
             kind: ExprKind::Builtin(
                 Builtin::StructCyclePrefix,
-                vec![receiver, integer(period), limit.clone()],
+                vec![receiver, Expr::integer(period), limit.clone()],
             ),
         };
         *args = vec![resume, limit];
