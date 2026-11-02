@@ -1,5 +1,6 @@
 """Logging for Python modules executed by the native object runtime."""
 import sys
+import weakref
 import _imre_logging as _native
 
 CRITICAL = 50
@@ -28,6 +29,7 @@ class _Lock:
 
 
 _lock = _Lock()
+_handlers = weakref.WeakValueDictionary()
 _handler_level = _native.check_level
 
 
@@ -62,9 +64,28 @@ _default_formatter = _MessageFormatter()
 raiseExceptions = True
 
 
-def _rename_handler(handler, old, new):
-    if old is not None or new is not None:
-        raise NotImplementedError("named handlers in runtime-loaded logging")
+def _set_handler_name(handler, name):
+    with _lock:
+        if handler._name in _handlers:
+            del _handlers[handler._name]
+        handler._name = name
+        if name:
+            _handlers[name] = handler
+
+
+def _close_handler(handler):
+    with _lock:
+        handler._closed = True
+        if handler._name and handler._name in _handlers:
+            del _handlers[handler._name]
+
+
+def getHandlerByName(name):
+    return _handlers.get(name)
+
+
+def getHandlerNames():
+    return frozenset(_handlers)
 
 
 def _handle_error(record):

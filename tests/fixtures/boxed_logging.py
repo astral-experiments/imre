@@ -31,6 +31,11 @@ def current():
     assert child.level == logging.NOTSET and child.getEffectiveLevel() == logging.INFO
 
     handler = logging.StreamHandler(stream)
+    handler.name = "access-stream"
+    assert logging.getHandlerByName("access-stream") is handler
+    handler.name = "renamed-stream"
+    assert logging.getHandlerByName("access-stream") is None
+    names = logging.getHandlerNames()
     parent.addHandler(handler)
     parent.addHandler(handler)
     assert len(parent.handlers) == 1
@@ -45,4 +50,7 @@ def current():
     child.error("GET %s %d", "/missing", 404)
     assert stream.writes == ["GET /health 200\n", "GET /missing 404\n"]
     assert stream.flushes == 2
+    handler.close()
+    assert names == frozenset({"renamed-stream"})
+    assert not logging.getHandlerNames()
     print(stream.writes, stream.flushes)

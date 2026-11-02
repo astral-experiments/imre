@@ -16,6 +16,16 @@ _default_formatter = Formatter()
 _config_lock = _Lock()
 
 
+def _set_handler_name(handler: Handler, name: str | None) -> None:
+    _rename_handler(handler, handler._name, name)
+    handler._name = name
+
+
+def _close_handler(handler: Handler) -> None:
+    handler._closed = True
+    _rename_handler(handler, handler._name, None)
+
+
 def _handle_error(record: LogRecord) -> None:
     if not logging.raiseExceptions:
         return
