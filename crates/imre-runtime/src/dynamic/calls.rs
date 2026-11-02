@@ -1007,6 +1007,10 @@ impl Context {
         {
             matched
         } else {
+            // A direct registry hit bypasses the positive cache in _abc.
+            if protocol && self.heap.abc_registrations.contains(&[parent, child]) {
+                return Ok(true);
+            }
             self.subclass(child, parent)
         };
         if protocol {
@@ -3659,8 +3663,11 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-                if name == "_abc_caches_clear" && self.is_protocol_declaration(obj) {
-                    let callable = self.builtin("abc._abc_caches_clear");
+                if matches!(name, "_abc_caches_clear" | "_abc_registry_clear")
+                    && metaclass_member.is_none()
+                    && self.is_protocol_declaration(obj)
+                {
+                    let callable = self.builtin(&format!("abc.{name}"));
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,

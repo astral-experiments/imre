@@ -246,6 +246,21 @@ pub(super) fn call(
         }
         return ctx.abc_check_methods(candidate, &names[..methods.len()]);
     }
+    if name == "_abc_registry_clear" {
+        let [Some(owner)] = super::builtins::bind_builtin_arguments(
+            "ABCMeta._abc_registry_clear",
+            args,
+            kwargs,
+            ["cls"],
+            1,
+        )?
+        else {
+            unreachable!("ABCMeta._abc_registry_clear requires a class")
+        };
+        check_impl(ctx, owner)?;
+        ctx.heap.abc_registrations.retain(|pair| pair[0] != owner);
+        return Ok(NONE);
+    }
     if name == "_abc_caches_clear"
         && let [owner] = args
         && kwargs.is_empty()
