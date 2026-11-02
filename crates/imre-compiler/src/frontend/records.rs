@@ -1573,7 +1573,7 @@ impl Checker<'_> {
                 }
             })?
         } else if self.inference.is_some() {
-            self.infer_call(call, &signature, None, 1)?.1
+            self.bind_source(call, &signature, None, 1, None)?.1
         } else {
             self.held_arguments(call, &signature.params[1..], None, &mut scope)?
         };
@@ -1795,7 +1795,8 @@ impl Checker<'_> {
         };
         let mut scope = calls::ArgumentScope::default();
         let args = if self.inference.is_some() {
-            self.infer_call(call, &signature, Some(receiver), 1)?.1
+            self.bind_source(call, &signature, Some(receiver), 1, None)?
+                .1
         } else {
             self.held_arguments(call, &signature.params[1..], Some(receiver), &mut scope)?
         };

@@ -888,7 +888,7 @@ fn collect_class(
         let infer = fields.len() == inherited_fields.len();
         inheritance::annotated_fields(graph, definition.module, &mut methods[init], &mut fields);
         if infer {
-            inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+            inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields);
             // A write to inherited or local class data creates an instance shadow.
             fields.retain(|f| {
                 !matches!(
