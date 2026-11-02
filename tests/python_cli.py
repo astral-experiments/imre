@@ -2294,6 +2294,7 @@ def report(text):
             "boxed_wide_decode.py",
             "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
+            "boxed_io_unsupported_operation.py",
             "boxed_io_reimport.py",
             "boxed_fileio_opener.py",
             "boxed_open_opener.py",

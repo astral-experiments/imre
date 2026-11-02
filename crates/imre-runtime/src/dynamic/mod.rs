@@ -1918,6 +1918,11 @@ impl Context {
         if let Some(&value) = self.builtins.get(name) {
             return value;
         }
+        if name == "UnsupportedOperation" {
+            let class = stdlib::io::unsupported_operation(self);
+            self.builtins.insert(name.to_owned(), class);
+            return class;
+        }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
         if let Some(owner) = stdlib::itertools::cursor_type(name) {

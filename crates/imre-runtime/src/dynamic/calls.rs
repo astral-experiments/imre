@@ -872,6 +872,7 @@ impl Context {
                     Value::IoMethod {
                         owner: defining,
                         name: "writelines",
+                        ..
                     } if self.direct_subclass(owner, *defining) => self.builtin("file.writelines"),
                     _ => value,
                 };
@@ -1511,6 +1512,11 @@ impl Context {
                     self.error_kind_matches(kind, class, builtin)
                 }
             }
+            // Native operations on intrinsic file objects belong to the first I/O module.
+            Value::Class { .. } if error.kind == "UnsupportedOperation" => self
+                .builtins
+                .get("UnsupportedOperation")
+                .is_some_and(|&initial| self.subclass(initial, class)),
             _ => false,
         }
     }
@@ -5470,7 +5476,8 @@ impl Context {
                     format!("cannot create '{name}' instances"),
                 ))
             }
-            Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::Native(name) => stdlib::call(self, &name, &args, &kwargs)
+                .map_err(|error| stdlib::io::qualify_error(self, error, None)),
             Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
             Value::KeyWrapper { comparator, .. } => {
                 let object = stdlib::functools::key_argument("K", "obj", &args, &kwargs)?;
@@ -5480,10 +5487,19 @@ impl Context {
                 }))
             }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
-            Value::IoOpen { reader, writer, random } => {
-                stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)
-            }
-            Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
+            Value::IoOpen {
+                reader,
+                writer,
+                random,
+                unsupported,
+            } => stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)
+                .map_err(|error| stdlib::io::qualify_error(self, error, Some(unsupported))),
+            Value::IoMethod {
+                owner,
+                name,
+                unsupported,
+            } => stdlib::io::call(self, owner, name, &args, &kwargs)
+                .map_err(|error| stdlib::io::qualify_error(self, error, Some(unsupported))),
             Value::Partial {
                 function,
                 args: bound,

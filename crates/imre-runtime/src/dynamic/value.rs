@@ -1062,10 +1062,12 @@ pub(super) enum Value {
         reader: Id,
         writer: Id,
         random: Id,
+        unsupported: Id,
     },
     IoMethod {
         owner: Id,
         name: &'static str,
+        unsupported: Id,
     },
     ProcessHandle(crate::objects::BoxedPopen),
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
@@ -1635,8 +1637,15 @@ impl Value {
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
-            Self::IoOpen { reader, writer, random } => visit.extend([*reader, *writer, *random]),
-            Self::IoMethod { owner, .. } => visit.push(*owner),
+            Self::IoOpen {
+                reader,
+                writer,
+                random,
+                unsupported,
+            } => visit.extend([*reader, *writer, *random, *unsupported]),
+            Self::IoMethod {
+                owner, unsupported, ..
+            } => visit.extend([*owner, *unsupported]),
             Self::CodecInfo {
                 decode,
                 text_encoding_override,
