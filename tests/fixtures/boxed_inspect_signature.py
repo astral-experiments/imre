@@ -1,5 +1,5 @@
 import inspect
-from functools import update_wrapper
+from functools import Placeholder, partial, update_wrapper
 from inspect import Parameter, Signature
 
 
@@ -9,6 +9,10 @@ def omitted(value=inspect._sentinel):
 
 def original(a, /, b: int = 3, *args, flag=False, **kwargs) -> str:
     return str(a)
+
+
+def with_options(a, b, *args, flag=False):
+    return a, b, args, flag
 
 
 def pair(a, b):
@@ -146,3 +150,8 @@ assert not inspect.ismodule(inspect.Parameter)
 
 
 print(inspect.signature(ConstructorChild), inspect.signature(NewFirst), inspect.signature(DefaultInit))
+
+
+assert str(inspect.signature(partial(with_options, 1))) == "(b, *args, flag=False)"
+assert str(inspect.signature(partial(with_options, b=2))) == "(a, *, b=2, flag=False)"
+assert str(inspect.signature(partial(with_options, Placeholder, 2))) == "(a, /, *args, flag=False)"
