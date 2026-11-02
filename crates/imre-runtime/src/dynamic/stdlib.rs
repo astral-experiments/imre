@@ -136,6 +136,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "math"
             | "unicodedata"
             | "json"
+            | "_json"
             | "_imre_logging"
             | "_imre_subprocess"
             | "_imre_dataclasses"
@@ -701,6 +702,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
+        | ("_json", "encode_basestring" | "encode_basestring_ascii")
         | ("random", "random" | "choice")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -2031,6 +2033,9 @@ pub(super) fn call(
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
+        "_json.encode_basestring" | "_json.encode_basestring_ascii" => {
+            return json::encode_basestring(ctx, name, args, kwargs);
+        }
         "json.loads" => (1, &["s"]),
         "json.dump" => (2, JSON_DUMP_KEYWORDS),
         "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),

@@ -43,6 +43,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
+        "_json" if matches!(function, "encode_basestring" | "encode_basestring_ascii") => {
+            Some((module, function))
+        }
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
         "resource" if function == "getrlimit" => Some((module, function)),
