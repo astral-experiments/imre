@@ -261,7 +261,38 @@ def relative_import_hooks():
                      ("helper", ("argv",), 2), ("missing", ("attr",), 1)]
 
 
+def source_match():
+    class Labels:
+        first = "hit"
+
+    calls = []
+    def observe(value):
+        calls.append(value)
+        return value
+
+    scope = {"Labels": Labels, "observe": observe}
+    exec("""
+def choose(value, guard):
+    match observe(value):
+        case Labels.first if observe(guard):
+            return "first"
+        case str():
+            return "text"
+        case ValueError():
+            return "exception"
+        case _:
+            return "other"
+""", scope)
+    choose = scope["choose"]
+    assert choose("hit", True) == "first"
+    assert choose("hit", False) == "text"
+    assert choose(5, False) == "other"
+    assert calls == ["hit", True, "hit", False, 5]
+    assert choose(ValueError("matched"), False) == "exception"
+
+
 def current():
+    source_match()
     relative_import_hooks()
     source_name_deletion()
     source_classes()

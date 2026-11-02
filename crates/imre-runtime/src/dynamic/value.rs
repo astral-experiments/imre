@@ -2744,14 +2744,26 @@ impl Heap {
         let active = self.caught_exception(caught);
         let frame = self.frames.last_mut().unwrap();
         frame.active = active;
-        if let Some(id) = frame.object
-            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
-        {
-            *lineno = location.line;
-        }
+        let line = location.line;
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+        self.set_statement_line(line);
+    }
+
+    /// A match statement can execute separate pattern and guard expressions in one step.
+    pub(super) fn set_statement_line(&mut self, line: u32) {
+        let frame = self.frames.last_mut().unwrap();
+        frame
+            .location
+            .as_mut()
+            .expect("active source location")
+            .line = line;
+        if let Some(id) = frame.object
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
+        {
+            *lineno = line;
+        }
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.
