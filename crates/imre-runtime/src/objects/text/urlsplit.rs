@@ -184,6 +184,13 @@ fn split<'a>(mut url: &'a str, default_scheme: &'a str, fragments: bool) -> Resu
     })
 }
 
+/// Strip the fragment using the private split fields, retaining an empty authority or query.
+pub(crate) fn defrag_parts(url: &str) -> Result<(String, String)> {
+    let parts = split(url, "", true)?;
+    let base = unsplit(&parts.scheme, parts.netloc, parts.path, parts.query, None)?;
+    Ok((base, copy_text(parts.fragment.unwrap_or_default())?))
+}
+
 /// Borrow the five cleaned fields until the caller has copied them to its result.
 pub(crate) fn with_split_fields<T>(
     url: &str,
