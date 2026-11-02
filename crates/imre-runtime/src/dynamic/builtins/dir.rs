@@ -44,6 +44,11 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")
         }
+        Value::Native(_) | Value::Method { .. }
+            if ctx.builtin_type_name(object) == Some("builtin_function_or_method") =>
+        {
+            ctx.builtin("builtin_function_or_method")
+        }
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
         | Value::Repeat(_)
@@ -188,9 +193,25 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             );
             names.extend(["__class__".to_owned(), "__doc__".to_owned()]);
         }
-        Value::Native(name) if matches!(name.as_str(), "dict" | "list" | "str") => {
+        Value::Native(name)
+            if matches!(
+                name.as_str(),
+                "builtin_function_or_method" | "dict" | "list" | "str"
+            ) =>
+        {
             class_names(ctx, ctx.builtins["object"], names)?;
             let (methods, slots): (&[&str], &[&str]) = match name.as_str() {
+                "builtin_function_or_method" => (
+                    &[],
+                    &[
+                        "__call__",
+                        "__module__",
+                        "__name__",
+                        "__qualname__",
+                        "__self__",
+                        "__text_signature__",
+                    ],
+                ),
                 "dict" => (
                     super::DICT_METHODS,
                     &["__class_getitem__", "__or__", "__reversed__", "__ror__"],

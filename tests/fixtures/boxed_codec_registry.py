@@ -3,13 +3,20 @@ import codecs
 import encodings
 
 
+def decode(value):
+    if isinstance(value, memoryview):
+        assert value.obj is None and value.readonly
+        views.append(bytes(value))
+    return bytes(value)[::-1].decode(), len(value)
+
+
 def search(name):
     calls.append(name)
     if enabled and name == "user_test":
         return codecs.CodecInfo(
             name=name,
             encode=lambda value: (value[::-1].encode(), len(value)),
-            decode=lambda value: (bytes(value)[::-1].decode(), len(value)),
+            decode=decode,
         )
 
 
@@ -41,6 +48,7 @@ assert codecs.unregister is _codecs.unregister
 assert codecs.lookup is _codecs.lookup
 
 calls = []
+views = []
 enabled = False
 
 codecs.register(miss)
@@ -62,6 +70,8 @@ try:
     assert codecs.lookup("user-test") is info
     assert codecs.encode("abc", "User-Test") == b"cba"
     assert codecs.decode(b"cba", "user test") == "abc"
+    assert b"cba".decode("user test") == "abc"
+    assert views == [b"cba"]
     assert len(calls) == 4
 
     codecs.unregister(lambda name: None)
