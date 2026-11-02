@@ -1165,6 +1165,15 @@ def main():
         )
         compare("-B", locale_script)
 
+        years = root / "calendar_years.py"
+        years.write_text(
+            "from datetime import MINYEAR, date\n"
+            "from _datetime import MAXYEAR, datetime\n"
+            "assert date(MINYEAR, 1, 1).year == 1\n"
+            "assert datetime(MAXYEAR, 12, 31).year == 9999\n"
+        )
+        compare("-IB", years, native_args=("run", years, "--quiet"))
+
         if os.name == "posix":
             compare(
                 "-IB", "-c",

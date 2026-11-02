@@ -2,6 +2,66 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone
 
 
+def test_module_exports():
+    import _datetime
+    import datetime
+
+    assert (datetime.MINYEAR, datetime.MAXYEAR) == (1, 9999)
+    assert datetime.__all__ == (
+        "date", "datetime", "time", "timedelta", "timezone", "tzinfo", "MINYEAR", "MAXYEAR", "UTC",
+    )
+    assert datetime is not _datetime and not hasattr(_datetime, "__all__")
+    for name in datetime.__all__:
+        assert vars(datetime)[name] is vars(_datetime)[name]
+    assert datetime.UTC is _datetime.timezone.utc
+    assert issubclass(_datetime.timezone, datetime.tzinfo)
+    assert isinstance(datetime.UTC, _datetime.tzinfo)
+
+    class Zone(datetime.tzinfo):
+        pass
+
+    assert isinstance(Zone(), _datetime.tzinfo)
+    assert timezone.__mro__ == (timezone, datetime.tzinfo, object)
+    try:
+        Zone().utcoffset(None)
+    except NotImplementedError as exc:
+        assert str(exc) == "a tzinfo subclass must implement utcoffset()"
+    else:
+        raise AssertionError("missing abstract timezone offset")
+
+    class IntegerZone(datetime.tzinfo, int):
+        pass
+
+    assert IntegerZone(7) == 7
+    try:
+        datetime.tzinfo.__new__(IntegerZone)
+    except TypeError as exc:
+        assert "is not safe" in str(exc)
+    else:
+        raise AssertionError("accepted plain tzinfo storage for an integer subtype")
+
+
+    class ListZone(list, datetime.tzinfo):
+        pass
+
+    zone = datetime.tzinfo.__new__(ListZone)
+    zone.append(5)
+    assert type(zone) is ListZone and zone == [5]
+
+    class Mixin:
+        def __new__(cls):
+            return "mixin"
+
+    class ZoneFirst(datetime.tzinfo, Mixin):
+        pass
+
+    class MixinFirst(Mixin, datetime.tzinfo):
+        pass
+
+    assert type(ZoneFirst()) is ZoneFirst
+    assert MixinFirst() == "mixin"
+
+
 def test_class_constants():
     for cls, smallest, largest, step in (
         (date, date(1, 1, 1), date(9999, 12, 31), timedelta(days=1)),
@@ -435,6 +495,7 @@ def current():
     test_now()
     test_time_of_day()
     test_http_date()
+    test_module_exports()
     test_class_constants()
     test_cookie_timestamp()
     for timestamp in (None, "0", 1 << 100):
