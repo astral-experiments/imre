@@ -1,0 +1,70 @@
+import errno
+import os
+import posix
+from os import sched_getscheduler
+
+
+def current():
+    get = sched_getscheduler
+    assert get is posix.sched_getscheduler and get is os.sched_getscheduler
+    assert get.__module__ == "posix" and get.__name__ == "sched_getscheduler"
+    assert get.__text_signature__ == "($module, pid, /)"
+    for name, value in (
+        ("SCHED_OTHER", 0), ("SCHED_NORMAL", 0), ("SCHED_FIFO", 1), ("SCHED_RR", 2),
+        ("SCHED_BATCH", 3), ("SCHED_IDLE", 5), ("SCHED_DEADLINE", 6),
+        ("SCHED_RESET_ON_FORK", 0x40000000),
+    ):
+        assert posix.__dict__[name] == os.__dict__[name] == value
+
+    class Pid:
+        def __index__(self):
+            return os.getpid()
+
+    policy = get(0)
+    assert type(policy) is int and policy == get(os.getpid()) == get(Pid())
+    if os.path.exists("/proc/thread-self/stat"):
+        with open("/proc/thread-self/stat") as stat:
+            # policy is field 41. The final ')' terminates field 2, the command name.
+            fields = stat.read().rsplit(")", 1)[1].split()
+        # procfs omits the sched_reset_on_fork flag returned by the syscall.
+        policy_mask = ~os.SCHED_RESET_ON_FORK
+        assert (policy & policy_mask) == int(fields[38])
+        parent = int(fields[1])
+        if parent and os.path.exists("/proc/%d/stat" % parent):
+            with open("/proc/%d/stat" % parent) as stat:
+                assert (get(parent) & policy_mask) == int(stat.read().rsplit(")", 1)[1].split()[38])
+
+    class BadPid:
+        def __index__(self):
+            raise failure
+
+    failure = ValueError("from __index__")
+    try:
+        get(BadPid())
+    except ValueError as exc:
+        assert exc is failure
+    else:
+        raise AssertionError("lost __index__ exception")
+
+    for args, kwargs, error in (
+        ((), {}, TypeError), ((0, 0), {}, TypeError), ((), {"pid": 0}, TypeError),
+        ((1.5,), {}, TypeError), ((1 << 31,), {}, OverflowError),
+        ((-(1 << 31) - 1,), {}, OverflowError),
+    ):
+        try:
+            get(*args, **kwargs)
+        except error as exc:
+            print(type(exc).__name__, str(exc))
+        else:
+            raise AssertionError("invalid scheduler query succeeded")
+
+    for pid, number in ((-1, errno.EINVAL), (0x7fffffff, errno.ESRCH)):
+        try:
+            get(pid)
+        except OSError as exc:
+            assert exc.errno == number
+            if number == errno.ESRCH:
+                assert isinstance(exc, ProcessLookupError)
+        else:
+            raise AssertionError("kernel accepted invalid PID")
+    print("Linux scheduler policy query passed")

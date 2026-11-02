@@ -1507,6 +1507,10 @@ pub(super) fn call(
     {
         return os::descriptor(ctx, op, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "posix.sched_getscheduler" {
+        return os::scheduler::get_policy(ctx, args, kwargs);
+    }
     if name == "posix.urandom" {
         return os::urandom(ctx, args, kwargs);
     }

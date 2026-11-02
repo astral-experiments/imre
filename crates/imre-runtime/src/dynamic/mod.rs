@@ -2374,6 +2374,8 @@ impl Context {
                 self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
+            "posix" if source.is_none() => stdlib::os::scheduler::initialize(self, scope),
+            #[cfg(target_os = "linux")]
             "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
             #[cfg(target_os = "linux")]
             "_imre_signal" if source.is_none() => {
