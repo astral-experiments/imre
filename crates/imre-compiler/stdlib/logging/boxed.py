@@ -27,7 +27,12 @@ class _Lock:
         self.release()
 
 
+_lock = _Lock()
 _handler_level = _native.check_level
+
+
+def _checkLevel(level):
+    return _handler_level(level)
 
 
 class _MessageRecord:
