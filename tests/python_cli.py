@@ -1834,6 +1834,8 @@ def report(text):
             os.symlink(b"unresolved-\xff", root / "readlink-source")
             plugin.write_bytes((fixtures / "boxed_os_readlink.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_os_symlink.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":

@@ -712,6 +712,9 @@ pub(super) fn bind_builtin_arguments<const N: usize>(
             .iter()
             .find(|(key, _)| !names.contains(&key.as_str()))
             && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
+            && !names[..args.len()]
+                .iter()
+                .any(|name| kwargs.iter().any(|(key, _)| *name == key))
         {
             return Err(type_error(format!(
                 "{builtin}() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
