@@ -2095,7 +2095,7 @@ pub(super) fn call(
                             | Value::Tuple(_)
                     ))
             {
-                let remaining = ctx.reverse_sequence_len(object)?;
+                let remaining = ctx.sequence_len(object)?;
                 return Ok(ctx.alloc(Value::ReverseSequence {
                     source: Some(object),
                     remaining,
@@ -2136,6 +2136,9 @@ pub(super) fn call(
                 Value::MappingProxy(_) => {
                     let mapping = ctx.mapping_proxy_target(args[0]);
                     return call(ctx, "len", &[mapping], &[]);
+                }
+                Value::Class { .. } if ctx.enum_values(args[0]).is_none() => {
+                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
                 }
                 Value::Class { .. } => {
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
