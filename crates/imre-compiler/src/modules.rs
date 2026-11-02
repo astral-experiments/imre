@@ -1770,6 +1770,10 @@ impl IntrinsicModule {
             (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
+            (Self::Typing, "Awaitable") => Intrinsic::ObjectRuntimeExport("typing.Awaitable"),
+            (Self::Typing, "AsyncIterator") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncIterator")
+            }
             (Self::Typing, "Pattern") => Intrinsic::ObjectRuntimeExport("typing.Pattern"),
             (Self::Typing, "Match") => Intrinsic::ObjectRuntimeExport("typing.Match"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
