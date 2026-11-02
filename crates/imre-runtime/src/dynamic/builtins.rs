@@ -399,6 +399,54 @@ pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
     }
 }
 
+/// Set methods shared by registration, attribute lookup, and directory enumeration.
+pub(super) fn set_methods(owner: &str) -> &'static [&'static str] {
+    match owner {
+        "set" => &[
+            "__class_getitem__",
+            "__contains__",
+            "__iter__",
+            "__len__",
+            "__reduce__",
+            "__repr__",
+            "add",
+            "clear",
+            "copy",
+            "difference",
+            "difference_update",
+            "discard",
+            "intersection",
+            "intersection_update",
+            "isdisjoint",
+            "issubset",
+            "issuperset",
+            "pop",
+            "remove",
+            "symmetric_difference",
+            "symmetric_difference_update",
+            "union",
+            "update",
+        ],
+        "frozenset" => &[
+            "__class_getitem__",
+            "__contains__",
+            "__iter__",
+            "__len__",
+            "__reduce__",
+            "__repr__",
+            "copy",
+            "difference",
+            "intersection",
+            "isdisjoint",
+            "issubset",
+            "issuperset",
+            "symmetric_difference",
+            "union",
+        ],
+        _ => &[],
+    }
+}
+
 pub(super) fn set_operators(owner: &str) -> &'static [&'static str] {
     match owner {
         "set" => SET_OPERATORS,
@@ -675,52 +723,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "tuple"
         }
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
-        Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
-        Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",
-        Value::Set { frozen: false, .. }
-            if matches!(
-                attr,
-                "add"
-                    | "clear"
-                    | "copy"
-                    | "discard"
-                    | "difference"
-                    | "intersection"
-                    | "symmetric_difference"
-                    | "pop"
-                    | "remove"
-                    | "union"
-                    | "difference_update"
-                    | "intersection_update"
-                    | "symmetric_difference_update"
-                    | "update"
-                    | "isdisjoint"
-                    | "issuperset"
-                    | "issubset"
-                    | "__contains__"
-                    | "__reduce__"
-                    | "__repr__"
-            ) =>
-        {
-            "set"
-        }
-        Value::Set { frozen: true, .. }
-            if matches!(
-                attr,
-                "copy"
-                    | "difference"
-                    | "intersection"
-                    | "symmetric_difference"
-                    | "union"
-                    | "isdisjoint"
-                    | "issuperset"
-                    | "issubset"
-                    | "__contains__"
-                    | "__reduce__"
-                    | "__repr__"
-            ) =>
-        {
-            "frozenset"
+        Value::Set { frozen, .. } => {
+            let owner = if *frozen { "frozenset" } else { "set" };
+            if !(set_methods(owner).contains(&attr) || set_operators(owner).contains(&attr)) {
+                return None;
+            }
+            owner
         }
         Value::DefaultDict { .. } if super::defaultdict::METHODS.contains(&attr) => {
             super::defaultdict::CLASS

@@ -747,8 +747,25 @@ pub(super) fn method(
             | "tuple.__len__"
             | "set.__repr__"
             | "frozenset.__repr__"
+            | "set.__iter__"
+            | "frozenset.__iter__"
+            | "set.__len__"
+            | "frozenset.__len__"
     ) {
         return builtin_slot(ctx, name, args, kwargs);
+    }
+    if matches!(
+        name,
+        "set.__class_getitem__" | "frozenset.__class_getitem__"
+    ) {
+        let Some((&owner, rest)) = args.split_first() else {
+            return Err(type_error(format!(
+                "unbound method {name}() needs an argument"
+            )));
+        };
+        let qualified = format!("{}.__class_getitem__", ctx.class_qualname(owner));
+        let index = super::one_positional_arg(&qualified, rest, kwargs)?;
+        return Ok(super::super::typing::builtin_alias(ctx, owner, index));
     }
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
@@ -883,6 +900,9 @@ pub(super) fn method(
             | "dict.__setitem__"
             | "dict.__delitem__"
     );
+    let set_method = name.split_once('.').filter(|(owner, method)| {
+        *method != "__reduce__" && super::set_methods(owner).contains(method)
+    });
     let (&object, args) = args
         .split_first()
         .ok_or_else(|| match name.strip_prefix("dict.") {
@@ -890,32 +910,12 @@ pub(super) fn method(
                 "descriptor '{method}' of 'dict' object needs an argument"
             )),
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
-            None if matches!(
-                name,
-                "set.clear"
-                    | "set.discard"
-                    | "set.pop"
-                    | "set.remove"
-                    | "set.difference_update"
-                    | "set.intersection_update"
-                    | "set.symmetric_difference_update"
-                    | "set.update"
-            ) || name.ends_with(".isdisjoint")
-                || name.ends_with(".issubset")
-                || name.ends_with(".symmetric_difference")
-                || name.ends_with(".intersection")
-                || name.ends_with(".difference")
-                || name.ends_with(".union") =>
-            {
+            None if set_method.is_some() => {
                 type_error(format!("unbound method {name}() needs an argument"))
             }
             None => type_error("missing collection receiver"),
         })?;
-    let receiver = if let Some((
-        kind,
-        method @ ("difference" | "intersection" | "isdisjoint" | "issubset" | "symmetric_difference" | "union"),
-    )) = name.split_once('.')
-    {
+    let receiver = if let Some((kind, method)) = set_method {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen, .. } if *frozen == (kind == "frozenset"))
         {
@@ -938,26 +938,6 @@ pub(super) fn method(
                 ))
             }
         })?
-    } else if matches!(
-        name,
-        "set.clear"
-            | "set.discard"
-            | "set.pop"
-            | "set.remove"
-            | "set.difference_update"
-            | "set.intersection_update"
-            | "set.symmetric_difference_update"
-            | "set.update"
-    ) {
-        let storage = ctx.scalar_value(object);
-        if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
-            return Err(type_error(format!(
-                "descriptor '{}' for 'set' objects doesn't apply to a '{}' object",
-                &name["set.".len()..],
-                ctx.type_name(object)
-            )));
-        }
-        storage
     } else {
         object
     };
@@ -1035,38 +1015,7 @@ pub(super) fn method(
         ctx.delete_item(receiver, *key)?;
         return Ok(NONE);
     }
-    if matches!(
-        name,
-        "dict.pop"
-            | "dict.popitem"
-            | "set.difference"
-            | "frozenset.difference"
-            | "set.symmetric_difference"
-            | "frozenset.symmetric_difference"
-            | "set.intersection"
-            | "frozenset.intersection"
-            | "set.union"
-            | "frozenset.union"
-            | "set.isdisjoint"
-            | "frozenset.isdisjoint"
-            | "set.issubset"
-            | "frozenset.issubset"
-            | "set.issuperset"
-            | "frozenset.issuperset"
-            | "set.clear"
-            | "set.discard"
-            | "set.pop"
-            | "set.remove"
-            | "set.difference_update"
-            | "set.intersection_update"
-            | "set.symmetric_difference_update"
-            | "set.update"
-            | "frozenset.copy"
-            | "set.copy"
-            | "frozenset.__contains__"
-            | "set.__contains__"
-    ) && !kwargs.is_empty()
-    {
+    if (set_method.is_some() || matches!(name, "dict.pop" | "dict.popitem")) && !kwargs.is_empty() {
         return Err(type_error(format!("{name}() takes no keyword arguments")));
     }
     if !matches!(name, "dict.update" | "dict.__init__") {
@@ -1189,24 +1138,19 @@ pub(super) fn method(
             let class = ctx.exact_type(receiver)?;
             Ok(ctx.alloc(Value::Tuple(vec![class, args, NONE])))
         }
-        "frozenset.copy" => {
-            arity(name, args, 0, 0)?;
-            Ok(receiver)
-        }
-        "set.copy" => {
-            arity(name, args, 0, 0)?;
-            let Value::Set {
-                entries,
-                frozen: false,
-            } = ctx.heap.get(receiver)
-            else {
-                return Err(type_error("descriptor 'copy' requires a 'set' object"));
-            };
-            let entries = entries.try_clone()?;
-            Ok(ctx.alloc(Value::Set {
-                entries,
-                frozen: false,
-            }))
+        "set.copy" | "frozenset.copy" => {
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "{name}() takes no arguments ({} given)",
+                    args.len()
+                )));
+            }
+            let frozen = name == "frozenset.copy";
+            if frozen && object == receiver {
+                return Ok(object);
+            }
+            let entries = ctx.stored_entries(receiver).try_clone()?;
+            Ok(ctx.alloc(Value::Set { entries, frozen }))
         }
         "set.isdisjoint" | "frozenset.isdisjoint" => {
             let other = super::one_positional_arg(name, args, kwargs)?;
@@ -1246,6 +1190,10 @@ pub(super) fn method(
             };
             if name.ends_with(".issubset") {
                 return set_issubset(ctx, receiver, *source);
+            }
+            let other = ctx.scalar_value(*source);
+            if matches!(ctx.heap.get(other), Value::Set { .. }) {
+                return ctx.order_sets(">=", receiver, other);
             }
             let iterator = ctx.iterator(*source)?;
             while let Some(item) = ctx.next_item(iterator)? {
@@ -1340,8 +1288,8 @@ pub(super) fn method(
             Ok(NONE)
         }
         "set.add" => {
-            arity(name, args, 1, 1)?;
-            set_add(ctx, receiver, args[0])?;
+            let item = super::one_positional_arg(name, args, kwargs)?;
+            set_add(ctx, receiver, item)?;
             Ok(NONE)
         }
         "set.union" | "frozenset.union" => {
@@ -1533,7 +1481,14 @@ pub(super) fn builtin_slot(
     }
     if matches!(
         method,
-        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__" | "__len__"
+        "__repr__"
+            | "__str__"
+            | "__index__"
+            | "__abs__"
+            | "__int__"
+            | "__float__"
+            | "__iter__"
+            | "__len__"
     ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
@@ -1546,16 +1501,20 @@ pub(super) fn builtin_slot(
                 rest.len()
             )));
         }
+        if method == "__iter__" {
+            return ctx.iterator(storage);
+        }
         if method == "__len__" {
             let length = match ctx.heap.get(storage) {
                 Value::List(items)
                 | Value::Tuple(items)
                 | Value::NamedTuple { values: items, .. } => items.len(),
+                Value::Set { entries, .. } => entries.len(),
                 Value::Instance { class, .. } => ctx
                     .namedtuple_fields(*class)
                     .expect("validated tuple receiver")
                     .len(),
-                _ => unreachable!("validated list or tuple receiver"),
+                _ => unreachable!("validated collection receiver"),
             };
             return Ok(ctx.int(length as i64));
         }

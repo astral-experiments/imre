@@ -127,34 +127,12 @@ impl BuiltinDescriptor {
                 Some(("member_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
-            Some(("set", attr)) => Some((
-                "set",
-                attr,
-                &[
-                    "__reduce__",
-                    "difference",
-                    "intersection",
-                    "intersection_update",
-                    "isdisjoint",
-                    "issubset",
-                    "symmetric_difference",
-                    "union",
-                    "update",
-                ][..],
-            )),
-            Some(("frozenset", attr)) => Some((
-                "frozenset",
-                attr,
-                &[
-                    "__reduce__",
-                    "difference",
-                    "intersection",
-                    "isdisjoint",
-                    "issubset",
-                    "symmetric_difference",
-                    "union",
-                ][..],
-            )),
+            Some(("set", attr)) if attr != "__class_getitem__" => {
+                Some(("set", attr, builtins::set_methods("set")))
+            }
+            Some(("frozenset", attr)) if attr != "__class_getitem__" => {
+                Some(("frozenset", attr, builtins::set_methods("frozenset")))
+            }
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some((stdlib::fixed_structseq::SCHED_PARAM, attr)) => Some((
@@ -183,6 +161,7 @@ impl BuiltinDescriptor {
                 method: !name.starts_with("__")
                     || (deque::iterator_class(owner).is_some() && name == "__length_hint__")
                     || (owner == "list" && name == "__getitem__")
+                    || (matches!(owner, "set" | "frozenset") && name == "__contains__")
                     || (owner == defaultdict::CLASS && name == "__missing__")
                     || matches!(
                         name,
@@ -268,8 +247,6 @@ impl BuiltinDescriptor {
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
-            "set.__repr__" => ("set", "__repr__"),
-            "frozenset.__repr__" => ("frozenset", "__repr__"),
             "types.SimpleNamespace.__init__" => (super::namespace::CLASS, "__init__"),
             "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
