@@ -2,6 +2,7 @@ import importlib
 import os
 import sys
 import tempfile
+import warnings
 from contextlib import contextmanager
 
 import _frozen_importlib
@@ -41,6 +42,15 @@ with fresh_imports("_frozen_importlib", "_frozen_importlib_external"):
     assert machinery.ModuleSpec is core.ModuleSpec and machinery.ModuleSpec is not frozen_machinery.ModuleSpec
     assert machinery.SourceFileLoader is external.SourceFileLoader
     assert machinery.SourceFileLoader is not frozen_machinery.SourceFileLoader
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", category=DeprecationWarning,
+                                module=r"^importlib[.]_bootstrap_external$", lineno=258)
+        try:
+            external.cache_from_source("example.py", False)
+        except DeprecationWarning:
+            pass
+        else:
+            raise AssertionError("source bootstrap warning missed its filter")
     original = core._gcd_import
     try:
         def record(name, package, level):
