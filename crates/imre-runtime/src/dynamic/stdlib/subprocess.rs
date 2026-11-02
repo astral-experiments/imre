@@ -87,7 +87,10 @@ fn environment(ctx: &mut Context, mapping: Id, fork: bool) -> Result<Option<Envi
         ctx.heap.keep(pair[1]);
         let key = path(ctx, pair[0], fork)?;
         if fork && key.contains(&b'=') {
-            return Err(Error::new("ValueError", "illegal environment variable name"));
+            return Err(Error::new(
+                "ValueError",
+                "illegal environment variable name",
+            ));
         }
         let value = path(ctx, pair[1], fork)?;
         entries
@@ -134,9 +137,10 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let default_umask = matches!(ctx.heap.get(umask), Value::Int(n) if n.as_small() == Some(-1));
     let pipe_count = streams.iter().filter(|(mode, _)| *mode == 1).count();
     let pipe_options = pipe_count != 0 && ctx.as_int(bufsize)?.as_small() != Some(-1);
-    let handles = (executable != NONE || start_new_session != FALSE || !default_umask || pipe_options)
-        .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
-        .transpose()?;
+    let handles =
+        (executable != NONE || start_new_session != FALSE || !default_umask || pipe_options)
+            .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
+            .transpose()?;
     // Popen opens the parent pipe wrappers before _execute_child examines child settings.
     if pipe_options && os::c_int(ctx, bufsize)? == 1 {
         for _ in 0..pipe_count {
