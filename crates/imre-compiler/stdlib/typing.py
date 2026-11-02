@@ -14,6 +14,28 @@ VT = TypeVar("VT")
 AnyStr = TypeVar("AnyStr", bytes, str)
 
 
+# Protocol introspection from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def is_protocol(tp: type, /) -> _builtins.bool:
+    """Return True if the given type is a Protocol.
+
+    Example::
+
+        >>> from typing import Protocol, is_protocol
+        >>> class P(Protocol):
+        ...     def a(self) -> str: ...
+        ...     b: int
+        >>> is_protocol(P)
+        True
+        >>> is_protocol(int)
+        False
+    """
+    return (
+        isinstance(tp, type)
+        and getattr(tp, '_is_protocol', False)
+        and tp != _typing.Protocol
+    )
+
+
 class IO(Generic[AnyStr]):
     __slots__ = ()
 
