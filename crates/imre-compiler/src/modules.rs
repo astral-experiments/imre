@@ -1430,6 +1430,7 @@ impl IntrinsicModule {
                 "SHUT_RDWR" => "_socket.SHUT_RDWR",
                 "SOMAXCONN" => "_socket.SOMAXCONN",
                 "socket" => "_socket.socket",
+                "close" => "_socket.close",
                 "error" => "_socket.error",
                 _ => return None,
             }),
@@ -1446,6 +1447,7 @@ impl IntrinsicModule {
             (Self::Socket, "SOCK_SEQPACKET") => {
                 Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
             }
+            (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
