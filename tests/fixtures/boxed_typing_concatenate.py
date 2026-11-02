@@ -85,3 +85,10 @@ assert pack_first[int, str, [float, bool]] == (int, str, float, bool)
 param_first = typing.Callable[P, typing.Tuple[typing.Unpack[Ts]]]
 assert param_first.__parameters__ == (P, Ts)
 assert param_first[[str, float], int, bytes] == typing.Callable[[str, float], typing.Tuple[int, bytes]]
+
+
+# The Concatenate expression already represents the Callable's argument list.
+prefixed = typing.Callable[typing.Concatenate[int, P], bytes]
+reconstruct, arguments = prefixed.__reduce__()
+assert arguments == (typing.Callable, (typing.Concatenate[int, P], bytes))
+assert reconstruct(*arguments) == prefixed
