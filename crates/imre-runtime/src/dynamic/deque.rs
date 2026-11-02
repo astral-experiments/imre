@@ -78,6 +78,11 @@ const MEMBERS: &[Member] = &[
     ),
     Member::new("copy", "Return a shallow copy of a deque.", "($self, /)"),
     Member::new(
+        "count",
+        "Return number of occurrences of value.",
+        "($self, value, /)",
+    ),
+    Member::new(
         "extend",
         "Extend the right side of the deque with elements from the iterable.",
         "($self, iterable, /)",
@@ -618,6 +623,24 @@ fn element_matches(ctx: &mut Context, item: Id, value: Id) -> Result<bool> {
     equal
 }
 
+/// Count live elements, checking the generation even after the final match.
+fn count(ctx: &mut Context, storage: Id, value: Id) -> Result<Id> {
+    let Value::Deque(ring) = ctx.heap.get(storage) else {
+        unreachable!()
+    };
+    let (state, mut remaining) = (ring.state, ring.items.len());
+    let mut matches = 0;
+    loop {
+        let Value::Deque(ring) = ctx.heap.get(storage) else {
+            unreachable!()
+        };
+        let Some(&item) = ring.cursor_item(state, &mut remaining, false)? else {
+            return Ok(ctx.int(matches));
+        };
+        matches += i64::from(element_matches(ctx, item, value)?);
+    }
+}
+
 /// Convert index bounds before capturing deque state; both conversions may run Python code.
 fn index(ctx: &mut Context, queue: Id, args: &[Id]) -> Result<Id> {
     let Some((&value, bounds)) = args.split_first() else {
@@ -845,7 +868,7 @@ pub(super) fn method(
     }
     if matches!(
         name,
-        "append" | "appendleft" | "extend" | "extendleft" | "remove"
+        "append" | "appendleft" | "count" | "extend" | "extendleft" | "remove"
     ) {
         let [item] = rest else {
             return Err(Error::new(
@@ -857,6 +880,7 @@ pub(super) fn method(
             ));
         };
         match name {
+            "count" => return count(ctx, storage, *item),
             "extend" | "extendleft" => extend(ctx, receiver, *item, name == "extendleft")?,
             "remove" => remove(ctx, storage, *item)?,
             _ => {
