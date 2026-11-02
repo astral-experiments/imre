@@ -96,3 +96,16 @@ def current():
         assert exc.args == ("unknown group name 'absent'",)
     else:
         raise AssertionError("unknown named group accepted")
+    for invalid in ("\\q\\", "\\2\\", "\\400\\", "\\g<x>\\"):
+        try:
+            groups.sub(invalid, "")
+        except re.PatternError as exc:
+            assert exc.msg == "bad escape (end of pattern)" and exc.pos == len(invalid) - 1
+        else:
+            raise AssertionError("incomplete trailing escape ignored")
+    try:
+        re.compile(b"(x)").sub(memoryview(bytearray(rb"\1")), b"y")
+    except ValueError as exc:
+        assert str(exc) == "cannot hash writable memoryview object"
+    else:
+        raise AssertionError("unhashable writable memoryview template accepted")
