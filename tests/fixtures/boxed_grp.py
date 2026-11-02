@@ -1,4 +1,5 @@
 import grp
+import sys
 from grp import getgrall, getgrgid, getgrnam, struct_group
 
 
@@ -31,4 +32,35 @@ def current():
             pass
         else:
             raise AssertionError((function, value))
+    if sys.platform == "linux":
+        import os
+        import posix
+        import pwd
+
+        user = pwd.getpwuid(os.getuid())
+        lookup = os.getgrouplist
+        assert vars(os)["getgrouplist"] is vars(posix)["getgrouplist"] is lookup
+        assert lookup.__self__ is posix
+        groups = lookup(user.pw_name, user.pw_gid)
+        assert type(groups) is list and user.pw_gid in groups
+
+        class Base:
+            def __index__(self):
+                return -1
+
+        assert -1 in lookup(user.pw_name, Base())
+        for arguments, error in (
+            ((b"bad", 0), TypeError),
+            (("bad\0name", 0), ValueError),
+            ((chr(0xDC80), 0), UnicodeEncodeError),
+            ((user.pw_name, -2), OverflowError),
+            ((user.pw_name, 1 << 64), OverflowError),
+        ):
+            try:
+                lookup(*arguments)
+            except error:
+                pass
+            else:
+                raise AssertionError(arguments)
+
     print("group records agree")
