@@ -252,6 +252,7 @@ impl BuiltinDescriptor {
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "dict.__reversed__" => ("dict", "__reversed__"),
             "mappingproxy.__getitem__" => ("mappingproxy", "__getitem__"),
             "mappingproxy.__hash__" => ("mappingproxy", "__hash__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
@@ -284,6 +285,7 @@ impl BuiltinDescriptor {
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
+                    | "__reversed__"
                     | "count"
                     | "index"
                     | "isascii"
@@ -504,7 +506,12 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
                 ctx.text("($self, /)")
             }
+            "__doc__" if self.owner == "dict" && self.name == "__reversed__" => {
+                ctx.text("Return a reverse iterator over the dict keys.")
+            }
+            "__text_signature__" if self.owner == "dict" && self.name == "__reversed__" => ctx.text("($self, /)"),
             "__doc__" if self.owner == "mappingproxy" && self.method => ctx.text(match self.name {
+                "__reversed__" => "D.__reversed__() -> reverse iterator",
                 "keys" => "D.keys() -> a set-like object providing a view on D's keys",
                 "values" => "D.values() -> an object providing a view on D's values",
                 "items" => "D.items() -> a set-like object providing a view on D's items",
