@@ -361,6 +361,18 @@ impl Context {
         Some(error)
     }
 
+    /// Replace the SystemExit member and schedule collection of a released weak target.
+    fn replace_exit_code(&mut self, object: Id, value: Id) -> bool {
+        let Some(error) = self.exception_storage(object, "SystemExit") else {
+            return false;
+        };
+        let old = std::mem::replace(&mut error.exit_code, value);
+        if old != value {
+            self.heap.weak_edge_removed(old);
+        }
+        true
+    }
+
     /// Lazily allocate the exact dictionary exposed through BaseException.__dict__.
     fn exception_dictionary(&mut self, obj: Id) -> Id {
         let Value::Raised(error) = self.heap.get(obj) else {
@@ -814,6 +826,7 @@ impl Context {
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
+                            | "SystemExit.__init__"
                             | "module.__init__"
                             | "module.__dir__"
                             | "module.__repr__"
@@ -1923,6 +1936,11 @@ impl Context {
             && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             return Ok(error.stop_value());
+        }
+        if name == "code"
+            && let Some(error) = self.exception_storage(obj, "SystemExit")
+        {
+            return Ok(error.exit_code);
         }
         if matches!(name, "__new__" | "__init__" | "with_traceback")
             && matches!(self.heap.get(obj), Value::Raised(_))
@@ -3920,6 +3938,9 @@ impl Context {
             error.set_stop_value(NONE);
             return Ok(());
         }
+        if name == "code" && self.replace_exit_code(obj, NONE) {
+            return Ok(());
+        }
         if name == "msg" && self.import_error_message(obj, Some(NONE)).is_some() {
             return Ok(());
         }
@@ -4666,6 +4687,9 @@ impl Context {
             error.set_stop_value(value);
             return Ok(());
         }
+        if name == "code" && self.replace_exit_code(obj, value) {
+            return Ok(());
+        }
         if member.is_none()
             && matches!(name, "__name__" | "fget" | "fset" | "fdel")
             && let Some(property) = self.heap.get_mut(obj).property_mut()
@@ -5358,6 +5382,7 @@ impl Context {
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
+                            | "SystemExit.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
                             | "bool.__repr__"
