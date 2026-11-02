@@ -170,11 +170,14 @@ impl BoxedPopen {
         // Reserve the public handle before a successful spawn can leave a child to reap.
         let mut owner = triomphe::UniqueArc::try_new_uninit().map_err(|_| Error::allocation())?;
         // SAFETY: argv, executable, cwd, sizes and descriptor integers stay rooted through spawn.
-        let process = unsafe { spawn(&config, extras) }.map_err(|error| BoxedLaunchError {
+        let mut process = unsafe { spawn(&config, extras) }.map_err(|error| BoxedLaunchError {
             error,
             directory: site.map(|(site, _)| matches!(site, launch_error::Site::Directory)),
             direct: site.is_some_and(|(_, direct)| direct),
         })?;
+        // The boxed Python owner emits the warning. Drop still reaps or defers
+        // the child if that owner's finalizer raises or releases a live handle.
+        process.native_finalizer_pending = false;
         owner.write(RefCell::new(process));
         // SAFETY: write initialized the unique allocation; sharing it performs no allocation.
         Ok(Self(
@@ -217,9 +220,6 @@ impl BoxedPopen {
 
     pub(crate) fn close_wait(&self) -> Result<()> {
         self.0.borrow_mut().close_wait()
-    }
-    pub(crate) fn finalize(&self) -> bool {
-        self.0.borrow_mut().finalize()
     }
     pub(crate) fn cleanup() {
         cleanup()

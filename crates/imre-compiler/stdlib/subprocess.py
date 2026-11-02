@@ -2,6 +2,7 @@
 import _imre_subprocess as _process
 from _weakref import ref as _ref
 from time import monotonic as _time
+from warnings import warn as _warn
 import io
 import selectors
 
@@ -139,8 +140,12 @@ class Popen:
             _process.close_wait(self._handle)
             raise
 
-    def __del__(self):
-        if self._handle is not None and _process.finalize(self._handle) and _active is not None:
+    def __del__(self, _warn=_warn):
+        if self._handle is None:
+            return
+        if self.returncode is None:
+            _warn("subprocess %s is still running" % self.pid, ResourceWarning, source=self)
+        if _process.status(self._handle, True) is None and _active is not None:
             _active.append(self)
 
     @property
