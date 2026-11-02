@@ -1686,6 +1686,7 @@ def report(text):
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_logging.py",
+            "boxed_logging_file.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
