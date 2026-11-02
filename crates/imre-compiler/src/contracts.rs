@@ -534,6 +534,7 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
+            | Self::SysContextAwareWarnings
             | Self::GeneratorFrameLeave
             | Self::IntSignAsFloat
             | Self::IsInstance(_)

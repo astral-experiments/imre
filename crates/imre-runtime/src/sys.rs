@@ -1,4 +1,5 @@
 //! Process text streams and their native encoding and buffering.
+pub(crate) mod context_warnings;
 mod recursion;
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
 mod intern;
@@ -7,7 +8,7 @@ use crate::objects::{Codec, errno_error};
 pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
-pub(crate) use encoding::{file_encoding, with_startup_ctype};
+pub(crate) use encoding::{file_encoding, imre_sys_utf8_mode, with_startup_ctype};
 mod input;
 pub(super) use input::read_input_line;
 mod encoding_names;

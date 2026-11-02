@@ -1491,6 +1491,7 @@ def report(text):
             "boxed_sys_audit_recursion.py",
             "boxed_sys_intern.py",
             "boxed_sys_hash_info.py",
+            "boxed_sys_flags.py",
             "boxed_sys_jit.py",
             "boxed_bytes_add.py",
             "boxed_binary_iterators.py",

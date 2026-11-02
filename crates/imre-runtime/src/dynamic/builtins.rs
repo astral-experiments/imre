@@ -225,7 +225,10 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
-        || name == super::stdlib::hash_info::TYPE
+        || matches!(
+            name,
+            super::stdlib::hash_info::TYPE | super::stdlib::flags::TYPE
+        )
         || is_exception(name)
         || is_enum_base(name)
 }
@@ -233,6 +236,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
 pub(super) fn is_static_gc_type(name: &str) -> bool {
     TYPES.contains(&name)
+        || name == super::stdlib::flags::TYPE
         || EXCEPTIONS.contains(&name)
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(

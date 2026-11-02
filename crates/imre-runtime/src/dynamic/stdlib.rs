@@ -17,6 +17,7 @@ mod csv;
 pub(super) mod datetime;
 mod email;
 mod files;
+pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
@@ -540,33 +541,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 FALSE
             }
         }
-        ("sys", "flags") => {
-            let isolated_flag = ctx.config["isolated"].as_bool().unwrap_or(false);
-            let isolated = ctx.int(i64::from(isolated_flag));
-            let no_user_site = ctx.int(i64::from(
-                ctx.config["no_user_site"].as_bool().unwrap_or(false),
-            ));
-            let safe_path = if ctx.config["safe_path"].as_bool().unwrap_or(false) {
-                TRUE
-            } else {
-                FALSE
-            };
-            let bytecode = ctx.int(i64::from(
-                ctx.config["dont_write_bytecode"].as_bool().unwrap_or(false),
-            ));
-            let optimize = ctx.int(ctx.config["optimize"].as_i64().unwrap_or(0));
-            record(
-                ctx,
-                &[
-                    ("optimize", optimize),
-                    ("isolated", isolated),
-                    ("ignore_environment", isolated),
-                    ("no_user_site", no_user_site),
-                    ("safe_path", safe_path),
-                    ("dont_write_bytecode", bytecode),
-                ],
-            )
-        }
+        ("sys", "flags") => flags::current(ctx),
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),

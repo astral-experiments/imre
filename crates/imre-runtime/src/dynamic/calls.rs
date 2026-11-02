@@ -786,7 +786,11 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if child == stdlib::hash_info::TYPE && parent == "tuple" {
+            if matches!(
+                child.as_str(),
+                stdlib::hash_info::TYPE | stdlib::flags::TYPE
+            ) && parent == "tuple"
+            {
                 return true;
             }
             if parent == "object" {
@@ -1054,6 +1058,7 @@ impl Context {
                     Some(
                         class @ ("time.struct_time"
                         | stdlib::hash_info::TYPE
+                        | stdlib::flags::TYPE
                         | stdlib::os::stat::CLASS),
                     ),
                 ..
@@ -1213,7 +1218,12 @@ impl Context {
             (
                 name,
                 Value::NamedTuple {
-                    class: Some(class @ ("time.struct_time" | stdlib::hash_info::TYPE)),
+                    class:
+                        Some(
+                            class @ ("time.struct_time"
+                            | stdlib::hash_info::TYPE
+                            | stdlib::flags::TYPE),
+                        ),
                     ..
                 },
             ) if name == *class => true,
@@ -2345,6 +2355,11 @@ impl Context {
                 let method = self.builtin("float.__getformat__");
                 return Ok(self.bind_native_classmethod(method, obj));
             }
+            Value::Native(ref class) if class == stdlib::flags::TYPE => {
+                if let Some(value) = stdlib::flags::type_attribute(self, name, true) {
+                    return Ok(value);
+                }
+            }
             Value::Native(ref class) if class == stdlib::hash_info::TYPE => {
                 if let Some(value) = stdlib::hash_info::type_attribute(self, name, true) {
                     return Ok(value);
@@ -2733,7 +2748,9 @@ impl Context {
                         return Ok(self.int(n));
                     }
                 }
-                if let Some(owner @ ("time.struct_time" | stdlib::hash_info::TYPE)) = class
+                if let Some(
+                    owner @ ("time.struct_time" | stdlib::hash_info::TYPE | stdlib::flags::TYPE),
+                ) = class
                     && name == "__class__"
                 {
                     return Ok(self.builtin(owner));
@@ -2744,6 +2761,10 @@ impl Context {
                 ) && let Some(property) = stdlib::urllib::property(self, values[1], name)?
                 {
                     return Ok(property);
+                } else if class == Some(stdlib::flags::TYPE)
+                    && let Some(value) = stdlib::flags::type_attribute(self, name, false)
+                {
+                    return Ok(value);
                 } else if class == Some(stdlib::hash_info::TYPE)
                     && let Some(value) = stdlib::hash_info::type_attribute(self, name, false)
                 {
@@ -3184,6 +3205,16 @@ impl Context {
         {
             return Some(member);
         }
+        if matches!(
+            self.heap.get(obj),
+            Value::NamedTuple {
+                class: Some(stdlib::flags::TYPE),
+                ..
+            }
+        ) && let Some(member) = stdlib::flags::member(self, name)
+        {
+            return Some(member);
+        }
         let member = self.slot(obj, name)?;
         if let Value::Instance { class, .. } = *self.heap.get(obj)
             && self.instance_layout(class, name).active_slot
@@ -3387,7 +3418,7 @@ impl Context {
             && (HashState::is_provider_class(class)
                 || matches!(
                     class.as_str(),
-                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
+                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER | stdlib::flags::TYPE
                 ))
         {
             return Err(Error::new(
@@ -3993,12 +4024,19 @@ impl Context {
             Value::Native(name) if name == "method_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "method_descriptor", &args, &kwargs)
             }
+            Value::Native(name) if name == stdlib::flags::TYPE => Err(Error::new(
+                "TypeError",
+                "cannot create 'sys.flags' instances",
+            )),
             Value::Native(name) if name == stdlib::hash_info::TYPE => {
                 stdlib::hash_info::construct(self, &args, &kwargs)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {
+                if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
+                    return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
+                }
                 super::namedtuple::allocate(self, &args, &kwargs)
             }
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
