@@ -2171,34 +2171,36 @@ impl Context {
     /// Render the receiver's identity without invoking its own __repr__ slot.
     pub(super) fn object_repr(&mut self, receiver: Id) -> Result<Id> {
         let class = self.exact_type(receiver)?;
+        Ok(self.text(self.default_object_repr(receiver, class)))
+    }
+
+    /// Spell the default repr using the actual receiver, even when its class overrides repr.
+    fn default_object_repr(&self, receiver: Id, class: Id) -> String {
         let name = match self.heap.get(class) {
-            Value::Class { name, scope, .. } => self.qualified_class_name(name, *scope),
+            Value::Class { scope, .. } => self.qualified_class_name(class, *scope),
             Value::Native(name) => name.clone(),
             _ => self.type_name(receiver).to_owned(),
         };
-        Ok(self.text(format!("<{name} object at {receiver:#x}>")))
+        format!("<{name} object at {receiver:#x}>")
     }
 
-    fn qualified_class_name(&self, name: &str, scope: Id) -> String {
+    fn qualified_class_name(&self, class: Id, scope: Id) -> String {
         let scope = self.scope_data(scope);
-        let attr = |key: &str| {
-            scope
-                .names
-                .get(key)
-                .and_then(|&id| match self.heap.get(id) {
-                    Value::Str(s) => Some(s.as_str()),
-                    _ => None,
-                })
+        let module = match scope.names.get("__module__") {
+            Some(&value) => self.str_value(value).ok(),
+            None => Some(scope.module.as_str()),
         };
-        let module = if scope.names.contains_key("__module__") {
-            attr("__module__")
-        } else {
-            Some(scope.module.as_str())
-        };
-        let name = attr("__qualname__").unwrap_or(name);
+        let name = self.class_name(class);
         match module {
             None | Some("builtins") => name.to_owned(),
-            Some(module) => format!("{module}.{name}"),
+            Some(module) => {
+                let qualname = scope
+                    .names
+                    .get("__qualname__")
+                    .and_then(|&value| self.str_value(value).ok())
+                    .unwrap_or(name);
+                format!("{module}.{qualname}")
+            }
         }
     }
 
@@ -2476,8 +2478,8 @@ impl Context {
                 "<attribute '__weakref__' of '{}' objects>",
                 self.weakref_descriptor_owner(*owner)
             ),
-            Value::Class { name, scope, .. } => {
-                format!("<class '{}'>", self.qualified_class_name(name, *scope))
+            Value::Class { scope, .. } => {
+                format!("<class '{}'>", self.qualified_class_name(id, *scope))
             }
             Value::Method {
                 callable,
@@ -2539,6 +2541,7 @@ impl Context {
             Value::File(file) if let Some(name) = file.socket_reader_name() => {
                 format!("<_io.BufferedReader name={name}>")
             }
+            Value::Instance { class, .. } => self.default_object_repr(id, *class),
             _ => "<object>".to_owned(),
         };
         if recursive.is_some() {
