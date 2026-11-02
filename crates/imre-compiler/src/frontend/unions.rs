@@ -377,7 +377,11 @@ impl Checker<'_> {
             );
             return Ok(classes);
         }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::CodecInfoClass)) {
+        if self.resolve(expression)
+            == Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                "codecs.CodecInfo",
+            )))
+        {
             return Ok(vec![InstanceType::Exact(Type::CodecInfo)]);
         }
         // Fixed I/O values can answer isinstance without materializing the public ABC.

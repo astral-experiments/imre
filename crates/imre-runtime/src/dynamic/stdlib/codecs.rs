@@ -14,15 +14,23 @@ use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEnc
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
     entries: HashMap<*const Object, Id>,
+    initialized: bool,
+    search_path: Vec<Id>,
+    // None denotes an existing stateless native transform with no boxed CodecInfo.
+    search_cache: indexmap::IndexMap<String, Option<Id>>,
     handlers: HashMap<String, Id>,
-    // Built-in and module-level decoders are shared across alias families.
-    functions: HashMap<&'static str, Id>,
+    // Built-in and module-level codec functions are shared across alias families.
+    functions: HashMap<&'static str, (Id, Id)>,
 }
 
 impl Registry {
     pub(in crate::dynamic) fn roots(&self) -> impl Iterator<Item = &Id> {
         // Each decoder is also reachable from its registry entry.
-        self.entries.values().chain(self.handlers.values())
+        self.entries
+            .values()
+            .chain(self.handlers.values())
+            .chain(&self.search_path)
+            .chain(self.search_cache.values().filter_map(Option::as_ref))
     }
 }
 
@@ -216,27 +224,269 @@ pub(super) fn builtin_handler(
     Ok(ctx.alloc(Value::Tuple(vec![value, position])))
 }
 
-pub(super) fn lookup(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    if !kwargs.is_empty() {
-        return Err(type_error("_codecs.lookup() takes no keyword arguments"));
+fn initialize_search_path(ctx: &mut Context) -> Result<()> {
+    if !ctx.codec_entries.initialized {
+        ctx.codec_entries
+            .search_path
+            .try_reserve(1)
+            .map_err(|_| crate::Error::allocation())?;
+        let default = ctx.builtin("encodings.search_function");
+        ctx.codec_entries.search_path.push(default);
+        ctx.codec_entries.initialized = true;
     }
-    let [name] = args else {
+    Ok(())
+}
+
+pub(super) fn search_registry(
+    ctx: &mut Context,
+    function: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let callback = unary_arg(function, args, kwargs)?;
+    initialize_search_path(ctx)?;
+    if function == "register" {
+        if !ctx.callable(callback) {
+            return Err(type_error("argument must be callable"));
+        }
+        ctx.codec_entries
+            .search_path
+            .try_reserve(1)
+            .map_err(|_| crate::Error::allocation())?;
+        ctx.codec_entries.search_path.push(callback);
+    } else if let Some(index) = ctx
+        .codec_entries
+        .search_path
+        .iter()
+        .position(|&item| item == callback)
+    {
+        ctx.codec_entries.search_path.remove(index);
+        ctx.heap.weak_edge_removed(callback);
+        // Detach the dictionary before releasing entries. Destructors may reenter
+        // lookup while later entries of the old dictionary are still alive.
+        let old = std::mem::take(&mut ctx.codec_entries.search_cache);
+        if ctx.heap.observes_released_roots() {
+            let mark = ctx.heap.temporary_mark();
+            for &entry in old.values().rev().flatten() {
+                ctx.heap.keep(entry);
+            }
+            let count = ctx.heap.temporary_mark() - mark;
+            for (index, entry) in old.into_values().flatten().enumerate() {
+                let remaining = mark + count - index - 1;
+                ctx.heap.release_temporaries_since(remaining);
+                ctx.heap.weak_edge_removed(entry);
+                ctx.collect_unreachable();
+            }
+            ctx.heap.release_temporaries_since(mark);
+        }
+    }
+    Ok(NONE)
+}
+
+fn unary_arg(name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
         return Err(type_error(format!(
-            "_codecs.lookup() takes exactly one argument ({} given)",
-            args.len()
+            "_codecs.{name}() takes no keyword arguments"
         )));
-    };
-    let Value::Str(name) = ctx.heap.get(*name) else {
-        let kind = if *name == NONE {
+    }
+    match args {
+        [arg] => Ok(*arg),
+        _ => Err(type_error(format!(
+            "_codecs.{name}() takes exactly one argument ({} given)",
+            args.len()
+        ))),
+    }
+}
+
+pub(super) fn lookup(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let name = unary_arg("lookup", args, kwargs)?;
+    let storage = ctx.string_storage(name).ok_or_else(|| {
+        let kind = if name == NONE {
             "None"
         } else {
-            ctx.type_name(*name)
+            ctx.type_name(name)
         };
+        type_error(format!("lookup() argument must be str, not {kind}"))
+    })?;
+    let spelling = match ctx.heap.get(storage) {
+        Value::Str(text) => text.clone(),
+        _ => String::from_utf8(ctx.encode_utf8_codepoints(storage, false, "strict")?)
+            .expect("strict UTF-8 encoding"),
+    };
+    lookup_name(ctx, &spelling)
+}
+
+/// Search the native codec provider outside the registry and preserve its entry identity.
+pub(super) fn native_search(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let arg = match (args, kwargs) {
+        ([name], []) => *name,
+        ([], [(keyword, name)]) if keyword == "encoding" => *name,
+        ([_], [(keyword, _)]) if keyword == "encoding" => {
+            return Err(type_error(
+                "search_function() got multiple values for argument 'encoding'",
+            ));
+        }
+        (_, [(keyword, _), ..]) => {
+            return Err(type_error(format!(
+                "search_function() got an unexpected keyword argument '{keyword}'"
+            )));
+        }
+        ([], []) => {
+            return Err(type_error(
+                "search_function() missing 1 required positional argument: 'encoding'",
+            ));
+        }
+        _ => {
+            return Err(type_error(format!(
+                "search_function() takes 1 positional argument but {} were given",
+                args.len()
+            )));
+        }
+    };
+    let source = if let Some(storage) = ctx.string_storage(arg) {
+        storage
+    } else if matches!(ctx.heap.get(ctx.scalar_value(arg)), Value::Bytes(_)) {
+        decode_bytes(ctx, Codec::Ascii, arg, None)?
+    } else {
         return Err(type_error(format!(
-            "lookup() argument must be str, not {kind}"
+            "'{}' object is not iterable",
+            ctx.type_name(arg)
         )));
     };
-    let entry = CodecInfo::lookup(name)?;
+    // encodings.normalize_encoding preserves case. The registry has already
+    // lowercased its argument before invoking this provider.
+    let mut key = String::new();
+    let mut punct = false;
+    for &point in ctx.string_codepoints(source)?.iter() {
+        if char::from_u32(point).is_some_and(|c| c.is_alphanumeric() || c == '.') {
+            if punct && !key.is_empty() {
+                key.push('_');
+            }
+            if point < 128 {
+                key.push(point as u8 as char);
+            }
+            punct = false;
+        } else {
+            punct = true;
+        }
+    }
+    if key.bytes().any(|c| c.is_ascii_uppercase()) {
+        return Ok(NONE);
+    }
+    match CodecInfo::lookup(&key).map_err(Error::from) {
+        Ok(entry) => box_native_entry(ctx, entry),
+        Err(error) if error.kind == "LookupError" => Ok(NONE),
+        Err(error) => Err(error),
+    }
+}
+
+pub(in crate::dynamic) fn lookup_name(ctx: &mut Context, spelling: &str) -> Result<Id> {
+    Ok(lookup_transform(ctx, spelling, false)?.expect("Python lookup requires a codec entry"))
+}
+
+/// A transform with no boxed entry can use its existing native implementation only
+/// when the ordered search reaches the default provider.
+pub(super) fn lookup_transform(
+    ctx: &mut Context,
+    spelling: &str,
+    native_fallback: bool,
+) -> Result<Option<Id>> {
+    if spelling.contains('\0') {
+        return Err(Error::new("ValueError", "embedded null character"));
+    }
+    initialize_search_path(ctx)?;
+    let key = crate::objects::normalize_codec(spelling)?;
+    // The default provider can win for a native-only codec even when the requested
+    // operation has no boxed implementation. A later callback cannot replace that win.
+    let result_for_request = |entry: Option<Id>| {
+        if entry.is_none() && !native_fallback {
+            Err(Error::new(
+                "LookupError",
+                format!("unknown encoding: {spelling}"),
+            ))
+        } else {
+            Ok(entry)
+        }
+    };
+    if let Some(&entry) = ctx.codec_entries.search_cache.get(&key) {
+        return result_for_request(entry);
+    }
+    let count = ctx.codec_entries.search_path.len();
+    if count == 0 {
+        return Err(Error::new(
+            "LookupError",
+            "no codec search functions registered: can't find encoding",
+        ));
+    }
+    let name = ctx.text(key.clone());
+    let (heap, roots) = ctx.heap_and_roots();
+    let name = heap.intern(name, roots);
+    let native_only = wide_unicode::encoding(&key).is_some() || key == "raw_unicode_escape";
+    let default = native_only.then(|| ctx.builtin("encodings.search_function"));
+    // A callback may change the live list. CPython snapshots only its length.
+    for index in 0..count {
+        let callback = ctx
+            .codec_entries
+            .search_path
+            .get(index)
+            .copied()
+            .ok_or_else(|| Error::new("IndexError", "list index out of range"))?;
+        if Some(callback) == default {
+            return result_for_request(cache_lookup(ctx, key, None)?);
+        }
+        let mark = ctx.heap.temporary_mark();
+        ctx.heap.keep(callback);
+        let result = ctx.call(callback, vec![name], Vec::new());
+        ctx.heap.release_temporaries_since(mark);
+        match &result {
+            Ok(entry) => ctx.heap.keep(*entry),
+            Err(error) => {
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
+            }
+        }
+        if ctx.heap.observes_released_roots() && !ctx.codec_entries.search_path.contains(&callback)
+        {
+            ctx.heap.weak_edge_removed(callback);
+            ctx.collect_unreachable();
+        }
+        let entry = result?;
+        if entry == NONE {
+            continue;
+        }
+        if !matches!(ctx.heap.get(entry), Value::CodecInfo { .. })
+            && !ctx
+                .tuple_items(entry)?
+                .is_some_and(|items| items.len() == 4)
+        {
+            return Err(type_error("codec search functions must return 4-tuples"));
+        }
+        return cache_lookup(ctx, key, Some(entry));
+    }
+    Err(Error::new(
+        "LookupError",
+        format!("unknown encoding: {spelling}"),
+    ))
+}
+
+fn cache_lookup(ctx: &mut Context, key: String, entry: Option<Id>) -> Result<Option<Id>> {
+    ctx.codec_entries
+        .search_cache
+        .try_reserve(1)
+        .map_err(|_| crate::Error::allocation())?;
+    // Successful normalized names, unlike ordinary misses, are immortal in CPython.
+    ctx.heap.code_name(&key);
+    if let Some(Some(old)) = ctx.codec_entries.search_cache.insert(key, entry) {
+        ctx.heap.weak_edge_removed(old);
+        if Some(old) != entry && ctx.heap.observes_released_roots() {
+            ctx.collect_unreachable();
+        }
+    }
+    Ok(entry)
+}
+
+fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
     let key = entry.as_ptr();
     if let Some(&id) = ctx.codec_entries.entries.get(&key) {
         return Ok(id);
@@ -245,25 +495,39 @@ pub(super) fn lookup(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
         .entries
         .try_reserve(1)
         .map_err(|_| crate::Error::allocation())?;
+    // _codecs.lookup also works before application code imports the public module.
+    if !ctx.classes.contains_key("codecs.CodecInfo") {
+        ctx.module("codecs")?;
+    }
+    let class = ctx
+        .classes
+        .get("codecs.CodecInfo")
+        .copied()
+        .ok_or_else(|| Error::new("ImportError", "codecs.CodecInfo is unavailable"))?;
     let codec = entry.codec();
-    let decode = if matches!(codec, Codec::CodePage(_)) {
-        // The charmap Codec.decode method belongs to this entry's codec instance.
-        ctx.alloc(Value::CodecDecoder(codec))
-    } else if let Some(&id) = ctx.codec_entries.functions.get(codec.name()) {
-        id
+    let (encode, decode) = if let Some(&functions) = ctx.codec_entries.functions.get(codec.name()) {
+        functions
     } else {
-        ctx.codec_entries
-            .functions
-            .try_reserve(1)
-            .map_err(|_| crate::Error::allocation())?;
-        let id = ctx.alloc(Value::CodecDecoder(codec));
-        ctx.codec_entries.functions.insert(codec.name(), id);
-        id
+        let functions = (
+            ctx.alloc(Value::CodecEncoder(codec)),
+            ctx.alloc(Value::CodecDecoder(codec)),
+        );
+        // Charmap methods belong to a per-entry Codec instance; built-ins and
+        // module-level functions are shared by all spellings of a codec.
+        if !matches!(codec, Codec::CodePage(_)) {
+            ctx.codec_entries
+                .functions
+                .try_reserve(1)
+                .map_err(|_| crate::Error::allocation())?;
+            ctx.codec_entries.functions.insert(codec.name(), functions);
+        }
+        functions
     };
     let id = ctx.alloc(Value::CodecInfo {
+        class,
         entry,
+        encode,
         decode,
-        // All codecs in the native lookup registry inherit CodecInfo's True default.
         text_encoding_override: None,
     });
     ctx.codec_entries.entries.insert(key, id);
@@ -377,90 +641,9 @@ pub(super) fn encode_fixed(
     Ok(bytes)
 }
 
-/// codecs.encode/decode use the registered codec directly, bypassing methods on the input.
-pub(super) fn transform(
-    ctx: &mut Context,
-    name: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let [input, encoding, errors] = super::builtins::bind_builtin_arguments(
-        name,
-        args,
-        kwargs,
-        ["obj", "encoding", "errors"],
-        1,
-    )?;
-    let input = input.expect("the binder requires obj");
-    for (label, arg) in [("encoding", encoding), ("errors", errors)] {
-        if let Some(arg) = arg {
-            if ctx.string_storage(arg).is_none() {
-                let kind = if arg == NONE {
-                    "None"
-                } else {
-                    ctx.type_name(arg)
-                };
-                return Err(type_error(format!(
-                    "{name}() argument '{label}' must be str, not {kind}"
-                )));
-            }
-            if ctx.str_value(arg)?.contains('\0') {
-                return Err(Error::new("ValueError", "embedded null character"));
-            }
-        }
-    }
-    if name == "decode" {
-        return decode_named(ctx, ctx.scalar_value(input), encoding, errors);
-    }
-    let spelling = encoding
-        .map(|id| ctx.str_value(id))
-        .transpose()?
-        .unwrap_or("utf-8");
-    let codec = CodecInfo::lookup(spelling)?.codec();
-    if ctx.string_storage(input).is_none() {
-        let encoder = match codec {
-            Codec::Utf8 { .. } => "utf_8",
-            Codec::Ascii => "ascii",
-            Codec::Latin1 => "latin_1",
-            Codec::CodePage(_) => "charmap",
-        };
-        return Err(type_error(format!(
-            "{encoder}_encode() argument 1 must be str, not {}",
-            ctx.type_name(input)
-        )));
-    }
-    let result = encode_text(ctx, input, encoding, errors)?;
-    Ok(ctx.alloc(Value::Bytes(result)))
-}
-
-/// Boxed decoding can represent lone surrogates from raw Unicode escapes.
-pub(in crate::dynamic) fn decode_named(
-    ctx: &mut Context,
-    input: Id,
-    encoding: Option<Id>,
-    errors: Option<Id>,
-) -> Result<Id> {
-    let spelling = encoding
-        .map(|id| ctx.str_value(id))
-        .transpose()?
-        .unwrap_or("utf-8");
-    if spelling.contains('\0') {
-        return Err(Error::new("ValueError", "embedded null character"));
-    }
-    let key = crate::objects::normalize_codec(spelling)?;
-    if let Some((format, bom)) = wide_unicode::encoding(&key) {
-        let name = error_name(ctx, errors)?.to_owned();
-        return ctx.with_buffer_export(input, |ctx| {
-            wide_unicode::decode(ctx, input, &name, format, bom)
-        });
-    }
-    if key == "raw_unicode_escape" {
-        let name = error_name(ctx, errors)?.to_owned();
-        return ctx.with_buffer_export(input, |ctx| raw_unicode_escape::decode(ctx, input, &name));
-    }
-    let codec = Codec::by_key(&key, spelling)?;
-    decode_bytes(ctx, codec, input, errors)
-}
+mod transform;
+pub(super) use transform::transform;
+pub(in crate::dynamic) use transform::{decode_named, encode_text_object};
 
 fn error_name(ctx: &Context, errors: Option<Id>) -> Result<&str> {
     let name = errors
@@ -631,7 +814,7 @@ fn resume_decode(
     }
 }
 
-fn positional_decoder_args(
+fn positional_codec_args(
     function: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -655,8 +838,111 @@ fn positional_decoder_args(
 }
 
 pub(super) fn escape_decode(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (input, errors) = positional_decoder_args("escape_decode", args, kwargs)?;
+    let (input, errors) = positional_codec_args("escape_decode", args, kwargs)?;
     ctx.with_buffer_export(input, |ctx| bytes_escape::decode(ctx, input, errors))
+}
+
+/// Bind the Python encoder/decoder wrappers, including a bound method's implicit self.
+fn python_codec_args(
+    wrapper: &str,
+    bound: bool,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, Option<Id>)> {
+    let mut input = args.first().copied();
+    let mut errors = args.get(1).copied();
+    for (key, value) in kwargs {
+        let slot = match key.as_str() {
+            "input" => &mut input,
+            "errors" => &mut errors,
+            _ => {
+                return Err(type_error(format!(
+                    "{wrapper}() got an unexpected keyword argument '{key}'"
+                )));
+            }
+        };
+        if slot.replace(*value).is_some() {
+            return Err(type_error(format!(
+                "{wrapper}() got multiple values for argument '{key}'"
+            )));
+        }
+    }
+    if args.len() > 2 {
+        let offset = usize::from(bound);
+        return Err(type_error(format!(
+            "{wrapper}() takes from {} to {} positional arguments but {} were given",
+            1 + offset,
+            2 + offset,
+            args.len() + offset
+        )));
+    }
+    Ok((
+        input.ok_or_else(|| {
+            type_error(format!(
+                "{wrapper}() missing 1 required positional argument: 'input'"
+            ))
+        })?,
+        errors,
+    ))
+}
+
+fn entry_error_policy(ctx: &Context, function: &str, errors: Option<Id>) -> Result<Option<Id>> {
+    Ok(match errors {
+        None | Some(NONE) => None,
+        Some(id) => {
+            let Value::Str(name) = ctx.heap.get(ctx.scalar_value(id)) else {
+                return Err(type_error(format!(
+                    "{function}() argument 2 must be str or None, not {}",
+                    ctx.type_name(id)
+                )));
+            };
+            if name.contains('\0') {
+                return Err(Error::new("ValueError", "embedded null character"));
+            }
+            Some(id)
+        }
+    })
+}
+
+/// Call the encoder stored on a built-in registry entry and report characters consumed.
+pub(in crate::dynamic) fn entry_encode(
+    ctx: &mut Context,
+    codec: Codec,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let function = match codec {
+        Codec::Latin1 => "latin_1_encode",
+        Codec::Ascii => "ascii_encode",
+        Codec::Utf8 { .. } => "utf_8_encode",
+        Codec::CodePage(_) => "charmap_encode",
+    };
+    let (input, errors) = if matches!(codec, Codec::Utf8 { signature: true } | Codec::CodePage(_)) {
+        let wrapper = if matches!(codec, Codec::CodePage(_)) {
+            "Codec.encode"
+        } else {
+            "encode"
+        };
+        python_codec_args(wrapper, matches!(codec, Codec::CodePage(_)), args, kwargs)?
+    } else {
+        positional_codec_args(function, args, kwargs)?
+    };
+    let length = match ctx.heap.get(ctx.scalar_value(input)) {
+        Value::Str(text) => text.chars().count(),
+        Value::SurrogateStr(points) => points.len(),
+        _ => {
+            return Err(type_error(format!(
+                "{function}() argument 1 must be str, not {}",
+                ctx.type_name(input)
+            )));
+        }
+    };
+    let encoding = ctx.text(codec.name());
+    let policy = entry_error_policy(ctx, function, errors)?;
+    let data = encode_text(ctx, input, Some(encoding), policy)?;
+    let data = ctx.alloc(Value::Bytes(data));
+    let length = ctx.int(length as i64);
+    Ok(ctx.alloc(Value::Tuple(vec![data, length])))
 }
 
 pub(in crate::dynamic) fn decode(
@@ -672,63 +958,15 @@ pub(in crate::dynamic) fn decode(
         Codec::CodePage(_) => "charmap_decode",
     };
     let (input, errors) = match codec {
-        Codec::Latin1 | Codec::Ascii => positional_decoder_args(function, args, kwargs)?,
+        Codec::Latin1 | Codec::Ascii => positional_codec_args(function, args, kwargs)?,
         _ => {
             let bound = matches!(codec, Codec::CodePage(_));
             let wrapper = if bound { "Codec.decode" } else { "decode" };
-            let mut input = args.first().copied();
-            let mut errors = args.get(1).copied();
-            for (key, value) in kwargs {
-                let slot = match key.as_str() {
-                    "input" => &mut input,
-                    "errors" => &mut errors,
-                    _ => {
-                        return Err(type_error(format!(
-                            "{wrapper}() got an unexpected keyword argument '{key}'"
-                        )));
-                    }
-                };
-                if slot.replace(*value).is_some() {
-                    return Err(type_error(format!(
-                        "{wrapper}() got multiple values for argument '{key}'"
-                    )));
-                }
-            }
-            if args.len() > 2 {
-                let offset = usize::from(bound);
-                return Err(type_error(format!(
-                    "{wrapper}() takes from {} to {} positional arguments but {} were given",
-                    1 + offset,
-                    2 + offset,
-                    args.len() + offset
-                )));
-            }
-            (
-                input.ok_or_else(|| {
-                    type_error(format!(
-                        "{wrapper}() missing 1 required positional argument: 'input'"
-                    ))
-                })?,
-                errors,
-            )
+            python_codec_args(wrapper, bound, args, kwargs)?
         }
     };
     let consumed = ctx.bytes_like(input)?.len();
-    let policy = match errors {
-        None | Some(NONE) => None,
-        Some(id) => {
-            let Value::Str(name) = ctx.heap.get(ctx.scalar_value(id)) else {
-                return Err(type_error(format!(
-                    "{function}() argument 2 must be str or None, not {}",
-                    ctx.type_name(id)
-                )));
-            };
-            if name.contains('\0') {
-                return Err(Error::new("ValueError", "embedded null character"));
-            }
-            Some(id)
-        }
-    };
+    let policy = entry_error_policy(ctx, function, errors)?;
     let text = decode_bytes(ctx, codec, input, policy)?;
     let length = ctx.alloc(Value::Int(crate::Int::from_usize(consumed)));
     Ok(ctx.alloc(Value::Tuple(vec![text, length])))

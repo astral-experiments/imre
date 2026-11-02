@@ -9,6 +9,41 @@ BOM_UTF32_LE = b'\xff\xfe\x00\x00'
 BOM_UTF32_BE = b'\x00\x00\xfe\xff'
 
 
+class CodecInfo(tuple):
+    """Codec details when looking up the codec registry"""
+
+    # Private API to allow Python 3.4 to denylist the known non-Unicode
+    # codecs in the standard library. A more general mechanism to
+    # reliably distinguish test encodings from other codecs will hopefully
+    # be defined for Python 3.5
+    #
+    # See http://bugs.python.org/issue19619
+    _is_text_encoding = True # Assume codecs are text encodings by default
+
+    def __new__(cls, encode, decode, streamreader=None, streamwriter=None,
+        incrementalencoder=None, incrementaldecoder=None, name=None,
+        *, _is_text_encoding=None):
+        self = tuple.__new__(cls, (encode, decode, streamreader, streamwriter))
+        self.name = name
+        self.encode = encode
+        self.decode = decode
+        self.incrementalencoder = incrementalencoder
+        self.incrementaldecoder = incrementaldecoder
+        self.streamwriter = streamwriter
+        self.streamreader = streamreader
+        if _is_text_encoding is not None:
+            self._is_text_encoding = _is_text_encoding
+        return self
+
+    def __repr__(self):
+        return "<%s.%s object for encoding %s at %#x>" % \
+                (self.__class__.__module__, self.__class__.__qualname__,
+                 self.name, id(self))
+
+    def __getnewargs__(self):
+        return tuple(self)
+
+
 class IncrementalDecoder(object):
     """
     An IncrementalDecoder decodes an input in multiple steps. The input can
