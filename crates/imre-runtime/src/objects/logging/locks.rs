@@ -9,9 +9,26 @@ use std::thread;
 use std::time::Duration;
 
 #[derive(Default)]
+struct State {
+    owner: Option<(usize, usize)>,
+    // Reinitializing clears the parking bit without waking already parked threads.
+    parked: bool,
+}
+
 pub(crate) struct HandlerLock {
-    owner: Mutex<Option<(usize, usize)>>,
+    creator_pid: u32,
+    state: Mutex<State>,
     available: Condvar,
+}
+
+impl Default for HandlerLock {
+    fn default() -> Self {
+        Self {
+            creator_pid: std::process::id(),
+            state: Mutex::default(),
+            available: Condvar::new(),
+        }
+    }
 }
 
 fn owner_ident() -> usize {
@@ -23,44 +40,46 @@ impl HandlerLock {
     /// An owner may acquire recursively; other callers wait for the final release.
     pub(crate) fn acquire(&self, blocking: bool, timeout: Option<Duration>) -> Result<bool> {
         let id = owner_ident();
-        let mut owner = self.owner.lock().unwrap();
-        if let Some((thread, depth)) = owner.as_mut()
+        let mut state = self.state.lock().unwrap();
+        if let Some((thread, depth)) = state.owner.as_mut()
             && *thread == id
         {
             // CPython's unsigned recursion counter also wraps after a forged saved count.
             *depth = depth.wrapping_add(1);
             return Ok(true);
         }
-        if owner.is_some() {
-            if !blocking {
+        if state.owner.is_some() {
+            if !blocking || timeout == Some(Duration::ZERO) {
                 return Ok(false);
             }
-            owner = if let Some(timeout) = timeout {
-                let (state, _) = self
+            state.parked = true;
+            let must_wait = |s: &mut State| s.owner.is_some() || !s.parked;
+            state = if let Some(timeout) = timeout {
+                let (state, timed) = self
                     .available
-                    .wait_timeout_while(owner, timeout, |s| s.is_some())
+                    .wait_timeout_while(state, timeout, must_wait)
                     .unwrap();
-                if state.is_some() {
+                if timed.timed_out() {
                     return Ok(false);
                 }
                 state
             } else {
-                self.available.wait_while(owner, |s| s.is_some()).unwrap()
+                self.available.wait_while(state, must_wait).unwrap()
             };
         }
-        *owner = Some((id, 1));
+        state.owner = Some((id, 1));
         Ok(true)
     }
 
     /// Wake a waiting thread only after the matching outer release.
     pub(crate) fn release(&self) -> Result<()> {
-        let mut owner = self.owner.lock().unwrap();
-        if let Some((id, depth)) = owner.as_mut()
+        let mut state = self.state.lock().unwrap();
+        if let Some((id, depth)) = state.owner.as_mut()
             && *id == owner_ident()
         {
             *depth = depth.wrapping_sub(1);
             if *depth == 0 {
-                *owner = None;
+                state.owner = None;
                 self.available.notify_one();
             }
             return Ok(());
@@ -73,9 +92,7 @@ impl HandlerLock {
 
     /// Report the current thread's recursion count, even if another thread owns it.
     pub(crate) fn depth(&self) -> usize {
-        self.owner
-            .lock()
-            .unwrap()
+        self.state()
             .filter(|(id, _)| *id == owner_ident())
             .map_or(0, |(_, depth)| depth)
     }
@@ -88,19 +105,19 @@ impl HandlerLock {
 
     /// Read the pthread owner and raw recursion count together for repr.
     pub(crate) fn state(&self) -> Option<(usize, usize)> {
-        *self.owner.lock().unwrap()
+        self.state.lock().unwrap().owner
     }
 
     /// Fully release a recursively acquired lock for a condition wait.
     pub(crate) fn release_save(&self) -> Result<(usize, usize)> {
-        let mut state = self.owner.lock().unwrap();
-        let Some((owner, depth)) = state.filter(|(owner, _)| *owner == owner_ident()) else {
+        let mut state = self.state.lock().unwrap();
+        let Some((owner, depth)) = state.owner.filter(|(owner, _)| *owner == owner_ident()) else {
             return Err(Error::new(
                 Kind::RuntimeError,
                 "cannot release un-acquired lock",
             ));
         };
-        *state = None;
+        state.owner = None;
         self.available.notify_one();
         Ok((depth, owner))
     }
@@ -108,17 +125,32 @@ impl HandlerLock {
     /// Wait for the underlying lock, then restore its saved recursion depth and owner.
     pub(crate) fn acquire_restore(&self, depth: usize, owner: usize) {
         let current = owner_ident();
-        let state = self.owner.lock().unwrap();
-        let mut state = self
-            .available
-            .wait_while(state, |s| s.is_some_and(|(owner, _)| owner != current))
-            .unwrap();
-        *state = Some((owner, depth));
+        let mut state = self.state.lock().unwrap();
+        if state.owner.is_some_and(|(owner, _)| owner != current) {
+            state.parked = true;
+            state = self
+                .available
+                .wait_while(state, |s| {
+                    s.owner.is_some_and(|(owner, _)| owner != current) || !s.parked
+                })
+                .unwrap();
+        }
+        state.owner = Some((owner, depth));
+    }
+
+    /// Preserve native aliases in this process. A forked child must never acquire
+    /// the parent's bookkeeping mutex, which could be held by a vanished thread.
+    pub(crate) fn at_fork_reinit(lock: &mut Arc<Self>) {
+        if lock.creator_pid == std::process::id() {
+            *lock.state.lock().unwrap() = State::default();
+        } else {
+            *lock = Arc::default();
+        }
     }
 
     /// Reinitialize ownership, as Handler._at_fork_reinit requests in the child.
     fn reset(&self) {
-        *self.owner.lock().unwrap() = None;
+        self.state.lock().unwrap().owner = None;
         self.available.notify_all();
     }
 }
@@ -323,6 +355,30 @@ mod tests {
         assert!(lock.release_save().is_err());
         lock.reset();
         assert!(lock.state().is_none());
+    }
+
+    #[test]
+    fn reset_leaves_a_parked_waiter_enrolled_until_timeout() {
+        let mut lock = Arc::new(HandlerLock::default());
+        assert!(lock.acquire(true, None).unwrap());
+        thread::scope(|scope| {
+            let peer = Arc::clone(&lock);
+            let waiter = scope.spawn(move || peer.acquire(true, Some(Duration::from_secs(1))));
+            let started = std::time::Instant::now();
+            while !lock.state.lock().unwrap().parked {
+                assert!(started.elapsed() < Duration::from_secs(5));
+                thread::yield_now();
+            }
+
+            HandlerLock::at_fork_reinit(&mut lock);
+            assert!(lock.acquire(false, None).unwrap());
+            // A zero-timeout probe must not re-arm the cleared parking bit.
+            let peer = Arc::clone(&lock);
+            let probe = scope.spawn(move || peer.acquire(true, Some(Duration::ZERO)));
+            assert!(!probe.join().unwrap().unwrap());
+            lock.release().unwrap();
+            assert!(!waiter.join().unwrap().unwrap());
+        });
     }
 
     #[test]
