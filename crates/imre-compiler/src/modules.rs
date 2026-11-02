@@ -1404,6 +1404,12 @@ impl IntrinsicModule {
             (Self::AnnotationLib, "annotations_to_string") => {
                 Intrinsic::ObjectRuntimeExport("annotationlib.annotations_to_string")
             }
+            (Self::AnnotationLib, "call_annotate_function") => {
+                Intrinsic::ObjectRuntimeExport("annotationlib.call_annotate_function")
+            }
+            (Self::AnnotationLib, "call_evaluate_function") => {
+                Intrinsic::ObjectRuntimeExport("annotationlib.call_evaluate_function")
+            }
             (Self::AnnotationLib, "get_annotate_from_class_namespace") => {
                 Intrinsic::ObjectRuntimeExport("annotationlib.get_annotate_from_class_namespace")
             }
