@@ -253,9 +253,10 @@ def current():
         explicit_none = TypedDict("ExplicitNone", None)
         explicit_empty = TypedDict("ExplicitEmpty", {})
     assert omitted.__annotations__ == explicit_none.__annotations__ == explicit_empty.__annotations__ == {}
-    assert len(captured) == 2 and all(w.category is DeprecationWarning for w in captured)
-    assert str(captured[0].message).startswith("Failing to pass a value for the 'fields' parameter")
-    assert str(captured[1].message).startswith("Passing `None` as the 'fields' parameter")
+    omitted_warning, none_warning = captured
+    assert omitted_warning.category is none_warning.category is DeprecationWarning
+    assert str(omitted_warning.message).startswith("Failing to pass a value for the 'fields' parameter")
+    assert str(none_warning.message).startswith("Passing `None` as the 'fields' parameter")
 
     Draft = TypedDict("Draft", [("title", str)], total=False)
     assert is_typeddict(Film) and is_typeddict(tp=Draft)
