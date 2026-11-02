@@ -45,7 +45,7 @@ pub(crate) fn disposition(number: i32) -> io::Result<Option<Disposition>> {
     Ok(Disposition::decode(unsafe { previous.assume_init() }))
 }
 
-pub(crate) fn install(number: i32, handler: Disposition) -> io::Result<Option<Disposition>> {
+pub(crate) fn install(number: i32, handler: Disposition) -> io::Result<()> {
     // SAFETY: initialize the mask and handler before passing the action to POSIX.
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(&mut action.sa_mask) };
@@ -56,13 +56,11 @@ pub(crate) fn install(number: i32, handler: Disposition) -> io::Result<Option<Di
         Disposition::Ignore => libc::SIG_IGN,
         Disposition::Python => trip as *const () as usize,
     };
-    let mut previous = std::mem::MaybeUninit::uninit();
-    // SAFETY: both structures live through sigaction. SA_RESTART is clear for Python handlers.
-    if unsafe { libc::sigaction(number, &action, previous.as_mut_ptr()) } < 0 {
+    // SAFETY: action lives through sigaction. SA_RESTART is clear for Python handlers.
+    if unsafe { libc::sigaction(number, &action, std::ptr::null_mut()) } < 0 {
         return Err(io::Error::last_os_error());
     }
-    // SAFETY: sigaction initialized the previous disposition on success.
-    Ok(Disposition::decode(unsafe { previous.assume_init() }))
+    Ok(())
 }
 
 pub(crate) fn initialize_interrupt() {

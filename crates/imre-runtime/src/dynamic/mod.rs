@@ -151,7 +151,7 @@ pub(crate) struct Context {
     classes: HashMap<String, Id>,
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
-    signal_handlers: HashMap<i32, Id>,
+    signal_handlers: Vec<Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,

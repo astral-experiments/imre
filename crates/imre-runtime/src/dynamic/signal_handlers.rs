@@ -12,22 +12,22 @@ impl Context {
         id
     }
 
-    fn signal_handler(&mut self, number: i32, disposition: Option<Disposition>) -> Id {
-        match disposition {
-            Some(Disposition::Default) => self.signal_sentinel("_signal.SIG_DFL", libc::SIG_DFL),
-            Some(Disposition::Ignore) => self.signal_sentinel("_signal.SIG_IGN", libc::SIG_IGN),
-            Some(Disposition::Python) => self.python_handler(number),
-            None => NONE,
+    /// A native library can replace a disposition without changing Python's handler table.
+    pub(super) fn initialize_signal_handlers(&mut self) {
+        if !self.signal_handlers.is_empty() {
+            return;
         }
-    }
-
-    fn python_handler(&mut self, number: i32) -> Id {
-        if let Some(&handler) = self.signal_handlers.get(&number) {
-            handler
-        } else if number == libc::SIGINT {
-            self.builtin("_signal.default_int_handler")
-        } else {
-            NONE
+        let default = self.signal_sentinel("_signal.SIG_DFL", libc::SIG_DFL);
+        let ignore = self.signal_sentinel("_signal.SIG_IGN", libc::SIG_IGN);
+        let interrupt = self.builtin("_signal.default_int_handler");
+        self.signal_handlers = vec![NONE; signals::nsig() as usize];
+        for (number, slot) in self.signal_handlers.iter_mut().enumerate().skip(1) {
+            *slot = match signals::disposition(number as i32) {
+                Ok(Some(Disposition::Default)) => default,
+                Ok(Some(Disposition::Ignore)) => ignore,
+                Ok(Some(Disposition::Python)) if number == libc::SIGINT as usize => interrupt,
+                _ => NONE,
+            };
         }
     }
 
@@ -35,12 +35,11 @@ impl Context {
         if !signals::begin_dispatch() {
             return Ok(());
         }
+        self.initialize_signal_handlers();
         for number in 1..signals::nsig() {
-            if signals::take(number)
-                && matches!(signals::disposition(number), Ok(Some(Disposition::Python)))
-            {
-                let handler = self.python_handler(number);
-                if handler != NONE {
+            if signals::take(number) {
+                let handler = self.signal_handlers[number as usize];
+                if self.callable(handler) {
                     let result = self.call_signal_handler(number, handler);
                     if result.is_err() {
                         // A raising handler leaves later pending signals for the next checkpoint.
@@ -90,14 +89,9 @@ impl Context {
         if !(1..signals::nsig()).contains(&number) {
             return Err(Error::new("ValueError", "signal number out of range"));
         }
+        self.initialize_signal_handlers();
         if !registering {
-            let existing = match signals::disposition(number) {
-                Ok(existing) => existing,
-                // Reserved numbers inside NSIG have no Python disposition.
-                Err(e) if e.raw_os_error() == Some(libc::EINVAL) => None,
-                Err(e) => return Err(stdlib::os_error(e)),
-            };
-            return Ok(self.signal_handler(number, existing));
+            return Ok(self.signal_handlers[number as usize]);
         }
         let handler = args[1];
         let action = if self.callable(handler) {
@@ -115,16 +109,13 @@ impl Context {
             }
         };
         self.dispatch_signals()?;
-        self.signal_handlers
-            .try_reserve(1)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        let old = signals::install(number, action).map_err(stdlib::os_error)?;
-        let old = self.signal_handler(number, old);
-        if action == Disposition::Python {
-            self.signal_handlers.insert(number, handler);
-        } else {
-            self.signal_handlers.remove(&number);
-        }
+        signals::install(number, action).map_err(stdlib::os_error)?;
+        let value = match action {
+            Disposition::Default => self.signal_sentinel("_signal.SIG_DFL", libc::SIG_DFL),
+            Disposition::Ignore => self.signal_sentinel("_signal.SIG_IGN", libc::SIG_IGN),
+            Disposition::Python => handler,
+        };
+        let old = std::mem::replace(&mut self.signal_handlers[number as usize], value);
         Ok(old)
     }
 }

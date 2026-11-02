@@ -718,7 +718,7 @@ pub(super) fn new_context<S: Into<String>>(
         finder_external: NONE,
         classes: HashMap::new(),
         enum_scopes: HashMap::new(),
-        signal_handlers: HashMap::new(),
+        signal_handlers: Vec::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
@@ -779,6 +779,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             let fd = ctx.int(i64::from(libc::STDERR_FILENO));
             ctx.call(enable, vec![fd], Vec::new())?;
         }
+        // CPython snapshots dispositions after enabling a startup fault handler.
+        #[cfg(unix)]
+        ctx.initialize_signal_handlers();
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
@@ -1531,7 +1534,7 @@ impl Context {
             self.classes
                 .values()
                 .chain(self.enum_scopes.values())
-                .chain(self.signal_handlers.values())
+                .chain(self.signal_handlers.iter())
                 .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())

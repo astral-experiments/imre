@@ -76,6 +76,7 @@ def current():
 
 
 def check_handlers():
+    import faulthandler
     import gc
     import os
 
@@ -86,6 +87,18 @@ def check_handlers():
 
     def second(number, frame):
         raise RuntimeError("from second handler")
+
+    if not faulthandler.is_enabled():
+        previous = signal.signal(signal.SIGABRT, first)
+        try:
+            faulthandler.enable()
+            assert signal.getsignal(signal.SIGABRT) is first
+            assert signal.signal(signal.SIGABRT, second) is first
+            faulthandler.disable()
+            assert signal.getsignal(signal.SIGABRT) is second
+        finally:
+            faulthandler.disable()
+            signal.signal(signal.SIGABRT, previous)
 
     sig = signal.SIGUSR1
     original = signal.getsignal(sig)
