@@ -31,9 +31,12 @@ mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod templatelib;
 mod thread_callback;
 mod thread_local;
 mod thread_lock;
+mod thread_rlock;
+mod thread_worker;
 mod typing;
 mod union;
 mod value;
@@ -90,6 +93,7 @@ impl IteratorSlice<'_> {
 
 pub(crate) struct Context {
     threads: lowlevel_threads::Workers,
+    workers: thread_worker::Registry,
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
@@ -398,6 +402,7 @@ impl Context {
         matches!(
             self.heap.get(id),
             Value::Iterator { .. }
+                | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
@@ -411,6 +416,7 @@ impl Context {
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
+                | Value::CoroutineWrapper(_)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -442,6 +448,12 @@ impl Context {
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
+            Value::Template {
+                strings,
+                interpolations,
+            } => {
+                return self.template_iterator(strings, interpolations);
+            }
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false);
@@ -539,7 +551,8 @@ impl Context {
         let value = self.heap.get(source);
         if matches!(
             value,
-            Value::SequenceIterator { .. }
+            Value::TemplateIter { .. }
+                | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
@@ -549,6 +562,7 @@ impl Context {
                 | Value::Filter { .. }
                 | Value::Zip { .. }
                 | Value::Generator { .. }
+                | Value::CoroutineWrapper(_)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -837,6 +851,11 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
+            return self
+                .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
+                .map(Some);
+        }
         if let Value::Scandir(scan) = self.heap.get(id) {
             return stdlib::os::scandir::advance(self, scan.clone());
         }
@@ -871,6 +890,7 @@ impl Context {
             }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
+            Value::TemplateIter { .. } => return self.next_template_item(id),
             Value::DictIterator(iter) => return (*iter).next(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
@@ -1101,6 +1121,8 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
+                | Value::Template { .. }
+                | Value::TemplateIter { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1624,6 +1646,7 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__", "__format__", "__init_subclass__"],
             "dict" => builtins::DICT_METHODS,
+            "function" => &["__call__"],
             "collections.defaultdict" => {
                 self.builtin("dict");
                 &[
@@ -1645,7 +1668,7 @@ impl Context {
             }
             "property" => property::METHODS,
             "int" => &["bit_length", "to_bytes", "__format__"],
-            "float" => &["__format__", "__getformat__"],
+            "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -1994,6 +2017,10 @@ impl Context {
         origin: Option<Id>,
         source: Option<(PathBuf, importlib::SourceBody)>,
     ) -> Result<()> {
+        if name == "_thread" && source.is_none() {
+            let rlock = self.builtin(thread_rlock::CLASS);
+            self.bind(scope, "RLock", rlock);
+        }
         match name {
             "_thread" => {
                 for name in ["allocate_lock", "allocate"] {
@@ -2025,6 +2052,8 @@ impl Context {
                     let value = self.lookup_attr(path, name)?;
                     self.bind(scope, name, value);
                 }
+                let linesep = self.text(crate::objects::os::LINE_SEPARATOR);
+                self.bind(scope, "linesep", linesep);
                 self.bind(scope, "path", path);
                 self.publish_module("os.path", path)?;
             }
@@ -2053,6 +2082,8 @@ impl Context {
                 self.module("io")?;
                 let open = self.builtin("open");
                 self.bind(scope, "open", open);
+                let text_encoding = self.builtin("_io.text_encoding");
+                self.bind(scope, "text_encoding", text_encoding);
                 for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
                     let class = self.builtins[&format!("_io.{name}")];
                     self.bind(scope, name, class);
@@ -2064,7 +2095,7 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
-                for name in ["audit", "addaudithook"] {
+                for name in ["audit", "addaudithook", "_getframe"] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,
@@ -2109,9 +2140,14 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
-            for function in ["start_new_thread", "_count"] {
+            for function in ["start_new_thread", "_count", "get_ident"] {
                 let value = self.builtin(&format!("_thread.{function}"));
                 self.bind(scope, function, value);
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                let id = self.builtin("_thread.get_native_id");
+                self.bind(scope, "get_native_id", id);
             }
         }
         if let Some((path, body)) = source {
@@ -2160,6 +2196,17 @@ impl Context {
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {
                 self.classes.insert("re.PatternError".into(), class);
+            }
+            if name == "threading"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("threading.py"))
+                && let (Some(class), Some(main)) = (
+                    self.scope_name(scope, "Thread"),
+                    self.scope_name(scope, "_main_thread"),
+                )
+            {
+                self.register_thread_run(class, main);
             }
             if name == "decimal"
                 && self.config["bundled_root"]

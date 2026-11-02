@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+pub(crate) use imre_ast::exceptions::builtin_id as exception_kind;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
@@ -488,91 +489,6 @@ const RESERVED: &[&str] = &[
     "__doc__",
     "__file__",
 ];
-
-/// Indices are runtime ABI categories. Empty entries belong to imported modules.
-pub(crate) fn exception_kind(name: &str) -> Option<u32> {
-    match name {
-        "NotImplementedError" => return Some(37),
-        "UnicodeEncodeError" => return Some(38),
-        "NameError" => return Some(39),
-        "UnboundLocalError" => return Some(40),
-        "RecursionError" => return Some(43),
-        "ReferenceError" => return Some(53),
-        "BufferError" => return Some(54),
-        "GeneratorExit" => return Some(59),
-        "StopAsyncIteration" => return Some(60),
-        "KeyboardInterrupt" => return Some(61),
-        "SyntaxError" => return Some(55),
-        "IndentationError" => return Some(56),
-        "BlockingIOError" => return Some(44),
-        "ConnectionError" => return Some(45),
-        "BrokenPipeError" => return Some(46),
-        "ConnectionAbortedError" => return Some(47),
-        "ConnectionRefusedError" => return Some(48),
-        "ConnectionResetError" => return Some(49),
-        "InterruptedError" => return Some(50),
-        "TimeoutError" => return Some(51),
-        "Warning" => return Some(80),
-        "RuntimeWarning" => return Some(81),
-        "DeprecationWarning" => return Some(82),
-        "EncodingWarning" => return Some(83),
-        "UserWarning" => return Some(84),
-        "PendingDeprecationWarning" => return Some(85),
-        "SyntaxWarning" => return Some(86),
-        "FutureWarning" => return Some(87),
-        "ImportWarning" => return Some(88),
-        "UnicodeWarning" => return Some(89),
-        "BytesWarning" => return Some(90),
-        "ResourceWarning" => return Some(91),
-        _ => {}
-    }
-    if name == "ImportError" {
-        return Some(41);
-    }
-    if name == "ModuleNotFoundError" {
-        return Some(42);
-    }
-    if name == "StopIteration" {
-        return Some(35);
-    }
-    if name == "ExceptionGroup" {
-        return Some(34);
-    }
-    if name == "SystemExit" {
-        return Some(32);
-    }
-    [
-        "BaseException",
-        "Exception",
-        "ArithmeticError",
-        "ZeroDivisionError",
-        "OverflowError",
-        "LookupError",
-        "IndexError",
-        "KeyError",
-        "ValueError",
-        "AssertionError",
-        "RuntimeError",
-        "EOFError",
-        "OSError",
-        "TypeError",
-        "AttributeError",
-        "MemoryError",
-        "SystemError",
-        "UnicodeError",
-        "UnicodeDecodeError",
-        // UnsupportedOperation belongs to io, not the builtin namespace.
-        "",
-        "FileNotFoundError",
-        "PermissionError",
-        "IsADirectoryError",
-        "NotADirectoryError",
-        "FileExistsError",
-    ]
-    .iter()
-    .position(|candidate| !candidate.is_empty() && *candidate == name)
-    .map(|kind| kind as u32)
-}
 
 fn reserved(name: &str) -> bool {
     RESERVED.contains(&name) || exception_kind(name).is_some()
@@ -1192,7 +1108,7 @@ pub(crate) fn lower_with_caller_cache(
     }
     Ok((
         ir::Module {
-            command_flags: graph.command_startup.as_ref().map(|(flags, _)| *flags),
+            command_flags: graph.command_startup.as_ref().map(|(flags, _)| flags.clone()),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
@@ -1882,6 +1798,16 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes })) => {
             return Ok(types.url_split_result(bytes));
+        }
+        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+            name @ ("urllib.parse.DefragResult" | "urllib.parse.DefragResultBytes"),
+        ))) => {
+            graph.needs_object_runtime.set(true);
+            return Err(error(
+                source,
+                expression,
+                &format!("{name} requires native Python object operations"),
+            ));
         }
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
@@ -6326,6 +6252,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
+                Intrinsic::CachedProperty => {
+                    return Err(self.object_runtime_export("functools.cached_property", expression));
+                }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
@@ -6448,12 +6377,14 @@ impl<'a> Checker<'a> {
                 Intrinsic::SysExecutable
                 | Intrinsic::SysPlatform
                 | Intrinsic::OsName
+                | Intrinsic::OsLinesep
                 | Intrinsic::OsPathsep { posix: false } => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
                             Builtin::Process(ir::ProcessOperation::Executable)
                         }
                         Intrinsic::OsName => Builtin::OsName,
+                        Intrinsic::OsLinesep => Builtin::OsLinesep,
                         Intrinsic::OsPathsep { .. } => Builtin::OsPathsep,
                         _ => Builtin::SysPlatform,
                     };
@@ -6486,6 +6417,9 @@ impl<'a> Checker<'a> {
                 (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
             }
             ast::Expr::FString(value) => return self.fstring(value),
+            ast::Expr::TString(_) => {
+                return Err(self.object_builtin_error("template literal", expression));
+            }
             ast::Expr::Lambda(lambda) => return self.lambda_value(lambda, None, None),
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
@@ -7762,9 +7696,12 @@ impl<'a> Checker<'a> {
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
                 if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
-                    && attribute.attr.as_str() == "islower"
+                    && matches!(attribute.attr.as_str(), "isascii" | "islower")
                 {
-                    return Err(self.object_builtin_error("bound str.islower", attribute));
+                    return Err(self.object_builtin_error(
+                        &format!("bound str.{}", attribute.attr.as_str()),
+                        attribute,
+                    ));
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
@@ -8959,6 +8896,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
+                return Err(self.object_runtime_export("functools.cached_property", call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
             }
@@ -9695,7 +9635,7 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isalnum" | "isspace" | "islower" | "isupper"
+                "splitlines" | "isalnum" | "isascii" | "isspace" | "islower" | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(

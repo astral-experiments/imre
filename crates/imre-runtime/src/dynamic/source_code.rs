@@ -1,7 +1,7 @@
 //! In-process execution of source received by the boxed Python runtime.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
 use ruff_python_ast as ast;
@@ -20,23 +20,34 @@ pub(super) struct Program {
     literals: HashMap<ruff_text_size::TextRange, Id>,
     pub(super) string_roots: Id,
     first_line: u32,
-    generator: bool,
+    kind: FunctionKind,
     locals: HashSet<String>,
+    reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
+    template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FunctionKind {
+    Plain,
+    Generator,
+    Coroutine,
 }
 
 enum Instruction {
     Eval(ast::Expr),
     AugAssign(ast::StmtAugAssign),
+    DeleteName(String),
     DeleteItem(ast::ExprSubscript),
+    DeleteAttr(ast::ExprAttribute),
     Assign(Vec<ast::Expr>, ast::Expr),
     Import {
         module: String,
         alias: Option<String>,
     },
-    From(String, Vec<(String, String)>),
+    From(String, u32, Vec<(String, String)>),
     Define(Definition),
     ClassStart,
     ClassEnd,
@@ -47,6 +58,7 @@ enum Instruction {
     Assert(ast::StmtAssert),
     Unless(ast::Expr, usize),
     Iter(ast::Expr),
+    Await(ast::Expr),
     Next(Option<ast::Expr>, usize),
     Jump(usize),
     Break(usize),
@@ -74,7 +86,7 @@ struct Definition {
 
 enum DefinitionKind {
     Function(Box<ast::Parameters>),
-    Class(Vec<ast::Expr>),
+    Class(Option<Box<ast::Arguments>>),
 }
 
 /// CPython records self.X stores from code units immediately enclosed by a class.
@@ -232,13 +244,46 @@ fn unsupported(what: impl std::fmt::Display) -> Error {
     Error::new("NotImplementedError", format!("runtime source: {what}"))
 }
 
+/// Constants shared by code objects produced by one source compilation.
+#[derive(Default)]
+struct SharedConstants<'a> {
+    text: HashMap<Cow<'a, str>, Id>,
+    surrogate_text: HashMap<Vec<u32>, Id>,
+    string_tuples: HashMap<Vec<Id>, Id>,
+}
+
+/// One literal segment can span multiple adjacent template tokens, including raw ones.
+#[derive(Default)]
+struct TemplateSegment<'a> {
+    text: Cow<'a, str>,
+    replacements: Vec<u32>,
+}
+
+impl<'a> TemplateSegment<'a> {
+    fn push(
+        &mut self,
+        lit: &'a ast::InterpolatedStringLiteralElement,
+        spellings: &TemplateReplacements,
+    ) {
+        self.text += &*lit.value;
+        // Escaped braces can join several middle tokens into one AST element.
+        if lit.value.contains(char::REPLACEMENT_CHARACTER) {
+            for (_, points) in spellings.range(lit.start()..lit.end()) {
+                self.replacements.extend_from_slice(points);
+            }
+        }
+    }
+}
+
 /// Collect names and string constants without recursing through an expression's left spine.
 struct CompiledStrings<'a, 'ctx> {
     heap: &'ctx mut value::Heap,
-    shared: &'ctx mut HashMap<&'a str, Id>,
+    shared: &'ctx mut SharedConstants<'a>,
+    spellings: &'ctx TemplateReplacements,
     constants: &'ctx mut HashMap<ruff_text_size::TextRange, Id>,
     roots: Vec<Id>,
     pending: Vec<&'a ast::Expr>,
+    reads: &'ctx mut BTreeSet<String>,
     exhausted: bool,
 }
 
@@ -275,23 +320,104 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    /// Share equal text constants across nested code objects.
-    fn string_constant(&mut self, literal: &'a ast::ExprStringLiteral) -> Result<()> {
-        let text = literal.value.to_str();
-        let id = if let Some(&id) = self.shared.get(text) {
+    fn text(&mut self, text: Cow<'a, str>) -> Result<Id> {
+        if let Some(&id) = self.shared.text.get(text.as_ref()) {
+            return Ok(id);
+        }
+        self.shared
+            .text
+            .try_reserve(1)
+            .map_err(|_| crate::Error::allocation())?;
+        let id = self
+            .heap
+            .source_string_constant(&text)
+            .ok_or_else(crate::Error::allocation)?;
+        self.shared.text.insert(text, id);
+        Ok(id)
+    }
+
+    /// Template strings and equivalent tuple displays load the same code constant.
+    fn string_tuple(&mut self, range: ruff_text_size::TextRange, items: Vec<Id>) -> Result<()> {
+        let id = if let Some(&id) = self.shared.string_tuples.get(&items) {
             id
         } else {
             self.shared
+                .string_tuples
                 .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            let id = self
-                .heap
-                .source_string_constant(text)
-                .ok_or_else(|| Error::new("MemoryError", ""))?;
-            self.shared.insert(text, id);
+                .map_err(|_| crate::Error::allocation())?;
+            let mut tuple = Vec::new();
+            tuple
+                .try_reserve_exact(items.len())
+                .map_err(|_| crate::Error::allocation())?;
+            tuple.extend_from_slice(&items);
+            let id = self.heap.packed_tuple(tuple, true);
+            self.shared.string_tuples.insert(items, id);
             id
         };
-        self.constant(literal.range(), id)
+        self.constant(range, id)
+    }
+
+    /// Pool template text by its original Python code points.
+    fn template_text(&mut self, segment: TemplateSegment<'a>) -> Result<Id> {
+        if !segment.replacements.iter().any(|&p| p != 0xfffd) {
+            return self.text(segment.text);
+        }
+        let mut replacements = segment.replacements.into_iter();
+        let mut points = Vec::new();
+        points
+            .try_reserve_exact(segment.text.chars().count())
+            .map_err(|_| crate::Error::allocation())?;
+        for ch in segment.text.chars() {
+            points.push(if ch == char::REPLACEMENT_CHARACTER {
+                replacements
+                    .next()
+                    .ok_or_else(|| unsupported("t-string escape spelling"))?
+            } else {
+                u32::from(ch)
+            });
+        }
+        if replacements.next().is_some() {
+            return Err(unsupported("t-string escape spelling"));
+        }
+        if let Some(&id) = self.shared.surrogate_text.get(&points) {
+            return Ok(id);
+        }
+        self.shared
+            .surrogate_text
+            .try_reserve(1)
+            .map_err(|_| crate::Error::allocation())?;
+        let id = self.heap.alloc(Value::SurrogateStr(points.clone()));
+        self.shared.surrogate_text.insert(points, id);
+        Ok(id)
+    }
+
+    fn template_strings(&mut self, template: &'a ast::ExprTString) -> Result<()> {
+        let mut items = Vec::new();
+        let mut segment = TemplateSegment::default();
+        for element in template.value.elements() {
+            match element {
+                ast::InterpolatedStringElement::Literal(lit) => {
+                    segment.push(lit, self.spellings);
+                }
+                ast::InterpolatedStringElement::Interpolation(field) => {
+                    items
+                        .try_reserve(1)
+                        .map_err(|_| crate::Error::allocation())?;
+                    items.push(self.template_text(std::mem::take(&mut segment))?);
+                    if let Ok(Some(lit)) = imre_ast::strings::template_format_spec(field) {
+                        let mut spec = TemplateSegment::default();
+                        spec.push(lit, self.spellings);
+                        let id = self.template_text(spec)?;
+                        self.constant(lit.range(), id)?;
+                    }
+                }
+            }
+        }
+        items
+            .try_reserve(1)
+            .map_err(|_| crate::Error::allocation())?;
+        items.push(self.template_text(segment)?);
+        self.string_tuple(template.range(), items)
     }
 
     /// Root a literal for later evaluation at its source position.
@@ -309,12 +435,37 @@ impl<'a> CompiledStrings<'a, '_> {
             match expr {
                 ast::Expr::Name(name) => {
                     class_cell |= matches!(name.id.as_str(), "super" | "__class__");
+                    if name.ctx == ast::ExprContext::Load {
+                        self.reads.insert(name.id.to_string());
+                    }
                     self.heap.code_name(name.id.as_str());
                 }
                 ast::Expr::Attribute(attr) => {
                     self.heap.code_name(attr.attr.as_str());
                 }
-                ast::Expr::StringLiteral(literal) => self.string_constant(literal)?,
+                ast::Expr::StringLiteral(literal) => {
+                    let id = self.text(literal.value.to_str().into())?;
+                    self.constant(literal.range(), id)?;
+                }
+                ast::Expr::TString(template) => self.template_strings(template)?,
+                ast::Expr::Tuple(tuple)
+                    if !tuple.elts.is_empty()
+                        && tuple.elts.iter().all(ast::Expr::is_string_literal_expr) =>
+                {
+                    let mut items = Vec::new();
+                    items
+                        .try_reserve_exact(tuple.elts.len())
+                        .map_err(|_| crate::Error::allocation())?;
+                    for literal in tuple
+                        .elts
+                        .iter()
+                        .filter_map(ast::Expr::as_string_literal_expr)
+                    {
+                        items.push(self.text(literal.value.to_str().into())?);
+                    }
+                    self.string_tuple(tuple.range(), items)?;
+                    continue;
+                }
                 ast::Expr::BytesLiteral(literal) => {
                     let id = self
                         .heap
@@ -337,11 +488,29 @@ impl<'a> CompiledStrings<'a, '_> {
     }
 }
 
-/// Runtime source constants still have scalar-string storage. Check their
-/// original escapes before using Ruff's replacement characters as cache keys.
-pub(super) fn check_runtime_strings(source: &str, tokens: &ast::token::Tokens) -> Result<()> {
+type TemplateReplacements = BTreeMap<ruff_text_size::TextSize, Vec<u32>>;
+
+/// Preserve template middle tokens' original code points. Other runtime source
+/// string constants still have scalar-only storage.
+pub(super) fn check_runtime_strings(
+    source: &str,
+    tokens: &ast::token::Tokens,
+) -> Result<TemplateReplacements> {
+    let mut template = BTreeMap::new();
     for token in tokens {
-        if let Some(range) = imre_ast::strings::cooked_content(token)
+        let cooked = imre_ast::strings::cooked_content(token);
+        if token.kind() == ast::token::TokenKind::TStringMiddle {
+            let points: Vec<_> = match cooked {
+                Some(range) => imre_ast::strings::replacements(&source[range]).collect(),
+                None => source[token.range()]
+                    .matches(char::REPLACEMENT_CHARACTER)
+                    .map(|_| 0xfffd)
+                    .collect(),
+            };
+            if !points.is_empty() {
+                template.insert(token.start(), points);
+            }
+        } else if let Some(range) = cooked
             && imre_ast::strings::replacements(&source[range]).any(|p| p != 0xfffd)
         {
             return Err(unsupported(
@@ -349,7 +518,7 @@ pub(super) fn check_runtime_strings(source: &str, tokens: &ast::token::Tokens) -
             ));
         }
     }
-    Ok(())
+    Ok(template)
 }
 
 /// Collect source line offsets before constructing code or AST nodes.
@@ -368,12 +537,16 @@ impl Program {
     fn prepare_strings<'a>(
         &'a mut self,
         heap: &mut value::Heap,
-        shared: &mut HashMap<&'a str, Id>,
-    ) -> Result<Id> {
+        shared: &mut SharedConstants<'a>,
+        spellings: &TemplateReplacements,
+    ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
+        let mut nested_reads = BTreeSet::new();
         let mut strings = CompiledStrings {
+            reads: &mut self.reads,
             heap,
             shared,
+            spellings,
             constants: &mut self.literals,
             roots: Vec::new(),
             pending: Vec::new(),
@@ -381,18 +554,26 @@ impl Program {
         };
         for (_, op) in &mut self.instructions {
             match op {
-                Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
-                    strings.visit_expr(e)
-                }
+                Instruction::Eval(e)
+                | Instruction::Unless(e, _)
+                | Instruction::Iter(e)
+                | Instruction::Await(e) => strings.visit_expr(e),
                 Instruction::EnterWith { item, .. } => {
                     strings.visit_expr(&item.context_expr);
                     if let Some(target) = &item.optional_vars {
                         strings.visit_expr(target);
                     }
                 }
+                Instruction::DeleteName(name) => {
+                    strings.heap.code_name(name);
+                }
                 Instruction::DeleteItem(item) => {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
+                }
+                Instruction::DeleteAttr(attr) => {
+                    strings.visit_expr(&attr.value);
+                    strings.heap.code_name(attr.attr.as_str());
                 }
                 Instruction::Assert(stmt) => {
                     strings.visit_expr(&stmt.test);
@@ -418,7 +599,7 @@ impl Program {
                         strings.heap.code_name(alias);
                     }
                 }
-                Instruction::From(module, bindings) => {
+                Instruction::From(module, _, bindings) => {
                     strings.heap.code_name(module);
                     for (name, alias) in bindings {
                         strings.heap.code_name(name);
@@ -429,7 +610,9 @@ impl Program {
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
-                    let roots = child.prepare_strings(strings.heap, strings.shared)?;
+                    let (roots, reads) =
+                        child.prepare_strings(strings.heap, strings.shared, spellings)?;
+                    nested_reads.extend(reads.iter().cloned());
                     if roots != NONE {
                         strings.keep(roots)?;
                     }
@@ -440,11 +623,8 @@ impl Program {
                         DefinitionKind::Function(parameters) => {
                             strings.visit_parameters(parameters)
                         }
-                        DefinitionKind::Class(bases) => {
-                            for base in bases {
-                                strings.visit_expr(base);
-                            }
-                        }
+                        DefinitionKind::Class(Some(args)) => strings.visit_arguments(args),
+                        DefinitionKind::Class(None) => {}
                     }
                 }
                 Instruction::ClassStart | Instruction::ClassEnd => {}
@@ -477,7 +657,15 @@ impl Program {
             }
         }
         (self.string_roots, self.class_cell) = strings.finish()?;
-        Ok(self.string_roots)
+        if self.class_attributes.is_some() {
+            // Methods skip the class namespace when resolving free variables.
+            self.reads.retain(|name| !self.locals.contains(name));
+            self.reads.extend(nested_reads);
+        } else {
+            self.reads.extend(nested_reads);
+            self.reads.retain(|name| !self.locals.contains(name));
+        }
+        Ok((self.string_roots, &self.reads))
     }
 
     fn new(filename: Rc<str>, name: &str) -> Self {
@@ -491,16 +679,18 @@ impl Program {
             literals: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
-            generator: false,
+            kind: FunctionKind::Plain,
             locals: HashSet::new(),
+            reads: BTreeSet::new(),
             method_imports: Rc::default(),
             private_names: None,
+            template_expressions: Rc::default(),
             instructions: Vec::new(),
         }
     }
 
     // A suspended expression supplies its result when execution resumes.
-    fn lower_yield(
+    fn lower_suspension(
         &mut self,
         expr: ast::Expr,
         line: u32,
@@ -510,6 +700,11 @@ impl Program {
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) if !function => {
                 return Err(Error::new("SyntaxError", "'yield' outside function"));
             }
+            ast::Expr::Await(a) if self.kind == FunctionKind::Coroutine => {
+                self.instructions.push((line, Instruction::Await(*a.value)));
+                self.instructions.push((line, Instruction::Delegate));
+                return Ok(None);
+            }
             ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
             ast::Expr::YieldFrom(y) => {
                 self.instructions.push((line, Instruction::Iter(*y.value)));
@@ -517,7 +712,7 @@ impl Program {
             }
             value => return Ok(Some(value)),
         };
-        self.generator = true;
+        self.kind = FunctionKind::Generator;
         self.instructions.push((line, op));
         Ok(None)
     }
@@ -544,6 +739,7 @@ impl Program {
         }
         child.method_imports = self.method_imports.clone();
         child.private_names = self.private_names.clone();
+        child.template_expressions = self.template_expressions.clone();
         child.first_line = decorators.first().map_or(line, |d| {
             lines.partition_point(|n| *n <= d.start().to_usize()) as u32
         });
@@ -580,7 +776,7 @@ impl Program {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
             let op = match stmt {
                 Stmt::Pass(_) => continue,
-                Stmt::Expr(s) => match self.lower_yield(*s.value, line, function)? {
+                Stmt::Expr(s) => match self.lower_suspension(*s.value, line, function)? {
                     Some(expr) => Instruction::Eval(expr),
                     None => continue,
                 },
@@ -588,7 +784,7 @@ impl Program {
                     for target in &s.targets {
                         self.declare_target(target)?;
                     }
-                    match self.lower_yield(*s.value, line, function)? {
+                    match self.lower_suspension(*s.value, line, function)? {
                         Some(value) => Instruction::Assign(s.targets, value),
                         None => Instruction::BindSent(s.targets),
                     }
@@ -600,7 +796,7 @@ impl Program {
                     self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = s.value else { continue };
-                    match self.lower_yield(*value, line, function)? {
+                    match self.lower_suspension(*value, line, function)? {
                         Some(value) => Instruction::Assign(vec![*s.target], value),
                         None => Instruction::BindSent(vec![*s.target]),
                     }
@@ -608,11 +804,21 @@ impl Program {
                 Stmt::Delete(s) => {
                     for target in s.targets {
                         match target {
+                            ast::Expr::Name(name) => {
+                                let name = name.id.to_string();
+                                self.locals.insert(name.clone());
+                                self.instructions
+                                    .push((line, Instruction::DeleteName(name)));
+                            }
                             ast::Expr::Subscript(item)
                                 if !matches!(*item.slice, ast::Expr::Slice(_)) =>
                             {
                                 self.instructions
                                     .push((line, Instruction::DeleteItem(item)));
+                            }
+                            ast::Expr::Attribute(attr) => {
+                                self.instructions
+                                    .push((line, Instruction::DeleteAttr(attr)));
                             }
                             _ => return Err(unsupported("deletion target")),
                         }
@@ -631,7 +837,7 @@ impl Program {
                         self.instructions.push((line, Instruction::Return(None)));
                         continue;
                     };
-                    match self.lower_yield(*value, line, function)? {
+                    match self.lower_suspension(*value, line, function)? {
                         Some(value) => Instruction::Return(Some(value)),
                         None => Instruction::ReturnSent,
                     }
@@ -651,11 +857,8 @@ impl Program {
                     continue;
                 }
                 Stmt::Assert(s) => Instruction::Assert(s),
-                Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
-                    let module = s
-                        .module
-                        .as_ref()
-                        .ok_or_else(|| unsupported("relative import"))?;
+                Stmt::ImportFrom(s) if !s.is_lazy => {
+                    let module = s.module.as_ref().map_or("", |module| module.as_str());
                     let mut names = vec![];
                     for alias in &s.names {
                         if alias.name.as_str() == "*" {
@@ -665,16 +868,29 @@ impl Program {
                         self.locals.insert(local.clone());
                         names.push((alias.name.to_string(), local));
                     }
-                    Instruction::From(module.to_string(), names)
+                    Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::FunctionDef(s) if !s.is_async && s.type_params.is_none() && !function => {
-                    if self.class_attributes.is_some()
+                Stmt::FunctionDef(s) if s.type_params.is_none() => {
+                    if (function || self.class_attributes.is_some())
                         && (s.returns.is_some()
                             || s.parameters.iter().any(|p| p.annotation().is_some()))
                     {
-                        return Err(unsupported("annotated method definition"));
+                        return Err(unsupported(if function {
+                            "annotated nested function definition"
+                        } else {
+                            "annotated method definition"
+                        }));
                     }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    child
+                        .locals
+                        .extend(s.parameters.iter().map(|p| p.name().to_string()));
+                    if s.is_async {
+                        if imre_ast::code_flags::is_generator(&s.body) {
+                            return Err(unsupported("async generator function"));
+                        }
+                        child.kind = FunctionKind::Coroutine;
+                    }
                     child.lower(s.body, lines, true, None)?;
                     self.locals.insert(s.name.to_string());
                     Instruction::Define(Definition {
@@ -685,16 +901,16 @@ impl Program {
                     })
                 }
                 Stmt::ClassDef(mut s) if s.type_params.is_none() => {
-                    let bases = match s.arguments {
-                        Some(args)
-                            if !args.keywords.is_empty()
-                                || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))) =>
-                        {
-                            return Err(unsupported("class keywords or expanded bases"));
-                        }
-                        Some(args) => args.args.into_iter().collect(),
-                        None => Vec::new(),
-                    };
+                    if let Some(args) = &s.arguments
+                        && (args
+                            .keywords
+                            .iter()
+                            .any(|kw| kw.arg.as_deref() != Some("total"))
+                            || args.keywords.len() > 1
+                            || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
+                    {
+                        return Err(unsupported("class keywords or expanded bases"));
+                    }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
@@ -713,7 +929,7 @@ impl Program {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::Class(bases),
+                        kind: DefinitionKind::Class(s.arguments),
                     })
                 }
                 Stmt::Break(_) => {
@@ -857,8 +1073,7 @@ impl Program {
             ast::Expr::Name(n) => {
                 self.locals.insert(n.id.to_string());
             }
-            ast::Expr::Attribute(_) => {}
-            ast::Expr::Subscript(item) if !matches!(*item.slice, ast::Expr::Slice(_)) => {}
+            ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {}
             ast::Expr::Starred(_) => {
                 return Err(Error::new(
                     "SyntaxError",
@@ -1034,12 +1249,17 @@ impl Context {
         let filename = filename_text;
         let parsed = ruff_python_parser::parse_module(&source)
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
-        check_runtime_strings(&source, parsed.tokens())?;
+        let spellings = check_runtime_strings(&source, parsed.tokens())?;
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
+        code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
+            &source,
+            parsed.tokens(),
+            parsed.syntax(),
+        ));
         code.lower(parsed.into_syntax().body, &lines, false, None)?;
-        code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
+        code.prepare_strings(&mut self.heap, &mut SharedConstants::default(), &spellings)?;
         Ok(self.box_source_code(Rc::new(code), None))
     }
 
@@ -1120,8 +1340,8 @@ impl Context {
             filename,
             first_line: program.first_line,
             module_definition: program.name == program.qualname,
+            coroutine: program.kind == FunctionKind::Coroutine,
             body: Body::Source(program),
-            coroutine: false,
             flags: None,
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
@@ -1363,9 +1583,8 @@ impl Context {
                 format!("Forward reference must be an expression -- got {source:?}"),
             )
         })?;
-        check_runtime_strings(source, parsed.tokens())?;
-        let expr = *parsed.into_syntax().body;
-        if let ast::Expr::Name(ident) = &expr
+        let spellings = check_runtime_strings(source, parsed.tokens())?;
+        if let ast::Expr::Name(ident) = parsed.syntax().body.as_ref()
             && usize::from(ident.range().len()) == source.len()
         {
             // ForwardRef.evaluate looks up the original string for a bare identifier.
@@ -1378,10 +1597,15 @@ impl Context {
             return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
         let mut program = Program::new(Rc::from("<string>"), "<module>");
+        program.template_expressions = Rc::new(imre_ast::strings::template_expressions(
+            source,
+            parsed.tokens(),
+            parsed.syntax(),
+        ));
         program
             .instructions
-            .push((1, Instruction::Return(Some(expr))));
-        program.prepare_strings(&mut self.heap, &mut HashMap::new())?;
+            .push((1, Instruction::Return(Some(*parsed.into_syntax().body))));
+        program.prepare_strings(&mut self.heap, &mut SharedConstants::default(), &spellings)?;
         let code = self.box_source_code(Rc::new(program), None);
         self.run_in_namespace(code, globals, Some(locals), None)
     }
@@ -1508,21 +1732,27 @@ impl Context {
     }
 
     pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let generator = match &self.code_object(code).body {
-            Body::Source(program) => program.generator,
-            Body::PendingGenerator { .. } => true,
+        let kind = match &self.code_object(code).body {
+            Body::Source(program) => program.kind,
+            Body::PendingGenerator { .. } => FunctionKind::Generator,
             Body::Native(_) => unreachable!("source function"),
         };
-        if generator {
-            Ok(self.alloc(Value::Generator {
+        if kind != FunctionKind::Plain {
+            let frame = self.alloc(Value::Generator {
                 owner,
+                frame: None,
                 code,
                 scope,
                 iterators: Vec::new(),
                 protected: Vec::new(),
                 offset: Some(0),
                 running: false,
-            }))
+            });
+            Ok(if kind == FunctionKind::Coroutine {
+                self.alloc(Value::Coroutine(frame))
+            } else {
+                frame
+            })
         } else {
             match self.run_source(
                 code,
@@ -1551,7 +1781,9 @@ impl Context {
         };
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
-        check_runtime_strings(source, parsed.tokens())?;
+        let spellings = check_runtime_strings(source, parsed.tokens())?;
+        let template_expressions =
+            imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
         let mut syntax = parsed.into_syntax();
         let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
@@ -1574,14 +1806,15 @@ impl Context {
             self.str_value(code.name)?,
         );
         program.method_imports = Rc::new(signature.method_imports);
+        program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
         program.first_line = code.first_line;
-        program.generator = true;
+        program.kind = FunctionKind::Generator;
         program.lower(std::mem::take(&mut def.body), &lines, true, None)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
-        program.prepare_strings(&mut self.heap, &mut HashMap::new())?;
+        program.prepare_strings(&mut self.heap, &mut SharedConstants::default(), &spellings)?;
         let Value::Code(code) = self.heap.get_mut(id) else {
             unreachable!()
         };
@@ -1602,13 +1835,24 @@ impl Context {
                 "generator.send requires a generator",
             ));
         };
+        let coroutine = self.code_object(code).coroutine;
+        let kind = if coroutine { "coroutine" } else { "generator" };
         if running {
-            return Err(Error::new("ValueError", "generator already executing"));
+            return Err(Error::new(
+                "ValueError",
+                format!("{kind} already executing"),
+            ));
+        }
+        if coroutine && offset.is_none() {
+            return Err(Error::new(
+                "RuntimeError",
+                "cannot reuse already awaited coroutine",
+            ));
         }
         if sent != NONE && offset == Some(0) {
             return Err(Error::new(
                 "TypeError",
-                "can't send non-None value to a just-started generator",
+                format!("can't send non-None value to a just-started {kind}"),
             ));
         }
         let next = if sent == NONE || matches!(self.code_object(code).body, Body::Native(_)) {
@@ -1693,13 +1937,13 @@ impl Context {
             }
         }
         let Value::Generator {
-            owner,
             code,
             scope,
             iterators,
             protected,
             running,
             offset,
+            ..
         } = self.heap.get_mut(id)
         else {
             unreachable!()
@@ -1714,7 +1958,7 @@ impl Context {
             };
         };
         *running = true;
-        let (code, frame_scope, owner) = (*code, *scope, *owner);
+        let (code, frame_scope) = (*code, *scope);
         let mut active = std::mem::take(iterators);
         let mut blocks = std::mem::take(protected);
         self.heap.disarm_generator_finalizer(id);
@@ -1727,9 +1971,9 @@ impl Context {
                     && cursor.advanced.is_none()
                     && cursor.sent == NONE
                     && cursor.thrown.is_none();
-                self.run_source(code, frame_scope, owner, cursor)
+                self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             })
-            .map_err(|error| self.generator_error(error));
+            .map_err(|error| self.frame_error(error, code));
         let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
             if matches!(&self.code_object(code).body, Body::Source(program)
                 if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate)))));
@@ -1738,6 +1982,7 @@ impl Context {
             offset,
             scope,
             owner,
+            frame,
             iterators,
             protected,
             ..
@@ -1748,8 +1993,10 @@ impl Context {
         *running = matches!(result, Ok(Step::Advance(..)));
         let completed = match result {
             Ok(step @ (Step::Yield(_, ip) | Step::Advance(_, ip, _) | Step::Rejected(_, ip))) => {
-                let needs_finalizer = matches!(step, Step::Yield(..))
-                    && (!blocks.is_empty() || suspended_at_delegate);
+                // A failed lookup of the delegate's throw method leaves it suspended.
+                let needs_finalizer = matches!(step, Step::Rejected(..))
+                    || (matches!(step, Step::Yield(..))
+                        && (!blocks.is_empty() || suspended_at_delegate));
                 *offset = Some(ip);
                 *iterators = active;
                 *protected = blocks;
@@ -1762,6 +2009,7 @@ impl Context {
             Err(error) => Err(error),
         };
         *scope = NONE;
+        *frame = None;
         *owner = FrameOwner::Module(NONE);
         self.heap.disarm_generator_finalizer(id);
         if self.heap.tracks_finalizers()
@@ -2060,6 +2308,7 @@ impl Context {
         scope: Id,
         module: &str,
         names: Option<&[(String, String)]>,
+        level: u32,
     ) -> Result<Id> {
         let mut root = scope;
         while let Some(parent) = self.scope_data(root).parent {
@@ -2086,7 +2335,7 @@ impl Context {
         } else {
             NONE
         };
-        let zero = self.int(0);
+        let level = self.int(i64::from(level));
         let locals = if self.code_object(owner).parameters == NONE {
             self.scope_data(scope).exec_locals.unwrap_or(globals)
         } else {
@@ -2094,7 +2343,7 @@ impl Context {
         };
         self.call(
             importer,
-            vec![modname, globals, locals, fromlist, zero],
+            vec![modname, globals, locals, fromlist, level],
             Vec::new(),
         )
     }
@@ -2188,10 +2437,19 @@ impl Context {
                     self.bind_target(code, scope, target, value)?;
                 }
             }
+            Instruction::DeleteName(name) => {
+                self.check_source_local(code, scope, name)?;
+                let key = self.heap.code_name(name);
+                self.op("delname", scope, key, NONE)?;
+            }
             Instruction::DeleteItem(item) => {
                 let object = eval(self, &item.value)?;
                 let key = eval(self, &item.slice)?;
                 self.delete_item(object, key)?;
+            }
+            Instruction::DeleteAttr(attr) => {
+                let object = eval(self, &attr.value)?;
+                self.delete_attr(object, attr.attr.as_str())?;
             }
             Instruction::AugAssign(stmt) => {
                 let update = |ctx: &mut Self, left: Id| -> Result<Id> {
@@ -2276,6 +2534,10 @@ impl Context {
                 let value = eval(self, e)?;
                 iterators.push(self.iterator(value)?);
             }
+            Instruction::Await(e) => {
+                let value = eval(self, e)?;
+                iterators.push(self.await_iterator(value)?);
+            }
             Instruction::Next(_, _) | Instruction::Delegate => {
                 let delegated = matches!(op, Instruction::Delegate);
                 let iter = *iterators.last().expect("active source iterator");
@@ -2283,7 +2545,7 @@ impl Context {
                 let item = if let Some(outcome) = advanced.take() {
                     outcome?
                 } else if thrown.is_none()
-                    && code.generator
+                    && code.kind != FunctionKind::Plain
                     && let Value::Generator { code, .. } = self.heap.get(iter)
                     && !matches!(self.code_object(*code).body, Body::Native(_))
                 {
@@ -2339,7 +2601,7 @@ impl Context {
                 }));
             }
             Instruction::Import { module, alias } => {
-                let mut imported = self.import_source_module(owner, scope, module, None)?;
+                let mut imported = self.import_source_module(owner, scope, module, None, 0)?;
                 let mut parts = module.split('.');
                 let first = parts.next().expect("nonempty module name");
                 if alias.is_some() {
@@ -2350,8 +2612,8 @@ impl Context {
                 }
                 self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
             }
-            Instruction::From(module, names) => {
-                let m = self.import_source_module(owner, scope, module, Some(names))?;
+            Instruction::From(module, level, names) => {
+                let m = self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
                     let name = self.text(name);
                     let v = self.op("from", m, name, NONE)?;
@@ -2387,14 +2649,22 @@ impl Context {
                 let defaults = self.dict(vec![]);
                 let mut bases = None;
                 let sig = match &definition.kind {
-                    DefinitionKind::Class(expressions) => {
+                    DefinitionKind::Class(args) => {
                         let mut values = Vec::new();
-                        for expression in expressions {
-                            let base = eval(self, expression)?;
-                            self.heap.keep(base);
-                            values.push(base);
+                        let mut total = None;
+                        if let Some(args) = args {
+                            for expression in &args.args {
+                                let base = eval(self, expression)?;
+                                self.heap.keep(base);
+                                values.push(base);
+                            }
+                            if let Some(keyword) = args.find_keyword("total") {
+                                let value = eval(self, &keyword.value)?;
+                                self.heap.keep(value);
+                                total = Some(value);
+                            }
                         }
-                        bases = Some(self.alloc(Value::List(values)));
+                        bases = Some((self.alloc(Value::List(values)), total));
                         serde_json::json!({})
                     }
                     DefinitionKind::Function(p) => {
@@ -2415,6 +2685,9 @@ impl Context {
                             }
                         }
                         sig["class_cell"] = serde_json::json!(child.class_cell);
+                        sig["scope_locals"] =
+                            serde_json::json!(child.locals.iter().collect::<BTreeSet<_>>());
+                        sig["scope_locals_complete"] = true.into();
                         sig
                     }
                 };
@@ -2428,7 +2701,23 @@ impl Context {
                     *existing
                 } else {
                     let parameters = self.text(sig.to_string());
+                    let freevars = if code.name != "<module>"
+                        && code.class_attributes.is_none()
+                        && child.class_attributes.is_none()
+                        && !child.class_cell
+                    {
+                        self.enclosing_freevars(scope, child.reads.iter().map(String::as_str))
+                    } else {
+                        None
+                    };
                     let id = self.box_source_code(child.clone(), Some(parameters));
+                    if let Some(names) = freevars {
+                        let Value::Code(nested) = self.heap.get_mut(id) else {
+                            unreachable!()
+                        };
+                        nested.freevars = names;
+                        nested.closure_supported = true;
+                    }
                     let Value::Code(parent) = self.heap.get_mut(owner) else {
                         unreachable!()
                     };
@@ -2442,9 +2731,8 @@ impl Context {
                     scope
                 };
                 let mut value = self.source_function(code, defining_scope, defaults);
-                if let Some(bases) = bases {
-                    let name = self.heap.code_name(&child.name);
-                    value = self.class(name, bases, value)?;
+                if let Some((bases, total)) = bases {
+                    value = self.class(bases, value, total, false)?;
                 }
                 for decorator in decorators.into_iter().rev() {
                     value = self.call(decorator, vec![value], Vec::new())?;
@@ -2588,6 +2876,23 @@ impl Context {
         Ok(truth)
     }
 
+    /// A function-local read or deletion must not fall back to a same-named global.
+    fn check_source_local(&self, code: &Program, scope: Id, name: &str) -> Result<()> {
+        if code.class_attributes.is_none()
+            && code.name != "<module>"
+            && code.locals.contains(name)
+            && self.scope_name(scope, name).is_none()
+        {
+            return Err(Error::new(
+                "UnboundLocalError",
+                format!(
+                    "cannot access local variable '{name}' where it is not associated with a value"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -2600,21 +2905,39 @@ impl Context {
                 {
                     return self.lookup(self.root_scope(scope), name);
                 }
-                if code.class_attributes.is_none()
-                    && code.name != "<module>"
-                    && code.locals.contains(name)
-                    && self.scope_name(scope, name).is_none()
-                {
-                    return Err(Error::new(
-                        "UnboundLocalError",
-                        format!(
-                            "cannot access local variable '{name}' where it is not associated with a value"
-                        ),
-                    ));
-                }
+                self.check_source_local(code, scope, name)?;
                 self.lookup(scope, name)
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
+            Expr::TString(template) => {
+                let strings = code.literals[&expr.range()];
+                let mut interpolations = Vec::new();
+                for field in template
+                    .value
+                    .iter()
+                    .flat_map(|s| s.elements.interpolations())
+                {
+                    let spec =
+                        imre_ast::strings::template_format_spec(field).map_err(unsupported)?;
+                    let spelling = code
+                        .template_expressions
+                        .get(&field.start())
+                        .ok_or_else(|| unsupported("t-string expression spelling"))?;
+                    let value = eval(self, &field.expression)?;
+                    let expression = self.text(spelling);
+                    let conversion = field
+                        .conversion
+                        .to_char()
+                        .map_or(NONE, |c| self.text(c.to_string()));
+                    let spec = match spec {
+                        Some(lit) => code.literals[&lit.range()],
+                        None => self.text(""),
+                    };
+                    interpolations
+                        .push(self.template_interpolation(value, expression, conversion, spec)?);
+                }
+                Ok(self.template_from_literal(strings, interpolations))
+            }
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {
@@ -2643,6 +2966,9 @@ impl Context {
                 Ok(self.alloc(Value::List(items)))
             }
             Expr::Tuple(v) => {
+                if let Some(&id) = code.literals.get(&v.range()) {
+                    return Ok(id);
+                }
                 let items = v
                     .elts
                     .iter()

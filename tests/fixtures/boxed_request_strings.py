@@ -21,6 +21,11 @@ class CustomAlnum(str):
         return "override"
 
 
+class CustomAscii(str):
+    def isascii(self):
+        return "override"
+
+
 class CustomUpper(str):
     def isupper(self):
         return "override"
@@ -118,6 +123,15 @@ def current():
         print(value.isalnum(), str.isalnum(value))
     for call in (lambda: str.isalnum(), lambda: str.isalnum(1), lambda: "a".isalnum(1),
                  lambda: "a".isalnum(value="x")):
+        try:
+            call()
+        except TypeError as error:
+            print(error)
+    for value in ("", "\0\x7f", "A\x80", "🦊", "\ud800", Text("A\udfff"), CustomAscii("a")):
+        saved = value.isascii
+        print(saved(), str.isascii(value))
+    for call in (lambda: str.isascii(), lambda: str.isascii(1), lambda: "a".isascii(1),
+                 lambda: "a".isascii(wrong=1)):
         try:
             call()
         except TypeError as error:

@@ -4,11 +4,13 @@
 use super::value::{Body, Code, Location};
 use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
+use crate::objects::logging::HandlerLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 enum Argument {
     Lock(Arc<PrimitiveLock>),
+    RLock(Arc<HandlerLock>),
     Builtin(&'static str),
 }
 
@@ -39,6 +41,33 @@ impl Callback {
         pos: &[Id],
         kwargs: Option<Id>,
     ) -> Result<Option<(Self, Vec<Id>)>> {
+        Self::capture_checked(ctx, target, args, pos, kwargs, false)
+    }
+
+    /// Thread.run cannot invoke its parent's excepthook, so only certified lock operations qualify.
+    pub(super) fn capture_for_thread(
+        ctx: &Context,
+        target: Id,
+        args: Id,
+        kwargs: Id,
+    ) -> Result<Option<(Self, Vec<Id>)>> {
+        let (Value::Tuple(pos) | Value::List(pos)) = ctx.heap.get(args) else {
+            return Err(unsupported());
+        };
+        if !matches!(ctx.heap.get(kwargs), Value::Dict(_)) {
+            return Err(unsupported());
+        }
+        Self::capture_checked(ctx, target, args, pos, Some(kwargs), true)
+    }
+
+    fn capture_checked(
+        ctx: &Context,
+        target: Id,
+        args: Id,
+        pos: &[Id],
+        kwargs: Option<Id>,
+        high_level: bool,
+    ) -> Result<Option<(Self, Vec<Id>)>> {
         let Value::Function {
             code,
             scope,
@@ -67,6 +96,9 @@ impl Callback {
         let Some(names) = meta["thread_parameters"].as_array() else {
             return Ok(None);
         };
+        if high_level && meta["thread_worker_locks"].as_array() != Some(names) {
+            return Ok(None);
+        }
         let kw = kwargs
             .and_then(|id| ctx.dict_entries(id))
             .unwrap_or_default();
@@ -107,10 +139,13 @@ impl Callback {
             let id = slot.ok_or_else(unsupported)?;
             let value = match ctx.heap.get(id) {
                 Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
-                Value::Native(name) if name == "_thread._count" => {
+                Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
+                Value::Native(name) if !high_level && name == "_thread._count" => {
                     Argument::Builtin("_thread._count")
                 }
-                Value::Native(name) if name == "sys.exit" => Argument::Builtin("sys.exit"),
+                Value::Native(name) if !high_level && name == "sys.exit" => {
+                    Argument::Builtin("sys.exit")
+                }
                 _ => return Err(unsupported()),
             };
             roots.push(id);
@@ -164,8 +199,11 @@ impl Callback {
         for value in self.values {
             let id = match value {
                 Argument::Lock(lock) => *aliases
-                    .entry(Arc::as_ptr(&lock))
+                    .entry(Arc::as_ptr(&lock).cast::<()>())
                     .or_insert_with(|| ctx.alloc(Value::PrimitiveLock(lock))),
+                Argument::RLock(lock) => *aliases
+                    .entry(Arc::as_ptr(&lock).cast::<()>())
+                    .or_insert_with(|| ctx.alloc(Value::HandlerLock(lock))),
                 Argument::Builtin(name) => ctx.builtin(name),
             };
             args.push(id);

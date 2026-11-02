@@ -13,6 +13,20 @@ from _imre_importlib import (
 from os import fspath as _fspath, sep
 
 
+# Boxed source directories are searched directly; only ZIP path finders are cached.
+_zip_path_importers = {}
+
+
+def _invalidate_default_path_caches():
+    if hasattr(sys, "path_hooks") or hasattr(sys, "path_importer_cache"):
+        raise NotImplementedError("custom sys.path_hooks and sys.path_importer_cache")
+    for path, finder in list(_zip_path_importers.items()):
+        if finder is None or not path.startswith("/"):
+            del _zip_path_importers[path]
+        elif hasattr(finder, "invalidate_caches"):
+            finder.invalidate_caches()
+
+
 def _cache_path(path):
     path = _fspath(path)
     if isinstance(path, bytes):
@@ -68,6 +82,12 @@ class SourceFileLoader:
     def is_package(self, fullname):
         filename = self.get_filename(fullname).rpartition(sep)[2]
         return filename.rsplit(".", 1)[0] == "__init__" and fullname.rpartition(".")[2] != "__init__"
+
+    def get_resource_reader(self, name=None):
+        if name is not None and self.name != name:
+            raise ImportError(f"loader for {self.name} cannot handle {name}", name=name)
+        from importlib.resources._filesystem import FileReader
+        return FileReader(self)
 
     def path_stats(self, path):
         return _path_stats(path)

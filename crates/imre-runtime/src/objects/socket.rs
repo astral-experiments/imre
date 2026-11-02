@@ -12,6 +12,7 @@ use std::ptr;
 
 pub(super) struct Socket {
     family: i32,
+    kind: i32,
     fd: RawFd,
     blocking: bool,
     readers: usize,
@@ -32,14 +33,17 @@ impl Socket {
         if fd == -1 {
             return Ok(());
         }
-        // SAFETY: the object relinquishes the descriptor before close. Do not retry
-        // on EINTR: the kernel may have reused the number. Python can also have
-        // explicitly closed fileno() via os.close; EBADF is an ordinary socket error.
-        match checked(unsafe { libc::close(fd) }) {
-            Ok(_) => Ok(()),
-            Err(e) if e.raw_os_error() == Some(libc::ECONNRESET) => Ok(()),
-            Err(e) => Err(e),
-        }
+        close_fd(fd)
+    }
+}
+
+/// Close a raw socket descriptor once, including when close reports EINTR.
+pub(crate) fn close_fd(fd: RawFd) -> io::Result<()> {
+    // SAFETY: close takes only a descriptor number. Retrying could close a reused fd.
+    match checked(unsafe { libc::close(fd) }) {
+        Ok(_) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(libc::ECONNRESET) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -150,6 +154,10 @@ pub(crate) fn family(s: &Object) -> i32 {
     state(s, |s| s.family)
 }
 
+pub(crate) fn kind(s: &Object) -> i32 {
+    state(s, |s| s.kind)
+}
+
 pub(crate) fn fd(s: &Object) -> RawFd {
     state(s, |s| s.fd)
 }
@@ -215,7 +223,7 @@ fn setopt(fd: RawFd, level: i32, name: i32, value: i32) -> io::Result<()> {
     Ok(())
 }
 
-fn handle(raw: RawFd, blocking: bool, family: i32) -> Result<crate::ObjectOwner> {
+fn handle(raw: RawFd, blocking: bool, family: i32, kind: i32) -> Result<crate::ObjectOwner> {
     // SAFETY: the kernel transferred a new fd; every path now has an owner.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
     #[cfg(not(target_os = "linux"))]
@@ -229,6 +237,7 @@ fn handle(raw: RawFd, blocking: bool, family: i32) -> Result<crate::ObjectOwner>
     crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Socket(Socket {
         fd: fd.into_raw_fd(),
         family,
+        kind,
         blocking,
         readers: 0,
         close_requested: false,
@@ -241,17 +250,20 @@ pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwne
     let family = if family == -1 { libc::AF_INET } else { family };
     let ty = if ty == -1 { libc::SOCK_STREAM } else { ty };
     let proto = if proto == -1 { 0 } else { proto };
-    if !matches!(family, libc::AF_INET | libc::AF_INET6) || ty != libc::SOCK_STREAM {
+    if !matches!(family, libc::AF_INET | libc::AF_INET6)
+        || !matches!(ty, libc::SOCK_STREAM | libc::SOCK_DGRAM)
+    {
         return Err(Error::new(
             Kind::NotImplementedError,
-            "only Internet stream sockets are supported",
+            "only Internet stream and datagram sockets are supported",
         ));
     }
+    let kind = ty;
     #[cfg(target_os = "linux")]
     let ty = ty | libc::SOCK_CLOEXEC;
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
     let raw = checked(unsafe { libc::socket(family, ty, proto) }).map_err(errno_error)?;
-    handle(raw, true, family)
+    handle(raw, true, family, kind)
 }
 
 #[unsafe(no_mangle)]
@@ -839,7 +851,7 @@ pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, InternetAddress)
         })
     })
     .map_err(errno_error)?;
-    let child = handle(child, true, family(s))?;
+    let child = handle(child, true, family(s), kind(s))?;
     // SAFETY: the kernel filled the supplied storage, and child owns its fd on errors.
     let addr = unsafe { InternetAddress::read((&raw const addr).cast(), len) }?;
     Ok((child, addr))
@@ -1044,11 +1056,11 @@ pub extern "C" fn imre_socket_getblocking(s: &Object) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
     let result = (|| {
-        let (raw, blocking, family) = state(s, |s| (s.fd, s.blocking, s.family));
+        let (raw, blocking, family, kind) = state(s, |s| (s.fd, s.blocking, s.family, s.kind));
         // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
         let copy =
             checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, blocking, family)?;
+        let child = handle(copy, blocking, family, kind)?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
         set_blocking(copy, blocking).map_err(errno_error)?;
         Ok(crate::ObjectOwner::into_raw(child))
@@ -1115,25 +1127,32 @@ pub extern "C" fn imre_socket_setsockopt_bytes(
     );
 }
 
+pub(crate) fn get_option_into(
+    s: &Object,
+    level: i32,
+    name: i32,
+    buffer: &mut [u8],
+) -> Result<usize> {
+    let mut len = libc::socklen_t::try_from(buffer.len())
+        .map_err(|_| Error::new(Kind::OverflowError, "getsockopt buffer too large"))?;
+    // SAFETY: the buffer is writable for the supplied capacity; the kernel returns its used length.
+    checked(unsafe {
+        libc::getsockopt(fd(s), level, name, buffer.as_mut_ptr().cast(), &raw mut len)
+    })
+    .map_err(errno_error)?;
+    Ok(len as usize)
+}
+
+pub(crate) fn get_option(s: &Object, level: i32, name: i32) -> Result<i32> {
+    let mut bytes = [0; size_of::<i32>()];
+    get_option_into(s, level, name, &mut bytes)?;
+    Ok(i32::from_ne_bytes(bytes))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_getsockopt(s: &Object, level: usize, name: usize) -> usize {
     finish(
-        (|| {
-            let mut value: i32 = 0;
-            let mut len = size_of_val(&value) as libc::socklen_t;
-            // SAFETY: the caller requests a scalar option; the kernel may write at most sizeof(int).
-            checked(unsafe {
-                libc::getsockopt(
-                    fd(s),
-                    c_int(level)?,
-                    c_int(name)?,
-                    (&raw mut value).cast(),
-                    &raw mut len,
-                )
-            })
-            .map_err(errno_error)?;
-            Ok(word(value))
-        })(),
+        (|| get_option(s, c_int(level)?, c_int(name)?).map(word))(),
         word(0),
     )
 }
@@ -1148,7 +1167,7 @@ mod tests {
         use std::os::unix::net::UnixDatagram;
 
         let (sender, socket) = UnixDatagram::pair().unwrap();
-        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_UNIX)
+        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_UNIX, libc::SOCK_DGRAM)
             .ok()
             .expect("socket handle");
         sender.send(b"larger packet").unwrap();
@@ -1171,7 +1190,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (socket, _) = listener.accept().unwrap();
-        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_INET)
+        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_INET, libc::SOCK_STREAM)
             .ok()
             .expect("socket handle");
         sender.write_all(&[0x5a; 258]).unwrap();

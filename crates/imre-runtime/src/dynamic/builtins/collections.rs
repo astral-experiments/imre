@@ -583,9 +583,10 @@ pub(super) fn construct(
     match name {
         "list" => Ok(ctx.alloc(Value::List(items))),
         "tuple"
-            if args
-                .first()
-                .is_some_and(|&id| matches!(ctx.heap.get(id), Value::List(_))) =>
+            if items.is_empty()
+                || args
+                    .first()
+                    .is_some_and(|&id| matches!(ctx.heap.get(id), Value::List(_))) =>
         {
             Ok(ctx.heap.packed_tuple(items, false))
         }
@@ -1160,7 +1161,7 @@ fn find_list_item(
 }
 
 /// Extend the list from a concrete sequence or consume the source iterator in order.
-fn list_extend(ctx: &mut Context, receiver: Id, source: Id) -> Result<()> {
+pub(in crate::dynamic) fn list_extend(ctx: &mut Context, receiver: Id, source: Id) -> Result<()> {
     // Self-extension snapshots the destination, including a list subclass's payload.
     let source = if ctx.scalar_value(source) == receiver {
         receiver

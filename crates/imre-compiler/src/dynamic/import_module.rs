@@ -27,6 +27,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
+                        section("def ismodule(object):", "def isclass(object):"),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
@@ -36,6 +37,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "urllib.parse" => Some((
+            "urllib/parse.py",
+            include_str!("../../stdlib/urllib/parse.py"),
+        )),
         "annotationlib" => Some((
             "annotationlib.py",
             include_str!("../../stdlib/annotationlib.py"),
@@ -68,10 +73,21 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/unittest/boxed_runner.py"),
             ),
         )),
+        "unittest.mock" => Some((
+            "unittest/mock.py",
+            concat!(
+                include_str!("../../stdlib/unittest/mock.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_mock.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_patch.py"),
+            ),
+        )),
         "unittest.loader" => Some((
             "unittest/loader.py",
             include_str!("../../stdlib/unittest/loader_boxed.py"),
         )),
+        "threading" => Some(("threading.py", include_str!("../../stdlib/threading.py"))),
         "textwrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("textwrap.py", SOURCE.get_or_init(|| {
@@ -87,6 +103,14 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 format!("{implementation}{functions}")
             })))
         }
+        "importlib.resources" => Some((
+            "importlib/resources/__init__.py",
+            include_str!("../../stdlib/importlib/resources/__init__.py"),
+        )),
+        "importlib.resources._filesystem" => Some((
+            "importlib/resources/_filesystem.py",
+            include_str!("../../stdlib/importlib/resources/_filesystem.py"),
+        )),
         "importlib.util" => Some((
             "importlib/util.py",
             include_str!("../../stdlib/importlib/util.py"),
