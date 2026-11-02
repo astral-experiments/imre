@@ -1226,6 +1226,8 @@ pub(crate) enum Builtin {
     ListAllI32,
     /// Best-effort bounded capacity hint for one empty loop output list.
     ListReserveRange,
+    /// Extend a proven periodic packed prefix and return the ordinal where normal iteration resumes.
+    StructCyclePrefix,
     /// The guarded loop proves all elements fit i32 and cannot be replaced.
     ListGetI32,
     /// Every call site and intervening operation preserve these exact element
