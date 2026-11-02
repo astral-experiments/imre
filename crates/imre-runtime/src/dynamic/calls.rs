@@ -3750,10 +3750,13 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("{}.{name}", weakref::REFERENCE_TYPE)));
             }
-            Value::Native(ref method)
-                if method == weakref::REFERENCE_HASH && name == "__qualname__" =>
+            Value::Native(ref builtin)
+                if name == "__qualname__"
+                    && let Some(qualified) = builtin.strip_prefix("weakref.")
+                    && (builtin == weakref::REFERENCE_HASH
+                        || self.builtin_type_name(obj) == Some("type")) =>
             {
-                return Ok(self.text("ReferenceType.__hash__"));
+                return Ok(self.text(qualified.to_owned()));
             }
             Value::Native(ref builtin)
                 if name == "__module__"
