@@ -99,6 +99,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/zipimport_source.py"),
             ),
         )),
+        "importlib.metadata._files" => Some((
+            "importlib/metadata/_files.py",
+            include_str!("../stdlib/importlib/metadata_files.py"),
+        )),
         "importlib.metadata._adapters" => Some((
             "importlib/metadata/_adapters.py",
             include_str!("../stdlib/importlib/metadata_adapters.py"),
@@ -1207,11 +1211,23 @@ impl IntrinsicModule {
             (Self::ImportlibMetadata, "Distribution") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.Distribution")
             }
+            (Self::ImportlibMetadata, "PackagePath") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.PackagePath")
+            }
+            (Self::ImportlibMetadata, "FileHash") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.FileHash")
+            }
+            (Self::ImportlibMetadata, "files") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.files")
+            }
             (Self::ImportlibMetadata, "PathDistribution") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.PathDistribution")
             }
             (Self::ImportlibMetadata, "distributions") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.distributions")
+            }
+            (Self::ImportlibMetadata, "requires") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.requires")
             }
             (Self::ImportlibMetadata, "metadata") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.metadata")

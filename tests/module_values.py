@@ -91,6 +91,7 @@ def write_distribution_archive(directory: Path) -> None:
     with ZipFile(directory / "packages.whl", "w", ZIP_DEFLATED) as archive:
         archive.writestr("demo_tools-7.dist-info/METADATA", "Name: Renamed-Tools\r\nVersion: 2.9\r\n")
         archive.writestr("demo_tools-7.dist-info/entry_points.txt", "[cli]\nrun = demo:main\n")
+        archive.writestr("demo_tools-7.dist-info/RECORD", "demo_tools-7.dist-info/METADATA,,\nmissing,,\n")
         archive.writestr("legacy.egg-info", "Name: Other\nVersion: 1\n")
     with ZipFile(directory / "replacement.whl", "w", ZIP_DEFLATED) as archive:
         archive.writestr("demo_tools-7.dist-info/METADATA", "Name: Renamed-Tools\nVersion: 3.1\n")
