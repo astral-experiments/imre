@@ -2722,7 +2722,13 @@ impl Heap {
     }
 
     /// Release an expression while preserving its result and earlier operands.
-    pub(super) fn discard_operands(&mut self, mark: usize, result: Id, modules: Id) -> bool {
+    pub(super) fn discard_operands(
+        &mut self,
+        mark: usize,
+        result: Id,
+        modules: Id,
+        stdin: Option<&[Id; 3]>,
+    ) -> bool {
         if !self.tracks_finalizers() {
             return false;
         }
@@ -2755,11 +2761,15 @@ impl Heap {
         if result != NONE {
             self.keep(result);
         }
+        // Discarded operands can be the last strong path to a weakly observed object.
+        // Preserve the existing trace in that case, including for nested operands.
+        let stdin = stdin.filter(|_| self.weak.is_empty());
         self.file_writers
             .iter()
             .chain(&self.ordinary_finalizers)
             .any(|&writer| {
                 writer != result
+                    && !stdin.is_some_and(|chain| chain.contains(&writer))
                     && !self.active_binding_matches(|bound| {
                         let mut budget = 8;
                         self.keeps_finalizer(bound, writer, &mut budget)
@@ -2769,7 +2779,12 @@ impl Heap {
 
     /// A consumed truth value cannot retain its receiver into the next operand.
     /// Earlier operands of enclosing expressions stay below this mark.
-    pub(super) fn discard_truth_operands(&mut self, mark: usize, modules: Id) -> bool {
+    pub(super) fn discard_truth_operands(
+        &mut self,
+        mark: usize,
+        modules: Id,
+        stdin: Option<&[Id; 3]>,
+    ) -> bool {
         let weak_release = self.has_weak_values
             && self
                 .frames
@@ -2779,7 +2794,7 @@ impl Heap {
                 .iter()
                 .skip(mark)
                 .any(|&id| self.weak_edge(id) && !self.bound_in_active_frame(id));
-        let finalizer_release = self.discard_operands(mark, NONE, modules);
+        let finalizer_release = self.discard_operands(mark, NONE, modules, stdin);
         self.release_temporaries_since(mark);
         weak_release || finalizer_release
     }
@@ -3816,9 +3831,9 @@ mod tests {
         let modules = heap.alloc(Value::Dict(vec![(NONE, module)].into()));
         let mark = heap.temporary_mark();
         heap.keep(module);
-        assert!(!heap.discard_operands(mark, NONE, modules));
+        assert!(!heap.discard_operands(mark, NONE, modules, None));
         *heap.get_mut(modules) = Value::Dict(Default::default());
-        assert!(heap.discard_operands(mark, NONE, modules));
+        assert!(heap.discard_operands(mark, NONE, modules, None));
     }
 
     #[test]
