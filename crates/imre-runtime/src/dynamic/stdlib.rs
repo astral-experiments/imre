@@ -9,7 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
-mod audit;
+pub(super) mod audit;
 mod binascii;
 pub(super) mod codecs;
 mod contextvars;
@@ -805,6 +805,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if super::lowlevel_threads::function_name(name).is_some() {
+        return super::lowlevel_threads::call(ctx, name, args, kwargs);
+    }
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
     }

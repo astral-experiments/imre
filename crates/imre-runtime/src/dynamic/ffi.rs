@@ -575,6 +575,18 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     crate::integer_text::imre_integer_digits_init(u32::from(
         config["isolated"].as_bool().unwrap_or(false),
     ));
+    // SAFETY: main supplies argc pointers to NUL-terminated strings that remain
+    // valid while the constructor consumes this iterator.
+    let args = unsafe { slice::from_raw_parts(argv, argc as usize) }
+        .iter()
+        .map(|&s| unsafe { CStr::from_ptr(s) }.to_string_lossy());
+    Box::into_raw(Box::new(new_context(config, args)))
+}
+
+pub(super) fn new_context<S: Into<String>>(
+    config: serde_json::Value,
+    args: impl IntoIterator<Item = S>,
+) -> Context {
     let executable = config["executable"]
         .as_str()
         .map(PathBuf::from)
@@ -582,6 +594,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         .unwrap_or_default();
     let mut ctx = Context {
         heap: Heap::new(),
+        threads: Default::default(),
         config,
         executable,
         argv: NONE,
@@ -610,14 +623,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         slot_depth: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
-    // SAFETY: ABI main supplies argc pointers, valid to the end of the call.
-    let args = unsafe { slice::from_raw_parts(argv, argc as usize) }
-        .iter()
-        .map(|&s| {
-            // SAFETY: native argv entries are valid NUL-terminated strings.
-            ctx.text(unsafe { CStr::from_ptr(s) }.to_string_lossy())
-        })
-        .collect();
+    let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
     let paths: Vec<String> =
         serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
@@ -629,7 +635,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
     // Resolving the handler after an allocation failure must not grow the builtin cache.
     ctx.builtin("MemoryError");
-    Box::into_raw(Box::new(ctx))
+    ctx
 }
 
 #[unsafe(no_mangle)]
@@ -952,7 +958,7 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
 }
 
 impl Context {
-    fn prelinked_code(
+    pub(super) fn prelinked_code(
         &mut self,
         entry: Code,
         scope: Id,
@@ -1261,6 +1267,7 @@ impl Context {
     }
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
+        self.threads.reap(&mut self.heap);
         (
             &mut self.heap,
             self.classes
@@ -1272,6 +1279,7 @@ impl Context {
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
                 .copied()
+                .chain(self.threads.roots())
                 .chain(self.contexts.iter().copied())
                 .chain(self.bytearray_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))

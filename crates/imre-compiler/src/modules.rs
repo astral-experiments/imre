@@ -1289,6 +1289,10 @@ impl IntrinsicModule {
             (Self::Thread | Self::Threading, "TIMEOUT_MAX") => {
                 Intrinsic::ObjectRuntimeExport("_thread.TIMEOUT_MAX")
             }
+            (Self::Thread, "_count") => Intrinsic::ObjectRuntimeExport("_thread._count"),
+            (Self::Thread, "start_new_thread") => {
+                Intrinsic::ObjectRuntimeExport("_thread.start_new_thread")
+            }
             (Self::Threading, "Lock") | (Self::Thread, "LockType") => {
                 Intrinsic::ObjectRuntimeExport("_thread.lock")
             }
