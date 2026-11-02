@@ -225,6 +225,12 @@ pub(super) fn call(
                 store(ctx, zone, NONE)
             })
         }
+        "datetime.now" => {
+            let [tz] =
+                crate::dynamic::builtins::bind_method_arguments("now", args, kwargs, ["tz"], 1)?;
+            let tz = tz.unwrap_or(NONE);
+            Ok(store(ctx, Calendar::now(zone(ctx, tz)?.as_ref())?, tz))
+        }
         "datetime.fromtimestamp" => {
             let [timestamp, tz] = bind("fromtimestamp", args, kwargs, ["timestamp", "tz"])?;
             let tz = tz.unwrap_or(NONE);
