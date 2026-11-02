@@ -2,6 +2,7 @@
 
 import argparse
 import errno
+import importlib.util
 import json
 import os
 import platform
@@ -1344,7 +1345,7 @@ def main():
             target["python_version"] + ".0",
         ]
 
-        def compare(*args, extra=None, status=0, native_args=None, native_timeout=60):
+        def compare(*args, extra=None, status=0, stderr=b"", native_args=None, native_timeout=60):
             expected = run(sys.executable, *args, extra=extra)
             actual = run(imre, *(args if native_args is None else native_args), extra=extra, timeout=native_timeout)
             assert actual.returncode == expected.returncode == status, (
@@ -1357,7 +1358,7 @@ def main():
                 actual.stdout,
                 expected.stdout,
             )
-            assert actual.stderr == expected.stderr == b"", (
+            assert actual.stderr == expected.stderr == stderr, (
                 args,
                 actual.stderr,
                 expected.stderr,
@@ -1408,6 +1409,17 @@ def main():
             for prefix in ("", "sub/"):
                 app.writestr(prefix + "__main__.py", (entry / "__main__.py").read_text())
                 app.writestr(prefix + "sibling.py", f"marker = {prefix!r}\n")
+        # A .pyc operand is never Python source, even when its bytes form a valid script.
+        bytecode = root / "not_source.pyc"
+        bytecode.write_text("print('executed as source')\n")
+        compare(bytecode, status=1, stderr=b"RuntimeError: Bad magic number in .pyc file\n")
+        bytecode.write_bytes(b"")
+        compare(bytecode, status=1, stderr=b"EOFError: EOF read where not expected\n")
+        if sys.version_info[:2] == (3, 14):
+            renamed = root / "bad_bytecode"
+            renamed.write_bytes(importlib.util.MAGIC_NUMBER[:2] + b"xx")
+            compare(renamed, status=1, stderr=b"RuntimeError: Bad magic number in .pyc file\n")
+
         compare("application", "tail")
         compare("-I", "./application/sub", "-h")
 
