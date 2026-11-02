@@ -172,3 +172,18 @@ def current():
             raise RuntimeError("list initialization uses indexing")
 
     assert list(array("i", EmptyList([4,5]))) == [4,5]
+
+    from io import BytesIO
+    sample = array('i', [0x12345678])
+    source = BytesIO(sample.tobytes())
+    appended = array('i')
+    try:
+        appended.fromfile(source, 2)
+    except EOFError:
+        pass
+    else:
+        raise AssertionError("expected a short array read")
+    assert appended.tolist() == sample.tolist()
+    with memoryview(appended) as view:
+        assert array.byteswap(appended) is None
+        assert view.tobytes() == sample.tobytes()[::-1]
