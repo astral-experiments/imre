@@ -1157,6 +1157,12 @@ impl IntrinsicModule {
             (Self::Gc, "enable") => Intrinsic::ObjectRuntimeExport("gc.enable"),
             (Self::Gc, "isenabled") => Intrinsic::ObjectRuntimeExport("gc.isenabled"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
+            (Self::Codecs, "utf_16_ex_decode") => {
+                Intrinsic::ObjectRuntimeExport("codecs.utf_16_ex_decode")
+            }
+            (Self::CodecsNative, "utf_16_ex_decode") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.utf_16_ex_decode")
+            }
             (Self::Codecs, "escape_decode") => {
                 Intrinsic::ObjectRuntimeExport("codecs.escape_decode")
             }

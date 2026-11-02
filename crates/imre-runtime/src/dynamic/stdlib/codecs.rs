@@ -4,6 +4,8 @@ use std::collections::HashMap;
 mod bytes_escape;
 mod raw_unicode_escape;
 mod surrogate_utf8;
+mod utf16;
+pub(super) use utf16::extended as utf16_extended;
 
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{Codec, CodecInfo, DecodeIssue, Object, StrEncoder, Utf16Order};
@@ -148,14 +150,34 @@ pub(super) fn builtin_handler(
     let start = ctx.lookup_attr(*exception, "start")?;
     let end = ctx.lookup_attr(*exception, "end")?;
     let (start, end) = (ctx.as_integer(start)?, ctx.as_integer(end)?);
-    let pass_utf8 = if name == "surrogatepass" {
+    let (pass_utf8, pass_utf16) = if name == "surrogatepass" {
         let encoding = ctx.lookup_attr(*exception, "encoding")?;
         let encoding = ctx.str_value(encoding)?;
-        ["utf-8", "utf_8", "utf8", "cp65001"]
+        let utf8 = ["utf-8", "utf_8", "utf8", "cp65001"]
             .iter()
-            .any(|key| encoding.eq_ignore_ascii_case(key))
+            .any(|key| encoding.eq_ignore_ascii_case(key));
+        // The C codec handler reads the encoding name up to its first NUL.
+        let encoding = encoding.split('\0').next().unwrap_or_default();
+        let utf16 = ["utf16", "utf-16", "utf_16"].iter().find_map(|prefix| {
+            let (base, suffix) = encoding.split_at_checked(prefix.len())?;
+            if !base.eq_ignore_ascii_case(prefix) {
+                return None;
+            }
+            if suffix.is_empty() {
+                return Some(Utf16Order::from_sign(0));
+            }
+            let suffix = suffix.strip_prefix(['-', '_']).unwrap_or(suffix);
+            if suffix.eq_ignore_ascii_case("le") {
+                Some(Utf16Order::Little)
+            } else if suffix.eq_ignore_ascii_case("be") {
+                Some(Utf16Order::Big)
+            } else {
+                None
+            }
+        });
+        (utf8, utf16)
     } else {
-        false
+        (false, None)
     };
     let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(object)) else {
         return Err(type_error(
@@ -175,6 +197,14 @@ pub(super) fn builtin_handler(
             let codepoint = 0xd000 + (u32::from(*b & 0x3f) << 6) + u32::from(*c & 0x3f);
             let text = ctx.text_codepoints(vec![codepoint]);
             let index = ctx.alloc(Value::Int(crate::Int::from_usize(start + 3)));
+            return Ok(ctx.alloc(Value::Tuple(vec![text, index])));
+        }
+        if let Some(order) = pass_utf16
+            && let Some(unit) = bytes[start..].first_chunk::<2>()
+            && let point @ 0xd800..=0xdfff = order.unit(*unit)
+        {
+            let text = ctx.text_codepoints(vec![u32::from(point)]);
+            let index = ctx.alloc(Value::Int(crate::Int::from_usize(start + 2)));
             return Ok(ctx.alloc(Value::Tuple(vec![text, index])));
         }
         return ctx.op("raise", *exception, NONE, NONE);
