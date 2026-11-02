@@ -189,6 +189,22 @@ impl Calendar {
         datetime_from_fields(fields, zone.map(|z| z.0.clone())).map(Self)
     }
 
+    pub(crate) fn timestamp(&self) -> Result<f64, Error> {
+        with(&self.0, |value| {
+            let Value::Date { local, zone, fold } = value else {
+                unreachable!()
+            };
+            let micros = *local - (EPOCH_ORD - 1) * DAY;
+            if let Some(zone) = zone {
+                return Ok(total_seconds(micros - offset(zone)));
+            }
+            let seconds =
+                conversion::local_candidate(micros.div_euclid(1_000_000) as i64, *fold != 0)?;
+            // CPython adds the fractional second after resolving the local wall time.
+            Ok(seconds as f64 + micros.rem_euclid(1_000_000) as f64 / 1_000_000.0)
+        })
+    }
+
     pub(crate) fn from_timestamp(
         timestamp: &CalendarNumber,
         zone: Option<&Self>,
