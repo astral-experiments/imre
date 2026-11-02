@@ -37,15 +37,13 @@ impl FunctionFields {
     }
 
     pub fn children(self, visit: &mut super::value::MarkQueue<'_>) {
-        visit.extend([
-            self.name,
-            self.qualname,
-            self.module,
-            self.doc,
-            self.annotate,
-            self.type_params,
-            self.dict,
-        ]);
+        visit.push(self.name);
+        visit.push(self.qualname);
+        visit.push(self.module);
+        visit.push(self.doc);
+        visit.push(self.annotate);
+        visit.push(self.type_params);
+        visit.push(self.dict);
         visit.extend(self.annotations);
     }
 }

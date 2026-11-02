@@ -178,12 +178,6 @@ pub(super) fn global(
         out.push(0x93); // STACK_GLOBAL
         return Ok(());
     }
-    if name.contains('.') {
-        return Err(Error::new(
-            "NotImplementedError",
-            "nested pickle globals need protocol 4 or later",
-        ));
-    }
     let (module, name) = if protocol < 3 && fix_imports {
         legacy_global(module, name)?
     } else {
@@ -230,9 +224,18 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             "zip" => ("itertools", "izip"),
             "map" => ("itertools", "imap"),
             "filter" => ("itertools", "ifilter"),
-            "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "list"
-            | "object" | "set" | "slice" | "tuple" | "type" => ("__builtin__", name),
+            "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "iter"
+            | "list" | "object" | "set" | "slice" | "tuple" | "type" | "Ellipsis"
+            | "NotImplemented" => ("__builtin__", name),
             _ => return Err(unsupported()),
+        });
+    }
+    if module == "collections" {
+        return Ok(match name {
+            "UserDict" => ("UserDict", "IterableUserDict"),
+            "UserList" => ("UserList", "UserList"),
+            "UserString" => ("UserString", "UserString"),
+            _ => (module, name),
         });
     }
     if module == "copyreg" {
@@ -248,7 +251,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "_pickle",
         "_socket",
         "_thread",
-        "collections",
         "collections.abc",
         "configparser",
         "dbm",

@@ -36,24 +36,37 @@ pub(super) fn decode(error: io::Error) -> (Option<Site>, io::Error) {
 /// The direct POSIX spawn interface reports its converted filesystem path.
 /// The fork/exec interface retains the caller's original executable object.
 /// This is observable even though both execute the same native program.
-fn uses_posix_spawn(has_directory: bool, cwd: bool, streams: u32, fds: [RawFd; 3]) -> bool {
+pub(super) fn uses_posix_spawn(
+    has_directory: bool,
+    cwd: bool,
+    [stdin, stdout, stderr]: [u32; 3],
+    fds: [RawFd; 3],
+    close_fds: bool,
+) -> bool {
     if !has_directory || cwd {
         return false;
     }
-    let [stdin, stdout, stderr] = [12, 0, 4].map(|shift| (streams >> shift) & 15);
     // Direct spawn requires each redirected child end to be absent or above
     // stderr. Use the original fd, before creating our CLOEXEC duplicates.
     if [stdin, stdout, stderr]
         .into_iter()
         .zip(fds)
-        .any(|(mode, fd)| matches!(mode, 3 | 4 | 8) || matches!(mode, 6 | 7) && fd != -1 && fd <= 2)
+        .any(|(mode, fd)| {
+            matches!(mode, 3 | 4 | 8) || matches!(mode, 1 | 2 | 6 | 7) && fd != -1 && fd <= 2
+        })
         || stdin == 5
         || stderr == 5 && stdout == 0
     {
         return false;
     }
+    let (spawn, closefrom) = posix_spawn_capabilities();
+    spawn && (closefrom || !close_fds)
+}
+
+/// Whether CPython probes the executable directory and can close descriptors during spawn.
+pub(super) fn posix_spawn_capabilities() -> (bool, bool) {
     static CAPABILITIES: std::sync::OnceLock<(bool, bool)> = std::sync::OnceLock::new();
-    let &(spawn, closefrom) = CAPABILITIES.get_or_init(|| {
+    *CAPABILITIES.get_or_init(|| {
         let spawn = match std::env::var_os("_PYTHON_SUBPROCESS_USE_POSIX_SPAWN").as_deref() {
             Some(value) if value == "0" => false,
             Some(value) if value == "1" => true,
@@ -69,8 +82,7 @@ fn uses_posix_spawn(has_directory: bool, cwd: bool, streams: u32, fds: [RawFd; 3
             .is_null()
         };
         (spawn, closefrom)
-    });
-    spawn && (closefrom || streams & (1 << 17) != 0)
+    })
 }
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -129,14 +141,17 @@ pub(super) unsafe fn spawn(
     // SAFETY: the original command and configuration are still rooted.
     unsafe { validate_command_shape(cmd, config) }
         .map_err(|e| popen::error_after_handles(pending, false, e))?;
-    // SAFETY: the caller roots the command until both launch APIs finish validation.
-    let direct = allow_spawn
-        && uses_posix_spawn(
-            unsafe { has_directory(cmd, config) },
-            !config.cwd.is_null(),
-            streams,
-            redirects.fds,
-        );
+    let direct = redirects.direct.unwrap_or_else(|| {
+        allow_spawn
+            && uses_posix_spawn(
+                // SAFETY: the caller roots the command and any explicit executable.
+                unsafe { has_directory(cmd, config) },
+                !config.cwd.is_null(),
+                modes,
+                redirects.fds,
+                streams & (1 << 17) == 0,
+            )
+    });
     // CPython's posix_spawn mapping converter allows an initial '=' but requires
     // a nonempty key. The fork/exec environment list rejects '=' anywhere.
     if let Some(env) = &redirects.environment
@@ -152,28 +167,40 @@ pub(super) unsafe fn spawn(
         return Err(popen::error_after_handles(pending, !direct, error));
     }
     // SAFETY: validation and copying complete before the command may fork.
-    let (launch, cwd, attributes) = unsafe {
-        prepare_command(cmd, config, redirects.environment.take(), || {
-            let attributes = child_attributes(direct)?;
-            if redirects.oversized && !direct {
-                return Err(c_int_overflow());
-            }
-            Ok(attributes)
-        })
+    let (mut launch, cwd, attributes) = unsafe {
+        prepare_command(
+            cmd,
+            config,
+            redirects.environment.take(),
+            redirects.search_path.as_deref(),
+            || {
+                let attributes = child_attributes(direct)?;
+                if redirects.oversized && !direct {
+                    return Err(c_int_overflow());
+                }
+                Ok(attributes)
+            },
+        )
     }
     .map_err(|e| popen::error_after_handles(pending, !direct, e))?;
-    if launch.argv.strings.is_empty() && direct {
-        let error = Error::new(Kind::ValueError, "posix_spawn: argv must not be empty");
-        return Err(popen::error_after_handles(pending, false, error));
+    if direct {
+        // posix_spawn executes the path from the final conversion, even if it is now bare.
+        launch.search = None;
+        let error = match launch.argv.strings.first() {
+            None => Some("posix_spawn: argv must not be empty"),
+            Some(arg) if arg.as_bytes().is_empty() => {
+                Some("posix_spawn: argv first element cannot be empty")
+            }
+            _ => None,
+        };
+        if let Some(message) = error {
+            let error = Error::new(Kind::ValueError, message);
+            return Err(popen::error_after_handles(pending, false, error));
+        }
     }
     if redirects.oversized {
         return Err(popen::error_after_handles(pending, false, c_int_overflow()));
     }
-    let streams = if attributes.keep.is_empty() {
-        streams
-    } else {
-        streams & !(1 << 17) // pass_fds closes all other inherited descriptors
-    };
     let failure_site = redirects.failure_site.take();
     launch
         .spawn_tagged(cwd.as_ref(), streams, redirects, attributes)

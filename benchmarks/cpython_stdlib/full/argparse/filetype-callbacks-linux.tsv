@@ -1,0 +1,28 @@
+lane	ordinal	occurrence	upstream_id	callback	unix_time_s
+CPython	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	startTest	1793633429.2567747
+CPython	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	addSuccess	1793633429.2584078
+CPython	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	stopTest	1793633429.2669683
+CPython	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	startTest	1793633429.2680156
+CPython	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	addSuccess	1793633429.2693567
+CPython	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	stopTest	1793633429.2705188
+CPython	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	startTest	1793633429.2715094
+CPython	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	addSuccess	1793633429.2737246
+CPython	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	stopTest	1793633429.2749636
+Imre O0	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	startTest	1793633484.5684228
+Imre O0	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	addSuccess	1793633487.1417818
+Imre O0	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	stopTest	1793633487.24313
+Imre O0	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	startTest	1793633487.5512424
+Imre O0	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	addSuccess	1793633488.2451396
+Imre O0	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	stopTest	1793633488.3442597
+Imre O0	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	startTest	1793633488.531672
+Imre O0	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	addSuccess	1793633491.646643
+Imre O0	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	stopTest	1793633491.7431026
+Imre O3	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	startTest	1793633984.9807172
+Imre O3	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	addSuccess	1793633991.6250587
+Imre O3	279	1	test.test_argparse.TestFileTypeMissingInitialization.test	stopTest	1793633991.7680345
+Imre O3	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	startTest	1793633992.1979945
+Imre O3	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	addSuccess	1793633993.3112543
+Imre O3	280	1	test.test_argparse.TestFileTypeOpenArgs.test_invalid_file_type	stopTest	1793633993.4701695
+Imre O3	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	startTest	1793633993.7698283
+Imre O3	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	addSuccess	1793633998.7217922
+Imre O3	281	1	test.test_argparse.TestFileTypeOpenArgs.test_open_args	stopTest	1793633998.984541

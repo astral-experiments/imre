@@ -66,6 +66,14 @@ pub(crate) struct SealedDocs {
 }
 
 impl SealedDocs {
+    /// The original Python docstring of a definition within this module.
+    pub(crate) fn object_docstring(&self, qualname: &str) -> Option<&'static str> {
+        self.entries.iter().find_map(|&(name, text)| {
+            let relative = name.strip_prefix(self.module)?.strip_prefix('.')?;
+            (relative == qualname).then_some(text)
+        })
+    }
+
     pub(crate) fn append_to(&self, docs: &mut Vec<(String, String)>) {
         docs.extend(
             self.entries
@@ -275,6 +283,54 @@ impl<'a> Visitor<'a> for Interactive<'_> {
             }
             ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
             _ => walk_stmt(self, stmt),
+        }
+    }
+}
+
+/// Register sources mentioned only in prompts without executing their initializers.
+struct PromptImports<'a, 'fs> {
+    loader: &'a Loader<'fs>,
+    origin: Option<ModuleId>,
+    targets: std::collections::BTreeSet<String>,
+    needs_runtime: bool,
+}
+
+impl PromptImports<'_, '_> {
+    fn module(&mut self, name: &str) {
+        self.needs_runtime |= IntrinsicModule::named(name).is_none();
+        self.targets.insert(name.to_owned());
+    }
+}
+
+impl<'a> ruff_python_ast::statement_visitor::StatementVisitor<'a> for PromptImports<'_, '_> {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        match stmt {
+            ast::Stmt::Import(import) => {
+                for alias in &import.names {
+                    self.module(alias.name.as_str());
+                }
+            }
+            ast::Stmt::ImportFrom(import) => {
+                let module = if import.level == 0 {
+                    import.module.as_ref().map(ToString::to_string)
+                } else {
+                    self.needs_runtime = true;
+                    self.origin
+                        .and_then(|id| self.loader.import_name(id, import).ok())
+                };
+                if let Some(module) = module {
+                    self.module(&module);
+                    // A from-list may bind an existing attribute or load a child module.
+                    self.targets.extend(
+                        import
+                            .names
+                            .iter()
+                            .filter(|a| a.name.as_str() != "*")
+                            .map(|a| format!("{module}.{}", a.name)),
+                    );
+                }
+            }
+            _ => ruff_python_ast::statement_visitor::walk_stmt(self, stmt),
         }
     }
 }
@@ -495,14 +551,16 @@ impl Loader<'_> {
         self.scan(id)
     }
 
-    pub(super) fn doctest_program(&mut self) -> Result<(), String> {
+    pub(super) fn doctest_program(&mut self) -> Result<Vec<String>, String> {
+        use ruff_python_ast::statement_visitor::StatementVisitor;
+
         let Some(suite) = self
             .by_name
             .get("doctest")
             .and_then(|id| self.modules[*id].bindings.get("DocTestSuite"))
             .copied()
         else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         let Binding::Definition(suite) = suite else {
             unreachable!()
@@ -549,6 +607,30 @@ impl Loader<'_> {
                 }
             }
         }
+        let mut imports = PromptImports {
+            loader: self,
+            origin: None,
+            targets: Default::default(),
+            needs_runtime: false,
+        };
+        for (sources, target) in cases.values() {
+            imports.origin = match target {
+                Binding::Module(id) => Some(*id),
+                _ => None,
+            };
+            for source in sources.iter().filter(|source| source.contains("import")) {
+                // The runner handles a skipped prompt or an expected SyntaxError.
+                if let Ok(parsed) = ruff_python_parser::parse_module(source) {
+                    imports.visit_body(&parsed.syntax().body);
+                }
+            }
+        }
+        if imports.needs_runtime {
+            // Run the original prompt with its globals, output capture and option flags.
+            let targets = imports.targets.into_iter().collect();
+            self.needs_object_imports = true;
+            return Ok(targets);
+        }
         let mut source = String::from("from doctest import DocTest\n");
         let mut body = String::from("\ndef _execute(test: DocTest, debug: bool) -> None:\n");
         for (i, (name, (prompts, context))) in cases.into_iter().enumerate() {
@@ -566,6 +648,7 @@ impl Loader<'_> {
         }
         body.push_str("    raise ValueError(\"no native doctest compiled for \" + test.name)\n");
         source.push_str(&body);
-        self.add_doctest_module(RUNNER_MODULE.into(), &source)
+        self.add_doctest_module(RUNNER_MODULE.into(), &source)?;
+        Ok(Vec::new())
     }
 }

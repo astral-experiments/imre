@@ -1,0 +1,152 @@
+import _codecs
+import codecs
+import encodings
+import io
+
+
+def decode(value):
+    if isinstance(value, memoryview):
+        assert value.obj is None and value.readonly
+        views.append(bytes(value))
+    return bytes(value)[::-1].decode(), len(value)
+
+
+def search(name):
+    calls.append(name)
+    if enabled and name == "user_test":
+        return codecs.CodecInfo(
+            name=name,
+            encode=lambda value: (value[::-1].encode(), len(value)),
+            decode=decode,
+        )
+
+
+def miss(name):
+    calls.append("miss:" + name)
+
+
+def custom_escape(name):
+    if name == "raw_unicode_escape":
+        calls.append(name)
+        return (None, lambda value: ("custom", len(value)), None, None)
+
+
+def decode_live(view):
+    assert view.readonly and view.obj is None
+    source[0] = 120
+    assert view[::2].tobytes() == b"xc"
+    retained.append(view)
+    return ("ok", len(view))
+
+
+def live_codec(name):
+    if name == "live_view":
+        return (None, decode_live, None, None)
+
+
+assert codecs.register is _codecs.register
+assert codecs.unregister is _codecs.unregister
+assert codecs.lookup is _codecs.lookup
+
+writer_class = codecs.getwriter(encoding="windows-1251")
+assert writer_class is codecs.lookup("cp1251").streamwriter
+stream = io.BytesIO()
+writer = writer_class(stream)
+writer.write("до свидания\n")
+expected = b"\xe4\xee \xf1\xe2\xe8\xe4\xe0\xed\xe8\xff\n"
+assert stream.getvalue() == expected
+try:
+    writer.write("x☃")
+except UnicodeEncodeError as error:
+    assert (error.object, error.start, error.end) == ("x☃", 1, 2)
+    assert stream.getvalue() == expected
+else:
+    raise AssertionError("strict writer accepted an unencodable character")
+
+
+def replace_snowman(error):
+    assert (error.object, error.start, error.end) == ("ё☃!", 1, 2)
+    return b"<snow>", error.end
+
+
+codecs.register_error("boxed_writer_snowman", replace_snowman)
+writer.errors = "boxed_writer_snowman"
+writer.write("ё☃!")
+assert stream.getvalue() == expected + b"\xb8<snow>!"
+
+
+calls = []
+views = []
+enabled = False
+
+codecs.register(miss)
+codecs.register(search)
+try:
+    codecs.lookup("utf-8")
+    assert calls == []
+    try:
+        codecs.lookup("User-Test")
+    except LookupError:
+        pass
+    else:
+        raise AssertionError("disabled codec was found")
+
+    enabled = True
+    info = codecs.lookup("USER test")
+    assert calls == ["miss:user_test", "user_test"] * 2
+    assert info.name == "user_test"
+    assert codecs.getwriter("user-test") is None
+    info.streamwriter = writer_class
+    assert codecs.getwriter("user-test") is writer_class
+    assert codecs.lookup("user-test") is info
+    assert codecs.encode("abc", "User-Test") == b"cba"
+    assert codecs.decode(b"cba", "user test") == "abc"
+    assert b"cba".decode("user test") == "abc"
+    assert views == [b"cba"]
+    assert len(calls) == 4
+
+    codecs.unregister(lambda name: None)
+    assert codecs.lookup("user_test") is info
+    codecs.unregister(miss)
+    assert codecs.lookup("user_test") is not info
+    assert calls[-1] == "user_test"
+finally:
+    codecs.unregister(miss)
+    codecs.unregister(search)
+
+try:
+    codecs.lookup("user-test")
+except LookupError:
+    pass
+else:
+    raise AssertionError("unregistered codec was still cached")
+
+
+calls.clear()
+codecs.register(custom_escape)
+try:
+    assert codecs.decode(br"\u0042", "raw-unicode-escape") == "B"
+    assert calls == []
+    codecs.unregister(encodings.search_function)
+    try:
+        assert codecs.decode(br"\u0042", "raw-unicode-escape") == "custom"
+        assert codecs.lookup("raw_unicode_escape")[1](b"x") == ("custom", 1)
+        assert calls == ["raw_unicode_escape"]
+    finally:
+        codecs.register(encodings.search_function)
+finally:
+    codecs.unregister(custom_escape)
+
+assert codecs.decode(br"\u0042", "raw-unicode-escape") == "B"
+
+source = bytearray(b"abc")
+retained = []
+codecs.register(live_codec)
+try:
+    assert source.decode("live-view") == "ok"
+    source[1] = 121
+    assert retained[0].tobytes() == b"xyc"
+    source.append(122)
+finally:
+    retained.clear()
+    codecs.unregister(live_codec)

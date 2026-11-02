@@ -1,12 +1,12 @@
 """Iterator tools for runtime-loaded Python."""
 
 
-import itertools as _itertools
+import _imre_itertools as _itertools
 from operator import index as _index
 from sys import maxsize as _maxsize
 
 
-def _make_chain(_get, _set, _allocate):
+def _make_chain(_advance, _set, _allocate):
     class chain:
         """Yield items from each iterable in order."""
 
@@ -24,26 +24,14 @@ def _make_chain(_get, _set, _allocate):
             return self
 
         def __next__(self):
-            while _get(self, False) is not None:
-                if _get(self, True) is None:
-                    try:
-                        active = iter(next(_get(self, False)))
-                        _set(self, True, active)
-                    except BaseException:
-                        _set(self, False, None)
-                        raise
-                try:
-                    return next(_get(self, True))
-                except StopIteration:
-                    _set(self, True, None)
-            raise StopIteration
+            return _advance(__class__, self)
 
 
     chain.__qualname__ = "chain"
     return chain
 
 
-chain = _make_chain(_itertools._chain_get, _itertools._chain_set, _itertools._chain_allocate)
+chain = _make_chain(_itertools._chain_next, _itertools._chain_set, _itertools._chain_allocate)
 
 
 def _make_cycle(_allocate, _advance):
@@ -166,6 +154,97 @@ def _make_filterfalse(_allocate, _state):
 
 
 filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+del _itertools
+
+
+class _TeeBlock:
+    # Forks only root their current block. Once all forks move past it, its
+    # items can be collected without retaining any preceding blocks.
+    __slots__ = ("source", "values", "filled", "following", "running")
+
+    def __init__(self, source):
+        self.source = source
+        self.values = [None] * 57
+        self.filled = 0
+        self.following = None
+        self.running = False
+
+
+class _tee:
+    __slots__ = ("_block", "_index", "__weakref__")
+
+    def __new__(cls, iterable, /):
+        if cls is not __class__:
+            raise TypeError("expected the itertools._tee class")
+        source = iter(iterable)
+        fork = object.__new__(cls)
+        if type(source) is cls:
+            fork._block = source._block
+            fork._index = source._index
+        else:
+            fork._block = _TeeBlock(source)
+            fork._index = 0
+        return fork
+
+    def __init__(self, *args, **kwargs):
+        # Reinitialization leaves the existing cursor in place.
+        pass
+
+    def __init_subclass__(cls):
+        raise TypeError("type 'itertools._tee' is not an acceptable base type")
+
+    def __copy__(self):
+        return type(self)(self)
+
+    def __reduce__(self):
+        raise TypeError("cannot pickle '_tee' object")
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        block = self._block
+        index = self._index
+        if index == len(block.values):
+            if block.following is None:
+                block.following = _TeeBlock(block.source)
+            self._block = block = block.following
+            self._index = index = 0
+        if index == block.filled:
+            if block.running:
+                raise RuntimeError("cannot re-enter the tee iterator")
+            block.running = True
+            try:
+                value = next(block.source)
+            except StopIteration:
+                pass
+            else:
+                block.values[index] = value
+                block.filled = index + 1
+            finally:
+                block.running = False
+            if index == block.filled:
+                raise StopIteration
+        self._index = index + 1
+        return block.values[index]
+
+
+def tee(iterable, n=2, /):
+    """Return n independent iterators sharing the same input stream."""
+    n = _ssize_index(n)
+    if n < 0:
+        raise ValueError("n must be >= 0")
+    if n == 0:
+        return ()
+    if n > _maxsize // 8:
+        raise MemoryError
+    forks = [None] * n
+    # Both tee() and the first fork acquire an iterator, as in CPython.
+    first = _tee(iter(iterable))
+    forks[0] = first
+    for i in range(1, n):
+        forks[i] = _tee(first)
+    return tuple(forks)
 
 
 class _Combination:

@@ -1,0 +1,138 @@
+{
+  "cpython_version": "3.14.5",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_subprocess_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+  "historical_inventory_revision": "e066f7f6e19fde55d59b910f38320ad625ac9586",
+  "discovered": 353,
+  "native_build": {"revision": "521ce99e0a70a91535c2394ca00b475c74bb2d98", "crates_patch_sha256": "d1e932e3f01b66127d0a5bc18a0c994d7790a150af486a893d9d0b93cd958bb3", "artifacts": {"imre": "d5a80c923f7d97a5a36d02a05b9a55e1ef949db85600dee0fd3d98b917521afc", "libimre_runtime.a": "93413b7f3fe1044f9e6797410137d5791f40194430be741e40404de374ddb46f"}},
+  "native_parent_projection_sha256": "3fed4d8bb9b9835bfbdfbf0b8145f26c6a2e4a9b6728cc80de40c16683362402",
+  "registered_runner_patch_sha256": "faec0bec7961087fc49ccbaf131879873f6061dcefc08f2f507ccac677040ec7",
+  "native_compile_flags": "--opt-level 0 or 3, --runtime libimre_runtime.a, --clang clang",
+  "reference_interpreter_flags": ["-B"],
+  "registered_driver_flags": ["-sB"],
+  "selected_id_delta": {"new_native_body": [122], "new_native_assertions": [122], "new_native_operation": [122]},
+  "legend": {
+    "values": "input, stdout, stderr; null is absent or None. During injected EIO, communicate raises before returning output.",
+    "native_pipes": "[endpoints, witnessed successful close returns, witnessed EOF reads, absent at parent exit] on original stdin/stdout/stderr pipes. A zero count leaves an unwitnessed syscall undetermined.",
+    "trace_sha256": "SHA256 over sorted lines \"<sha256>  <filename>\\n\" for events.jsonl, tap.jsonl and fault.jsonl when present.",
+    "retained": "[original stdio fd, pipe device, pipe inode, retained parent fds]",
+    "read_syscall_incomplete": "Original assertion/closure evidence is independent of individual libc read-return observations.",
+    "native_columns": ["cell", "parent", "direct_pids", "direct_images", "leaf_image", "leaf_pids", "waits_raw_0_then_ECHILD", "root_raw", "pipes", "observations", "trace_sha256"],
+    "native_natural_exit": "All native rows ended naturally with outer ECHILD. Each group gives O0 then O3. Wait counts cover method-to-child and launcher-to-leaf."
+  },
+  "originals": [
+    {
+      "ordinal": 122,
+      "id": "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input_nonbyte",
+      "method_sha256": "5b2df06d493409b868d3b9b5f75cf2a4cbe05c36e67dba8f4bb1f006c2c63c9e",
+      "prior": "blocked",
+      "assertion_scope": "The original compares stdout to array.tobytes() and asserts stderr is None.",
+      "pipes": [[0, 1]],
+      "reference_positive": {"cell": "122-wire-reference", "parent": [63198, "i1"], "children": [63219], "values": ["v1", "v2", null], "passed": true, "trace_sha256": "ac737ace0dc428582fc108fae734216c163fc028f3ba3a8b2830fb6174d786b7", "waits_raw_0_then_ECHILD": 1, "child_image": "i1", "input_view": {"format": "i", "itemsize": 4, "length": 4097}},
+      "reference_negative": {"cell": "122-wire-reference-negative", "parent": [63222, "i1"], "children": [63224], "values": ["v1", "v3", "v4"], "passed": false, "trace_sha256": "f6c23afa6225c2889aab1f1355d8d826d9fd44f81a2db3b7174f9b824788cc92", "waits_raw_0_then_ECHILD": 1, "failure": "AssertionError"},
+      "native_positive": [
+        ["122-fixed-O0-wire", [70805, "i4"], [70825], ["i2"], "i3", [70829], 2, 0, [2, 2, 2, 2], {"completed": true}, "92fa36732a221c022b6f0aa551f089458480cce8364bec4cec9699a3cb5eeb69"],
+        ["122-fixed-O3-wire", [71302, "i6"], [71330], ["i2"], "i5", [71381], 2, 0, [2, 2, 2, 2], {"completed": true}, "78b6d08ff566b2d69164049a1a2355472c93a6695ca433ffda49b05228fd4da7"]
+      ],
+      "native_negative": [
+        ["122-fixed-O0-wire-negative", [70912, "i4"], [70933], ["i7", "i2"], "i8", [70937], 2, 256, [2, 2, 2, 2], {"completed": false}, "079cd26166b836cb2849201914d39062594bcc76edb5e14c67e8b3e16d57e08d"],
+        ["122-fixed-O3-wire-negative", [71710, "i6"], [71720], ["i7", "i2"], "i9", [71805], 2, 256, [2, 2, 2, 2], {"completed": false}, "5a5d1519c155b38c1b0a65b854cf220427ac22bf003b3fbf201f4294203d2c80"]
+      ],
+      "registered": {
+        "roles": {"body": "Imre", "assertions": "Imre", "fixture_execution": "CPython module/class/instance hooks; native instance in child; registered cleanups executed on the native instance"},
+        "cells": [["122-fixed-O0-entry", "04dd27ceeeadf34880470f4b70633092aae7a41da22069548b305bb11d9cfdc1"], ["122-fixed-O3-entry", "66788aa7f8622179d9603d937f68da106709440693cf62f8e9a08200e9543de6"]]
+      },
+      "native_wire_positive": {"0": "v1", "1": "v1"},
+      "native_wire_negative": {"0": "v1", "1": "v3"}
+    }
+  ],
+  "api_values": {
+    "v1": {"type": "memoryview", "nbytes": 16388, "sha256": "27376224e20a04118ff3aebd50c6176262282476d85bec900a95d4d35633121e", "length": 4097, "itemsize": 4},
+    "v2": {"type": "bytes", "nbytes": 16388, "sha256": "27376224e20a04118ff3aebd50c6176262282476d85bec900a95d4d35633121e"},
+    "v3": {"type": "bytes", "nbytes": 16388, "sha256": "d6b955416f37a1c7c919839e433478bed8fee8470aa2a74444125eeced9d91c2"},
+    "v4": {"type": "NoneType", "is_none": true}
+  },
+  "executed_images": {
+    "i1": {"image": "python3.14", "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"},
+    "i2": {"image": "imre", "sha256": "d5a80c923f7d97a5a36d02a05b9a55e1ef949db85600dee0fd3d98b917521afc"},
+    "i3": {"image": ".imre-run-fd-4", "sha256": "77f90c48bd6bf1982eebe0704fc52e3c1eee14ead6f0bbefcdbd0b234fb81505"},
+    "i4": {"image": "parent-122-O0", "sha256": "4735a1a7dde6fdfe86e85588c37ddf84fe16389e542b9d94a8d153d1022ab911"},
+    "i5": {"image": ".imre-run-fd-4", "sha256": "1e02a59cfd96401e6ffff59f1ba07315018d511d33c37521927dcff4b547245f"},
+    "i6": {"image": "parent-122-O3", "sha256": "cf30bfce6c7b91f59df719c6e9d29c80e451d4dd750154fc9e700be9875343b7"},
+    "i7": {"image": "wrong-child", "sha256": "cbd823a1d17b428931571d3c93f675fea248cb520397b5bca1f7d3fec270d532"},
+    "i8": {"image": ".imre-run-fd-4", "sha256": "48f1defdd35103485a445526b6c8b2fe81def9a0e2894825f67c5dfd71b87183"},
+    "i9": {"image": ".imre-run-fd-4", "sha256": "8892adaf79532bcda3a89ef160750bccbc694f0a3414f7df723a1d18c5708c8d"}
+  },
+  "host_fixture_runs": [
+    {"cell": "122-fixed-O0-fixture", "compiled_parent_pid": 70779, "fixture_wait": {"parent": 70767, "child": 70779, "raw": 0, "post_reap_waitid": "ECHILD"}, "outer_ECHILD": true, "native_json_sha256": "dadd3c863f8df029572e0357f90835d6bc8cca0dc32865c1302eb0db05032b83"},
+    {"cell": "122-fixed-O3-fixture", "compiled_parent_pid": 71241, "fixture_wait": {"parent": 71234, "child": 71241, "raw": 0, "post_reap_waitid": "ECHILD"}, "outer_ECHILD": true, "native_json_sha256": "ec9de93a51ad693efe62df7738516eb74f09ecbf2d8817b1f182dd1151f34083"}
+  ],
+  "original_input": {"type": "memoryview(array.array(\"i\", ...))", "format": "i", "itemsize": 4, "elements": 4097, "nbytes": 16388, "source_item": 1680895846, "byte_prefix_hex": "666f3064", "tobytes_sha256": "27376224e20a04118ff3aebd50c6176262282476d85bec900a95d4d35633121e"},
+  "dependencies": {
+    "stdio_pr": 3738,
+    "stdio_tested_head": "d92e31303344c63553b7ee8450e5ed6d896ef65d",
+    "stdio_squash": "521ce99e0a70a91535c2394ca00b475c74bb2d98",
+    "literal_sha256": "365e6d6e80aaa0bdcbcefcabefb144018eb2ae2e7a24a565be94d474ce879252",
+    "before_parent_exception": "NotImplementedError: memoryview of a mutable buffer is unsupported",
+    "before_child_exception": "AttributeError: '_io.TextIOWrapper' object has no attribute 'buffer'",
+    "native_parent_before": [
+      {"cell": "122-base-O0-direct", "parent_pid": 59405, "parent_sha256": "7cefa490f47436a48b313869dd8a0c7e440447a3a890c46c2ab5fd18b8e5c0f7", "child_started": false, "watchdog_raw": 256, "outer_ECHILD": true},
+      {"cell": "122-base-O3-direct", "parent_pid": 59875, "parent_sha256": "c2ad265fa24486a458ace1f5c7ac4acbb0b2ed8cef3410b9b12f9380849eaf44", "child_started": false, "watchdog_raw": 256, "outer_ECHILD": true}
+    ],
+    "binary_child_before": [
+      {
+        "cell": "122-stdiobefore-O0-child",
+        "launcher_pid_sha256": [65820, "2595ac32d034b29f990722643b995ec50ecca5452d9bf5ed66d3847008137540"],
+        "executed_leaf": [65824, "e99ebc80cb2bc970ad710c47e5f41ce639e25c920d60c2d6862fa9b9550dd20d"],
+        "literal_exit": 1,
+        "output_bytes": 0,
+        "stdout_equals_all_input_bytes": false,
+        "watchdog_ECHILD": true,
+        "events_sha256": "831cc2fc2662bf5609389b1761911c3d9ab94d47b75dbdcf3e0824eba1ba8a7a"
+      },
+      {
+        "cell": "122-stdiobefore-O3-child",
+        "launcher_pid_sha256": [65828, "2595ac32d034b29f990722643b995ec50ecca5452d9bf5ed66d3847008137540"],
+        "executed_leaf": [65866, "fe23db228b91a9aaab926dd769ebce59625c4b813f348ac3ba21d70ef82e587d"],
+        "literal_exit": 1,
+        "output_bytes": 0,
+        "stdout_equals_all_input_bytes": false,
+        "watchdog_ECHILD": true,
+        "events_sha256": "726ef6438a199f70d9645c660fcb927f025aa5f0efdfa8c64bd51fa5249f4d9b"
+      }
+    ],
+    "binary_child_prerequisite": [
+      {
+        "cell": "122-v3-O0-literal",
+        "launcher_pid_sha256": [68410, "2595ac32d034b29f990722643b995ec50ecca5452d9bf5ed66d3847008137540"],
+        "executed_leaf": [68414, "5f2f97349f7eeed12753e179a45626ac521f7829c959241dfa091004d60ba51d"],
+        "literal_exit": 0,
+        "output_bytes": 16388,
+        "stdout_equals_all_input_bytes": true,
+        "watchdog_ECHILD": true,
+        "events_sha256": "7576887f5cc9f9a164dfaeac480d3122cb119dd913efbd92303a3257dc077979"
+      },
+      {
+        "cell": "122-v3-O3-literal",
+        "launcher_pid_sha256": [68455, "2595ac32d034b29f990722643b995ec50ecca5452d9bf5ed66d3847008137540"],
+        "executed_leaf": [68459, "fc0038cf8f858ee01d41ea31b699cf3373c0b62be585ef7611ea68ec0dd6388f"],
+        "literal_exit": 0,
+        "output_bytes": 16388,
+        "stdout_equals_all_input_bytes": true,
+        "watchdog_ECHILD": true,
+        "events_sha256": "8f17e20f28ec5214983f3fa08f8d9958ca4a6ab62939ffefca5362efddca0d00"
+      }
+    ],
+    "matched_parent_before": {
+      "build": {"revision": "521ce99e0a70a91535c2394ca00b475c74bb2d98", "crates_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "artifacts": {"imre": "d5a80c923f7d97a5a36d02a05b9a55e1ef949db85600dee0fd3d98b917521afc", "libimre_runtime.a": "3b31ec4265598ab00d7ac9e357031bd73c6ab1216f87d651060a2cd8a25d5935"}},
+      "cells": [
+        {"cell": "122-pre122-O0-wire", "parent_pid": 69771, "parent_sha256": "104309cf2504ccae0c9290d299f6d91fe3deeee2db26b8ff1d628a109ba20dc8", "child_started": false, "watchdog_raw": 256, "outer_ECHILD": true},
+        {"cell": "122-pre122-O3-wire", "parent_pid": 70441, "parent_sha256": "1dec92218075b0ed3f3b9a0ca87695b26deee6f2037640ce739744a7d409a56a", "child_started": false, "watchdog_raw": 256, "outer_ECHILD": true}
+      ]
+    },
+    "array_change_with_cpython_child": [
+      {"cell": "122-array-O0-stock-child", "parent": [62758, "5dc1d7c681574477b2a89eb2d52f5cbaed4d2c59096fa9b3a8f9a2ea0a577a21"], "CPython_child": [62779, "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"], "raw_wait": 0, "parent_raw": 0, "outer_ECHILD": true},
+      {"cell": "122-array-O3-stock-child", "parent": [63110, "a65466665d5a57e07042b72c4777652dcfeed1fc48bff7c04969fe7edb9ab516"], "CPython_child": [63130, "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"], "raw_wait": 0, "parent_raw": 0, "outer_ECHILD": true}
+    ]
+  }
+}

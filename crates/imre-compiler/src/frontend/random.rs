@@ -12,6 +12,7 @@ fn random(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
 impl Checker<'_> {
     pub(super) fn random_call(&mut self, op: Op, call: &ast::ExprCall) -> Result<Expr, String> {
         let specs = match op {
+            Op::Shuffle => vec![("x", None)],
             Op::Float => vec![],
             Op::Seed => vec![("a", Some(Expr::none()))],
             Op::Bits => vec![("k", None)],
@@ -46,6 +47,13 @@ impl Checker<'_> {
             |checker, i, argument| {
                 let node = argument.site();
                 let value = Self::string_value(argument.value(checker)?);
+                if op == Op::Shuffle {
+                    return if matches!(value.ty, Type::ListInt | Type::List(_)) {
+                        Ok(value)
+                    } else {
+                        Err(checker.object_builtin_error("random.shuffle", node))
+                    };
+                }
                 if op == Op::Seed && matches!(value.ty, Type::None | Type::Str | Type::Bytes)
                     || op == Op::Randrange && i == 1 && value.ty == Type::None
                 {
@@ -56,7 +64,7 @@ impl Checker<'_> {
         )?;
         let mut values: Vec<_> = args.order.iter().map(|&i| args.values[i].clone()).collect();
         let value = match op {
-            Op::Seed => random(op, Type::None, values),
+            Op::Shuffle | Op::Seed => random(op, Type::None, values),
             Op::Float => random(op, Type::Float, values),
             Op::Bits => random(op, Type::Int, values),
             Op::Randint => {

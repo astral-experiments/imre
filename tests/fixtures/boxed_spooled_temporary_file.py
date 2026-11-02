@@ -17,6 +17,10 @@ def current():
         stream.rollover()
         assert stream.fileno() == descriptor
         assert stream.tell() == 5 and stream.seek(2) == 2 and stream.read() == b"cde"
+        assert stream.writelines([b"f", b"g"]) is None
+        write_lines = stream._file.writelines
+        assert write_lines((bytearray(b"h"),)) is None
+        assert stream.seek(5) == 5 and stream.read() == b"fgh"
     assert stream.closed and stream.name == descriptor
     try:
         os.dup(descriptor)
@@ -24,6 +28,17 @@ def current():
         pass
     else:
         raise AssertionError("the backing file descriptor survived close")
+
+    with tempfile.SpooledTemporaryFile(4, dir=".") as stream:
+        stream.write(b"abcdef")
+        stream.seek(0)
+        assert stream.read(2) == b"ab"
+        assert stream.truncate() == stream.tell() == 2
+        stream.seek(0)
+        assert stream.read() == b"ab"
+        assert stream.truncate(5) == 5 and stream.tell() == 2
+        assert stream.read() == bytes(3)
+        assert os.fstat(stream.fileno()).st_size == 5
 
     with tempfile.SpooledTemporaryFile(1, dir="missing-spool-directory") as memory:
         try:

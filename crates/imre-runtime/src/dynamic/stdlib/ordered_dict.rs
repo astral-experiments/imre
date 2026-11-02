@@ -18,6 +18,24 @@ pub(super) fn call(
         .filter(|_| kwargs.is_empty())
         .ok_or_else(|| Error::new("TypeError", "expected a dictionary"))?;
     match (op, args) {
+        ("sizeof", []) => {
+            let bytes = ctx.dictionary_size(owner, storage, true)?;
+            Ok(ctx.alloc(Value::Int(crate::Int::from_usize(bytes))))
+        }
+        ("setitem", [key, value]) => {
+            ctx.set_ordered_dictionary_key(storage, *key, *value)?;
+            Ok(NONE)
+        }
+        ("delitem", [key]) => {
+            let removed = remove_key(ctx, storage, *key, None)?
+                .ok_or_else(|| ctx.lookup_error("KeyError", *key))?;
+            ctx.finalize_removed_dict_value(removed);
+            Ok(NONE)
+        }
+        ("clear", []) => {
+            ctx.clear_ordered_dict(storage);
+            Ok(NONE)
+        }
         ("view", [kind]) => {
             let kind = match ctx.str_value(*kind)? {
                 "keys" => DictViewKind::Keys,
@@ -41,21 +59,18 @@ pub(super) fn call(
             if let Some(index) = found {
                 return Ok(ctx.stored_entries(storage)[index].1);
             }
-            ctx.set_dictionary_key(storage, *key, *default, None, true)?;
+            ctx.set_ordered_dictionary_key(storage, *key, *default)?;
             Ok(*default)
         }
         ("pop", [key] | [key, _]) => pop_key(ctx, storage, *key, None, args.get(1).copied()),
         ("popitem", [last]) => {
             let last = ctx.truth(*last)?;
-            let entries = ctx.stored_entries(storage);
-            let Some(end) = entries.len().checked_sub(1) else {
+            let nodes = ctx.stored_entries(storage).ordered_nodes();
+            let Some(&(key, hash)) = (if last { nodes.last() } else { nodes.first() }) else {
                 let message = ctx.text("dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
             };
-            let dense = entries.ordered_dense(if last { end } else { 0 });
-            let key = entries[dense].0;
-            let cached = entries.stored_hash(dense);
-            let value = pop_key(ctx, storage, key, cached, None)?;
+            let value = pop_key(ctx, storage, key, Some(hash), None)?;
             Ok(ctx.alloc(Value::Tuple(vec![key, value])))
         }
         ("repr", []) => {
@@ -99,39 +114,45 @@ fn pop_key(
     default: Option<Id>,
 ) -> Result<Id> {
     let (hash, found) = ctx.find_dictionary_key(storage, key, cached)?;
-    if found.is_none() {
+    let entries = ctx.stored_entries(storage);
+    if found.and_then(|i| entries.ordered_rank(i)).is_none() {
         return default.ok_or_else(|| ctx.lookup_error("KeyError", key));
     }
-    // Finding the order node, unlinking it, and removing the mapping entry
-    // each resolve colliding keys. A callback may change the mapping.
-    if ctx
-        .find_dictionary_key(storage, key, Some(hash))?
-        .1
-        .is_none()
-    {
-        return Err(ctx.lookup_error("KeyError", key));
-    }
-    super::super::builtins::remove_dict_item_hashed(ctx, storage, key, Some(hash))?
+    remove_key(ctx, storage, key, Some(hash))?
         .or(default)
         .ok_or_else(|| ctx.lookup_error("KeyError", key))
+}
+
+/// Resolve the node before deleting the backing entry: each lookup can call Python.
+fn remove_key(ctx: &mut Context, storage: Id, key: Id, cached: Option<i64>) -> Result<Option<Id>> {
+    let hash = if ctx.stored_entries(storage).ordered_nodes().is_empty() {
+        cached
+    } else {
+        let (hash, dense) = ctx.find_dictionary_key(storage, key, cached)?;
+        if let Some(dense) = dense
+            && let Some(rank) = ctx.stored_entries(storage).ordered_rank(dense)
+        {
+            ctx.unlink_ordered_node(storage, dense, rank);
+        }
+        Some(hash)
+    };
+    super::super::builtins::remove_dict_item_hashed(ctx, storage, key, hash)
 }
 
 /// Stop if comparing two keys changes the order of either dictionary.
 fn keys_equal(ctx: &mut Context, left: Id, right: Id) -> Result<bool> {
     let state = |ctx: &Context, id| {
         let entries = ctx.stored_entries(id);
-        (entries.len(), entries.order_state())
+        (entries.ordered_nodes().len(), entries.order_state())
     };
     let original = (state(ctx, left), state(ctx, right));
-    let len = ctx.stored_entries(left).len();
-    if len != ctx.stored_entries(right).len() {
-        return Ok(false);
-    }
-    for index in 0..len {
+    let ((left_len, _), (right_len, _)) = original;
+    // Mapping equality may have changed a length. Compare the common prefix before testing the ends.
+    for index in 0..left_len.min(right_len) {
         let first = ctx.stored_entries(left);
         let second = ctx.stored_entries(right);
-        let a = first[first.ordered_dense(index)].0;
-        let b = second[second.ordered_dense(index)].0;
+        let a = first.ordered_nodes()[index].0;
+        let b = second.ordered_nodes()[index].0;
         let equal = a == b || ctx.checked_equal(a, b)?;
         if (state(ctx, left), state(ctx, right)) != original {
             return Err(Error::new(
@@ -143,5 +164,5 @@ fn keys_equal(ctx: &mut Context, left: Id, right: Id) -> Result<bool> {
             return Ok(false);
         }
     }
-    Ok(true)
+    Ok(left_len == right_len)
 }

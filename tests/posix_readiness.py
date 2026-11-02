@@ -181,7 +181,7 @@ def main():
         def build(source, level):
             exe = work / "native"
             require([args.compiler, "build", source, "--no-cache", "--runtime", args.runtime,
-                     "--opt-level", str(level), "--clang", args.clang, "-o", exe])
+                     "--opt-level", str(level), "--clang", args.clang, "-o", exe], timeout=180)
             return exe
         for level in args.opt_levels:
             observations = {}

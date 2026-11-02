@@ -1,7 +1,11 @@
 import contextlib
-from collections import ChainMap
+import time
 import warnings
+from collections import ChainMap
 from unittest import SkipTest, TestCase, _enterCleanupContext
+
+DIFF_OMITTED = ('\nDiff is %s characters long. '
+                 'Set self.maxDiff to None to see it.')
 
 _module_cleanups = []
 
@@ -30,6 +34,58 @@ def doModuleCleanups():
 def expectedFailure(test_item):
     test_item.__unittest_expecting_failure__ = True
     return test_item
+
+
+class _BaseTestCaseContext:
+
+    def __init__(self, test_case):
+        self.test_case = test_case
+
+    def _raiseFailure(self, standardMsg):
+        msg = self.test_case._formatMessage(self.msg, standardMsg)
+        raise self.test_case.failureException(msg)
+
+
+def assertLogs(self, logger=None, level=None):
+    """Fail unless a log message of level *level* or higher is emitted
+    on *logger_name* or its children.  If omitted, *level* defaults to
+    INFO and *logger* defaults to the root logger.
+
+    This method must be used as a context manager, and will yield
+    a recording object with two attributes: `output` and `records`.
+    At the end of the context manager, the `output` attribute will
+    be a list of the matching formatted log messages and the
+    `records` attribute will be a list of the corresponding LogRecord
+    objects.
+
+    Example::
+
+        with self.assertLogs('foo', level='INFO') as cm:
+            logging.getLogger('foo').info('first message')
+            logging.getLogger('foo.bar').error('second message')
+        self.assertEqual(cm.output, ['INFO:foo:first message',
+                                     'ERROR:foo.bar:second message'])
+    """
+    # Lazy import to avoid importing logging if it is not needed.
+    from ._log import _AssertLogsContext
+    return _AssertLogsContext(self, logger, level, no_logs=False)
+
+
+def assertNoLogs(self, logger=None, level=None):
+    """ Fail unless no log messages of level *level* or higher are emitted
+    on *logger_name* or its children.
+
+    This method must be used as a context manager.
+    """
+    from ._log import _AssertLogsContext
+    return _AssertLogsContext(self, logger, level, no_logs=True)
+
+
+assertLogs.__qualname__ = "TestCase.assertLogs"
+assertNoLogs.__qualname__ = "TestCase.assertNoLogs"
+TestCase.assertLogs = assertLogs
+TestCase.assertNoLogs = assertNoLogs
+del assertLogs, assertNoLogs
 
 
 class _UnexpectedSuccess(Exception):
@@ -161,17 +217,24 @@ class _TestPartExecutor(contextlib.ContextDecorator):
             outcome.success = outcome.success and self.old_success
 
 
+# From CPython 3.14.5 Lib/unittest/case.py. See ../docstrings/LICENSE.
+def _addDuration(self, result, elapsed):
+    try:
+        addDuration = result.addDuration
+    except AttributeError:
+        warnings.warn("TestResult has no addDuration method",
+                      RuntimeWarning)
+    else:
+        addDuration(self, elapsed)
+
+
+TestCase._addDuration = _addDuration
+
+
 def _addSkip(result, test_case, reason):
     addSkip = getattr(result, 'addSkip', None)
     if addSkip is not None:
         addSkip(test_case, reason)
-        from unittest import TextTestResult
-        if isinstance(result, TextTestResult):
-            status = "skipped " + repr(reason)
-            if isinstance(test_case, _SubTest):
-                result._markSubTest(test_case._subDescription(), "s", status)
-            else:
-                result._mark("s", status)
     else:
         warnings.warn("TestResult has no addSkip method, skips not reported",
                       RuntimeWarning, 2)

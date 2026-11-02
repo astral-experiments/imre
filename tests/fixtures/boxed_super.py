@@ -103,7 +103,42 @@ def current():
     except TypeError as error:
         print(str(error))
 
+    check_mro()
     check_subclass_hooks()
+
+
+def check_mro():
+    original = D.mro()
+    assert original == [D, C, B, A, object] and D.__mro__ == tuple(original)
+    original.clear()
+    assert D.mro() == type.mro(D) == [D, C, B, A, object]
+    from collections import defaultdict
+    from datetime import timezone, tzinfo
+    from os import terminal_size
+    from types import ModuleType
+    assert bool.mro() == type.mro(bool) == [bool, int, object]
+    assert terminal_size.mro() == [terminal_size, tuple, object]
+    assert type.mro(defaultdict) == [defaultdict, dict, object]
+    assert timezone.mro() == [timezone, tzinfo, object]
+    assert D.mro.__self__ is D and not hasattr(super(D, D()), "mro")
+
+    class Meta(type): pass
+    class ViaMeta(metaclass=Meta): pass
+    class Shadow(D): mro = None
+    assert ViaMeta.mro() == [ViaMeta, object] and Meta.mro is type.mro
+    assert ViaMeta.mro.__qualname__ == ViaMeta.__qualname__ + ".mro"
+    assert type.mro(Meta) == [Meta, type, object]
+    assert Shadow.mro is None and type.mro(Shadow)[1:] == D.mro()
+    class NamedModule(ModuleType): pass
+    NamedModule.__name__ = "type"
+    fake = NamedModule("fake")
+    for invalid in (lambda: type.mro(fake), lambda: type.mro(D()), lambda: D.mro(1), lambda: Meta.mro()):
+        try:
+            invalid()
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid mro call succeeded")
 
 
 def check_subclass_hooks():
@@ -142,6 +177,34 @@ def check_subclass_hooks():
         ("field", "Child"), ("left", "Child"), ("right", "Child"),
         ("root", "Child"), ("decorator", "Child"),
     ]
+    class Configure:
+        def __init_subclass__(cls, *, tag, **extras):
+            super().__init_subclass__()
+            cls.settings = tag, tuple(extras.items())
+
+    class Tagged(Configure, first=1, metaclass=type, tag=2, total=False):
+        pass
+
+    assert Tagged.settings == (2, (("first", 1), ("total", False)))
+    scope = {"Configure": Configure}
+    exec("class Loaded(Configure, first=3, tag=4, total=True): pass", scope)
+    assert scope["Loaded"].settings == (4, (("first", 3), ("total", True)))
+    try:
+        class Refused(extra=True):
+            pass
+    except TypeError as error:
+        assert str(error) == "check_subclass_hooks.<locals>.Refused.__init_subclass__() takes no keyword arguments"
+    else:
+        raise AssertionError("object accepted class keywords")
+
+    calls = []
+    try:
+        exec("calls.append(0)\nclass Duplicate(tag=calls.append(1), tag=calls.append(2)): pass", {"calls": calls})
+    except SyntaxError as error:
+        assert error.msg == "keyword argument repeated: tag"
+    else:
+        raise AssertionError("duplicate class keyword compiled")
+    assert calls == []
     assert isinstance(Left.__dict__["__init_subclass__"], classmethod)
     assert Child.__init_subclass__.__self__ is Child
 

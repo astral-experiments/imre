@@ -14,6 +14,7 @@ impl Checker<'_> {
                 name,
                 "_at"
                     | "_child"
+                    | "_get_child"
                     | "_attach"
                     | "_record"
                     | "_name"
@@ -29,8 +30,15 @@ impl Checker<'_> {
 
     /// Check the argument expressions before selecting the boxed constructor. A
     /// type error inside an expression is independent of how Mock stores it.
-    pub(super) fn boxed_mock_keywords(&mut self, call: &ast::ExprCall) -> Result<bool, String> {
-        let mut boxed = false;
+    pub(super) fn boxed_mock_arguments(&mut self, call: &ast::ExprCall) -> Result<bool, String> {
+        let mut boxed = match &call.arguments.args[..] {
+            [] => false,
+            [spec] => {
+                self.evaluated_argument(spec)?;
+                true
+            }
+            _ => return Ok(false),
+        };
         for keyword in &call.arguments.keywords {
             match keyword.arg.as_deref() {
                 Some("name") => {
@@ -128,8 +136,11 @@ impl Checker<'_> {
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = attr.attr.as_str();
-        if name == "configure_mock" {
-            return Err(self.object_runtime_export("unittest.mock.Mock.configure_mock", attr));
+        if matches!(
+            name,
+            "configure_mock" | "mock_calls" | "method_calls" | "assert_has_calls"
+        ) {
+            return Err(self.object_runtime_export(&format!("unittest.mock.Mock.{name}"), attr));
         }
         // An unimplemented real member must never become a successful child mock.
         if name.starts_with('_')
@@ -137,13 +148,10 @@ impl Checker<'_> {
             || matches!(
                 name,
                 "assert_any_call"
-                    | "assert_has_calls"
                     | "assert_called_once_with"
                     | "assert_called_with"
                     | "attach_mock"
                     | "mock_add_spec"
-                    | "mock_calls"
-                    | "method_calls"
                     | "reset_mock"
             )
             || self.classes.declarations.definitions[class]

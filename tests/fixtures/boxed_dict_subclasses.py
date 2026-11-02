@@ -19,6 +19,27 @@ def ordered_dictionary():
     source = OrderedDict(b=[2], a=[1])
     assert source != OrderedDict(a=[1], b=[2])
     assert source == {"a": [1], "b": [2]}
+
+    # Mapping equality removes the first key. The ordered comparison still visits the remaining prefix.
+    callbacks = []
+    tail = object()
+
+    class PrefixKey:
+        def __hash__(self):
+            return 19
+
+        def __eq__(self, other):
+            callbacks.append((self is right_key, other is left_key, other is tail))
+            if len(callbacks) == 1:
+                del left[left_key]
+            return True
+
+    left_key, right_key = PrefixKey(), PrefixKey()
+    left = OrderedDict([(left_key, 1), (tail, 2)])
+    right = OrderedDict([(right_key, 1), (tail, 2)])
+    assert left != right
+    assert callbacks == [(True, True, False), (True, False, True)]
+
     dense = OrderedDict([(2, "two"), (0, "zero"), (1, "one")])
     assert list(reversed(dense)) == [1, 0, 2]
     items = reversed(dense.items())
@@ -68,6 +89,76 @@ def ordered_dictionary():
     else:
         raise AssertionError("cursor missed a deletion and reinsertion")
     assert next(cursor, None) is None
+    # A dict descriptor only changes the backing table. The OrderedDict node
+    # still owns its key and reports the missing value on ordered traversal.
+    for remove in (dict.__delitem__, dict.pop, dict.popitem):
+        mixed = OrderedDict([("spam", 1), ("ham", 2)])
+        if remove is dict.popitem:
+            assert remove(mixed) == ("ham", 2)
+            missing = "ham"
+        else:
+            remove(mixed, "spam")
+            missing = "spam"
+        assert missing not in mixed and len(mixed) == 1
+        try:
+            repr(mixed)
+        except KeyError as error:
+            assert error.args == (missing,)
+        else:
+            raise AssertionError("dict removal unlinked an OrderedDict node")
+        mixed.clear()
+        assert not list(mixed)
+    dict.__setitem__(mixed, "hidden", 1)
+    assert list(dict.keys(mixed)) == ["hidden"] and list(mixed) == []
+    mixed["visible"] = 2
+    del mixed["visible"]
+    assert list(mixed) == [] and mixed["hidden"] == 1
+
+    class EqualKey:
+        def __hash__(self):
+            return 23
+        def __eq__(self, other):
+            return isinstance(other, EqualKey)
+
+    resident, node = EqualKey(), EqualKey()
+    mixed.clear()
+    dict.__setitem__(mixed, resident, 1)
+    mixed[node] = 2
+    mixed[resident] = 3
+    assert next(iter(dict.keys(mixed))) is resident
+    assert next(iter(mixed)) is node
+    mixed["other"] = 4
+    mixed.move_to_end(resident)
+    assert list(mixed)[-1] is node and mixed.pop(resident) == 3
+    assert list(mixed) == ["other"]
+
+    watched = OrderedDict()
+    phases = []
+    class ObservedKey:
+        def __hash__(self):
+            return 1
+        def __eq__(self, other):
+            phases.append((list(dict.values(watched)), len(list(watched))))
+            return True
+
+    original, alias = ObservedKey(), ObservedKey()
+    watched[original] = 1
+    watched[alias] = 2
+    assert phases == [([1], 1), ([2], 1)]
+    phases.clear()
+    del watched[alias]
+    assert phases == [([2], 1), ([2], 0)]
+
+    class DoubleValues(OrderedDict):
+        def __setitem__(self, key, value):
+            super().__setitem__(key, 2 * value)
+
+    updates = DoubleValues()
+    updates.update(a=1)
+    OrderedDict.update(updates, [("b", 2)])
+    dict.update(updates, hidden=3)
+    assert list(updates.items()) == [("a", 2), ("b", 4)] and updates["hidden"] == 3
+
     endpoints = OrderedDict(a=1, b=2, c=3)
     assert endpoints.popitem(last=False) == ("a", 1)
     assert endpoints.popitem() == ("c", 3)
@@ -118,6 +209,40 @@ def ordered_dictionary():
     assert list(dict.keys(moved)) == ["a", "b", "c"]
     assert moved.popitem(last=False) == ("b", 2)
 
+
+    for method, args in (
+        (OrderedDict.__init__, (object(),)),
+        (OrderedDict.__init__, ({},)),
+        (OrderedDict.__or__, ({}, OrderedDict())),
+        (OrderedDict.__ror__, ({}, OrderedDict())),
+        (OrderedDict.__ior__, ({}, {})),
+    ):
+        try:
+            method(*args)
+        except TypeError as error:
+            assert "requires a 'collections.OrderedDict' object" in str(error)
+        else:
+            raise AssertionError("ordered descriptor accepted a foreign receiver")
+
+    class UnionChild(OrderedDict):
+        def update(self, *args, **kwargs):
+            raise AssertionError("union called update")
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, (value,))
+
+    class ItemsOnly:
+        def items(self):
+            return [("a", 4), ("c", 3)]
+
+    merged = UnionChild()
+    merged["b"] = 1
+    assert list((merged | {"a": 2}).items()) == [("b", ((1,),)), ("a", (2,))]
+    assert type({"a": 2} | merged) is UnionChild
+    assert type(OrderedDict() | merged) is OrderedDict
+    same = merged
+    merged |= ItemsOnly()
+    assert merged is same and list(merged.items()) == [("b", (1,)), ("a", (4,)), ("c", (3,))]
 
     class ClearOnRepr:
         def __repr__(self):
@@ -220,7 +345,44 @@ def mapping_patterns():
             assert not calls
 
 
+def defaultdict_type_namespace():
+    from collections import defaultdict
+    from types import MappingProxyType
+
+    namespace = vars(defaultdict)
+    assert type(namespace) is MappingProxyType and namespace is not defaultdict.__dict__
+    assert "get" not in namespace and "__name__" not in namespace
+    for name in ("__repr__", "__init__", "__missing__", "copy", "__copy__", "__reduce__"):
+        member = namespace[name]
+        assert member is getattr(defaultdict, name) and member.__objclass__ is defaultdict
+        assert member.__get__(None, defaultdict) is member
+    assert namespace["__module__"] is defaultdict.__module__
+
+    class Child(defaultdict):
+        pass
+
+    child = Child(list)
+    missing = namespace["__missing__"].__get__(child)
+    assert type(missing).__name__ == "builtin_function_or_method"
+    assert missing.__self__ is child and missing("new") is child["new"]
+    copied = namespace["copy"].__get__(child)()
+    assert type(copied) is Child and copied.default_factory is list and copied == child
+    try:
+        namespace["copy"].__get__({})
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("bound defaultdict.copy to a plain dict")
+    try:
+        namespace["copy"] = None
+    except TypeError:
+        assert namespace["copy"] is defaultdict.copy
+    else:
+        raise AssertionError("writable defaultdict namespace")
+
+
 def current():
+    defaultdict_type_namespace()
     from collections import defaultdict
     from types import ModuleType
 
@@ -294,6 +456,8 @@ def current():
 
     fromkeys_construction()
     ordered_dictionary()
+    pure_ordered_dictionary()
+    base_equality()
     allocate_without_init()
     mapping_patterns()
     counts = Counter(a=3)
@@ -526,15 +690,19 @@ def current():
     pending.extend([FirstPair(), ("original", 4)])
     print(dict(pending))
 
+    class PairError(TypeError):
+        pass
+
     class BrokenPair(dict):
         def __iter__(self):
-            raise TypeError("from pair iterator")
+            raise PairError("from pair iterator")
 
     for pair in (42, BrokenPair()):
         partial = {"kept": 1}
         try:
             partial.update([("good", 4), pair, ("late", 9)], tail=1)
         except TypeError as error:
+            assert type(error) is TypeError
             print(error.args, partial)
 
     pairs = dict.__iter__({("first", 1): None, ("bad",): None, ("later", 2): None})
@@ -860,3 +1028,56 @@ def allocate_without_init():
             print(exc)
         else:
             raise AssertionError("dict allocator accepted an invalid subtype")
+
+
+def base_equality():
+    class Overrides(dict):
+        def __eq__(self, other):
+            raise AssertionError("base comparison invoked subclass __eq__")
+
+        def items(self):
+            raise AssertionError("base comparison invoked subclass items")
+
+    left = Overrides(first=1, last=2)
+    right = Overrides(last=2, first=1)
+    assert dict.__eq__(left, right) is True
+    right["first"] = 0
+    assert dict.__eq__(left, right) is False
+    assert dict.__eq__(left, list(right)) is NotImplemented
+
+    class Derived(dict):
+        pass
+
+    left, right = Derived(), Derived()
+    left[0], right[0] = left, right
+    try:
+        dict.__eq__(left, right)
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("cyclic dicts unexpectedly compared equal")
+
+
+def pure_ordered_dictionary():
+    # Blocking the accelerator creates independent linked-list storage in a fresh module.
+    import importlib
+    import sys
+
+    public_collections = sys.modules["collections"]
+    public_accelerator = sys.modules["_collections"]
+    try:
+        del sys.modules["collections"]
+        sys.modules["_collections"] = None
+        fresh_collections = importlib.import_module("collections")
+        pure_type = fresh_collections.OrderedDict
+        assert pure_type is not public_accelerator.OrderedDict
+        assert pure_type.__module__ == "collections"
+        ordered = pure_type([("a", 1), ("b", 2)])
+        ordered.move_to_end("a")
+        print(list(ordered), list(dict.keys(ordered)), list(ordered.copy().items()))
+        print(fresh_collections.Counter("aba")["a"], type(iter(ordered)).__name__)
+    finally:
+        sys.modules["_collections"] = public_accelerator
+        sys.modules["collections"] = public_collections
+    assert pure_type.__iter__.__globals__ is fresh_collections.__dict__
+    assert pure_type.__iter__.__globals__["OrderedDict"] is pure_type

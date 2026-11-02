@@ -2,6 +2,37 @@ import re
 
 
 def current():
+    from string import Template
+
+    high = chr(0xd800)
+    assert "<%-4.2s>" % ("é" + high + "a") == "<é" + high + "  >"
+    members = "[%s]" % ("é" + high)
+    for char in ("é", high):
+        assert re.fullmatch(members, char).group() == char
+    assert re.fullmatch(members, chr(0xf0000)) is None
+    assert re.fullmatch("[^" + high + "]", chr(0xf0000))
+    assert re.fullmatch("[^" + high + "]", high) is None
+
+    for flags in (re.I, re.I | re.X):
+        pattern = re.compile(r"(?P<ascii>(?a:[a-z]))(?P<unicode>[a-z])", flags)
+        assert pattern.fullmatch("KK").groups() == ("K", "K")
+        for letter in "Kſİı":
+            assert pattern.fullmatch(letter + "K") is None
+        assert re.fullmatch(r"(?a:.[^a-z])", "éK", flags)
+        assert re.fullmatch(r"(?a:\w(?u:\w)\w)\w", "AéZé", flags)
+    assert re.fullmatch(r"(?a:(?=\b)\w)", "A")
+    assert re.search(r"(?u:\b)", "\u0301") is None
+    assert re.fullmatch(r"(?-i:I)\b", "İ", re.I) is None
+    assert re.fullmatch("(?x:a # (?a: ignored\n)(?ui:b)", "aB")
+    assert re.fullmatch("(?x:a # (?u: ignored\n)(?i-m:b)", "aB", re.A)
+    assert re.fullmatch("(?x:a # (?-u: ignored\n)(?i-m:b)", "aB")
+    assert re.fullmatch("(?x:\\b a # (?u: ignored\n)(?i-m:b)\\Z", "aB", re.A)
+    assert re.fullmatch(r"(?ui:a)", "A")
+    assert re.fullmatch(r"(?u-m:a)", "a")
+    assert re.fullmatch(r"(?u:(?P<état>é))", "é")["état"] == "é"
+    assert Template("$User ${Count} $$").substitute(User="Ann", Count=2) == "Ann 2 $"
+    assert not Template("$K").is_valid()
+
     ascii_digits = re.compile(r"-?\d+", flags=re.ASCII)
     unicode_digits = re.compile(r"-?\d+")
     from re import Pattern
@@ -73,6 +104,16 @@ def current():
     print(re.search(grouped, "αβ").group("letter"))
     names = re.match(rb"(?P<z>a)(b)?(?P<a>x)?$", b"a")
     default = []
+    assert list(names.re.groupindex.items()) == [("z", 1), ("a", 3)]
+    try:
+        names.re.groupindex["a"] = 2
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("groupindex allowed assignment")
+    unnamed = re.compile(r"(x)$")
+    unnamed.groupindex["extra"] = 1
+    assert unnamed.groupindex == {}
     values = names.groupdict(default=default)
     assert list(values) == ["z", "a"]
     assert values["z"] == b"a" and values["a"] is default
@@ -129,14 +170,43 @@ def current():
         assert doubled.fullmatch(subject, pos, end - 1) is None
     assert re.fullmatch(r"(Python)\1", "PythonPythox") is None
 
-    # Repeating a variable expression can accept a different capture on the second copy.
+    for spelling, subject, capture, wrong in (
+        (r"([a-c]*)\1", "xabcabc!", "abc", "abccba"),
+        (rb"([a-c]*)\1", b"xabcabc!", b"abc", b"abccba"),
+    ):
+        doubled = re.compile(spelling)
+        match = doubled.fullmatch(subject, 1, 7)
+        assert match.group(1) == capture and match.span(1) == (1, 4)
+        assert doubled.match(subject, 1, 7).span() == (1, 7)
+        assert doubled.fullmatch(wrong) is None
+        assert doubled.match(wrong).span(1) == (0, 0)
+    assert re.fullmatch(r"^(a+).\1$", "aaaa") is None
+    at_end = re.search(r"(?=(a*)*)\1", "aaa")
+    assert at_end.span() == (0, 0) and at_end.span(1) == (3, 3)
+    for spelling, subject, expected in (
+        (r"((a)?)+\2", "aa", ((1, 1), (0, 1))),
+        (rb"(?:(a?)|(b)){0,2}\2\1", b"bb", ((1, 1), (0, 1))),
+    ):
+        try:
+            match = re.fullmatch(spelling, subject)
+        except re.PatternError:
+            continue
+        assert (match.span(1), match.span(2)) == expected
     try:
-        variable = re.compile(r"(a|b)\1")
+        high_repeat = re.compile(rb"((?:\200|A)+)\1")
     except re.PatternError:
         pass
     else:
-        assert variable.fullmatch("bb").group(1) == "b"
-        assert variable.fullmatch("ab") is None
+        assert high_repeat.fullmatch(b"\x80\x80").group(1) == b"\x80"
+        assert high_repeat.fullmatch(b"\xc2\x80\xc2\x80") is None
+    try:
+        re.compile(r"(a)\1{2,1}")
+    except re.PatternError:
+        pass
+    else:
+        raise AssertionError("accepted a decreasing repetition range")
+    mixed = re.fullmatch(rb"(.+)\1", b"\xffA\xffa", re.I)
+    assert mixed.group(1) == b"\xffA" and mixed.span() == (0, 4)
 
     for spelling, name, word in (
         ("(?P<if>ab)(?P=if)", "if", "ab"),
@@ -146,6 +216,48 @@ def current():
         pattern = re.compile(spelling)
         assert pattern.fullmatch(word + word).group(name) == word
         assert pattern.fullmatch(word) is None
+
+    import sys
+    if sys.platform.startswith("linux"):
+        import _locale
+        saved = _locale.setlocale(_locale.LC_CTYPE)
+        try:
+            _locale.setlocale(_locale.LC_CTYPE, "C")
+            locale_ref = re.compile(rb"([a-c]*)\1", re.L | re.I)
+            assert locale_ref.fullmatch(b"AbCaBc").group(1) == b"AbC"
+            assert locale_ref.fullmatch(b"AbCac") is None
+        finally:
+            _locale.setlocale(_locale.LC_CTYPE, saved)
+
+    for spelling, flags, word, repeated, wrong in (
+        ("(?P<name>ab)(?P=name)", re.I, "Ab", "aB", "ac"),
+        (r"(k)\1", re.I, "K", "K", "x"),
+        (r"(is)\1", re.I | re.A, "iS", "Is", "ıS"),
+        (rb"(is)\1", re.I, b"iS", b"Is", b"ix"),
+        (b"(?P<name>a)(?P=name)", re.L, b"a", b"a", b"A"),
+    ):
+        doubled = re.compile(spelling, flags)
+        match = doubled.fullmatch(word + repeated)
+        assert match.group(1) == word and match.span(1) == (0, len(word))
+        assert doubled.fullmatch(word + wrong) is None
+
+    numbered = re.compile(r"(x)" * 10 + r"(k)(l)\119", re.I)
+    prefix = "x" * 10 + "Kl"
+    match = numbered.fullmatch(prefix + "k9")
+    assert match.group(11, 12) == ("K", "l") and match.span(11) == (10, 11)
+    assert numbered.fullmatch(prefix + "l9") is None
+
+    high = re.compile(b"(\xff)(\xfeB)\\2Z")
+    assert high.fullmatch(b"\xff\xfeB\xfeBZ").group(2) == b"\xfeB"
+    assert high.fullmatch(b"\xff\xfeB\xffBZ") is None
+
+    for letter, other in (("s", "ſ"), ("i", "ı")):
+        try:
+            doubled = re.compile("(" + letter + r")\1", re.I)
+        except re.PatternError:
+            continue
+        assert doubled.fullmatch(other + other).group(1) == other
+        assert doubled.fullmatch(letter + other) is None
 
     for spelling, message, position in (
         ("é(?P<?foo>x)", "bad character in group name '?foo'", 5),
@@ -159,3 +271,31 @@ def current():
             assert (error.msg, error.pattern, error.pos) == (message, spelling, position)
         else:
             raise AssertionError("invalid group name accepted")
+
+    for flags in (0, re.X):
+        for spelling, expected in (
+            (r"[--1]", "-./01"),
+            (r"[&&1]", "1&"),
+            (r"[||1]", "1|"),
+            (r"[~~1]", "1~"),
+        ):
+            assert "".join(re.findall(spelling, "-./012&|~", flags)) == expected
+        negated = re.compile(rb"X([^--1])", flags)
+        assert negated.fullmatch(b"X2").group(1) == b"2"
+        assert negated.fullmatch(b"X/") is None
+
+    for pattern, message, position in (
+        (r"[\w-b]", r"bad character range \w-b", 1),
+        (b"[\xff-a]", r"bad character range \xff-a", 1),
+        (r"a**[\w-b]", "multiple repeat", 2),
+        (rb"[a-\D]", r"bad character range a-\D", 1),
+        (r"é[\x62-a]", r"bad character range \x-a", 4),
+        (rb"[\141-\w]", r"bad character range \1-\w", 3),
+    ):
+        try:
+            re.compile(pattern)
+        except re.PatternError as exc:
+            assert (exc.msg, exc.pattern, exc.pos) == (message, pattern, position)
+        else:
+            raise AssertionError("invalid range accepted")
+    assert re.fullmatch(r"[\w-]", "-") and re.fullmatch(rb"[\--0]", b"/")

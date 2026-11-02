@@ -4,7 +4,18 @@ import warnings
 from _thread import RLock as _Lock
 from types import GenericAlias
 import weakref
-import _imre_logging as _native
+
+
+__all__ = ['BASIC_FORMAT', 'BufferingFormatter', 'CRITICAL', 'DEBUG', 'ERROR',
+           'FATAL', 'FileHandler', 'Filter', 'Formatter', 'Handler', 'INFO',
+           'LogRecord', 'Logger', 'LoggerAdapter', 'NOTSET', 'NullHandler',
+           'StreamHandler', 'WARN', 'WARNING', 'addLevelName', 'basicConfig',
+           'captureWarnings', 'critical', 'debug', 'disable', 'error',
+           'exception', 'fatal', 'getLevelName', 'getLogger', 'getLoggerClass',
+           'info', 'log', 'makeLogRecord', 'setLoggerClass', 'shutdown',
+           'warn', 'warning', 'getLogRecordFactory', 'setLogRecordFactory',
+           'lastResort', 'raiseExceptions', 'getLevelNamesMapping',
+           'getHandlerByName', 'getHandlerNames']
 
 
 _lock = _Lock()
@@ -35,23 +46,6 @@ def _addHandlerRef(handler):
     """
     with _lock:
         _handlerList.append(weakref.ref(handler, _removeHandlerRef))
-
-
-def _handler_init(self, level=NOTSET):
-    self.filters = []
-    self._name = None
-    self.level = _checkLevel(level)
-    self.formatter = None
-    self._closed = False
-    _addHandlerRef(self)
-    self.createLock()
-
-
-# Typed handlers register their fixed-layout record after construction.
-_handler_init.__name__ = Handler.__init__.__name__
-_handler_init.__qualname__ = Handler.__init__.__qualname__
-Handler.__init__ = _handler_init
-del _handler_init
 
 
 def shutdown(handlerList=_handlerList):
@@ -221,67 +215,42 @@ _defaultLastResort = _StderrHandler(WARNING)
 lastResort = _defaultLastResort
 
 
-class Filterer(object):
+class Filter(object):
     """
-    A base class for loggers and handlers which allows them to share
-    common code.
+    Filter instances are used to perform arbitrary filtering of LogRecords.
+
+    Loggers and Handlers can optionally use Filter instances to filter
+    records as desired. The base filter class only allows events which are
+    below a certain point in the logger hierarchy. For example, a filter
+    initialized with "A.B" will allow events logged by loggers "A.B",
+    "A.B.C", "A.B.C.D", "A.B.D" etc. but not "A.BB", "B.A.B" etc. If
+    initialized with the empty string, all events are passed.
     """
-    def __init__(self):
+    def __init__(self, name=''):
         """
-        Initialize the list of filters to be an empty list.
-        """
-        self.filters = []
+        Initialize a filter.
 
-    def addFilter(self, filter):
+        Initialize with the name of the logger which, together with its
+        children, will have its events allowed through the filter. If no
+        name is specified, allow every event.
         """
-        Add the specified filter to this handler.
-        """
-        if not (filter in self.filters):
-            self.filters.append(filter)
-
-    def removeFilter(self, filter):
-        """
-        Remove the specified filter from this handler.
-        """
-        if filter in self.filters:
-            self.filters.remove(filter)
+        self.name = name
+        self.nlen = len(name)
 
     def filter(self, record):
         """
-        Determine if a record is loggable by consulting all the filters.
+        Determine if the specified record is to be logged.
 
-        The default is to allow the record to be logged; any filter can veto
-        this by returning a false value.
-        If a filter attached to a handler returns a log record instance,
-        then that instance is used in place of the original log record in
-        any further processing of the event by that handler.
-        If a filter returns any other true value, the original log record
-        is used in any further processing of the event by that handler.
-
-        If none of the filters return false values, this method returns
-        a log record.
-        If any of the filters return a false value, this method returns
-        a false value.
-
-        .. versionchanged:: 3.2
-
-           Allow filters to be just callables.
-
-        .. versionchanged:: 3.12
-           Allow filters to return a LogRecord instead of
-           modifying it in place.
+        Returns True if the record should be logged, or False otherwise.
+        If deemed appropriate, the record may be modified in-place.
         """
-        for f in self.filters:
-            if hasattr(f, 'filter'):
-                result = f.filter(record)
-            else:
-                result = f(record) # assume callable - will raise if not
-            if not result:
-                return False
-            if isinstance(result, LogRecord):
-                record = result
-        return record
-
+        if self.nlen == 0:
+            return True
+        elif self.name == record.name:
+            return True
+        elif record.name.find(self.name, 0, self.nlen) != 0:
+            return False
+        return (record.name[self.nlen] == ".")
 
 # CPython 3.14.5 Lib/logging/__init__.py, logger hierarchy and enablement.
 class PlaceHolder(object):
@@ -776,6 +745,12 @@ class Logger(Filterer):
         if self.isEnabledFor(CRITICAL):
             self._log(CRITICAL, msg, args, **kwargs)
 
+    def __reduce__(self):
+        if getLogger(self.name) is not self:
+            import pickle
+            raise pickle.PicklingError('logger cannot be pickled')
+        return getLogger, (self.name,)
+
 
 # CPython 3.14.5 Lib/logging/__init__.py. See records.py for the license.
 class LoggerAdapter(object):
@@ -1091,6 +1066,24 @@ def basicConfig(**kwargs):
                 raise ValueError('Unrecognised argument(s): %s' % keys)
 
 
+def critical(msg, *args, **kwargs):
+    """
+    Log a message with severity 'CRITICAL' on the root logger. If the logger
+    has no handlers, call basicConfig() to add a console handler with a
+    pre-defined format.
+    """
+    if len(root.handlers) == 0:
+        basicConfig()
+    root.critical(msg, *args, **kwargs)
+
+
+def fatal(msg, *args, **kwargs):
+    """
+    Don't use this function, use critical() instead.
+    """
+    critical(msg, *args, **kwargs)
+
+
 def error(msg, *args, **kwargs):
     """
     Log a message with severity 'ERROR' on the root logger. If the logger has
@@ -1122,6 +1115,23 @@ def warning(msg, *args, **kwargs):
     root.warning(msg, *args, **kwargs)
 
 
+def warn(msg, *args, **kwargs):
+    warnings.warn("The 'warn' function is deprecated, "
+        "use 'warning' instead", DeprecationWarning, 2)
+    warning(msg, *args, **kwargs)
+
+
+def info(msg, *args, **kwargs):
+    """
+    Log a message with severity 'INFO' on the root logger. If the logger has
+    no handlers, call basicConfig() to add a console handler with a pre-defined
+    format.
+    """
+    if len(root.handlers) == 0:
+        basicConfig()
+    root.info(msg, *args, **kwargs)
+
+
 def debug(msg, *args, **kwargs):
     """
     Log a message with severity 'DEBUG' on the root logger. If the logger has
@@ -1131,3 +1141,54 @@ def debug(msg, *args, **kwargs):
     if len(root.handlers) == 0:
         basicConfig()
     root.debug(msg, *args, **kwargs)
+
+
+def log(level, msg, *args, **kwargs):
+    """
+    Log 'msg % args' with the integer severity 'level' on the root logger. If
+    the logger has no handlers, call basicConfig() to add a console handler
+    with a pre-defined format.
+    """
+    if len(root.handlers) == 0:
+        basicConfig()
+    root.log(level, msg, *args, **kwargs)
+
+# Warnings integration
+
+_warnings_showwarning = None
+
+def _showwarning(message, category, filename, lineno, file=None, line=None):
+    """
+    Implementation of showwarnings which redirects to logging, which will first
+    check to see if the file parameter is None. If a file is specified, it will
+    delegate to the original warnings implementation of showwarning. Otherwise,
+    it will call warnings.formatwarning and will log the resulting string to a
+    warnings logger named "py.warnings" with level logging.WARNING.
+    """
+    if file is not None:
+        if _warnings_showwarning is not None:
+            _warnings_showwarning(message, category, filename, lineno, file, line)
+    else:
+        s = warnings.formatwarning(message, category, filename, lineno, line)
+        logger = getLogger("py.warnings")
+        if not logger.handlers:
+            logger.addHandler(NullHandler())
+        # bpo-46557: Log str(s) as msg instead of logger.warning("%s", s)
+        # since some log aggregation tools group logs by the msg arg
+        logger.warning(str(s))
+
+def captureWarnings(capture):
+    """
+    If capture is true, redirect all warnings to the logging package.
+    If capture is False, ensure that warnings are not redirected to logging
+    but to their original destinations.
+    """
+    global _warnings_showwarning
+    if capture:
+        if _warnings_showwarning is None:
+            _warnings_showwarning = warnings.showwarning
+            warnings.showwarning = _showwarning
+    else:
+        if _warnings_showwarning is not None:
+            warnings.showwarning = _warnings_showwarning
+            _warnings_showwarning = None

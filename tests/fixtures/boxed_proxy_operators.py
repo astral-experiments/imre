@@ -53,6 +53,25 @@ def current():
     mapping = Mapping(visits=2)
     print(op.getitem(mapping, "visits"), op.contains(mapping, "absent"), events)
 
+    from operator import __lt__, __sub__
+    for name in ("lt", "le", "eq", "ne", "ge", "gt", "and_", "or_", "sub", "xor"):
+        alias = "__" + name.rstrip("_") + "__"
+        assert vars(op)[alias] is getattr(op, name)
+    assert __lt__ is op.lt and __sub__ is op.sub
+    class Reflected:
+        def __gt__(self, other):
+            return self
+        def __rsub__(self, other):
+            return self
+    reflected = Reflected()
+    assert __lt__(0, reflected) is reflected and __sub__(0, reflected) is reflected
+    try:
+        __sub__(reflected, 0)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("missing subtraction was accepted")
+
     comparisons = (op.lt, op.le, op.eq, op.ne, op.gt, op.ge)
     print([f(9, 4) for f in comparisons])
     assert op.__pow__ is op.pow

@@ -40,6 +40,26 @@ class InterruptedDisplay:
 
 
 class IdentityTest(unittest.TestCase):
+    def test_text_and_bytes_instance(self):
+        log: list[str] = []
+        self.assertIsInstance("text", str, message(log))
+        self.assertIsInstance(obj=b"bytes", cls=bytes)
+        with self.assertRaises(AssertionError) as caught:
+            self.assertIsInstance(msg=message(log), cls=str, obj=b"bytes")
+        self.assertEqual(str(caught.exception), "b'bytes' is not an instance of <class 'str'> : custom")
+        self.assertEqual(log, ["msg", "msg"])
+        with self.assertRaises(AssertionError) as reverse:
+            self.assertIsInstance("text", bytes)
+        self.assertEqual(str(reverse.exception), "'text' is not an instance of <class 'bytes'>")
+
+    def test_type_values(self):
+        expected = str
+        self.assertEqual(type("text"), expected)
+        self.assertEqual(type(b"bytes"), bytes)
+        with self.assertRaises(AssertionError) as caught:
+            self.assertEqual(type(b"bytes"), expected, "type differs")
+        self.assertEqual(str(caught.exception), "<class 'bytes'> != <class 'str'> : type differs")
+
     def test_alias_and_equal_distinct_objects(self):
         first = [1]
         alias = first

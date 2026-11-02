@@ -104,12 +104,34 @@ impl Checker<'_> {
         Some((origin, self.types.namedtuple_metadata(origin)?))
     }
 
+    /// Use the generated Python method for both saved attributes and direct calls.
+    pub(super) fn check_namedtuple_asdict(
+        &self,
+        attribute: &ast::ExprAttribute,
+        receiver: Option<Type>,
+    ) -> Result<(), String> {
+        if attribute.attr.as_str() == "_asdict" {
+            let declared = match receiver {
+                Some(ty) => self.types.namedtuple_definition(ty).is_some(),
+                None => matches!(
+                    self.namedtuple_factory(&attribute.value),
+                    Some((TupleOrigin::Declaration(_), _))
+                ),
+            };
+            if declared {
+                return Err(self.object_builtin_error("namedtuple._asdict", attribute));
+            }
+        }
+        Ok(())
+    }
+
     /// Read immutable attributes from a static namedtuple factory.
     pub(super) fn namedtuple_class_attribute(
         &self,
         attribute: &ast::ExprAttribute,
         declaration: &NamedTuple,
     ) -> Result<Expr, String> {
+        self.check_namedtuple_asdict(attribute, None)?;
         match attribute.attr.as_str() {
             "_fields" | "__match_args__" => Ok(self.namedtuple_fields(declaration)),
             "__name__" => Ok(Expr {
@@ -131,6 +153,7 @@ impl Checker<'_> {
         receiver: Expr,
         declaration: &NamedTuple,
     ) -> Result<Expr, String> {
+        self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
         if attribute.attr.as_str() == "__match_args__"
             || (attribute.attr.as_str() == "_fields"
                 && !matches!(

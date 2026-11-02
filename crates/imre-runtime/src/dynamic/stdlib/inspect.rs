@@ -187,9 +187,9 @@ fn static_member(ctx: &mut Context, obj: Id, attr: Id, missing: Id) -> Result<Id
             Value::Function { fields, .. } => Some(fields.dict),
             Value::Raised(ref error) => error.trace.as_ref().and_then(|trace| trace.dictionary),
             Value::Partial { dictionary, .. } => dictionary,
-            Value::Cached { dictionary, .. } | Value::StaticMethod { dictionary, .. } => {
-                Some(dictionary)
-            }
+            Value::Cached { dictionary, .. }
+            | Value::ClassMethod { dictionary, .. }
+            | Value::StaticMethod { dictionary, .. } => Some(dictionary),
             _ => None,
         };
         if let Some(storage) = dict.and_then(|dict| ctx.dict_storage(dict)) {

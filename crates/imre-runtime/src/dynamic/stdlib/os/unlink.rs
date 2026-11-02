@@ -1,4 +1,4 @@
-use super::{Context, Id, NONE, Result, native, path_and_dir_fd};
+use super::{Context, Id, NONE, Result, audit_fd, native, path_and_dir_fd};
 
 /// Remove an entry or an empty directory using the same path and dir_fd converters.
 pub(super) fn call(
@@ -8,6 +8,10 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let (path, pathname, dir_fd) = path_and_dir_fd(ctx, name, args, kwargs)?;
+    if name != "rmdir" && !ctx.audit_hooks.is_empty() {
+        let directory = audit_fd(ctx, dir_fd);
+        super::super::audit::event(ctx, "os.remove", &[path, directory])?;
+    }
     match native::unlink_at(&pathname, dir_fd, name == "rmdir") {
         Ok(()) => Ok(NONE),
         Err(error) => {

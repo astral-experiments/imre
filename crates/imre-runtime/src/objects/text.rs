@@ -236,15 +236,13 @@ pub(crate) fn python_alnum(text: &str) -> bool {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
     }
     const RANGES: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alnum.rs"));
-    all_in_ranges(text, RANGES)
+    text.chars().all(|ch| in_ranges(ch, RANGES))
 }
 
-fn all_in_ranges(text: &str, ranges: &[(u32, u32)]) -> bool {
-    text.chars().all(|ch| {
-        let cp = u32::from(ch);
-        let index = ranges.partition_point(|&(_, end)| end < cp);
-        ranges.get(index).is_some_and(|&(start, _)| start <= cp)
-    })
+fn in_ranges(ch: char, ranges: &[(u32, u32)]) -> bool {
+    let cp = u32::from(ch);
+    let index = ranges.partition_point(|&(_, end)| end < cp);
+    ranges.get(index).is_some_and(|&(start, _)| start <= cp)
 }
 
 pub(crate) fn python_isalpha(text: &str) -> bool {
@@ -252,7 +250,15 @@ pub(crate) fn python_isalpha(text: &str) -> bool {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphabetic());
     }
     const LETTERS: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alpha.rs"));
-    all_in_ranges(text, LETTERS)
+    text.chars().all(|ch| in_ranges(ch, LETTERS))
+}
+
+pub(crate) fn python_isidentifier(text: &str) -> bool {
+    const START: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_identifier_start.rs"));
+    const CONTINUE: &[(u32, u32)] =
+        include!(concat!(env!("OUT_DIR"), "/unicode_identifier_continue.rs"));
+    let mut chars = text.chars();
+    chars.next().is_some_and(|ch| in_ranges(ch, START)) && chars.all(|ch| in_ranges(ch, CONTINUE))
 }
 
 pub(crate) fn python_isdigit(text: &str) -> bool {
@@ -959,7 +965,7 @@ pub unsafe extern "C" fn imre_str_find(
 }
 
 /// Resolve Python search bounds, preserving a start beyond the end even for an empty needle.
-fn search_window<'a>(
+pub(crate) fn search_window<'a>(
     source: &'a str,
     start: Option<&Int>,
     end: Option<&Int>,
@@ -983,7 +989,7 @@ pub(crate) fn count_text(
 }
 
 /// Resolve a slice of a Python string stored as code points, preserving the original offset.
-fn codepoint_search_window<'a>(
+pub(crate) fn codepoint_search_window<'a>(
     source: &'a [u32],
     start: Option<&Int>,
     end: Option<&Int>,
@@ -997,20 +1003,24 @@ fn codepoint_search_window<'a>(
     Some((source.get(start..end)?, start))
 }
 
-/// Find the first occurrence when either string contains surrogate code points.
+/// Find the first or last match when either string contains surrogate code points.
 pub(crate) fn find_codepoints(
     source: &[u32],
     needle: &[u32],
     start: Option<&Int>,
     end: Option<&Int>,
+    reverse: bool,
 ) -> Int {
     let found = codepoint_search_window(source, start, end).and_then(|(window, start)| {
         if needle.is_empty() {
-            return Some(start);
+            return Some(if reverse { start + window.len() } else { start });
         }
-        let offset = window
-            .windows(needle.len())
-            .position(|part| part == needle)?;
+        let mut windows = window.windows(needle.len());
+        let offset = if reverse {
+            windows.rposition(|part| part == needle)
+        } else {
+            windows.position(|part| part == needle)
+        }?;
         Some(start + offset)
     });
     found.map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)

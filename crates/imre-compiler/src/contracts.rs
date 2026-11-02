@@ -63,6 +63,7 @@ impl Builtin {
             Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
                 Contract::new(true, PreservesLists)
             }
+            Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
             Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
             Self::ListExtendBuffer | Self::ListExtendSnapshot | Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
@@ -119,10 +120,11 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet => Contract::new(true, PreservesOwners),
+            Self::MappingObjectGet | Self::ObjectTextProject => Contract::new(true, PreservesOwners),
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
+            | Self::ObjectIsExactTuple
             | Self::ObjectStreamProject
             | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity
@@ -364,9 +366,15 @@ impl Builtin {
                 | ProcessOperation::TaskResult
                 | ProcessOperation::Semaphore
                 | ProcessOperation::Release
-                | ProcessOperation::EnvironCopy
+                | ProcessOperation::EnvironCopy { .. }
+                | ProcessOperation::EnvironKeys
+                | ProcessOperation::EnvironIndex { .. }
+                | ProcessOperation::EnvironDelete { .. }
+                | ProcessOperation::EnvironSet { .. }
+                | ProcessOperation::EnvironClear
+                | ProcessOperation::EnvironUpdate { .. }
                 | ProcessOperation::EnvironGet
-                | ProcessOperation::GetCwd
+                | ProcessOperation::GetCwd { .. }
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Credential(_)
                 | ProcessOperation::CredentialId { .. }
@@ -538,6 +546,8 @@ impl Builtin {
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
             | Self::SysContextAwareWarnings
+            | Self::FaultFrame { .. }
+            | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
@@ -621,6 +631,7 @@ impl Builtin {
             | Self::ChainMapSetItem
             | Self::ChainMapGet(_)
             | Self::DictPop
+            | Self::DictPopItem
             | Self::DictSetDefault
             | Self::DefaultDictMissing
             | Self::DictTryPop(_)
@@ -1092,12 +1103,19 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "int_lshift"
                 | "int_rshift"
                 | "imre_flush_stdout"
+                | "imre_environ_clear"
+                | "imre_environ_update"
                 | "imre_environ_get"
+                | "imre_environ_keys"
+                | "imre_environb_index"
+                | "imre_environ_index"
                 | "imre_getcwd"
+                | "imre_getcwdb"
                 | "imre_os_linesep"
                 | "imre_os_pathsep"
                 | "imre_shutil_which"
                 | "imre_environ_copy"
+                | "imre_environb_copy"
                 | "imre_subprocess_check"
                 | "imre_subprocess_error_field"
                 | "imre_print_int"
@@ -1188,6 +1206,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_splitlines_options"
                 | "imre_str_translate"
                 | "imre_mapping_object_get"
+                | "imre_object_exact_text"
                 | "imre_exception_field_repr"
                 | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
@@ -1362,6 +1381,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
+                | "imre_dict_popitem"
                 | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"

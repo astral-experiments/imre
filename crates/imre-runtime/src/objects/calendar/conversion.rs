@@ -85,7 +85,7 @@ pub(super) fn local_fold(seconds: i64) -> Result<i32, Error> {
 
 /// Solve local_seconds(utc) == wall using the two offsets bracketing a clock
 /// transition, as in CPython's local_to_seconds.
-fn local_candidate(wall: i64, fold: bool) -> Result<i64, Error> {
+pub(super) fn local_candidate(wall: i64, fold: bool) -> Result<i64, Error> {
     let a = local_seconds(wall)? - wall;
     let first = wall - a;
     let first_local = local_seconds(first)?;
@@ -113,7 +113,7 @@ fn local_candidate(wall: i64, fold: bool) -> Result<i64, Error> {
     })
 }
 
-fn naive_offset(local: i128, fold: bool) -> Result<i128, Error> {
+pub(super) fn naive_offset(local: i128, fold: bool) -> Result<i128, Error> {
     let wall = ((local - (EPOCH_ORD - 1) * DAY).div_euclid(1_000_000)) as i64;
     let first = local_candidate(wall, fold)?;
     let other = local_candidate(wall, !fold)?;

@@ -1,0 +1,93 @@
+from inspect import getattr_static
+from types import MappingProxyType
+from typing import TypeVar, Unpack
+
+
+def current():
+    variable = TypeVar("T", covariant=True)
+    namespace = vars(TypeVar)
+    assert type(namespace) is MappingProxyType
+    assert namespace["__module__"] == TypeVar.__module__ == "typing"
+    assert namespace["__doc__"] == TypeVar.__doc__ and TypeVar.__doc__.startswith("Type variable.")
+    assert namespace["has_default"] is TypeVar.has_default
+    assert namespace["has_default"](variable) is variable.has_default() is False
+    substitute = namespace["__typing_subst__"]
+    assert substitute is TypeVar.__typing_subst__
+    assert substitute(variable, None) is type(None)
+    assert variable.__typing_subst__(int) is int
+    for unpacked in (Unpack[tuple[int, ...]], (*tuple[int, ...],)[0]):
+        try:
+            variable.__typing_subst__(unpacked)
+        except TypeError as error:
+            assert str(error) == f"{unpacked} is not valid as type argument"
+        else:
+            raise AssertionError("substituted an unpacked tuple for a type variable")
+    try:
+        namespace["extra"] = 1
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("TypeVar namespace is writable")
+    for name in ("__covariant__", "__contravariant__", "__infer_variance__"):
+        member = getattr_static(variable, name)
+        assert member is namespace[name] is getattr_static(TypeVar, name) is getattr(TypeVar, name)
+        assert type(member).__name__ == "member_descriptor"
+        assert member.__objclass__ is TypeVar and member.__name__ == name
+        assert member.__get__(None, TypeVar) is member
+        assert member.__get__(variable, TypeVar) is (name == "__covariant__")
+        assert type(member).__get__(member, variable) is getattr(variable, name)
+        for write in (lambda: setattr(variable, name, False),
+                      lambda: delattr(variable, name)):
+            try:
+                write()
+            except AttributeError as error:
+                assert str(error) == "readonly attribute"
+            else:
+                raise AssertionError("variance flag was writable")
+
+    class Other:
+        flag = TypeVar.__covariant__
+
+    assert Other.flag is TypeVar.__covariant__
+    try:
+        Other().flag = False
+    except TypeError as error:
+        print(error)
+    else:
+        raise AssertionError("member accepted unrelated receiver")
+
+    from annotationlib import Format
+    from typing import NoDefault, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
+
+    P = ParamSpec("P")
+    parameters = (P, P.args, P.kwargs, TypeVarTuple("Ts"))
+    for parameter in parameters:
+        cls = type(parameter)
+        members = vars(cls)
+        assert type(members) is MappingProxyType
+        assert members["__doc__"] == cls.__doc__ and cls.__doc__
+        assert members["__module__"] == cls.__module__ == "typing"
+    for cls, marker in ((ParamSpecArgs, P.args), (ParamSpecKwargs, P.kwargs)):
+        origin = vars(cls)["__origin__"]
+        assert origin is cls.__origin__ and origin.__objclass__ is cls
+        assert origin.__get__(marker) is marker.__origin__ is P
+        assert vars(cls)["__hash__"] is None
+        compare = vars(cls)["__eq__"]
+        assert type(compare).__name__ == "wrapper_descriptor"
+        assert compare.__get__(marker)(cls(P))
+    for parameter in (variable, P, parameters[-1]):
+        cls = type(parameter)
+        method = vars(cls)["has_default"]
+        assert method is cls.has_default and method.__objclass__ is cls
+        assert type(method).__name__ == "method_descriptor"
+        assert method.__get__(parameter)() is parameter.has_default() is False
+    assert isinstance(ParamSpec.__name__, str)
+    assert vars(ParamSpec)["__name__"].__get__(P) == "P"
+
+    marker = []
+    for default in (None, (), marker, NoDefault):
+        parameter = TypeVar("T", default=default)
+        assert parameter.__default__ is default
+        assert parameter.has_default() is (default is not NoDefault)
+        assert parameter.evaluate_default(Format.VALUE) is default
+    assert variable.evaluate_default(Format.VALUE) is NoDefault

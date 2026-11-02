@@ -115,7 +115,7 @@ impl Session {
             (
                 "hashlib",
                 // Hash constructors accept data and its legacy string spelling, exclusively.
-                "from _hashlib import HASH as _Hash, HASHXOF as _Xof\nfrom typing import BinaryIO as _BinaryIO, Callable as _Callable\ndef file_digest(fileobj: _BinaryIO | None, digest: str | _Callable[[], _Hash], /, *, _bufsize: object = ...) -> _Hash: ...\nalgorithms_available: set[str]\nalgorithms_guaranteed: set[str]\ndef blake2b(data: bytes = b'', *, digest_size: int = ..., key: bytes = ..., salt: bytes = ..., person: bytes = ..., fanout: int = ..., depth: int = ..., leaf_size: int = ..., node_offset: int = ..., node_depth: int = ..., inner_size: int = ..., last_node: bool = ..., usedforsecurity: bool = ..., string: bytes = ...) -> _Hash: ...\ndef blake2s(data: bytes = b'', *, digest_size: int = ..., key: bytes = ..., salt: bytes = ..., person: bytes = ..., fanout: int = ..., depth: int = ..., leaf_size: int = ..., node_offset: int = ..., node_depth: int = ..., inner_size: int = ..., last_node: bool = ..., usedforsecurity: bool = ..., string: bytes = ...) -> _Hash: ...\ndef md5(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha1(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef shake_128(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef shake_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\n",
+                "from _hashlib import HASH as _Hash, HASHXOF as _Xof, pbkdf2_hmac as pbkdf2_hmac, scrypt as scrypt\nfrom typing import BinaryIO as _BinaryIO, Callable as _Callable\ndef file_digest(fileobj: _BinaryIO | None, digest: str | _Callable[[], _Hash], /, *, _bufsize: object = ...) -> _Hash: ...\nalgorithms_available: set[str]\nalgorithms_guaranteed: set[str]\ndef blake2b(data: bytes = b'', *, digest_size: int = ..., key: bytes = ..., salt: bytes = ..., person: bytes = ..., fanout: int = ..., depth: int = ..., leaf_size: int = ..., node_offset: int = ..., node_depth: int = ..., inner_size: int = ..., last_node: bool = ..., usedforsecurity: bool = ..., string: bytes = ...) -> _Hash: ...\ndef blake2s(data: bytes = b'', *, digest_size: int = ..., key: bytes = ..., salt: bytes = ..., person: bytes = ..., fanout: int = ..., depth: int = ..., leaf_size: int = ..., node_offset: int = ..., node_depth: int = ..., inner_size: int = ..., last_node: bool = ..., usedforsecurity: bool = ..., string: bytes = ...) -> _Hash: ...\ndef md5(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha1(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef shake_128(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef shake_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\n",
             ),
             (
                 "tomli",
@@ -376,6 +376,13 @@ impl Session {
             .load(&self.db)
     }
 
+    /// Resolve a source offset with the cached line index for the defining module.
+    pub(crate) fn source_line(&self, module: usize, offset: TextSize) -> u32 {
+        ruff_db::source::line_index(&self.db, self.files[module])
+            .line_index(offset)
+            .get() as u32
+    }
+
     /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
     pub(crate) fn replace_source(&mut self, module: usize, source: String) -> ParsedModuleRef {
         let file = self.files[module];
@@ -449,6 +456,27 @@ impl Session {
         resolves_to_stdlib_function(&model, expression, owner, name)
     }
 
+    /// Recognize the sealed regex receiver even when its pattern cannot be lowered statically.
+    pub(crate) fn is_regex_pattern(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(ty @ Type::NominalInstance(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        let Some(TypeDefinition::StaticClass(class)) =
+            ty.definition(&self.db, &model.program_environment())
+        else {
+            return false;
+        };
+        class.name(&self.db).as_deref() == Some("Pattern")
+            && class.file(&self.db).path(&self.db).is_vendored_path()
+            && model
+                .resolve_module(Some("re"), 0)
+                .and_then(|module| module.file(&self.db))
+                == Some(class.file(&self.db))
+    }
+
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
         use ty_python_semantic::types::Type as Ty;
         self.hint_reads.set(self.hint_reads.get() + 1);
@@ -456,6 +484,16 @@ impl Session {
         matches!(
             expression.inferred_type(&model),
             Some(Ty::NominalInstance(_) | Ty::LiteralValue(_))
+        )
+    }
+
+    pub(crate) fn is_typing_protocol(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{SpecialFormType, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(
+            expression.inferred_type(&model),
+            Some(Ty::SpecialForm(SpecialFormType::Protocol))
         )
     }
 
@@ -480,9 +518,14 @@ impl Session {
             return false;
         };
         let env = ProgramEnvironment::from_file(file);
-        ty.definition(&self.db, &env).is_some_and(|definition| {
-            class.to_instance(&self.db, &env).definition(&self.db, &env) == Some(definition)
-        })
+        // ty represents tuple instances by their element types. Its subclass view
+        // exposes the builtin definition without constructing an unparameterized tuple.
+        let canonical = match class {
+            ty_python_semantic::types::KnownClass::Tuple => class.to_subclass_of(&self.db, &env),
+            _ => class.to_instance(&self.db, &env),
+        };
+        ty.definition(&self.db, &env)
+            .is_some_and(|definition| canonical.definition(&self.db, &env) == Some(definition))
     }
 
     /// Bound methods on these sealed native receiver layouts cannot dispatch to a
@@ -629,11 +672,41 @@ impl Session {
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
-        scoped_builtin: bool,
+        calls: FallbackCalls,
+        runtime_provider: Option<usize>,
     ) -> Result<(), String> {
+        let all_calls = matches!(calls, FallbackCalls::All);
+        self.set_fallback_rules(all_calls);
+        let provider = runtime_provider.map(|index| self.files[index]);
+        self.errors(skipped, overloads, all_calls, provider)?;
+        if let FallbackCalls::Entry(entry) = calls {
+            // Only the entry gained a new statement order. Imported modules retain
+            // the argument-checking policy they had before the guard.
+            self.set_fallback_rules(true);
+            let checked = CheckedFile::new(
+                &self.db,
+                self.files[entry],
+                skipped.map_or(&[][..], |ranges| ranges[entry].as_slice()),
+                overloads[entry].as_slice(),
+                true,
+                provider,
+            );
+            let errors = file_errors(&self.db, checked);
+            if !errors.is_empty() {
+                return Err(errors.join("\n"));
+            }
+        }
+        Ok(())
+    }
+
+    fn set_fallback_rules(&mut self, scoped_builtin: bool) {
         let mut rules = RuleSelection::default();
-        let argument_rule = scoped_builtin.then_some("invalid-argument-type");
-        for name in std::iter::once("invalid-return-type").chain(argument_rule) {
+        let arguments = if scoped_builtin {
+            CALL_ARGUMENT_RULES
+        } else {
+            &[]
+        };
+        for &name in ["invalid-return-type"].iter().chain(arguments) {
             rules.enable(
                 default_lint_registry()
                     .get(name)
@@ -645,7 +718,6 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(Arc::new(rules));
-        self.errors(skipped, overloads)
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.
@@ -657,13 +729,15 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(skipped, overloads)
+        self.errors(skipped, overloads, false, None)
     }
 
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
+        scoped_builtin: bool,
+        runtime_provider: Option<File>,
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -675,6 +749,8 @@ impl Session {
                     file,
                     skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
                     overloads.get(index).map_or(&[][..], Vec::as_slice),
+                    scoped_builtin,
+                    runtime_provider,
                 );
                 file_errors(&self.db, checked)
             })
@@ -695,7 +771,28 @@ struct CheckedFile<'db> {
     file: File,
     skipped: Vec<TextRange>,
     overloads: Vec<CheckedDiagnostic>,
+    #[returns(copy)]
+    scoped_builtin: bool,
+    #[returns(copy)]
+    runtime_provider: Option<File>,
 }
+
+/// Files in which a checked object fallback also enforces call arguments.
+pub(crate) enum FallbackCalls {
+    None,
+    Entry(usize),
+    All,
+}
+
+const CALL_ARGUMENT_RULES: &[&str] = &[
+    "invalid-argument-type",
+    "missing-argument",
+    "no-matching-overload",
+    "too-many-positional-arguments",
+    "unknown-argument",
+    "positional-only-parameter-as-kwarg",
+    "parameter-already-assigned",
+];
 
 /// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -811,8 +908,15 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (diagnostic.id().as_str() == "invalid-argument-type"
-                                && vendored_argument(db, file, range))
+                            || (checked.scoped_builtin(db)
+                                && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
+                                && runtime_argument(
+                                    db,
+                                    file,
+                                    range,
+                                    diagnostic.id().as_str(),
+                                    checked.runtime_provider(db),
+                                ))
                             // ty also reports implicit None returns at the annotation span.
                             || (diagnostic.id().as_str() == "invalid-return-type"
                                 && diagnostic.headline_message()
@@ -838,8 +942,14 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .collect()
 }
 
-/// Leave argument conversion to Python only for calls proved to target vendored code.
-fn vendored_argument(db: &dyn Db, file: File, range: TextRange) -> bool {
+/// Leave argument conversion to Python for vendored code and its compiler-supplied adapter.
+fn runtime_argument(
+    db: &dyn Db,
+    file: File,
+    range: TextRange,
+    rule: &str,
+    runtime_provider: Option<File>,
+) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::Type;
     let file = db.program_file(file);
@@ -849,9 +959,19 @@ fn vendored_argument(db: &dyn Db, file: File, range: TextRange) -> bool {
         return false;
     }
     let nodes = covering_node(root, range);
-    let Some(call) = nodes.ancestors().find_map(|node| match node {
-        AnyNodeRef::ExprCall(call) if call.arguments.range().contains_range(range) => Some(call),
-        _ => None,
+    // ty points to the entire call for missing arguments and overload mismatches.
+    // An excess argument can itself be a call, in which case its parent owns the error.
+    let whole_call = matches!(rule, "missing-argument" | "no-matching-overload");
+    let Some(call) = nodes.ancestors().find_map(|node| {
+        let AnyNodeRef::ExprCall(call) = node else {
+            return None;
+        };
+        let owns_range = if whole_call {
+            call.range() == range
+        } else {
+            call.arguments.range().contains_range(range)
+        };
+        owns_range.then_some(call)
     }) else {
         return false;
     };
@@ -859,14 +979,21 @@ fn vendored_argument(db: &dyn Db, file: File, range: TextRange) -> bool {
     let Some(callee) = call.func.inferred_type(&model) else {
         return false;
     };
-    let is_vendored = |ty: Type<'_>| {
+    let uses_runtime_provider = |ty: Type<'_>| {
         ty.definition(db, &model.program_environment())
             .and_then(|definition| definition.definition())
-            .is_some_and(|definition| definition.file(db).path(db).is_vendored_path())
+            .is_some_and(|definition| {
+                let file = definition.file(db);
+                file.path(db).is_vendored_path() || Some(file) == runtime_provider
+            })
     };
     match callee {
-        Type::Union(union) => union.elements(db).iter().copied().all(is_vendored),
-        ty => is_vendored(ty),
+        Type::Union(union) => union
+            .elements(db)
+            .iter()
+            .copied()
+            .all(uses_runtime_provider),
+        ty => uses_runtime_provider(ty),
     }
 }
 
@@ -925,7 +1052,7 @@ fn contextmanager_annotation(db: &dyn Db, file: File, range: TextRange) -> bool 
     let index = ty_python_core::semantic_index(db, program);
     index
         .node_scope(NodeWithScopeRef::Function(function))
-        .is_generator_function(&index)
+        .is_generator_function(index)
         && resolves_to_stdlib_function(
             &SemanticModel::new(db, program),
             &decorator.expression,
@@ -1107,7 +1234,7 @@ impl AnalysisCache {
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached.session.errors(skipped, overloads);
+            return cached.session.errors(skipped, overloads, false, None);
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
@@ -1536,7 +1663,11 @@ mod diagnostic_mode_tests {
         assert!(message.contains("not callable"), "{message}");
         // Entry profiles can skip a scope without changing its source or Salsa revision.
         let whole = TextRange::new(0.into(), 40.into());
-        assert!(session.errors(Some(&[vec![whole]]), &[]).is_ok());
-        assert_eq!(session.errors(None, &[]).unwrap_err(), message);
+        assert!(
+            session
+                .errors(Some(&[vec![whole]]), &[], false, None)
+                .is_ok()
+        );
+        assert_eq!(session.errors(None, &[], false, None).unwrap_err(), message);
     }
 }

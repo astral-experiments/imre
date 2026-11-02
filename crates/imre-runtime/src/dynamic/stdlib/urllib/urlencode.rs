@@ -1,40 +1,6 @@
 //! Encode mappings and ordered query pairs for runtime-imported URL consumers.
 
-use super::{Context, Error, Id, NONE, Result, Value, quote::quote, required};
-
-/// Bind the Python function's arguments, including its keyword diagnostics.
-fn arguments(args: &[Id], kwargs: &[(String, Id)]) -> Result<[Option<Id>; 6]> {
-    let names = ["query", "doseq", "safe", "encoding", "errors", "quote_via"];
-    let mut values = [None; 6];
-    for (slot, &arg) in values.iter_mut().zip(args) {
-        *slot = Some(arg);
-    }
-    for (key, arg) in kwargs {
-        let Some(index) = names.iter().position(|name| name == key) else {
-            let mut message = format!("urlencode() got an unexpected keyword argument '{key}'");
-            if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names) {
-                message.push_str(&format!(". Did you mean '{hint}'?"));
-            }
-            return Err(Error::new("TypeError", message));
-        };
-        if values[index].replace(*arg).is_some() {
-            return Err(Error::new(
-                "TypeError",
-                format!("urlencode() got multiple values for argument '{key}'"),
-            ));
-        }
-    }
-    if args.len() > names.len() {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "urlencode() takes from 1 to 6 positional arguments but {} were given",
-                args.len()
-            ),
-        ));
-    }
-    Ok(values)
-}
+use super::{Context, Error, Id, Result, Value};
 
 /// Check the length and first tuple before iterating a non-mapping query.
 fn check_sequence(ctx: &mut Context, query: Id) -> Result<()> {
@@ -53,8 +19,18 @@ fn check_sequence(ctx: &mut Context, query: Id) -> Result<()> {
 
 /// Join the quoted key-value pairs of a mapping or sequence of tuples.
 pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [query, doseq, safe, encoding, errors, via] = arguments(args, kwargs)?;
-    let query = required(query, "urlencode", "query")?;
+    let &[query, doseq, safe, encoding, errors, via] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "_imre_urlencode expects six arguments",
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_imre_urlencode expects positional arguments",
+        ));
+    }
     let query = match ctx.lookup_attr(query, "items") {
         Ok(_) => {
             let method = ctx.lookup_attr(query, "items")?;
@@ -78,8 +54,7 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         }
         Err(e) => return Err(e),
     };
-    let doseq = ctx.optional_truth(doseq, false)?;
-    let safe = safe.unwrap_or_else(|| ctx.text(""));
+    let doseq = ctx.truth(doseq)?;
     let pairs = ctx.iterator(query)?;
     ctx.heap.reserve_temporaries(1)?;
     ctx.heap.keep(pairs);
@@ -169,9 +144,9 @@ fn encoded(
     ctx: &mut Context,
     value: Id,
     safe: Id,
-    encoding: Option<Id>,
-    errors: Option<Id>,
-    via: Option<Id>,
+    encoding: Id,
+    errors: Id,
+    via: Id,
 ) -> Result<Id> {
     let bytes = matches!(ctx.heap.get(ctx.scalar_value(value)), Value::Bytes(_));
     let id = if bytes || matches!(ctx.heap.get(value), Value::Str(_)) {
@@ -191,22 +166,11 @@ fn encoded(
     } else {
         ctx.text(ctx.display(value))
     };
-    let value = if let Some(function) = via {
-        let mut args = vec![id, safe];
-        if !bytes {
-            args.extend([encoding.unwrap_or(NONE), errors.unwrap_or(NONE)]);
-        }
-        ctx.call(function, args, Vec::new())?
-    } else {
-        quote(
-            ctx,
-            "quote_plus",
-            id,
-            Some(safe),
-            if bytes { None } else { encoding },
-            if bytes { None } else { errors },
-        )?
-    };
+    let mut args = vec![id, safe];
+    if !bytes {
+        args.extend([encoding, errors]);
+    }
+    let value = ctx.call(via, args, Vec::new())?;
     ctx.str_value(value)?;
     Ok(value)
 }

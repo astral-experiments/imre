@@ -1,19 +1,103 @@
 """POSIX filesystem spellings for runtime-loaded modules."""
 import abc
 import sys
+from posix import openpty
 import posixpath as path
+import stat as st
+from posix import _exit
+from posix import pread, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import access, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
-from posix import chdir
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat, truncate
+
+try:
+    from posix import waitstatus_to_exitcode
+except ImportError:
+    pass
+
+if sys.platform == "linux":
+    from posix import MFD_CLOEXEC, memfd_create
+    import posix as _posix
+    from posix import pipe2
+    for _name in vars(_posix):
+        if _name.startswith("RTLD_"):
+            globals()[_name] = getattr(_posix, _name)
+    del _name, _posix
+    from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
+    from posix import (
+        POSIX_FADV_DONTNEED, POSIX_FADV_NOREUSE, POSIX_FADV_NORMAL, POSIX_FADV_RANDOM,
+        POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,
+    )
+    from posix import (
+        sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
+        SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
+    )
+    from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
 
 
 curdir = path.curdir
+defpath = path.defpath
 extsep = path.extsep
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if sys.platform != 'vxworks':
+    # Supply os.popen()
+    def popen(cmd, mode="r", buffering=-1):
+        if not isinstance(cmd, str):
+            raise TypeError("invalid cmd type (%s, expected string)" % type(cmd))
+        if mode not in ("r", "w"):
+            raise ValueError("invalid mode %r" % mode)
+        if buffering == 0 or buffering is None:
+            raise ValueError("popen() does not support unbuffered streams")
+        import subprocess
+        if mode == "r":
+            proc = subprocess.Popen(cmd,
+                                    shell=True, text=True,
+                                    stdout=subprocess.PIPE,
+                                    bufsize=buffering)
+            return _wrap_close(proc.stdout, proc)
+        else:
+            proc = subprocess.Popen(cmd,
+                                    shell=True, text=True,
+                                    stdin=subprocess.PIPE,
+                                    bufsize=buffering)
+            return _wrap_close(proc.stdin, proc)
+
+    # Helper for popen() -- a proxy for a file whose close waits for the process
+    class _wrap_close:
+        def __init__(self, stream, proc):
+            self._stream = stream
+            self._proc = proc
+        def close(self):
+            self._stream.close()
+            returncode = self._proc.wait()
+            if returncode == 0:
+                return None
+            return returncode << 8  # POSIX wait status
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.close()
+        def __getattr__(self, name):
+            return getattr(self._stream, name)
+        def __iter__(self):
+            return iter(self._stream)
+
+
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+def fdopen(fd, mode="r", buffering=-1, encoding=None, *args, **kwargs):
+    if not isinstance(fd, int):
+        raise TypeError("invalid fd type (%s, expected integer)" % type(fd))
+    import io
+    if "b" not in mode:
+        encoding = io.text_encoding(encoding)
+    return io.open(fd, mode, buffering, encoding, *args, **kwargs)
+
+
+
 _walk_symlinks_as_files = object()
 
 
@@ -190,6 +274,74 @@ def makedirs(name, mode=0o777, exist_ok=False):
             raise
 
 
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+def get_exec_path(env=None):
+    """Returns the sequence of directories that will be searched for the
+    named executable (similar to a shell) when launching a process.
+
+    *env* must be an environment variable dict or None.  If *env* is None,
+    os.environ will be used.
+    """
+    # Use a local import instead of a global import to limit the number of
+    # modules loaded at startup: the os module is always loaded at startup by
+    # Python. It may also avoid a bootstrap issue.
+    import warnings
+
+    if env is None:
+        env = environ
+
+    # {b'PATH': ...}.get('PATH') and {'PATH': ...}.get(b'PATH') emit a
+    # BytesWarning when using python -b or python -bb: ignore the warning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", BytesWarning)
+
+        try:
+            path_list = env.get('PATH')
+        except TypeError:
+            path_list = None
+
+        if supports_bytes_environ:
+            try:
+                path_listb = env[b'PATH']
+            except (KeyError, TypeError):
+                pass
+            else:
+                if path_list is not None:
+                    raise ValueError(
+                        "env cannot contain 'PATH' and b'PATH' keys")
+                path_list = path_listb
+
+            if path_list is not None and isinstance(path_list, bytes):
+                path_list = fsdecode(path_list)
+
+    if path_list is None:
+        path_list = defpath
+    return path_list.split(pathsep)
+
+
+def removedirs(name):
+    """removedirs(name)
+
+    Super-rmdir; remove a leaf directory and all empty intermediate
+    ones.  Works like rmdir except that, if the leaf directory is
+    successfully removed, directories corresponding to rightmost path
+    segments will be pruned away until either the whole path is
+    consumed or an error occurs.  Errors during this latter phase are
+    ignored -- they generally mean that a directory was not empty.
+
+    """
+    rmdir(name)
+    head, tail = path.split(name)
+    if not tail:
+        head, tail = path.split(head)
+    while head and tail:
+        try:
+            rmdir(head)
+        except OSError:
+            break
+        head, tail = path.split(head)
+
+
 def fsencode(filename):
     filename = fspath(filename)
     if isinstance(filename, str):
@@ -205,6 +357,42 @@ def fsdecode(filename):
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+def _fspath(path):
+    """Return the path representation of a path-like object.
+
+    If str or bytes is passed in, it is returned unchanged. Otherwise the
+    os.PathLike interface is used to get the path representation. If the
+    path representation is not str or bytes, TypeError is raised. If the
+    provided path is not str, bytes, or os.PathLike, TypeError is raised.
+    """
+    if isinstance(path, (str, bytes)):
+        return path
+
+    # Work from the object's type to match method resolution of other magic
+    # methods.
+    path_type = type(path)
+    try:
+        path_repr = path_type.__fspath__(path)
+    except AttributeError:
+        if hasattr(path_type, '__fspath__'):
+            raise
+        else:
+            raise TypeError("expected str, bytes or os.PathLike object, "
+                            "not " + path_type.__name__)
+    except TypeError:
+        if path_type.__fspath__ is None:
+            raise TypeError("expected str, bytes or os.PathLike object, "
+                            "not " + path_type.__name__) from None
+        else:
+            raise
+    if isinstance(path_repr, (str, bytes)):
+        return path_repr
+    else:
+        raise TypeError("expected {}.__fspath__() to return str or bytes, "
+                        "not {}".format(path_type.__name__,
+                                        type(path_repr).__name__))
+
+
 class PathLike(abc.ABC):
 
     """Abstract base class for implementing the file system path protocol."""
@@ -317,9 +505,146 @@ supports_bytes_environ = True
 environb = _Environ(_environ, _check_bytes, bytes)
 
 
+def reload_environ():
+    data = _create_environ()
+    env_data = environ._data
+    env_data.clear()
+    env_data.update(data)
+
+
 def getenv(key, default=None):
     return environ.get(key, default)
 
 
 def getenvb(key, default=None):
     return environb.get(key, default)
+
+
+# From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if {open, stat} <= supports_dir_fd and {scandir, stat} <= supports_fd:
+
+    def fwalk(top=".", topdown=True, onerror=None, *, follow_symlinks=False, dir_fd=None):
+        """Directory tree generator.
+
+        This behaves exactly like walk(), except that it yields a 4-tuple
+
+            dirpath, dirnames, filenames, dirfd
+
+        `dirpath`, `dirnames` and `filenames` are identical to walk() output,
+        and `dirfd` is a file descriptor referring to the directory `dirpath`.
+
+        The advantage of fwalk() over walk() is that it's safe against symlink
+        races (when follow_symlinks is False).
+
+        If dir_fd is not None, it should be a file descriptor open to a directory,
+          and top should be relative; top will then be relative to that directory.
+          (dir_fd is always supported for fwalk.)
+
+        Caution:
+        Since fwalk() yields file descriptors, those are only valid until the
+        next iteration step, so you should dup() them if you want to keep them
+        for a longer period.
+
+        Example:
+
+        import os
+        for root, dirs, files, rootfd in os.fwalk('python/Lib/xml'):
+            print(root, "consumes", end="")
+            print(sum(os.stat(name, dir_fd=rootfd).st_size for name in files),
+                  end="")
+            print("bytes in", len(files), "non-directory files")
+            if '__pycache__' in dirs:
+                dirs.remove('__pycache__')  # don't visit __pycache__ directories
+        """
+        sys.audit("os.fwalk", top, topdown, onerror, follow_symlinks, dir_fd)
+        top = fspath(top)
+        stack = [(_fwalk_walk, (True, dir_fd, top, top, None))]
+        isbytes = isinstance(top, bytes)
+        try:
+            while stack:
+                yield from _fwalk(stack, isbytes, topdown, onerror, follow_symlinks)
+        finally:
+            # Close any file descriptors still on the stack.
+            while stack:
+                action, value = stack.pop()
+                if action == _fwalk_close:
+                    close(value)
+
+    # Each item in the _fwalk() stack is a pair (action, args).
+    _fwalk_walk = 0  # args: (isroot, dirfd, toppath, topname, entry)
+    _fwalk_yield = 1  # args: (toppath, dirnames, filenames, topfd)
+    _fwalk_close = 2  # args: dirfd
+
+    def _fwalk(stack, isbytes, topdown, onerror, follow_symlinks):
+        # Note: This uses O(depth of the directory tree) file descriptors: if
+        # necessary, it can be adapted to only require O(1) FDs, see issue
+        # #13734.
+
+        action, value = stack.pop()
+        if action == _fwalk_close:
+            close(value)
+            return
+        elif action == _fwalk_yield:
+            yield value
+            return
+        assert action == _fwalk_walk
+        isroot, dirfd, toppath, topname, entry = value
+        try:
+            if not follow_symlinks:
+                # Note: To guard against symlink races, we use the standard
+                # lstat()/open()/fstat() trick.
+                if entry is None:
+                    orig_st = stat(topname, follow_symlinks=False, dir_fd=dirfd)
+                else:
+                    orig_st = entry.stat(follow_symlinks=False)
+            topfd = open(topname, O_RDONLY | O_NONBLOCK, dir_fd=dirfd)
+        except OSError as err:
+            if isroot:
+                raise
+            if onerror is not None:
+                onerror(err)
+            return
+        stack.append((_fwalk_close, topfd))
+        if not follow_symlinks:
+            if isroot and not st.S_ISDIR(orig_st.st_mode):
+                return
+            if not path.samestat(orig_st, stat(topfd)):
+                return
+
+        scandir_it = scandir(topfd)
+        dirs = []
+        nondirs = []
+        entries = None if topdown or follow_symlinks else []
+        for entry in scandir_it:
+            name = entry.name
+            if isbytes:
+                name = fsencode(name)
+            try:
+                if entry.is_dir():
+                    dirs.append(name)
+                    if entries is not None:
+                        entries.append(entry)
+                else:
+                    nondirs.append(name)
+            except OSError:
+                try:
+                    # Add dangling symlinks, ignore disappeared files
+                    if entry.is_symlink():
+                        nondirs.append(name)
+                except OSError:
+                    pass
+
+        if topdown:
+            yield toppath, dirs, nondirs, topfd
+        else:
+            stack.append((_fwalk_yield, (toppath, dirs, nondirs, topfd)))
+
+        toppath = path.join(toppath, toppath[:0])  # Add trailing slash.
+        if entries is None:
+            stack.extend(
+                (_fwalk_walk, (False, topfd, toppath + name, name, None))
+                for name in dirs[::-1])
+        else:
+            stack.extend(
+                (_fwalk_walk, (False, topfd, toppath + name, name, entry))
+                for name, entry in zip(dirs[::-1], entries[::-1]))

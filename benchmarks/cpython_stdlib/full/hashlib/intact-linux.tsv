@@ -1,0 +1,83 @@
+ordinal	registered_id	cpython_empty	cpython_cached	native_empty_ordinary_O0	native_empty_ordinary_O3	native_empty_boxed_O0	native_empty_boxed_O3	native_cached_ordinary_O0	native_cached_ordinary_O3	native_cached_boxed_O0	native_cached_boxed_O3	native_detail_1
+1	test.test_hashlib.HashLibTestCase.test_algorithms_available	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+2	test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+3	test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+4	test.test_hashlib.HashLibTestCase.test_blake2b	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+5	test.test_hashlib.HashLibTestCase.test_blake2b_vectors	skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'	skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+6	test.test_hashlib.HashLibTestCase.test_blake2s	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+7	test.test_hashlib.HashLibTestCase.test_blake2s_vectors	skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'	skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+8	test.test_hashlib.HashLibTestCase.test_blocksize_and_name	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+9	test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+10	test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+11	test.test_hashlib.HashLibTestCase.test_case_blake2b_0	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+12	test.test_hashlib.HashLibTestCase.test_case_blake2b_1	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+13	test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+14	test.test_hashlib.HashLibTestCase.test_case_blake2s_0	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+15	test.test_hashlib.HashLibTestCase.test_case_blake2s_1	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+16	test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+17	test.test_hashlib.HashLibTestCase.test_case_md5_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+18	test.test_hashlib.HashLibTestCase.test_case_md5_1	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+19	test.test_hashlib.HashLibTestCase.test_case_md5_2	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+20	test.test_hashlib.HashLibTestCase.test_case_md5_huge	skipped 'not enough memory: 4.0G minimum needed'	skipped 'not enough memory: 4.0G minimum needed'	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	not enough memory: 4.0G minimum needed
+21	test.test_hashlib.HashLibTestCase.test_case_md5_uintmax	skipped 'not enough memory: 4.0G minimum needed'	skipped 'not enough memory: 4.0G minimum needed'	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	not enough memory: 4.0G minimum needed
+22	test.test_hashlib.HashLibTestCase.test_case_sha1_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+23	test.test_hashlib.HashLibTestCase.test_case_sha1_1	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+24	test.test_hashlib.HashLibTestCase.test_case_sha1_2	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+25	test.test_hashlib.HashLibTestCase.test_case_sha1_3	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+26	test.test_hashlib.HashLibTestCase.test_case_sha224_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+27	test.test_hashlib.HashLibTestCase.test_case_sha224_1	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+28	test.test_hashlib.HashLibTestCase.test_case_sha224_2	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+29	test.test_hashlib.HashLibTestCase.test_case_sha224_3	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+30	test.test_hashlib.HashLibTestCase.test_case_sha256_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+31	test.test_hashlib.HashLibTestCase.test_case_sha256_1	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+32	test.test_hashlib.HashLibTestCase.test_case_sha256_2	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+33	test.test_hashlib.HashLibTestCase.test_case_sha256_3	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+34	test.test_hashlib.HashLibTestCase.test_case_sha384_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+35	test.test_hashlib.HashLibTestCase.test_case_sha384_1	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+36	test.test_hashlib.HashLibTestCase.test_case_sha384_2	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+37	test.test_hashlib.HashLibTestCase.test_case_sha384_3	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+38	test.test_hashlib.HashLibTestCase.test_case_sha3_224_0	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+39	test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+40	test.test_hashlib.HashLibTestCase.test_case_sha3_256_0	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+41	test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+42	test.test_hashlib.HashLibTestCase.test_case_sha3_384_0	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+43	test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+44	test.test_hashlib.HashLibTestCase.test_case_sha3_512_0	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+45	test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+46	test.test_hashlib.HashLibTestCase.test_case_sha512_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+47	test.test_hashlib.HashLibTestCase.test_case_sha512_1	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+48	test.test_hashlib.HashLibTestCase.test_case_sha512_2	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+49	test.test_hashlib.HashLibTestCase.test_case_sha512_3	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+50	test.test_hashlib.HashLibTestCase.test_case_shake128_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_128.txt'	ok	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ok	ok	ok	ok	NotImplementedError: urllib.request has no default http handler
+51	test.test_hashlib.HashLibTestCase.test_case_shake256_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_256.txt'	ok	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ok	ok	ok	ok	NotImplementedError: urllib.request has no default http handler
+52	test.test_hashlib.HashLibTestCase.test_case_shake_128_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+53	test.test_hashlib.HashLibTestCase.test_case_shake_256_0	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+54	test.test_hashlib.HashLibTestCase.test_clinic_signature	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+55	test.test_hashlib.HashLibTestCase.test_clinic_signature_errors	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+56	test.test_hashlib.HashLibTestCase.test_digest_length_overflow	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+57	test.test_hashlib.HashLibTestCase.test_disallow_instantiation	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	implementation detail specific to cpython
+58	test.test_hashlib.HashLibTestCase.test_extra_sha3	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+59	test.test_hashlib.HashLibTestCase.test_get_builtin_constructor	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	_md5 module not available
+60	test.test_hashlib.HashLibTestCase.test_get_fips_mode	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+61	test.test_hashlib.HashLibTestCase.test_gil	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+62	test.test_hashlib.HashLibTestCase.test_hash_array	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+63	test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	need _hashlib
+64	test.test_hashlib.HashLibTestCase.test_hexdigest	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+65	test.test_hashlib.HashLibTestCase.test_large_update	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+66	test.test_hashlib.HashLibTestCase.test_name_attribute	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+67	test.test_hashlib.HashLibTestCase.test_new_upper_to_lower	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+68	test.test_hashlib.HashLibTestCase.test_no_unicode	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+69	test.test_hashlib.HashLibTestCase.test_no_unicode_blake2	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _blake2
+70	test.test_hashlib.HashLibTestCase.test_no_unicode_sha3	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires _sha3
+71	test.test_hashlib.HashLibTestCase.test_readonly_types	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+72	test.test_hashlib.HashLibTestCase.test_sha256_gil	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+73	test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+74	test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+75	test.test_hashlib.HashLibTestCase.test_threaded_hashing	ok	ok	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	ERROR [1]	NotImplementedError: this thread target cannot run independently of the boxed Python heap
+76	test.test_hashlib.HashLibTestCase.test_unknown_hash	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+77	test.test_hashlib.HashLibTestCase.test_usedforsecurity_false	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+78	test.test_hashlib.HashLibTestCase.test_usedforsecurity_true	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+79	test.test_hashlib.KDFTests.test_file_digest	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+80	test.test_hashlib.KDFTests.test_normalized_name	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	-
+81	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	requires OpenSSL bindings
+82	test.test_hashlib.KDFTests.test_scrypt	ok	ok	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	skipped [1]	   test requires OpenSSL > 1.1

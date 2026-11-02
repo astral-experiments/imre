@@ -77,7 +77,29 @@ impl Union {
 
 /// typing.Union and types.UnionType publish the same class on Python 3.14.
 pub(super) fn class(ctx: &mut Context) -> Id {
-    typing::named_class(ctx, "typing", "Union")
+    if let Some(&class) = ctx.classes.get("typing.Union") {
+        return class;
+    }
+    let class = typing::named_class(ctx, "typing", "Union");
+    ctx.builtins.insert("typing.Union".into(), class);
+    let Value::Class { scope, .. } = *ctx.heap.get(class) else {
+        unreachable!()
+    };
+    let args = ctx.readonly_member("typing.Union", "__args__");
+    ctx.bind(scope, "__args__", args);
+    for name in ["__origin__", "__parameters__"] {
+        let get = ctx.builtin(&format!("typing.Union.{name}"));
+        let descriptor = ctx.alloc(Value::GetSetDescriptor {
+            owner: "typing.Union",
+            name,
+            get,
+            set: None,
+        });
+        ctx.bind(scope, name, descriptor);
+    }
+    let hook = ctx.builtin("typing.Union.__mro_entries__");
+    ctx.bind(scope, "__mro_entries__", hook);
+    class
 }
 
 fn accepts(ctx: &Context, id: Id) -> bool {
@@ -85,7 +107,7 @@ fn accepts(ctx: &Context, id: Id) -> bool {
         || ctx.builtin_type_name(id) == Some("type")
         || matches!(
             ctx.heap.get(id),
-            Value::GenericAlias(_) | Value::TypeVar(_) | Value::Union(_)
+            Value::GenericAlias(_) | Value::TypeAlias { .. } | Value::TypeVar(_) | Value::Union(_)
         )
         || matches!(ctx.heap.get(id), Value::Native(n) if matches!(n.as_str(), "typing.Any" | "typing.Callable"))
 }
@@ -182,7 +204,10 @@ pub(super) fn binary(ctx: &mut Context, left: Id, right: Id) -> Option<Result<Id
     {
         return Some(make(ctx, &[left, right]));
     }
-    if ctx.builtin_type_name(left) == Some("type") || ctx.builtin_type_name(right) == Some("type") {
+    if [left, right].into_iter().any(|id| {
+        ctx.builtin_type_name(id) == Some("type")
+            || matches!(ctx.heap.get(id), Value::TypeAlias { .. })
+    }) {
         let type_name = |value| {
             ctx.builtin_type_name(value)
                 .unwrap_or_else(|| ctx.type_name(value))
@@ -200,6 +225,19 @@ pub(super) fn binary(ctx: &mut Context, left: Id, right: Id) -> Option<Result<Id
 }
 
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
+    if let Value::Union(union) = *ctx.heap.get(target) {
+        if tuple_items(ctx, union.parameters).is_empty() {
+            return Some(ctx.checked_format(target, true).and_then(|name| {
+                Err(Error::new(
+                    "TypeError",
+                    format!("{name} is not a generic class"),
+                ))
+            }));
+        }
+        return Some(ctx.module("typing").and_then(|_| {
+            ctx.call_typing_helper("_specialize_generic_alias_uncached", vec![target, index])
+        }));
+    }
     if ctx.classes.get("typing.Union") != Some(&target) {
         return None;
     }

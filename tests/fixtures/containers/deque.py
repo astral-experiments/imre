@@ -75,3 +75,6 @@ try:
     hash(alias)
 except TypeError as error:
     print(str(error))
+
+assert repr(deque([1, 2])) == 'deque([1, 2])'
+assert repr([deque(['a'], maxlen=3)]) == "[deque(['a'], maxlen=3)]"

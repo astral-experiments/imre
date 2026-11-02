@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::DirBuilderExt;
 use std::rc::Rc;
 
@@ -545,6 +546,19 @@ pub extern "C" fn imre_getcwd() -> *const Str {
     finish(result, std::ptr::null())
 }
 
+/// Returns the raw POSIX working directory without applying a text codec.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_getcwdb() -> *const Bytes {
+    let cwd = std::env::current_dir()
+        .map_err(files::errno_error)
+        .map(|cwd| {
+            crate::BytesOwner::into_raw(crate::BytesOwner::new(
+                cwd.into_os_string().into_vec(),
+            ))
+        });
+    finish(cwd, std::ptr::null())
+}
+
 fn suffix_start(name: &str) -> Option<usize> {
     let index = name.rfind('.')?;
     name[..index]
@@ -829,53 +843,6 @@ pub unsafe extern "C" fn imre_path_resolve(path: *const Object, strict: u32) -> 
             .with(|storage| resolve(storage.path(), strict != 0))
     };
     finish(result.map(new_path), std::ptr::null())
-}
-
-/// # Safety
-/// Root an exact Path. Like Python 3.14, failed metadata queries (including NUL
-/// paths) return false and do not install or modify a pending language error.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_path_exists(path: *const Object) -> u32 {
-    // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
-    unsafe {
-        object(path)
-            .0
-            .with(|storage| u32::from(exists(storage.path().as_ref())))
-    }
-}
-
-/// Follow symlinks and return false for every failed stat, including permission errors.
-pub(crate) fn exists(path: &std::path::Path) -> bool {
-    fs::metadata(path).is_ok()
-}
-
-/// Test the target of a filesystem spelling, following symlinks and suppressing stat errors.
-pub(crate) fn is_file(path: &std::path::Path) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
-}
-
-/// # Safety
-/// Root an exact Path. This follows symlinks and suppresses metadata errors.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_path_is_file(path: *const Object) -> u32 {
-    // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
-    unsafe {
-        object(path)
-            .0
-            .with(|storage| u32::from(is_file(storage.path().as_ref())))
-    }
-}
-
-/// # Safety
-/// Root an exact Path. This follows symlinks and suppresses metadata errors.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_path_is_dir(path: *const Object) -> u32 {
-    // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
-    unsafe {
-        object(path).0.with(|storage| {
-            u32::from(fs::metadata(storage.path()).is_ok_and(|metadata| metadata.is_dir()))
-        })
-    }
 }
 
 /// # Safety
@@ -1728,6 +1695,11 @@ mod tests {
 
     #[test]
     fn path_reads_writes_predicates_and_errors_share_text_file_semantics() {
+        use metadata::imre_path_query;
+        const EXISTS: u32 = 0;
+        const DIRECTORY: u32 = 1;
+        const FILE: u32 = 2;
+
         let directory = Directory::new();
         let filename = directory.0.join("text");
         let value = path(filename.to_str().unwrap());
@@ -1735,11 +1707,14 @@ mod tests {
         // SAFETY: all exact roots outlive their ABI calls, which transfer owned results.
         unsafe {
             let pointer = crate::ObjectOwner::as_ptr(&value);
-            assert_eq!(imre_path_exists(pointer), 0);
-            assert_eq!(imre_path_is_dir(crate::ObjectOwner::as_ptr(&root)), 1);
+            assert_eq!(imre_path_query(pointer, EXISTS, 1), 0);
+            assert_eq!(
+                imre_path_query(crate::ObjectOwner::as_ptr(&root), DIRECTORY, 1),
+                1
+            );
             let count = Int(imre_path_write_text(pointer, &Str::from("é\r\n🦀\r")));
             assert_eq!(count.as_small(), Some(5));
-            assert_eq!(imre_path_is_file(pointer), 1);
+            assert_eq!(imre_path_query(pointer, FILE, 1), 1);
             assert_eq!(
                 StrOwner::from_raw(imre_path_read_text(pointer)).as_str(),
                 "é\n🦀\n"
@@ -1753,9 +1728,12 @@ mod tests {
             assert!(imre_path_read_text(crate::ObjectOwner::as_ptr(&root)).is_null());
             take_error(Kind::IsADirectoryError);
             let nul = path("a\0b");
-            assert_eq!(imre_path_exists(crate::ObjectOwner::as_ptr(&nul)), 0);
-            assert_eq!(imre_path_is_file(crate::ObjectOwner::as_ptr(&nul)), 0);
-            assert_eq!(imre_path_is_dir(crate::ObjectOwner::as_ptr(&nul)), 0);
+            for kind in [EXISTS, DIRECTORY, FILE] {
+                assert_eq!(
+                    imre_path_query(crate::ObjectOwner::as_ptr(&nul), kind, 1),
+                    0
+                );
+            }
             assert!(imre_path_read_text(crate::ObjectOwner::as_ptr(&nul)).is_null());
             take_error(Kind::ValueError);
         }

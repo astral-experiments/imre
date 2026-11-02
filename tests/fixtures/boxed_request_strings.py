@@ -132,6 +132,11 @@ def current():
             print(error)
     bound_title = Digit.TWO.istitle
     print(bound_title(), str.istitle(Digit.TWO))
+    for value, expected in (("", False), ("_2", True), ("class", True), ("1a", False),
+                            (Text("a\u0301"), True), ("\u0301a", False), (Text("a\ud800"), False)):
+        assert value.isidentifier() is expected
+        assert str.isidentifier(value) is expected
+    assert str.isidentifier.__text_signature__ == "($self, /)"
     bound_digit = Digit.TWO.isdigit
     print(bound_digit(), str.isalpha(Digit.TWO))
     for value in (Text("é"), Text("²"), "\ud800", Text("7\udfff"), Text("a\udfff"),
@@ -217,15 +222,24 @@ def check_index():
     assert text.index(Text("🦊"), Bound(2), Bound(6)) == 5
     assert calls == [2, 6]
     assert str.index(text, ":", -10**80, 10**80) == 2
+    assert str.rindex(text, ":", -10**80, 10**80) == 4
     surrogate = Text("a\ud800🦊\udfff")
     assert surrogate.index(Text("\ud800🦊"), None, -1) == 1
     assert str.index(surrogate, "🦊") == 2
     assert surrogate.index("", 4, 10**80) == 4
+    repeated = Text("a\ud800\ud800\ud800")
+    assert repeated.find(Text("\ud800\ud800")) == 1
+    assert repeated.rfind(Text("\ud800\ud800"), 1, 10**80) == 2
+    assert repeated.rindex(Text("\ud800\ud800"), 1, 10**80) == 2
+    assert repeated.rfind("", 1, -1) == 3
+    assert repeated.rfind("", 5) == -1
+    assert "abc".find("\ud800") == "abc".rfind("\ud800") == -1
     for call in (
         lambda: surrogate.index("", 5),
         lambda: surrogate.index("", 2, 1),
         lambda: surrogate.index("🦊", 3),
         lambda: "abc".index("\udfff"),
+        lambda: repeated.rindex("", 5),
     ):
         try:
             call()

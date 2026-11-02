@@ -1,6 +1,6 @@
-//! Object-valued members declared by a dynamically constructed slotted class.
+//! Namespace-based class construction and object-valued slot descriptors.
 
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
 use ruff_python_stdlib::identifiers::is_identifier;
 
 impl Context {
@@ -26,7 +26,7 @@ impl Context {
             };
             let frame = self.scope_data(*scope);
             // Assigning __bases__ in boxed classes can shadow, but cannot rebuild, their layout.
-            if frame.names.contains_key("__bases__") {
+            if self.namespace_binding(frame, "__bases__").is_some() {
                 return Err(unsupported());
             }
             let layout = frame
@@ -80,10 +80,8 @@ impl Context {
             let Value::Class { scope, .. } = self.heap.get(base) else {
                 return false;
             };
-            self.scope_data(*scope)
-                .names
-                .get("__slots__")
-                .is_none_or(|&slots| {
+            self.namespace_binding(self.scope_data(*scope), "__slots__")
+                .is_none_or(|slots| {
                     matches!(
                         self.heap.get(slots),
                         Value::None
@@ -109,18 +107,11 @@ impl Context {
             let implicit = self.alloc(Value::Tuple(implicit));
             entries.push(self.alloc(Value::Tuple(vec![base, implicit])));
         }
-        // An ordinary object-based class cannot participate in exception-name dispatch.
-        // A subsequent annotation, descriptor, or base-class hook can still raise.
-        let Value::Class { name, .. } = self.heap.get(old) else {
+        if !matches!(self.heap.get(old), Value::Class { .. }) {
             return Err(Error::new(
                 "TypeError",
                 "expected an ordinary dataclass type",
             ));
-        };
-        let name = name.clone();
-        if self.classes.get(&name) == Some(&old) {
-            self.classes.remove(&name);
-            self.heap.weak_edge_removed(old);
         }
         Ok(self.alloc(Value::Tuple(entries)))
     }
@@ -198,49 +189,423 @@ impl Context {
         member_slots: bool,
         provider_annotations: bool,
     ) -> Result<Id> {
+        let layout = super::value::ClassNamespace {
+            member_slots,
+            provider_annotations,
+            ..Default::default()
+        };
+        let cell = self.alloc(Value::Cell(None));
+        let scope = self.namespace_scope(module, layout, cell);
         let entries = self
             .dict_entries(namespace)
             .ok_or_else(|| Error::new("TypeError", "expected a class namespace dictionary"))?
             .to_vec();
-        let scope = self.scope(module, None);
-        let cell = self.alloc(Value::ClassCell(None));
-        let Value::Scope(frame) = self.heap.get_mut(scope) else {
-            unreachable!()
-        };
-        frame.class_body = Some(Vec::new());
-        frame.class_cell = Some(cell);
-        let layout = frame.class_namespace.get_or_insert_with(Default::default);
-        layout.member_slots = member_slots;
-        layout.provider_annotations = provider_annotations;
         for (key, value) in entries {
             let key = self.str_value(key)?.to_owned();
             self.bind_local(scope, &key, value);
         }
         let class = self.allocate_class(name, scope, bases)?;
-        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
-        self.install_weakref_descriptor(class, scope);
-        self.initialize_class_members(class, scope)?;
-        let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
-        self.call(hook, Vec::new(), Vec::new())?;
+        self.finish_namespace_class(class, scope, cell, None, Vec::new())
+    }
+
+    /// Allocate through type.__new__, validating its explicit receiver and positional arguments.
+    pub(super) fn type_new(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&meta, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "type.__new__(): not enough arguments",
+            ));
+        };
+        let type_class = self.builtin("type");
+        if !self.direct_subclass(meta, type_class) {
+            let owner = self.exact_type(meta)?;
+            let message = if self.direct_subclass(owner, type_class) {
+                let name = self.class_name(meta);
+                format!("type.__new__({name}): {name} is not a subtype of type")
+            } else {
+                format!(
+                    "type.__new__(X): X is not a type object ({})",
+                    self.type_name(meta)
+                )
+            };
+            return Err(Error::new("TypeError", message));
+        }
+        let [name, bases, namespace] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "type.__new__() takes exactly 3 arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        self.type_from_namespace(Some(meta), *name, *bases, *namespace, kwargs, false)
+    }
+
+    /// Validate the receiver of the unbound ABCMeta.__new__ method.
+    pub(super) fn abc_new_from_namespace(
+        &mut self,
+        meta: Id,
+        name: Id,
+        bases: Id,
+        namespace: Id,
+        keywords: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        if !self.is_abc_metaclass(meta) {
+            return Err(Error::new(
+                "TypeError",
+                "ABCMeta.__new__ requires an ABCMeta subtype",
+            ));
+        }
+        self.type_from_namespace(Some(meta), name, bases, namespace, &keywords, true)
+    }
+
+    /// Construct a class from a copy of its namespace, including any deferred annotation cells.
+    pub(super) fn type_from_namespace(
+        &mut self,
+        explicit_meta: Option<Id>,
+        name: Id,
+        base_tuple: Id,
+        namespace: Id,
+        kwargs: &[(String, Id)],
+        abc_new: bool,
+    ) -> Result<Id> {
+        let argument = |ctx: &Context, position, expected, value| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "type.__new__() argument {position} must be {expected}, not {}",
+                    ctx.type_name(value)
+                ),
+            )
+        };
+        let name_storage = self
+            .string_storage(name)
+            .ok_or_else(|| argument(self, 1, "str", name))?;
+        let bases = self
+            .tuple_items(base_tuple)?
+            .ok_or_else(|| argument(self, 2, "tuple", base_tuple))?;
+        let storage = self
+            .dict_storage(namespace)
+            .ok_or_else(|| argument(self, 3, "dict", namespace))?;
+        let type_class = self.builtin("type");
+        let mut specialized = false;
+        for &base in &bases {
+            let meta = self.exact_type(base)?;
+            if self.direct_subclass(meta, type_class) {
+                specialized |= self.direct_subclass(base, type_class)
+                    || meta != type_class
+                    || self.is_bundled_abc(base);
+                continue;
+            }
+            match self.lookup_attr(base, "__mro_entries__") {
+                Ok(_) => {
+                    return Err(Error::new(
+                        "TypeError",
+                        "type() doesn't support MRO entry resolution; use types.new_class()",
+                    ));
+                }
+                Err(error) if error.kind != "AttributeError" => return Err(error),
+                Err(_) => {}
+            }
+            return Err(Error::new(
+                "TypeError",
+                "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
+            ));
+        }
+        let metaclass = if specialized || explicit_meta.is_some() {
+            let winner = self.select_class_metaclass(
+                &bases,
+                Some(explicit_meta.unwrap_or(type_class)),
+                None,
+                false,
+            )?;
+            if bases
+                .iter()
+                .any(|&base| self.direct_subclass(base, type_class))
+            {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "type() with specialized metaclasses is unsupported",
+                ));
+            }
+            if let Some(winner) = winner
+                && explicit_meta != Some(winner)
+                && self.class_attr(winner, "__new__").is_some()
+            {
+                let result =
+                    self.call_metaclass_new(winner, name, base_tuple, namespace, kwargs.to_vec())?;
+                if abc_new {
+                    // The outer ABCMeta.__new__ also initializes a more derived __new__ result.
+                    let Value::Class { scope, .. } = *self.heap.get(result) else {
+                        self.lookup_attr(result, "__dict__")?;
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "ABC initialization requires a Python class",
+                        ));
+                    };
+                    if !self.is_bundled_abc(result) {
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "ABC initialization of an unrelated metaclass result is unsupported",
+                        ));
+                    }
+                    self.init_abstract_class(result, scope)?;
+                }
+                return Ok(result);
+            }
+            winner
+        } else {
+            None
+        };
+        let layout = super::typing::ClassLayout::TypeNamespace;
+        let bases = self.validate_class_bases(bases, layout)?;
+        let layout_base = self.member_layout_base(&bases)?;
+        let namespace = super::builtins::copy_dict(self, namespace, storage)?;
+        let slots =
+            self.declared_slot_names(self.dict_named_item(namespace, "__slots__"), layout_base)?;
+        if matches!(self.heap.get(name_storage), Value::SurrogateStr(_)) {
+            self.encode_utf8_codepoints(name_storage, false, "strict")?;
+        }
+        let name_text = self.str_value(name)?.to_owned();
+        if name_text.contains('\0') {
+            return Err(Error::new(
+                "ValueError",
+                "type name must not contain null characters",
+            ));
+        }
+        let entries = self
+            .dict_entries(namespace)
+            .expect("copied type namespace")
+            .to_vec();
+        for &(key, value) in &entries {
+            match self.heap.get(key) {
+                Value::Str(_) => {}
+                Value::SurrogateStr(_) => {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "surrogate-containing type namespace keys are unsupported",
+                    ));
+                }
+                _ => {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "type namespace keys other than exact strings are unsupported",
+                    ));
+                }
+            }
+            self.heap.keep(key);
+            self.heap.keep(value);
+        }
+        // Inherited ABCMeta.__new__ calls type.__new__ from abc's defining globals.
+        let creator = abc_new.then(|| self.abc_meta());
+        let creator_scope = match creator.map(|meta| self.heap.get(meta)) {
+            Some(Value::Class { scope, .. }) => *scope,
+            _ => self.heap.current_scope(),
+        };
+        let globals = self.module_globals(creator_scope)?;
+        let module = self.dict_named_item(globals, "__name__");
+        let module_text = self.scope_data(creator_scope).module.clone();
+        let cell = match self.type_namespace_cell(
+            "__classcell__",
+            self.dict_named_item(namespace, "__classcell__"),
+        )? {
+            Some(cell) => cell,
+            None => self.alloc(Value::Cell(None)),
+        };
+        let dict_cell = self.dict_named_item(namespace, "__classdictcell__");
+        let class_namespace = super::value::ClassNamespace {
+            name_override: Some(name),
+            dictionary: Some(namespace),
+            ..Default::default()
+        };
+        let scope = self.namespace_scope(&module_text, class_namespace, cell);
+        for (key_id, value) in entries {
+            let key = self.str_value(key_id)?.to_owned();
+            if matches!(key.as_str(), "__classcell__" | "__classdictcell__") {
+                self.delete_item(namespace, key_id)?;
+                continue;
+            }
+            if key == "__qualname__" && self.string_storage(value).is_none() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "type __qualname__ must be a str, not {}",
+                        self.type_name(value)
+                    ),
+                ));
+            }
+            let value =
+                if key == "__new__" && matches!(self.heap.get(value), Value::Function { .. }) {
+                    super::method_decorator::static_method(self, value)?
+                } else {
+                    value
+                };
+            self.bind_local(scope, &key, value);
+        }
+        if self.scope_name(scope, "__module__").is_none()
+            && let Some(module) = module
+        {
+            self.bind_local(scope, "__module__", module);
+        }
+        if self.scope_name(scope, "__qualname__").is_none() {
+            self.bind_local(scope, "__qualname__", name);
+        }
+        self.enable_class_annotation_provider(scope);
+        if metaclass.is_some() {
+            let original = self.scope_name(scope, "__orig_bases__");
+            super::typing::class_parameters(self, scope, original, &bases)?;
+        }
+        let ancestors = self.linearized_bases(&bases, false)?;
+        let class =
+            self.allocate_prepared_class(name_text, scope, bases, ancestors, layout, slots)?;
+        if self.scope_name(scope, "__doc__").is_none() {
+            self.bind_local(scope, "__doc__", NONE);
+        }
+        let qualname = self.heap.code_name("__qualname__");
+        self.delete_item(namespace, qualname)?;
+        let Value::Class {
+            metaclass: class_meta,
+            ..
+        } = self.heap.get_mut(class)
+        else {
+            unreachable!()
+        };
+        *class_meta = metaclass;
+        self.finish_namespace_class(class, scope, cell, dict_cell, kwargs.to_vec())?;
+        if abc_new {
+            self.init_abstract_class(class, scope)?;
+        }
         Ok(class)
     }
 
-    /// Calendar payloads and object-valued slots require one most-derived storage base.
-    pub(super) fn check_member_slot_bases(&mut self, bases: &[Id], ancestors: &[Id]) -> Result<()> {
-        if bases.len() < 2
-            || !ancestors.iter().any(|&base| match self.heap.get(base) {
-                Value::Native(name) => super::stdlib::datetime::members(name).is_some(),
-                Value::Class { scope, .. } => self
-                    .scope_data(*scope)
-                    .class_namespace
-                    .as_ref()
-                    .is_some_and(|ns| ns.member_slots),
+    fn type_namespace_cell(&self, name: &str, cell: Option<Id>) -> Result<Option<Id>> {
+        if let Some(value) = cell
+            && !matches!(self.heap.get(value), Value::Cell(_))
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{name} must be a nonlocal cell, not <class '{}'>",
+                    self.type_name(value)
+                ),
+            ));
+        }
+        Ok(cell)
+    }
+
+    /// Keep the namespace and closure cell live while descriptors and subclass hooks can run Python.
+    fn namespace_scope(
+        &mut self,
+        module: &str,
+        layout: super::value::ClassNamespace,
+        cell: Id,
+    ) -> Id {
+        let scope = self.scope(module, None);
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.class_body = Some(Vec::new());
+        frame.class_cell = Some(cell);
+        frame.class_namespace = Some(Box::new(layout));
+        scope
+    }
+
+    /// Bind __class__ before calling descriptor and inherited subclass hooks.
+    fn finish_namespace_class(
+        &mut self,
+        class: Id,
+        scope: Id,
+        cell: Id,
+        dict_cell: Option<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        self.heap.replace_cell(cell, Some(class));
+        // A valid __classcell__ is populated even when the following dictionary cell is invalid.
+        if let Some(dict_cell) = self.type_namespace_cell("__classdictcell__", dict_cell)? {
+            let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                unreachable!()
+            };
+            frame
+                .class_namespace
+                .as_mut()
+                .expect("namespace class")
+                .annotation_dict_cell = Some(dict_cell);
+            let dict = self.class_namespace_dict(scope, false);
+            self.heap.replace_cell(dict_cell, Some(dict));
+        }
+        self.install_weakref_descriptor(class, scope);
+        self.initialize_class_members(class, scope, None)?;
+        let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
+        self.call(hook, Vec::new(), kwargs)?;
+        Ok(class)
+    }
+
+    /// Extension types need their physical layout modeled before accepting a dynamic subtype.
+    pub(super) fn check_namespace_layouts(&self, bases: &[Id]) -> Result<()> {
+        for &base in bases {
+            let owner = self.allocation_base(base).unwrap_or(base);
+            let supported = match self.heap.get(owner) {
+                Value::Native(name) if super::builtins::is_exception(name) => bases.len() == 1,
+                Value::Native(name) => {
+                    super::builtins::is_exported_type(name)
+                        || matches!(
+                            name.as_str(),
+                            "module"
+                                | "reversed"
+                                | "itertools.count"
+                                | "itertools.repeat"
+                                | super::deque::CLASS
+                        )
+                }
                 _ => false,
+            };
+            if !supported {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    format!(
+                        "dynamic type() does not support the layout of base '{}'",
+                        self.class_name(base)
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Select the direct base that supplies instance storage, retaining the first base on a tie.
+    pub(super) fn member_layout_base(&mut self, bases: &[Id]) -> Result<Id> {
+        if bases.len() < 2
+            || !bases.iter().any(|&base| {
+                self.lineage(base)
+                    .into_iter()
+                    .any(|base| match self.heap.get(base) {
+                        Value::Class { .. }
+                            if self.classes.get(super::namespace::CLASS) == Some(&base) =>
+                        {
+                            true
+                        }
+                        Value::Native(name) => {
+                            super::stdlib::datetime::members(name).is_some()
+                                || matches!(name.as_str(), "module" | super::deque::CLASS)
+                                || super::builtins::is_iterator_type(name)
+                                || (name != "object"
+                                    && super::builtins::is_exported_type(name)
+                                    && !super::builtins::is_exception(name))
+                        }
+                        Value::Class { scope, .. } => self
+                            .scope_data(*scope)
+                            .class_namespace
+                            .as_ref()
+                            .is_some_and(|ns| ns.member_slots),
+                        _ => false,
+                    })
             })
         {
-            return Ok(());
+            return Ok(bases[0]);
         }
         let object = self.builtin("object");
+        let mut winner = bases[0];
         let mut solid = object;
         for &base in bases {
             let lineage = self.lineage(base);
@@ -267,47 +632,103 @@ impl Context {
                     _ => false,
                 })
                 .unwrap_or(object);
+            if self.direct_subclass(solid, candidate) {
+                continue;
+            }
             if self.direct_subclass(candidate, solid) {
                 solid = candidate;
-            } else if !self.direct_subclass(solid, candidate) {
+                winner = base;
+            } else {
                 return Err(Error::new(
                     "TypeError",
                     "multiple bases have instance lay-out conflict",
                 ));
             }
         }
-        Ok(())
+        Ok(winner)
+    }
+
+    /// Check storage reserved by the best base after materializing the slots iterable.
+    pub(super) fn checked_slot_names(&self, base: Id, slots: &[Id]) -> Result<Vec<String>> {
+        if slots.is_empty() {
+            return Ok(Vec::new());
+        }
+        if ["int", "tuple", "bytes", "type"]
+            .iter()
+            .any(|name| self.has_base(base, name))
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "nonempty __slots__ not supported for subtype of '{}'",
+                    self.class_name(base)
+                ),
+            ));
+        }
+        let native = self
+            .allocation_base(base)
+            .and_then(|owner| match self.heap.get(owner) {
+                Value::Native(name) => Some(name.as_str()),
+                _ => None,
+            });
+        let mut dictionary = self.class_instances_have_dict(base)
+            || matches!(native, Some("classmethod" | "staticmethod" | "module"))
+            || native.is_some_and(super::builtins::is_exception);
+        let mut weakref = self.class_instances_support_weakref(base)
+            || matches!(
+                native,
+                Some("set" | "frozenset" | "module" | super::deque::CLASS)
+            );
+        let mut names = Vec::with_capacity(slots.len());
+        for &slot in slots {
+            let name = self.str_value(slot).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "__slots__ items must be strings, not '{}'",
+                        self.type_name(slot)
+                    ),
+                )
+            })?;
+            if !is_identifier(name) {
+                return Err(Error::new("TypeError", "__slots__ must be identifiers"));
+            }
+            let occupied = match name {
+                "__dict__" => std::mem::replace(&mut dictionary, true),
+                "__weakref__" => std::mem::replace(&mut weakref, true),
+                _ => false,
+            };
+            if occupied {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{name} slot disallowed: we already got one"),
+                ));
+            }
+            names.push(name.to_owned());
+        }
+        Ok(names)
     }
 
     pub(super) fn prepare_slot_members(
         &self,
         class_name: &str,
         scope: Id,
-        bases: &[Id],
         slots: &[String],
+        ordinary_slots: bool,
     ) -> Result<Vec<String>> {
-        let mut weak = bases
-            .iter()
-            .any(|&base| self.class_instances_support_weakref(base));
         let mut members = Vec::new();
         for original in slots {
-            if !is_identifier(original) {
-                return Err(Error::new("TypeError", "__slots__ must be identifiers"));
-            }
             if original == "__dict__" {
+                if ordinary_slots {
+                    // Ordinary instances already supply dictionary storage through their layout.
+                    continue;
+                }
                 return Err(Error::new(
                     "NotImplementedError",
                     "dynamic __dict__ slot descriptors are unsupported",
                 ));
             }
             if original == "__weakref__" {
-                if weak {
-                    return Err(Error::new(
-                        "TypeError",
-                        "__weakref__ slot disallowed: either we already got one, or __itemsize__ != 0",
-                    ));
-                }
-                weak = true;
                 continue;
             }
             let owner = class_name.trim_start_matches('_');
@@ -317,7 +738,10 @@ impl Context {
                 } else {
                     original.clone()
                 };
-            if self.scope_data(scope).names.contains_key(&name) {
+            if self
+                .namespace_binding(self.scope_data(scope), &name)
+                .is_some()
+            {
                 return Err(Error::new(
                     "ValueError",
                     format!("'{name}' in __slots__ conflicts with class variable"),
@@ -335,7 +759,7 @@ impl Context {
             unreachable!()
         };
         if let Value::Instance { class, .. } = *self.heap.get(receiver)
-            && self.subclass(class, owner)
+            && self.direct_subclass(class, owner)
         {
             return Ok(name);
         }
@@ -357,7 +781,7 @@ impl Context {
         };
         let name = self.str_value(name)?;
         member_values
-            .as_deref()
+            .as_ref()
             .and_then(|values| values.get(&member))
             .copied()
             .ok_or_else(|| self.missing_attribute(receiver, name))
@@ -379,7 +803,7 @@ impl Context {
                 .insert(member, value)
         } else {
             let previous = member_values
-                .as_deref_mut()
+                .as_mut()
                 .and_then(|values| values.remove(&member));
             if previous.is_none() {
                 return Err(Error::new(

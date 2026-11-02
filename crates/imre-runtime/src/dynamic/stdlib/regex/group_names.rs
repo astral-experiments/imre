@@ -10,6 +10,7 @@ pub(super) fn valid(name: &str, bytes: bool) -> bool {
 pub(super) fn diagnostic(
     text: &str,
     bytes: bool,
+    points: Option<&[u32]>,
     parsed: &Result<Ast, Error>,
 ) -> Option<(String, usize)> {
     if !text.contains("(?P") {
@@ -77,7 +78,15 @@ pub(super) fn diagnostic(
             if valid(name, bytes) {
                 return None;
             }
-            return Some((bad_name(name, bytes), position));
+            let message = if let Some(points) = points {
+                let quoted = crate::dynamic::operators::surrogate_repr(
+                    &points[position..position + name.chars().count()],
+                );
+                format!("bad character in group name {quoted}")
+            } else {
+                bad_name(name, bytes)
+            };
+            return Some((message, position));
         }
     }
     let message = if text.len() == start {

@@ -81,6 +81,15 @@ impl NativeToolchain {
         })
     }
 
+    pub fn provider_archive(&self, optimization: &OsStr) -> Option<PathBuf> {
+        let root = self.bundle.as_ref()?;
+        let path = root
+            .join("lib/imre-stdlib")
+            .join(format!("O{}", optimization.to_str()?))
+            .join("providers.a");
+        path.is_file().then_some(path)
+    }
+
     pub fn driver(&self) -> Command {
         let mut command = Command::new(&self.clang);
         if self.bundle.is_some() {
@@ -409,7 +418,7 @@ impl Cache {
             .command
             .as_ref()
             .map(|command| blake3::hash(command.source.as_bytes()).to_hex().to_string());
-        let file = if command_hash.is_none() {
+        let file = if command_hash.is_none() && options.module_entry.is_none() {
             Some(entry.canonicalize().ok()?)
         } else {
             None
@@ -420,6 +429,8 @@ impl Cache {
             (
                 file,
                 command_hash,
+                &options.module_entry,
+                options.path_entry,
                 options.python_startup(),
                 options.runtime_imports,
                 &options.extension_paths,
@@ -534,6 +545,7 @@ impl Cache {
         stage: &Path,
         file: &Path,
         materialized_output: &Path,
+        bundled_provider_archive: Option<&Path>,
     ) -> Option<()> {
         // LLD's Make depfile normalizes POSIX backslashes into separators.
         // Its object trace preserves those names, including archive members.
@@ -580,7 +592,11 @@ impl Cache {
                             .is_some_and(|dir| path.starts_with(dir))
                 };
                 let cwd_symlink = p.parent() == Some(cwd.as_path()) && p.is_symlink();
+                // The packaged provider archive is an explicit compiler input, like the runtime.
+                let is_provider =
+                    bundled_provider_archive == Some(p.as_path()) && ordinary_archive(&resolved);
                 if resolved != self.runtime
+                    && !is_provider
                     && !(supported(&resolved) && (supported(&p) || cwd_symlink))
                 {
                     return None;

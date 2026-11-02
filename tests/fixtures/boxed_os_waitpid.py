@@ -1,6 +1,7 @@
 import errno
 import os
 import posix
+import subprocess
 
 
 class Index:
@@ -37,4 +38,17 @@ def current():
         pass
     else:
         raise AssertionError("options must be positional")
+    assert os.waitstatus_to_exitcode is posix.waitstatus_to_exitcode
+    with subprocess.Popen(["/bin/sh", "-c", "exit 23"]) as child:
+        pid, status = os.waitpid(child.pid, 0)
+        assert pid == child.pid
+        assert os.waitstatus_to_exitcode(status=Index(status)) == 23
+
+    for status, kind in ((1 << 100, OverflowError), (2.5, TypeError), (-1, ValueError)):
+        try:
+            os.waitstatus_to_exitcode(status)
+        except kind:
+            pass
+        else:
+            raise AssertionError("invalid wait status accepted")
     return 42

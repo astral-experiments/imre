@@ -22,3 +22,13 @@ if os.name == 'posix':
     Path(archive).write_bytes(Path(__file__).with_name('replacement.whl').read_bytes())
     assert dist.version == '2.9'
     assert distribution('demo.tools').version == '3.1'
+
+# Read the manifest from the retained distribution, even after the archive was replaced.
+sys.path.remove(unsupported)
+listed = dist.files
+assert len(listed) == 1
+old_metadata = listed[0]
+assert old_metadata.dist is dist
+assert str(old_metadata.locate()) == archive + '/demo_tools-7.dist-info/METADATA'
+assert b'Version: 2.9\r\n' in old_metadata.read_binary()
+assert 'Version: 2.9\n' in old_metadata.read_text(encoding=None)

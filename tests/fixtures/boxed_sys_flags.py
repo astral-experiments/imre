@@ -5,6 +5,26 @@ def current():
     flags = sys.flags
     owner = type(flags)
     assert flags is sys.flags
+    assert sys.get_int_max_str_digits.__self__ is sys
+    assert sys.set_int_max_str_digits.__self__ is sys
+    old = sys.get_int_max_str_digits()
+    snapshot = tuple(flags)
+    try:
+        sys.set_int_max_str_digits(maxdigits=640)
+        assert sys.get_int_max_str_digits() == flags.int_max_str_digits == flags[-1] == 640
+        assert snapshot[-1] == old
+        assert int("9" * 640) > 0
+        try:
+            int("9" * 641)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted an integer above the configured limit")
+        sys.set_int_max_str_digits(0)
+        assert len(str(int("9" * 5000))) == 5000
+    finally:
+        sys.set_int_max_str_digits(old)
+    assert flags.int_max_str_digits == old
     assert owner.__module__ == "sys" and owner.__name__ == "flags"
     assert isinstance(flags, tuple) and issubclass(owner, tuple)
     assert (len(flags), flags.n_sequence_fields, flags.n_fields) == (18, 18, 21)

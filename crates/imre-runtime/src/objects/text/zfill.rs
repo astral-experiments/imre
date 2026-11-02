@@ -58,9 +58,10 @@ pub(crate) fn text(source: &str, width: usize, copy: bool) -> Result<Option<Stri
 pub unsafe extern "C" fn imre_str_zfill(source: *const Str, index: usize, copy: u32) -> *const Str {
     finish(
         (|| {
-            // SAFETY: both inputs are rooted through the call.
+            // SAFETY: the caller roots the tagged index through the call.
             let index = unsafe { Int::borrow(index) };
             let width = width(&index)?;
+            // SAFETY: the caller keeps the immutable Str alive for this borrow.
             let source = unsafe { &*source };
             if let Some(padded) = text(source, width, copy != 0)? {
                 let owner =

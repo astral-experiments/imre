@@ -1,9 +1,11 @@
 //! Fixed-size struct sequences whose named fields are all visible tuple elements.
 
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
 use crate::python_hash;
 
 pub(in crate::dynamic) const HASH_INFO: &str = "sys.hash_info";
+pub(in crate::dynamic) const THREAD_INFO: &str = "sys.thread_info";
+pub(in crate::dynamic) const SCHED_PARAM: &str = "posix.sched_param";
 pub(in crate::dynamic) const TERMINAL_SIZE: &str = "os.terminal_size";
 pub(in crate::dynamic) const UNRAISABLE_ARGS: &str = "UnraisableHookArgs";
 const HASH_FIELDS: [&str; 9] = [
@@ -21,8 +23,10 @@ const HASH_FIELDS: [&str; 9] = [
 pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
     match name {
         HASH_INFO => Some(HASH_INFO),
+        THREAD_INFO => Some(THREAD_INFO),
         UNRAISABLE_ARGS => Some(UNRAISABLE_ARGS),
         TERMINAL_SIZE => Some(TERMINAL_SIZE),
+        SCHED_PARAM if cfg!(target_os = "linux") => Some(SCHED_PARAM),
         _ => None,
     }
 }
@@ -30,6 +34,7 @@ pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
 pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
     match class {
         HASH_INFO => &HASH_FIELDS,
+        THREAD_INFO => &["name", "lock", "version"],
         UNRAISABLE_ARGS => &[
             "exc_type",
             "exc_value",
@@ -38,6 +43,7 @@ pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
             "object",
         ],
         TERMINAL_SIZE => &["columns", "lines"],
+        SCHED_PARAM => &["sched_priority"],
         _ => unreachable!("unknown fixed struct sequence"),
     }
 }
@@ -60,6 +66,13 @@ pub(in crate::dynamic) fn record(ctx: &mut Context, class: &'static str, values:
     })
 }
 
+pub(in crate::dynamic) fn thread_info(ctx: &mut Context) -> Id {
+    let name = crate::sys::thread_name().map_or(NONE, |value| ctx.text(value));
+    let lock = crate::sys::thread_lock_backend().map_or(NONE, |value| ctx.text(value));
+    let version = crate::sys::thread_version().map_or(NONE, |value| ctx.text(value));
+    record(ctx, THREAD_INFO, vec![name, lock, version])
+}
+
 pub(super) fn current_hash_info(ctx: &mut Context) -> Id {
     let values = vec![
         ctx.int(i64::from(i64::BITS)),
@@ -76,22 +89,10 @@ pub(super) fn current_hash_info(ctx: &mut Context) -> Id {
     record(ctx, HASH_INFO, values)
 }
 
-pub(in crate::dynamic) fn construct(
-    ctx: &mut Context,
-    class: &'static str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let [sequence, dictionary] = super::super::builtins::bind_builtin_arguments(
-        "structseq",
-        args,
-        kwargs,
-        ["sequence", "dict"],
-        1,
-    )?;
-    let sequence = sequence.expect("required sequence bound");
-    let values = if matches!(ctx.heap.get(sequence), Value::List(_) | Value::Tuple(_)) {
-        ctx.items(sequence)?
+/// Materialize a struct sequence's positional argument with PySequence_Fast semantics.
+pub(super) fn sequence_values(ctx: &mut Context, sequence: Id) -> Result<Vec<Id>> {
+    if matches!(ctx.heap.get(sequence), Value::List(_) | Value::Tuple(_)) {
+        ctx.items(sequence)
     } else {
         let iter = ctx.iterator(sequence).map_err(|err| {
             let type_error = ctx.builtin("TypeError");
@@ -104,8 +105,40 @@ pub(in crate::dynamic) fn construct(
         // PySequence_Fast consumes this iterator as a list, including its length hint.
         let list = ctx.alloc(Value::List(Vec::new()));
         super::super::builtins::list_extend(ctx, list, iter)?;
-        ctx.items(list)?
-    };
+        ctx.items(list)
+    }
+}
+
+pub(in crate::dynamic) fn construct(
+    ctx: &mut Context,
+    class: &'static str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    // CPython's sched_param has a scalar constructor, unlike other struct sequences.
+    if class == SCHED_PARAM {
+        let [priority] = super::super::builtins::bind_builtin_arguments(
+            "sched_param",
+            args,
+            kwargs,
+            ["sched_priority"],
+            1,
+        )?;
+        return Ok(record(
+            ctx,
+            class,
+            vec![priority.expect("required priority bound")],
+        ));
+    }
+    let [sequence, dictionary] = super::super::builtins::bind_builtin_arguments(
+        "structseq",
+        args,
+        kwargs,
+        ["sequence", "dict"],
+        1,
+    )?;
+    let sequence = sequence.expect("required sequence bound");
+    let values = sequence_values(ctx, sequence)?;
     let extras = if let Some(dict) = dictionary {
         ctx.dict_entries(dict)
             .ok_or_else(|| {
@@ -137,6 +170,92 @@ pub(in crate::dynamic) fn construct(
     Ok(record(ctx, class, values))
 }
 
+/// sched_param reduces to one scalar constructor argument and can replace just that field.
+pub(in crate::dynamic) fn sched_param_method(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method {SCHED_PARAM}.{method}() needs an argument"),
+        ));
+    };
+    if method == "__new__" {
+        if receiver != ctx.builtin(SCHED_PARAM) {
+            return Err(Error::new(
+                "TypeError",
+                "sched_param.__new__() requires the sched_param type",
+            ));
+        }
+        return construct(ctx, SCHED_PARAM, rest, kwargs);
+    }
+    let Value::NamedTuple {
+        class: Some(SCHED_PARAM),
+        values,
+        ..
+    } = ctx.heap.get(receiver)
+    else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{method}' for '{SCHED_PARAM}' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            ),
+        ));
+    };
+    let mut priority = values[0];
+    match method {
+        "__reduce__" => {
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "sched_param.__reduce__() takes no keyword arguments",
+                ));
+            }
+            if !rest.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "sched_param.__reduce__() takes no arguments ({} given)",
+                        rest.len()
+                    ),
+                ));
+            }
+            let class = ctx.builtin(SCHED_PARAM);
+            let args = ctx.alloc(Value::Tuple(vec![priority]));
+            Ok(ctx.alloc(Value::Tuple(vec![class, args])))
+        }
+        "__replace__" => {
+            if !rest.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "__replace__() takes no positional arguments",
+                ));
+            }
+            let mut unknown = Vec::new();
+            for (key, value) in kwargs {
+                if key == "sched_priority" {
+                    priority = *value;
+                } else {
+                    unknown.push(ctx.text(key));
+                }
+            }
+            if !unknown.is_empty() {
+                let keys = ctx.alloc(Value::List(unknown));
+                return Err(Error::new(
+                    "TypeError",
+                    format!("Got unexpected field name(s): {}", ctx.repr(keys)),
+                ));
+            }
+            Ok(record(ctx, SCHED_PARAM, vec![priority]))
+        }
+        _ => Err(Error::new("AttributeError", method.to_owned())),
+    }
+}
+
 pub(in crate::dynamic) fn type_attribute(
     ctx: &mut Context,
     class: &'static str,
@@ -147,9 +266,20 @@ pub(in crate::dynamic) fn type_attribute(
     Some(match name {
         "__name__" | "__qualname__" if on_type => ctx.text(qualname),
         "__module__" => ctx.text(module),
+        "__new__" if class == SCHED_PARAM => ctx.builtin("posix.sched_param.__new__"),
+        "__reduce__" | "__replace__" if on_type && class == SCHED_PARAM => {
+            ctx.builtin(&format!("{class}.{name}"))
+        }
+        "__reduce_ex__" if on_type && class == SCHED_PARAM => ctx.builtin("object.__reduce_ex__"),
+        "__doc__" if class == SCHED_PARAM => {
+            ctx.text("Currently has only one field: sched_priority")
+        }
         "__doc__" if class == UNRAISABLE_ARGS => {
             ctx.text("UnraisableHookArgs\n\nType used to pass arguments to sys.unraisablehook.")
         }
+        "__doc__" if class == THREAD_INFO => ctx.text(
+            "sys.thread_info\n\nA named tuple holding information about the thread implementation.",
+        ),
         "__doc__" if class == TERMINAL_SIZE => {
             ctx.text("A tuple of (columns, lines) for holding terminal window size")
         }

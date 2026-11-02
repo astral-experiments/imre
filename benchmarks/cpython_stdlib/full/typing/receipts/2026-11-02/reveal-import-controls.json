@@ -1,0 +1,850 @@
+{
+  "hostname": "a0f7c43eb913",
+  "inputs": {
+    "14c8478a23afdc0a241b9a6b715f829182948f79d6ba35f8f2f569f8e54a3949": "from typing import reveal_type\n\n\nclass FromWitness:\n    pass\n\n\nobj = FromWitness()\n\nimport io\nimport sys\n\ncaptured = io.StringIO()\nsaved = sys.stderr\ntry:\n    sys.stderr = captured\n    assert reveal_type(obj) is obj\n    assert captured.getvalue() == \"Runtime type is 'FromWitness'\\n\"\nfinally:\n    sys.stderr = saved\nprint('redirected')\n",
+    "1eec1e2a1a6eb01cffcf10f758a00badebb87eb3feb1d2226e2e65b544a7bcd5": "from typing import reveal_type\n\n\nclass FromWitness:\n    pass\n\n\nobj = FromWitness()\nassert reveal_type(obj) is not obj\n",
+    "212755dbcc4b491833fadff837c01bf058ab741b9cac8492aef2d9f6549477cf": "from typing import reveal_type\n\n\nclass FromWitness:\n    pass\n\n\nobj = FromWitness()\n\ntry:\n    reveal_type(obj=obj)\nexcept TypeError:\n    print('positional-only')\nelse:\n    raise AssertionError(\"accepted keyword obj\")\n",
+    "38801c2ec10db933e311f588fd188b326c90b605fd66092f7e291ca360e2c61c": "import typing\n\n\nclass ModuleWitness:\n    pass\n\n\nobj = ModuleWitness()\n\ntry:\n    typing.reveal_type(obj=obj)\nexcept TypeError:\n    print('positional-only')\nelse:\n    raise AssertionError(\"accepted keyword obj\")\n",
+    "585427af5ba67ce8e14b495b33907244395ca50cc044bb22bcce08529162e0fa": "from typing import reveal_type\nimport typing\n\n\nfn = reveal_type\nother = typing.reveal_type\nassert fn is other\nparams = fn.__type_params__\nassert len(params) == 1\nt = params[0]\nassert isinstance(t, typing.TypeVar)\nassert t.__name__ == 'T'\nassert t is not typing.T\nassert t.__infer_variance__ is True\nassert fn.__annotations__ == {'obj': t, 'return': t}\nprint('metadata')\n",
+    "5f494b7813ba0261bc0f30ba5aaa3b615483a6d74f4fd48fc1004bfef88b6dfe": "import typing\n\n\nclass ModuleWitness:\n    pass\n\n\nobj = ModuleWitness()\n\nimport sys\n\nfailure = RuntimeError(\"write failed\")\n\nclass BrokenStream:\n    def write(self, text):\n        raise failure\n\nsaved = sys.stderr\ntry:\n    sys.stderr = BrokenStream()\n    try:\n        typing.reveal_type(obj)\n    except RuntimeError as error:\n        assert error is failure\n    else:\n        raise AssertionError(\"lost stderr write failure\")\nfinally:\n    sys.stderr = saved\nprint('propagated')\n",
+    "63eaf780d45c45f99c7d37352c8676c666f51c975cb87c302edb4574b2803f91": "from typing import reveal_type\n\n\nclass FromWitness:\n    pass\n\n\nobj = FromWitness()\n\nimport sys\n\nfailure = RuntimeError(\"write failed\")\n\nclass BrokenStream:\n    def write(self, text):\n        raise failure\n\nsaved = sys.stderr\ntry:\n    sys.stderr = BrokenStream()\n    try:\n        reveal_type(obj)\n    except RuntimeError as error:\n        assert error is failure\n    else:\n        raise AssertionError(\"lost stderr write failure\")\nfinally:\n    sys.stderr = saved\nprint('propagated')\n",
+    "968732e9aa23daf22285101a62ca2da2bf6d4ad350b33e195c4f77d1365a296c": "import typing\n\n\nfn = typing.reveal_type\nother = typing.reveal_type\nassert fn is other\nparams = fn.__type_params__\nassert len(params) == 1\nt = params[0]\nassert isinstance(t, typing.TypeVar)\nassert t.__name__ == 'T'\nassert t is not typing.T\nassert t.__infer_variance__ is True\nassert fn.__annotations__ == {'obj': t, 'return': t}\nprint('metadata')\n",
+    "986223da5eeae43b7d52ccad8c60cb82aa6a7f0903a8da1c41a2eb8305192b09": "import typing\n\n\nclass ModuleWitness:\n    pass\n\n\nobj = ModuleWitness()\n\nimport io\nimport sys\n\ncaptured = io.StringIO()\nsaved = sys.stderr\ntry:\n    sys.stderr = captured\n    assert typing.reveal_type(obj) is obj\n    assert captured.getvalue() == \"Runtime type is 'ModuleWitness'\\n\"\nfinally:\n    sys.stderr = saved\nprint('redirected')\n",
+    "993ed7a6af08f51a50cfed473b641df1c282c0e2b18906631bca21e5325601e1": "import typing\n\n\nclass ModuleWitness:\n    pass\n\n\nobj = ModuleWitness()\nassert typing.reveal_type(obj) is obj\nprint('identity')\n",
+    "b82b0f14ebaa4eed3daebd7eefbb2275a12b892a9d2cf219a49eca8ccd8f0095": "import typing\n\n\nclass ModuleWitness:\n    pass\n\n\nobj = ModuleWitness()\nassert typing.reveal_type(obj) is not obj\n",
+    "bda2fb83d35afaf36de6dfb01a56dcb3a522afc753236de6d765318596d21be0": "from typing import reveal_type\n\n\nclass FromWitness:\n    pass\n\n\nobj = FromWitness()\nassert reveal_type(obj) is obj\nprint('identity')\n"
+  },
+  "labels": {
+    "draft-4020-on-06": "bb7f44a2af572d1c28cac6df4deb19bcf2fb17be on 06c9fd7d70a1153ee20581f44a2d628231188ca4, without 3b7853c29dcbc82f6ae19083210fdaa1f2d26c25",
+    "main-06c9fd7d": "06c9fd7d70a1153ee20581f44a2d628231188ca4",
+    "stock": null
+  },
+  "observations": [
+    {
+      "artifact": "stock",
+      "check": "core",
+      "form": "from",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/from/core/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.02,
+        "stderr": "Runtime type is 'FromWitness'\n",
+        "stdout": "identity\n"
+      },
+      "source_hash": "bda2fb83d35afaf36de6dfb01a56dcb3a522afc753236de6d765318596d21be0"
+    },
+    {
+      "artifact": "stock",
+      "check": "core",
+      "form": "module",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/module/core/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.036,
+        "stderr": "Runtime type is 'ModuleWitness'\n",
+        "stdout": "identity\n"
+      },
+      "source_hash": "993ed7a6af08f51a50cfed473b641df1c282c0e2b18906631bca21e5325601e1"
+    },
+    {
+      "artifact": "stock",
+      "check": "metadata",
+      "form": "from",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/from/metadata/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.019,
+        "stderr": "",
+        "stdout": "metadata\n"
+      },
+      "source_hash": "585427af5ba67ce8e14b495b33907244395ca50cc044bb22bcce08529162e0fa"
+    },
+    {
+      "artifact": "stock",
+      "check": "metadata",
+      "form": "module",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/module/metadata/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.019,
+        "stderr": "",
+        "stdout": "metadata\n"
+      },
+      "source_hash": "968732e9aa23daf22285101a62ca2da2bf6d4ad350b33e195c4f77d1365a296c"
+    },
+    {
+      "artifact": "stock",
+      "check": "arguments",
+      "form": "from",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/from/arguments/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.055,
+        "stderr": "",
+        "stdout": "positional-only\n"
+      },
+      "source_hash": "212755dbcc4b491833fadff837c01bf058ab741b9cac8492aef2d9f6549477cf"
+    },
+    {
+      "artifact": "stock",
+      "check": "arguments",
+      "form": "module",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/module/arguments/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.033,
+        "stderr": "",
+        "stdout": "positional-only\n"
+      },
+      "source_hash": "38801c2ec10db933e311f588fd188b326c90b605fd66092f7e291ca360e2c61c"
+    },
+    {
+      "artifact": "stock",
+      "check": "redirect",
+      "form": "from",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/from/redirect/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.02,
+        "stderr": "",
+        "stdout": "redirected\n"
+      },
+      "source_hash": "14c8478a23afdc0a241b9a6b715f829182948f79d6ba35f8f2f569f8e54a3949"
+    },
+    {
+      "artifact": "stock",
+      "check": "redirect",
+      "form": "module",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/module/redirect/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.018,
+        "stderr": "",
+        "stdout": "redirected\n"
+      },
+      "source_hash": "986223da5eeae43b7d52ccad8c60cb82aa6a7f0903a8da1c41a2eb8305192b09"
+    },
+    {
+      "artifact": "stock",
+      "check": "broken",
+      "form": "from",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/from/broken/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.054,
+        "stderr": "",
+        "stdout": "propagated\n"
+      },
+      "source_hash": "63eaf780d45c45f99c7d37352c8676c666f51c975cb87c302edb4574b2803f91"
+    },
+    {
+      "artifact": "stock",
+      "check": "broken",
+      "form": "module",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/module/broken/probe.py"
+        ],
+        "returncode": 0,
+        "seconds": 0.027,
+        "stderr": "",
+        "stdout": "propagated\n"
+      },
+      "source_hash": "5f494b7813ba0261bc0f30ba5aaa3b615483a6d74f4fd48fc1004bfef88b6dfe"
+    },
+    {
+      "artifact": "stock",
+      "check": "negative",
+      "form": "from",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/from/negative/probe.py"
+        ],
+        "returncode": 1,
+        "seconds": 0.267,
+        "stderr": "Runtime type is 'FromWitness'\nTraceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/from/negative/probe.py\", line 9, in <module>\n    assert reveal_type(obj) is not obj\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+        "stdout": ""
+      },
+      "source_hash": "1eec1e2a1a6eb01cffcf10f758a00badebb87eb3feb1d2226e2e65b544a7bcd5"
+    },
+    {
+      "artifact": "stock",
+      "check": "negative",
+      "form": "module",
+      "level": "",
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-IB",
+          "/workspace/scratch/controls/sources/module/negative/probe.py"
+        ],
+        "returncode": 1,
+        "seconds": 0.311,
+        "stderr": "Runtime type is 'ModuleWitness'\nTraceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/module/negative/probe.py\", line 9, in <module>\n    assert typing.reveal_type(obj) is not obj\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+        "stdout": ""
+      },
+      "source_hash": "b82b0f14ebaa4eed3daebd7eefbb2275a12b892a9d2cf219a49eca8ccd8f0095"
+    },
+    {
+      "artifact": "main-06c9fd7d",
+      "build": {
+        "argv": [
+          "/workspace/scratch/controls/baseline-bin/imre",
+          "build",
+          "/workspace/scratch/controls/sources/from/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/from/core",
+          "--runtime",
+          "/workspace/scratch/controls/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/main-06c9fd7d/from-core-ordinary0/program"
+        ],
+        "returncode": 1,
+        "seconds": 0.036,
+        "stderr": " Compiling /workspace/scratch/controls/sources/from/core/probe.py (-O0)\n/workspace/scratch/controls/sources/from/core/probe.py:1:1: Imre: unsupported sealed standard-library export typing.reveal_type\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "from",
+      "level": "0",
+      "mode": "ordinary",
+      "source_hash": "bda2fb83d35afaf36de6dfb01a56dcb3a522afc753236de6d765318596d21be0"
+    },
+    {
+      "artifact": "main-06c9fd7d",
+      "build": {
+        "argv": [
+          "/workspace/scratch/controls/baseline-bin/imre",
+          "build",
+          "/workspace/scratch/controls/sources/from/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/from/core",
+          "--runtime",
+          "/workspace/scratch/controls/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "3",
+          "-o",
+          "/workspace/scratch/controls/results/main-06c9fd7d/from-core-ordinary3/program"
+        ],
+        "returncode": 1,
+        "seconds": 0.016,
+        "stderr": " Compiling /workspace/scratch/controls/sources/from/core/probe.py (-O3)\n/workspace/scratch/controls/sources/from/core/probe.py:1:1: Imre: unsupported sealed standard-library export typing.reveal_type\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "from",
+      "level": "3",
+      "mode": "ordinary",
+      "source_hash": "bda2fb83d35afaf36de6dfb01a56dcb3a522afc753236de6d765318596d21be0"
+    },
+    {
+      "artifact": "main-06c9fd7d",
+      "build": {
+        "argv": [
+          "/workspace/scratch/controls/baseline-bin/imre",
+          "build",
+          "/workspace/scratch/controls/sources/from/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/from/core",
+          "--runtime",
+          "/workspace/scratch/controls/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/main-06c9fd7d/from-core-boxed0/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 19.778,
+        "stderr": " Compiling /workspace/scratch/controls/sources/from/core/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/main-06c9fd7d/from-core-boxed0/program in 19.77 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "from",
+      "level": "0",
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/main-06c9fd7d/from-core-boxed0/program"
+        ],
+        "returncode": 1,
+        "seconds": 1.384,
+        "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/from/core/probe.py\", line 1\nImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)\n",
+        "stdout": ""
+      },
+      "source_hash": "bda2fb83d35afaf36de6dfb01a56dcb3a522afc753236de6d765318596d21be0"
+    },
+    {
+      "artifact": "main-06c9fd7d",
+      "build": {
+        "argv": [
+          "/workspace/scratch/controls/baseline-bin/imre",
+          "build",
+          "/workspace/scratch/controls/sources/from/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/from/core",
+          "--runtime",
+          "/workspace/scratch/controls/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "3",
+          "-o",
+          "/workspace/scratch/controls/results/main-06c9fd7d/from-core-boxed3/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 186.99,
+        "stderr": " Compiling /workspace/scratch/controls/sources/from/core/probe.py (-O3)\n  Finished /workspace/scratch/controls/results/main-06c9fd7d/from-core-boxed3/program in 186.96 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "from",
+      "level": "3",
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/main-06c9fd7d/from-core-boxed3/program"
+        ],
+        "returncode": 1,
+        "seconds": 5.106,
+        "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/from/core/probe.py\", line 1\nImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)\n",
+        "stdout": ""
+      },
+      "source_hash": "bda2fb83d35afaf36de6dfb01a56dcb3a522afc753236de6d765318596d21be0"
+    },
+    {
+      "artifact": "main-06c9fd7d",
+      "build": {
+        "argv": [
+          "/workspace/scratch/controls/baseline-bin/imre",
+          "build",
+          "/workspace/scratch/controls/sources/module/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/module/core",
+          "--runtime",
+          "/workspace/scratch/controls/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/main-06c9fd7d/module-core-ordinary0/program"
+        ],
+        "returncode": 1,
+        "seconds": 0.074,
+        "stderr": " Compiling /workspace/scratch/controls/sources/module/core/probe.py (-O0)\n/workspace/scratch/controls/sources/module/core/probe.py:9:8: Imre: name is not a local value; globals and first-class functions are unsupported\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "module",
+      "level": "0",
+      "mode": "ordinary",
+      "source_hash": "993ed7a6af08f51a50cfed473b641df1c282c0e2b18906631bca21e5325601e1"
+    },
+    {
+      "artifact": "main-06c9fd7d",
+      "build": {
+        "argv": [
+          "/workspace/scratch/controls/baseline-bin/imre",
+          "build",
+          "/workspace/scratch/controls/sources/module/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/module/core",
+          "--runtime",
+          "/workspace/scratch/controls/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "3",
+          "-o",
+          "/workspace/scratch/controls/results/main-06c9fd7d/module-core-ordinary3/program"
+        ],
+        "returncode": 1,
+        "seconds": 0.061,
+        "stderr": " Compiling /workspace/scratch/controls/sources/module/core/probe.py (-O3)\n/workspace/scratch/controls/sources/module/core/probe.py:9:8: Imre: name is not a local value; globals and first-class functions are unsupported\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "module",
+      "level": "3",
+      "mode": "ordinary",
+      "source_hash": "993ed7a6af08f51a50cfed473b641df1c282c0e2b18906631bca21e5325601e1"
+    },
+    {
+      "artifact": "main-06c9fd7d",
+      "build": {
+        "argv": [
+          "/workspace/scratch/controls/baseline-bin/imre",
+          "build",
+          "/workspace/scratch/controls/sources/module/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/module/core",
+          "--runtime",
+          "/workspace/scratch/controls/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/main-06c9fd7d/module-core-boxed0/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 42.32,
+        "stderr": " Compiling /workspace/scratch/controls/sources/module/core/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/main-06c9fd7d/module-core-boxed0/program in 42.29 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "module",
+      "level": "0",
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/main-06c9fd7d/module-core-boxed0/program"
+        ],
+        "returncode": 1,
+        "seconds": 2.793,
+        "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/module/core/probe.py\", line 9\n  File \"<imre stdlib>/typing.py\", line 1954\nAttributeError: module 'typing' has no attribute 'reveal_type'\n",
+        "stdout": ""
+      },
+      "source_hash": "993ed7a6af08f51a50cfed473b641df1c282c0e2b18906631bca21e5325601e1"
+    },
+    {
+      "artifact": "main-06c9fd7d",
+      "build": {
+        "argv": [
+          "/workspace/scratch/controls/baseline-bin/imre",
+          "build",
+          "/workspace/scratch/controls/sources/module/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/module/core",
+          "--runtime",
+          "/workspace/scratch/controls/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "3",
+          "-o",
+          "/workspace/scratch/controls/results/main-06c9fd7d/module-core-boxed3/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 393.948,
+        "stderr": " Compiling /workspace/scratch/controls/sources/module/core/probe.py (-O3)\n  Finished /workspace/scratch/controls/results/main-06c9fd7d/module-core-boxed3/program in 393.90 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "module",
+      "level": "3",
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/main-06c9fd7d/module-core-boxed3/program"
+        ],
+        "returncode": 1,
+        "seconds": 8.542,
+        "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/module/core/probe.py\", line 9\n  File \"<imre stdlib>/typing.py\", line 1954\nAttributeError: module 'typing' has no attribute 'reveal_type'\n",
+        "stdout": ""
+      },
+      "source_hash": "993ed7a6af08f51a50cfed473b641df1c282c0e2b18906631bca21e5325601e1"
+    },
+    {
+      "artifact": "draft-4020-on-06",
+      "build": {
+        "argv": [
+          "/workspace/scratch/draft-target/debug/imre",
+          "build",
+          "/workspace/scratch/controls/sources/from/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/from/core",
+          "--runtime",
+          "/workspace/scratch/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/draft-4020-on-06/from-core-ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 45.47,
+        "stderr": " Compiling /workspace/scratch/controls/sources/from/core/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/draft-4020-on-06/from-core-ordinary0/program in 45.43 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "from",
+      "level": "0",
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/draft-4020-on-06/from-core-ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 3.045,
+        "stderr": "Runtime type is 'FromWitness'\n",
+        "stdout": "identity\n"
+      },
+      "source_hash": "bda2fb83d35afaf36de6dfb01a56dcb3a522afc753236de6d765318596d21be0"
+    },
+    {
+      "artifact": "draft-4020-on-06",
+      "build": {
+        "argv": [
+          "/workspace/scratch/draft-target/debug/imre",
+          "build",
+          "/workspace/scratch/controls/sources/from/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/from/core",
+          "--runtime",
+          "/workspace/scratch/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/draft-4020-on-06/from-core-boxed0/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 35.91,
+        "stderr": " Compiling /workspace/scratch/controls/sources/from/core/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/draft-4020-on-06/from-core-boxed0/program in 35.89 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "from",
+      "level": "0",
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/draft-4020-on-06/from-core-boxed0/program"
+        ],
+        "returncode": 0,
+        "seconds": 3.834,
+        "stderr": "Runtime type is 'FromWitness'\n",
+        "stdout": "identity\n"
+      },
+      "source_hash": "bda2fb83d35afaf36de6dfb01a56dcb3a522afc753236de6d765318596d21be0"
+    },
+    {
+      "artifact": "draft-4020-on-06",
+      "build": {
+        "argv": [
+          "/workspace/scratch/draft-target/debug/imre",
+          "build",
+          "/workspace/scratch/controls/sources/module/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/module/core",
+          "--runtime",
+          "/workspace/scratch/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/draft-4020-on-06/module-core-ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 28.158,
+        "stderr": " Compiling /workspace/scratch/controls/sources/module/core/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/draft-4020-on-06/module-core-ordinary0/program in 28.13 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "module",
+      "level": "0",
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/draft-4020-on-06/module-core-ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 4.909,
+        "stderr": "Runtime type is 'ModuleWitness'\n",
+        "stdout": "identity\n"
+      },
+      "source_hash": "993ed7a6af08f51a50cfed473b641df1c282c0e2b18906631bca21e5325601e1"
+    },
+    {
+      "artifact": "draft-4020-on-06",
+      "build": {
+        "argv": [
+          "/workspace/scratch/draft-target/debug/imre",
+          "build",
+          "/workspace/scratch/controls/sources/module/core/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/module/core",
+          "--runtime",
+          "/workspace/scratch/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/draft-4020-on-06/module-core-boxed0/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 42.032,
+        "stderr": " Compiling /workspace/scratch/controls/sources/module/core/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/draft-4020-on-06/module-core-boxed0/program in 42.01 s\n",
+        "stdout": ""
+      },
+      "check": "core",
+      "form": "module",
+      "level": "0",
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/draft-4020-on-06/module-core-boxed0/program"
+        ],
+        "returncode": 0,
+        "seconds": 5.095,
+        "stderr": "Runtime type is 'ModuleWitness'\n",
+        "stdout": "identity\n"
+      },
+      "source_hash": "993ed7a6af08f51a50cfed473b641df1c282c0e2b18906631bca21e5325601e1"
+    },
+    {
+      "artifact": "draft-4020-on-06",
+      "build": {
+        "argv": [
+          "/workspace/scratch/draft-target/debug/imre",
+          "build",
+          "/workspace/scratch/controls/sources/from/metadata/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/from/metadata",
+          "--runtime",
+          "/workspace/scratch/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/draft-4020-on-06/from-metadata-ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 34.563,
+        "stderr": " Compiling /workspace/scratch/controls/sources/from/metadata/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/draft-4020-on-06/from-metadata-ordinary0/program in 34.53 s\n",
+        "stdout": ""
+      },
+      "check": "metadata",
+      "form": "from",
+      "level": "0",
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/draft-4020-on-06/from-metadata-ordinary0/program"
+        ],
+        "returncode": 1,
+        "seconds": 6.142,
+        "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/from/metadata/probe.py\", line 9\nAssertionError\n",
+        "stdout": ""
+      },
+      "source_hash": "585427af5ba67ce8e14b495b33907244395ca50cc044bb22bcce08529162e0fa"
+    },
+    {
+      "artifact": "draft-4020-on-06",
+      "build": {
+        "argv": [
+          "/workspace/scratch/draft-target/debug/imre",
+          "build",
+          "/workspace/scratch/controls/sources/from/metadata/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/from/metadata",
+          "--runtime",
+          "/workspace/scratch/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/draft-4020-on-06/from-metadata-boxed0/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 20.973,
+        "stderr": " Compiling /workspace/scratch/controls/sources/from/metadata/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/draft-4020-on-06/from-metadata-boxed0/program in 20.91 s\n",
+        "stdout": ""
+      },
+      "check": "metadata",
+      "form": "from",
+      "level": "0",
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/draft-4020-on-06/from-metadata-boxed0/program"
+        ],
+        "returncode": 1,
+        "seconds": 1.584,
+        "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/from/metadata/probe.py\", line 9\nAssertionError\n",
+        "stdout": ""
+      },
+      "source_hash": "585427af5ba67ce8e14b495b33907244395ca50cc044bb22bcce08529162e0fa"
+    },
+    {
+      "artifact": "draft-4020-on-06",
+      "build": {
+        "argv": [
+          "/workspace/scratch/draft-target/debug/imre",
+          "build",
+          "/workspace/scratch/controls/sources/module/metadata/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/module/metadata",
+          "--runtime",
+          "/workspace/scratch/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/draft-4020-on-06/module-metadata-ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 21.581,
+        "stderr": " Compiling /workspace/scratch/controls/sources/module/metadata/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/draft-4020-on-06/module-metadata-ordinary0/program in 21.57 s\n",
+        "stdout": ""
+      },
+      "check": "metadata",
+      "form": "module",
+      "level": "0",
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/draft-4020-on-06/module-metadata-ordinary0/program"
+        ],
+        "returncode": 1,
+        "seconds": 2.484,
+        "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/module/metadata/probe.py\", line 8\nAssertionError\n",
+        "stdout": ""
+      },
+      "source_hash": "968732e9aa23daf22285101a62ca2da2bf6d4ad350b33e195c4f77d1365a296c"
+    },
+    {
+      "artifact": "draft-4020-on-06",
+      "build": {
+        "argv": [
+          "/workspace/scratch/draft-target/debug/imre",
+          "build",
+          "/workspace/scratch/controls/sources/module/metadata/probe.py",
+          "--no-cache",
+          "--module-root",
+          "/workspace/scratch/controls/sources/module/metadata",
+          "--runtime",
+          "/workspace/scratch/baseline-bin/libimre_runtime.a",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--opt-level",
+          "0",
+          "-o",
+          "/workspace/scratch/controls/results/draft-4020-on-06/module-metadata-boxed0/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 51.625,
+        "stderr": " Compiling /workspace/scratch/controls/sources/module/metadata/probe.py (-O0)\n  Finished /workspace/scratch/controls/results/draft-4020-on-06/module-metadata-boxed0/program in 51.59 s\n",
+        "stdout": ""
+      },
+      "check": "metadata",
+      "form": "module",
+      "level": "0",
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/draft-4020-on-06/module-metadata-boxed0/program"
+        ],
+        "returncode": 1,
+        "seconds": 4.791,
+        "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/controls/sources/module/metadata/probe.py\", line 8\nAssertionError\n",
+        "stdout": ""
+      },
+      "source_hash": "968732e9aa23daf22285101a62ca2da2bf6d4ad350b33e195c4f77d1365a296c"
+    }
+  ],
+  "python_suite_pin": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "scope": "independent reveal_type runtime controls (no typing unittest cases)"
+}

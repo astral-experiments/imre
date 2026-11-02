@@ -755,6 +755,7 @@ impl Checker<'_> {
                 "not every path returns the declared type",
             ));
         }
+        helper.fault_frame(&mut body, definition.name.as_str(), definition.start());
         self.helpers.finish(
             signature.id,
             comprehensions::Helper {
