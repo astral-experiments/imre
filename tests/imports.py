@@ -16,6 +16,9 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "codeop_import_keeps_return_check": ({
+        "main.py": 'import codeop\ndef wrong() -> int:\n    return "invalid return"\nwrong()\n',
+    }, "invalid-return-type"),
     "function_wildcard": ({
         "main.py": "def invalid():\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
@@ -259,6 +262,26 @@ ACCEPTED = {
     "token_qualified_helper": {
         "main.py": "from helper import read\nprint(read())\n",
         "helper.py": "import token\ndef read():\n    return token.tok_name[token.EXACT_TOKEN_TYPES[':=']]\n",
+    },
+    "codeop_module": {
+        "main.py": (
+            "import codeop\n"
+            "from codeop import Compile, CommandCompiler\n"
+            "assert codeop.Compile is Compile\n"
+            "compiler = CommandCompiler().compiler\n"
+            "assert type(compiler) is Compile\n"
+            "assert compiler.flags == codeop.PyCF_DONT_IMPLY_DEDENT | codeop.PyCF_ALLOW_INCOMPLETE_INPUT\n"
+        ),
+    },
+    "codeop_named_helper": {
+        "main.py": "from helper import flags\nprint(flags())\n",
+        "helper.py": (
+            "from codeop import Compile, CommandCompiler\n"
+            "def flags():\n"
+            "    compiler = CommandCompiler().compiler\n"
+            "    assert type(compiler) is Compile\n"
+            "    return compiler.flags\n"
+        ),
     },
     "opcode_named_helper": {
         "main.py": "from helper import effect\nprint(effect())\n",
@@ -909,6 +932,11 @@ def main() -> None:
                         archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
+            if name in {"codeop_module", "codeop_named_helper"}:
+                # Run these checked modules with the late-import executable below.
+                require_success(run([compiler, "check", str(case / "main.py")], temporary))
+                checks += 1
+                continue
             for level in args.opt_levels:
                 executable = temporary / f"accepted-{name}-{level}"
                 command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
@@ -923,19 +951,45 @@ def main() -> None:
                 checks += 1
 
         late_import = temporary / "late_import.py"
-        late_import.write_text(
-            "import builtins\nimport sys\nprint(builtins.__import__(sys.argv[1]).opmap['POP_TOP'])\n"
-        )
+        late_import.write_text("import importlib, sys\nimportlib.import_module(sys.argv[1]).run()\n")
         for level in args.opt_levels:
-            executable = temporary / f"late-opcode-{level}"
-            require_success(run([compiler, "build", str(late_import), "-o", str(executable),
-                                 "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
-                                 "--runtime-imports", "--no-cache"], temporary))
-            for module in ("opcode", "_opcode_metadata"):
-                result = run([str(executable), module], temporary)
+            executable = temporary / f"late-import-{level}"
+            command = [compiler, "build", str(late_import), "-o", str(executable),
+                       "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                       *build_flags, "--runtime-imports", "--no-cache"]
+            if args.sanitize:
+                command.append("--sanitize")
+            require_success(run(command, temporary, timeout=build_timeout))
+            # Load the probe from disk so the executable cannot resolve its imports at build time.
+            probe = temporary / f"late_import_probe_{level}.py"
+            probe.write_text(
+                "import builtins, sys\n"
+                "def run():\n"
+                "    sys.path.insert(0, sys.argv[4])\n"
+                "    module = builtins.__import__(sys.argv[2])\n"
+                "    if sys.argv[3] == 'flags':\n"
+                "        print(module.CommandCompiler().compiler.flags)\n"
+                "    elif sys.argv[3] == 'lookup':\n"
+                "        print(module.opmap['POP_TOP'])\n"
+                "    elif sys.argv[3] == 'current':\n"
+                "        module.current()\n"
+            )
+            for module, operation, path, expected in [
+                ("opcode", "lookup", temporary, "31\n"), ("_opcode_metadata", "lookup", temporary, "31\n"),
+                ("code", "flags", temporary, "16896\n"), ("codeop", "flags", temporary, "16896\n"),
+                ("main", "import", temporary / "codeop_module", ""),
+                ("main", "import", temporary / "codeop_named_helper", "16896\n"),
+                ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
+            ]:
+                result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
                 require_success(result)
-                assert result.stdout == "31\n", (module, level, result.stdout)
+                assert result.stdout == expected, (module, level, result.stdout)
                 checks += 1
+
+            absent = "no_such_console_guard_module"
+            result = run([str(executable), probe.stem, absent, "flags", str(temporary)], temporary)
+            assert result.returncode == 1 and f"ModuleNotFoundError: No module named '{absent}'" in result.stderr, result
+            checks += 1
 
         # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
         for level in args.opt_levels:

@@ -108,6 +108,8 @@ impl Imports {
                 name,
                 "_imp"
                     | "atexit"
+                    | "code"
+                    | "codeop"
                     | "json"
                     | "json.encoder"
                     | "opcode"
@@ -451,6 +453,7 @@ pub(crate) fn compile(
             "__future__",
             "_imp",
             "atexit",
+            "code",
             "weakref",
             "pathlib",
             "sys",
@@ -735,7 +738,9 @@ pub(crate) fn compile(
         "abc",
         "annotationlib",
         "ast",
+        "code",
         "codecs",
+        "codeop",
         "copyreg",
         "datetime",
         "genericpath",
