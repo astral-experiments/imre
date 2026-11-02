@@ -34,6 +34,10 @@ pub(super) struct Reference {
 }
 
 impl Value {
+    pub(super) fn is_weak_proxy(&self) -> bool {
+        matches!(self, Self::Weak(wr) if wr.kind != Kind::Reference)
+    }
+
     fn is_weakrefable_native_base(&self) -> bool {
         matches!(self, Self::Native(name)
             if matches!(name.as_str(), "set" | "frozenset" | super::deque::CLASS))
@@ -131,6 +135,20 @@ impl Context {
         Ok(obj)
     }
 
+    /// Hold the referent through a proxy operation that can run Python.
+    pub(super) fn with_weak_target<T>(
+        &mut self,
+        target: Id,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        self.heap.reserve_temporaries(1)?;
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(target);
+        let result = operation(self);
+        self.heap.release_weak_target(mark, target);
+        result
+    }
+
     pub(super) fn class_instances_support_weakref(&self, class: Id) -> bool {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return false;
@@ -220,6 +238,7 @@ impl Context {
             | Value::TypeVarTuple { .. }
             | Value::Class { .. }
             | Value::Function { .. }
+            | Value::Generator { .. }
             | Value::Module { .. }
             | Value::Method { .. }
             | Value::Code(_)

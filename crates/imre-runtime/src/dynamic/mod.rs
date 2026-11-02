@@ -650,8 +650,9 @@ impl Context {
         })
     }
     fn is_native_iterator(&self, id: Id) -> bool {
+        let value = self.heap.get(id);
         matches!(
-            self.heap.get(id),
+            value,
             Value::Iterator { .. }
                 | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
@@ -675,7 +676,7 @@ impl Context {
                 | Value::Enumerate { .. }
                 | Value::Count { .. }
                 | Value::Repeat(_)
-        )
+        ) || value.is_weak_proxy()
     }
 
     /// Select the inherited binary iterator for an exact value or a subclass with native storage.
@@ -689,6 +690,10 @@ impl Context {
 
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
+        let target = self.weak_proxy_target(id)?;
+        if target != id {
+            return self.with_weak_target(target, |ctx| ctx.iterator(target));
+        }
         if self.is_native_iterator(id) {
             let closed = match self.heap.get(id) {
                 Value::BufferedRandom(file, _) => file.borrow().closed(),
@@ -832,6 +837,7 @@ impl Context {
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
         ) || value.instance_class().is_some()
+            || value.is_weak_proxy()
         {
             return Ok(self.alloc(Value::LoopIterator {
                 source,
@@ -1116,6 +1122,19 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        let target = self.weak_proxy_target(id)?;
+        if target != id {
+            if !self.is_native_iterator(target) && self.slot(target, "__next__").is_none() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "Weakref proxy referenced a non-iterator '{:.200}' object",
+                        self.type_name(target)
+                    ),
+                ));
+            }
+            return self.with_weak_target(target, |ctx| ctx.next_item(target));
+        }
         if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
             return self
                 .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
@@ -1421,6 +1440,7 @@ impl Context {
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
         ) || matches!(self.heap.get(id), Value::GenericAlias(alias) if alias.is_builtin_alias() || alias.kind.iterates_unpack())
+            || self.heap.get(id).is_weak_proxy()
             || self.slot(id, "__iter__").is_some()
             || self.slot(id, "__getitem__").is_some()
         {
