@@ -1811,6 +1811,12 @@ pub(super) fn call(
     if name == "_imre_itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
     }
+    if name == "_imre_itertools._pairwise_allocate" {
+        return itertools::pairwise_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._pairwise_next" {
+        return itertools::pairwise_next(ctx, args, kwargs);
+    }
     if name == "_imre_itertools._starmap_allocate" {
         return itertools::starmap_allocate(ctx, args, kwargs);
     }

@@ -2787,6 +2787,8 @@ impl Context {
                 for attr in [
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_pairwise_allocate",
+                    "_pairwise_next",
                     "_starmap_allocate",
                     "_starmap_next",
                     "_predicate_allocate",
@@ -3301,6 +3303,7 @@ impl Context {
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),
                     ("compress", "itertools.compress"),
+                    ("pairwise", "itertools.pairwise"),
                 ] {
                     if let Some(class) = self.scope_name(scope, name)
                         && let Value::Class { scope, .. } = *self.heap.get(class)
@@ -3311,18 +3314,13 @@ impl Context {
                     }
                 }
             }
-            if name == "itertools" {
-                // Keep iterator state outside Python attribute lookup, including on subclasses.
-                for (class, field) in [
-                    ("batched", "_batched_state"),
-                    ("pairwise", "_pairwise_state"),
-                ] {
-                    if let Some(owner) = self.scope_name(scope, class) {
-                        let name = self.text(field);
-                        let member = self.alloc(Value::SlotMember { owner, name });
-                        self.bind(scope, field, member);
-                    }
-                }
+            if name == "itertools"
+                && let Some(owner) = self.scope_name(scope, "batched")
+            {
+                // Keep the iterator state outside Python attribute lookup, even on subclasses.
+                let name = self.text("_batched_state");
+                let member = self.alloc(Value::SlotMember { owner, name });
+                self.bind(scope, "_batched_state", member);
             }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")
