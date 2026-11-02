@@ -52,8 +52,8 @@ pub(super) fn literal_lengths(function: &Function, writes: &[u8]) -> Vec<(usize,
 struct Reduction<'a> {
     target: usize,
     lengths: &'a [(usize, i32)],
-    values: Vec<(usize, Affine)>,
-    flags: Vec<(usize, Cycle)>,
+    values: Vec<(usize, Scalar)>,
+    scope_budget: usize,
     sum: Option<usize>,
     increment: Affine,
     cycle: Cycle,
@@ -66,7 +66,51 @@ struct Cycle {
     count: i64,
 }
 
+/// The part of a scalar needed to evaluate this iteration's contributions.
+#[derive(Clone, Copy)]
+enum Scalar {
+    Integer(Affine),
+    Predicate(Cycle),
+    Length(i32),
+    Cleared,
+}
+
 impl Reduction<'_> {
+    /// A move or cleanup shadows earlier facts, including a literal's initial length.
+    fn local(&self, slot: usize) -> Option<Scalar> {
+        self.values
+            .iter()
+            .rev()
+            .find(|(id, _)| *id == slot)
+            .map(|&(_, value)| value)
+            .or_else(|| {
+                self.lengths
+                    .iter()
+                    .find(|(id, _)| *id == slot)
+                    .map(|&(_, length)| Scalar::Length(length))
+            })
+    }
+
+    /// Record a scalar write without replacing the range index or accumulator.
+    fn write(&mut self, slot: usize, value: Scalar) -> Option<()> {
+        if slot == self.target || self.sum == Some(slot) || self.values.len() >= 64 {
+            return None;
+        }
+        self.values.push((slot, value));
+        Some(())
+    }
+
+    /// Only scalar cleanups with no observable destructor may be skipped.
+    fn clear(&mut self, slot: usize, locals: &[Type]) -> Option<()> {
+        if !matches!(
+            locals[slot],
+            Type::Int | Type::Bool | Type::Str | Type::Bytes
+        ) {
+            return None;
+        }
+        self.write(slot, Scalar::Cleared)
+    }
+
     /// Resolve a scalar only after it was initialized in this iteration.
     fn expression(&self, expr: &Expr) -> Option<Affine> {
         if expr.ty != Type::Int {
@@ -77,12 +121,10 @@ impl Reduction<'_> {
                 scale: 1,
                 offset: 0,
             }),
-            ExprKind::Local(slot) => self
-                .values
-                .iter()
-                .rev()
-                .find(|(id, _)| id == slot)
-                .map(|p| p.1),
+            ExprKind::Local(slot) => match self.local(*slot)? {
+                Scalar::Integer(value) => Some(value),
+                _ => None,
+            },
             ExprKind::Int(text) => Some(Affine {
                 scale: 0,
                 offset: text.parse::<i32>().ok().filter(|&n| n >= 0)?,
@@ -92,7 +134,9 @@ impl Reduction<'_> {
                 let ExprKind::Local(slot) = arg.kind else {
                     return None;
                 };
-                let &(_, offset) = self.lengths.iter().find(|(id, _)| *id == slot)?;
+                let Scalar::Length(offset) = self.local(slot)? else {
+                    return None;
+                };
                 Some(Affine { scale: 0, offset })
             }
             ExprKind::Binary(op, a, b) => {
@@ -112,12 +156,10 @@ impl Reduction<'_> {
     /// Count equal or unequal residues in a full cycle, independently of its starting ordinal.
     fn predicate(&self, expr: &Expr) -> Option<Cycle> {
         if let ExprKind::Local(slot) = expr.kind {
-            return self
-                .flags
-                .iter()
-                .rev()
-                .find(|(id, _)| *id == slot)
-                .map(|p| p.1);
+            return match self.local(slot)? {
+                Scalar::Predicate(flag) => Some(flag),
+                _ => None,
+            };
         }
         let ExprKind::Compare(values, ops) = &expr.kind else {
             return None;
@@ -196,20 +238,47 @@ impl Reduction<'_> {
                     .checked_add(no.checked_mul(cycle.period - cycle.count)?)?;
                 self.cycle.period = cycle.period;
             }
+            Statement::Scope { body, clear } => {
+                self.scope_budget = self
+                    .scope_budget
+                    .checked_sub(1 + body.len() + clear.len())?;
+                for stmt in body {
+                    self.statement(stmt, locals)?;
+                }
+                for &slot in clear {
+                    self.clear(slot, locals)?;
+                }
+            }
+            Statement::Move(to, from) if to != from && locals[*to] == locals[*from] => {
+                let value = self.local(*from)?;
+                if matches!(value, Scalar::Cleared) {
+                    return None;
+                }
+                self.clear(*from, locals)?;
+                self.write(*to, value)?;
+            }
+            Statement::Clear(slot) => self.clear(*slot, locals)?,
             Statement::Assign(slot, rhs) if *slot != self.target && locals[*slot] == rhs.ty => {
-                if rhs.ty == Type::Bool {
-                    let flag = self.predicate(rhs)?;
-                    self.flags.push((*slot, flag));
-                } else if matches!(&rhs.kind, ExprKind::Binary(Binary::Add,a,_) if matches!(a.kind, ExprKind::Local(id) if id==*slot))
+                if matches!(&rhs.kind, ExprKind::Binary(Binary::Add,a,_) if matches!(a.kind, ExprKind::Local(id) if id==*slot))
                 {
                     let value = self.addend(*slot, rhs)?;
                     self.increment = self.increment.add(value)?;
                 } else {
-                    if self.sum == Some(*slot) {
-                        return None;
-                    }
-                    let value = self.expression(rhs)?;
-                    self.values.push((*slot, value));
+                    let value = match rhs.ty {
+                        Type::Int => Scalar::Integer(self.expression(rhs)?),
+                        Type::Bool => Scalar::Predicate(self.predicate(rhs)?),
+                        Type::Str | Type::Bytes => {
+                            let ExprKind::Local(source) = rhs.kind else {
+                                return None;
+                            };
+                            let Scalar::Length(length) = self.local(source)? else {
+                                return None;
+                            };
+                            Scalar::Length(length)
+                        }
+                        _ => return None,
+                    };
+                    self.write(*slot, value)?;
                 }
             }
             _ => return None,
@@ -237,7 +306,7 @@ impl Emitter<'_, '_> {
             target,
             lengths: &self.affine_literal_lengths,
             values: Vec::new(),
-            flags: Vec::new(),
+            scope_budget: 32,
             sum: None,
             increment: Affine::default(),
             cycle: Cycle {
