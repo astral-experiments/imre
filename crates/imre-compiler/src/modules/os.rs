@@ -18,16 +18,6 @@ pub(crate) fn credential_arity(name: &str) -> usize {
 pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     #[cfg(target_os = "linux")]
     {
-        match name {
-            "getxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.getxattr")),
-            "setxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.setxattr")),
-            "listxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.listxattr")),
-            "removexattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.removexattr")),
-            "XATTR_CREATE" => return Some(Intrinsic::IntConstant(i64::from(libc::XATTR_CREATE))),
-            "XATTR_REPLACE" => return Some(Intrinsic::IntConstant(i64::from(libc::XATTR_REPLACE))),
-            "XATTR_SIZE_MAX" => return Some(Intrinsic::IntConstant(65536)),
-            _ => {}
-        }
         let policy = match name {
             "SCHED_OTHER" => Some(libc::SCHED_OTHER),
             "SCHED_NORMAL" => Some(libc::SCHED_NORMAL),
@@ -56,6 +46,17 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         {
             return Some(Intrinsic::Credential(known));
         }
+    }
+    #[cfg(target_os = "linux")]
+    match name {
+        "getxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.getxattr")),
+        "setxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.setxattr")),
+        "listxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.listxattr")),
+        "removexattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.removexattr")),
+        "XATTR_CREATE" => return Some(Intrinsic::IntConstant(i64::from(libc::XATTR_CREATE))),
+        "XATTR_REPLACE" => return Some(Intrinsic::IntConstant(i64::from(libc::XATTR_REPLACE))),
+        "XATTR_SIZE_MAX" => return Some(Intrinsic::IntConstant(65536)),
+        _ => {}
     }
     #[cfg(all(target_os = "linux", any(target_env = "gnu", target_env = "musl")))]
     if name.starts_with("RTLD_") {
