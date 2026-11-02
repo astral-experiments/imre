@@ -35,6 +35,23 @@ def current():
                     assert exc.reason == 'truncated data'
             else:
                 assert raw == b'' and result == ''
+    for enc in ('utf-32-le', 'utf-32-be'):
+        raw = 'A😀\r\nB'.encode(enc)
+        stream = io.TextIOWrapper(io.BytesIO(raw), encoding=enc)
+        stream._CHUNK_SIZE = 1
+        assert stream.read(1) == 'A'
+        position = stream.tell()
+        assert stream.readline() == '😀\n'
+        stream.seek(position)
+        assert stream.read() == '😀\nB'
+        stream = io.TextIOWrapper(io.BytesIO(raw[:-1]), encoding=enc)
+        try:
+            stream.read()
+        except UnicodeDecodeError as exc:
+            assert (exc.encoding, exc.start, exc.end, exc.reason) == (enc, len(raw) - 4, len(raw) - 1, 'truncated data')
+        else:
+            raise AssertionError('partial UTF-32 code unit accepted')
+
     # Retain the saved byte order when iteration reads a later chunk.
     fp = io.TextIOWrapper(io.BytesIO(b'\xfe\xff\0A\0\n\0B\0\n\0C\0\n\0D\0\n'), 'utf-16')
     fp._CHUNK_SIZE = 6

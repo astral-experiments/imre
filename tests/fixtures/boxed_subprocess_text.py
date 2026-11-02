@@ -51,4 +51,24 @@ def current():
                             "are supplied but different. Pass one or the other.")
     else:
         raise AssertionError("conflicting text options accepted")
+    for encoding in ("utf-16", "utf-32-be"):
+        with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe, encoding=encoding) as child:
+            assert child.communicate("A😀\r\nB") == ("A😀\nB", None)
+    cmd = ["cmp", "-", "/dev/null"]
+    with subprocess.Popen(cmd, stdin=pipe, stdout=pipe, encoding="utf-16") as child:
+        assert child.communicate("") == ("", None)
+        assert child.returncode == 0
+
+    class BadInput(str):
+        def encode(self, *args):
+            return 123
+
+    for value, error in ((BadInput(""), TypeError), (b"", AttributeError)):
+        with subprocess.Popen(cmd, stdin=pipe, stdout=pipe, encoding="utf-16") as child:
+            try:
+                child.communicate(value)
+            except error:
+                assert child.stdin.closed
+            else:
+                raise AssertionError("invalid empty input accepted")
     print("Popen text pipes passed")
