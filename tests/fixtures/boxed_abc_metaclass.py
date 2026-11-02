@@ -61,13 +61,40 @@ def current():
     assert issubclass(virtual, Abstract) and isinstance(virtual(), Abstract)
     assert Abstract not in virtual.__mro__
 
-    class Custom(type):
+    class Factory(type):
+        __call__ = dict
+
+    class Refined(Factory):
+        pass
+
+    class Base(metaclass=Factory):
+        pass
+
+    class Derived(metaclass=Refined):
+        pass
+
+    class Combined(Base, Derived):
+        pass
+
+    assert type(Base) is Factory and type(Combined) is Refined
+    assert Combined(key=42) == {"key": 42}
+
+    class Other(type):
         pass
 
     try:
-        class Unsupported(metaclass=Custom):
-            events.append("custom")
-    except NotImplementedError:
-        assert events == ["meta", "body"]
+        class Conflict(Base, metaclass=Other):
+            events.append("conflict")
+    except TypeError as exc:
+        assert "metaclass conflict" in str(exc)
     else:
-        assert type(Unsupported) is Custom and events[-1] == "custom"
+        raise AssertionError("accepted incompatible metaclasses")
+    assert events == ["meta", "body"]
+
+    Factory.__call__ = Base
+    try:
+        Base()
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("recursive metaclass call returned")
