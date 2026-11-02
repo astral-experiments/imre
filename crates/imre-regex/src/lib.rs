@@ -1,6 +1,10 @@
 //! Translate the supported Python lexical forms, then let the native regex parser
 //! validate precedence, character ranges, repetition, captures, and engine limits.
 
+mod casefold;
+
+pub use casefold::expand_case;
+
 use std::fmt::Write;
 
 use regex_syntax::hir::HirKind;
@@ -108,7 +112,35 @@ pub enum Alphabet {
     Unicode,
     UnicodeIgnoreCase,
     Ascii,
+    AsciiIgnoreCase,
     Bytes,
+}
+
+impl Alphabet {
+    fn ignores_case(self) -> bool {
+        matches!(self, Self::UnicodeIgnoreCase | Self::AsciiIgnoreCase)
+    }
+
+    fn ascii(self) -> bool {
+        matches!(self, Self::Ascii | Self::AsciiIgnoreCase | Self::Bytes)
+    }
+
+    fn scoped(self, flag: char, enable: bool) -> Result<Self, String> {
+        if self == Self::Bytes {
+            return Err("scoped text modes require a str pattern".into());
+        }
+        let (ascii, ignore_case) = match flag {
+            'a' | 'u' if enable => (flag == 'a', self.ignores_case()),
+            'i' => (self.ascii(), enable),
+            _ => return Err("cannot turn off a text alphabet".into()),
+        };
+        Ok(match (ascii, ignore_case) {
+            (false, false) => Self::Unicode,
+            (false, true) => Self::UnicodeIgnoreCase,
+            (true, false) => Self::Ascii,
+            (true, true) => Self::AsciiIgnoreCase,
+        })
+    }
 }
 
 struct Escapes {
@@ -145,7 +177,14 @@ pub fn translate_pattern(
     dotall: bool,
     literal_guards: bool,
 ) -> Result<FixedPattern, String> {
-    let (output, groups) = tokenize(pattern, verbose, alphabet, dotall, literal_guards, false)?;
+    let (output, groups) = tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        literal_guards,
+        Grammar::Standard,
+    )?;
     analyze(output, groups)
 }
 
@@ -156,7 +195,39 @@ pub fn lookahead_source(
     alphabet: Alphabet,
     dotall: bool,
 ) -> Result<(String, Vec<Option<String>>), String> {
-    tokenize(pattern, verbose, alphabet, dotall, false, true)
+    tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::Lookahead,
+    )
+}
+
+/// Normalize text for the boxed matcher when a lookahead, Python word boundary,
+/// or scoped case/alphabet rule needs its extended group and capture support.
+pub fn lookahead_or_scoped_source(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
+    tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::LookaheadOrScoped,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Grammar {
+    Standard,
+    Lookahead,
+    LookaheadOrScoped,
 }
 
 enum Scope {
@@ -166,6 +237,7 @@ enum Scope {
 }
 
 struct GroupState {
+    alphabet: Alphabet,
     backtrack: bool,
     dotall: bool,
     verbose: bool,
@@ -213,13 +285,17 @@ fn tokenize(
     alphabet: Alphabet,
     mut dotall: bool,
     literal_guards: bool,
-    lookahead: bool,
+    grammar: Grammar,
 ) -> Result<(String, Vec<Option<String>>), String> {
+    let lookahead = grammar != Grammar::Standard;
     let mut escapes = Escapes {
         alphabet,
         bracketed_word: false,
     };
+    let mut modes = vec![(0, alphabet)];
+    let mut scoped_mode = false;
     let mut has_lookahead = false;
+    let mut has_boundary = false;
     let mut highest_condition = 0;
     let mut literal_brace = false;
     let mut input = pattern.chars().peekable();
@@ -232,7 +308,11 @@ fn tokenize(
         match c {
             '(' => {
                 let extension = input.next_if_eq(&'?').is_some();
-                if literal_guards && extension && input.next_if_eq(&'!').is_some() {
+                if literal_guards
+                    && escapes.alphabet != Alphabet::UnicodeIgnoreCase
+                    && extension
+                    && input.next_if_eq(&'!').is_some()
+                {
                     guarded_class(&mut input, &mut output, verbose, &mut escapes)?;
                     // A following quantifier would repeat the consumed class alone.
                     can_repeat = false;
@@ -264,6 +344,7 @@ fn tokenize(
                 };
                 let atomic_assertion = assertion == Some('=');
                 let mut group = GroupState {
+                    alphabet: escapes.alphabet,
                     backtrack: may_backtrack,
                     dotall,
                     verbose,
@@ -289,19 +370,40 @@ fn tokenize(
                         group.scope = Scope::Conditional { has_else: false };
                     } else if input.next_if_eq(&':').is_some() {
                         output.push_str("?:");
-                    } else if matches!(input.peek(), Some('x' | '-')) {
+                    } else if matches!(input.peek(), Some('a' | 'u' | 'i' | 's' | 'x' | '-')) {
                         let enable = input.next_if_eq(&'-').is_none();
-                        if input.next() != Some('x') || input.next() != Some(':') {
-                            return Err("expected scoped verbose group".into());
-                        }
-                        verbose = enable;
-                        output.push_str("?:");
-                    } else if input.next_if_eq(&'s').is_some() {
+                        let flag = input.next().ok_or("expected scoped flag")?;
                         if input.next() != Some(':') {
-                            return Err("expected scoped dotall group".into());
+                            return Err("expected a single scoped flag".into());
                         }
-                        output.push_str("?s:");
-                        dotall = true;
+                        let opener = match flag {
+                            'x' => {
+                                verbose = enable;
+                                "?:"
+                            }
+                            's' => {
+                                dotall = enable;
+                                if enable { "?s:" } else { "?-s:" }
+                            }
+                            'a' | 'u' | 'i' => {
+                                scoped_mode = true;
+                                let parent = escapes.alphabet;
+                                let next = parent.scoped(flag, enable)?;
+                                if next != parent {
+                                    escapes.alphabet = next;
+                                    modes.push((output.len(), next));
+                                }
+                                // Only Unicode ignorecase uses the engine's fold.
+                                // Even under ASCII, text dot and negated classes consume scalars.
+                                match (parent, next) {
+                                    (Alphabet::UnicodeIgnoreCase, n) if n != parent => "?-i:",
+                                    (p, Alphabet::UnicodeIgnoreCase) if p != next => "?i:",
+                                    _ => "?:",
+                                }
+                            }
+                            _ => return Err("unsupported scoped flag".into()),
+                        };
+                        output.push_str(opener);
                     } else if input.next_if_eq(&'>').is_some() {
                         atomic_delimited(&mut input, &mut output, dotall, verbose, &mut escapes)?;
                         may_backtrack = group.backtrack;
@@ -364,6 +466,10 @@ fn tokenize(
                     may_backtrack |= group.backtrack;
                     dotall = group.dotall;
                     verbose = group.verbose;
+                    if escapes.alphabet != group.alphabet {
+                        escapes.alphabet = group.alphabet;
+                        modes.push((output.len(), group.alphabet));
+                    }
                     if group.atomic_assertion {
                         output.push(')');
                     }
@@ -393,13 +499,17 @@ fn tokenize(
                 class(&mut input, &mut output, &mut escapes)?;
                 can_repeat = true;
             }
-            '\\' if lookahead
-                && alphabet == Alphabet::Unicode
-                && matches!(input.peek(), Some('b' | 'B')) =>
-            {
-                // Python words contain Unicode letters, numbers and underscore.
-                // Test both sides without consuming either adjacent character.
-                let word = r"[\p{L}\p{N}_]";
+            '\\' if lookahead && matches!(input.peek(), Some('b' | 'B')) => {
+                // Compare the Python word status on either side without consuming a scalar.
+                // The lookahead engine cannot switch its Unicode mode even for ASCII boundaries.
+                has_boundary = true;
+                let word = if escapes.alphabet.ascii() {
+                    r"[A-Za-z0-9_]"
+                } else if escapes.alphabet.ignores_case() {
+                    r"(?-i:[\p{L}\p{N}_])"
+                } else {
+                    r"[\p{L}\p{N}_]"
+                };
                 let (after_word, after_nonword) = if input.next() == Some('b') {
                     ('!', '=')
                 } else {
@@ -474,10 +584,7 @@ fn tokenize(
             }
         }
     }
-    if (literal_brace || lookahead)
-        && escapes.bracketed_word
-        && alphabet == Alphabet::UnicodeIgnoreCase
-    {
+    if (literal_brace || lookahead || scoped_mode) && escapes.bracketed_word {
         return Err(
             "case-insensitive Unicode word sets inside bracket expressions are unsupported".into(),
         );
@@ -485,8 +592,14 @@ fn tokenize(
     if highest_condition >= groups.len() {
         return Err("invalid conditional group reference".into());
     }
-    if lookahead && !has_lookahead {
+    if lookahead
+        && !has_lookahead
+        && !(grammar == Grammar::LookaheadOrScoped && (scoped_mode || has_boundary))
+    {
         return Err("expected a Python lookahead assertion".into());
+    }
+    if modes.iter().any(|(_, mode)| mode.ignores_case()) {
+        output = casefold::scoped(&output, &modes, lookahead)?;
     }
     Ok((output, groups))
 }
@@ -789,7 +902,7 @@ fn escaped(
     escapes: &mut Escapes,
 ) -> Result<Escape, String> {
     let c = input.next().ok_or("incomplete regex escape")?;
-    let ascii = matches!(escapes.alphabet, Alphabet::Ascii | Alphabet::Bytes);
+    let ascii = escapes.alphabet.ascii();
     if ascii && let Some(class) = ascii_class(c) {
         output.push_str(class);
         return Ok(Escape::Class);
@@ -807,7 +920,7 @@ fn escaped(
             if protect_word {
                 output.push_str("(?-i:");
             }
-            escapes.bracketed_word |= in_class;
+            escapes.bracketed_word |= in_class && escapes.alphabet.ignores_case();
             output.push_str(if c == 'w' {
                 r"[\p{L}\p{N}_]"
             } else {
@@ -927,6 +1040,53 @@ fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> R
 mod tests {
     use super::translate;
     use regex::Regex;
+
+    #[test]
+    fn scoped_text_modes_restore_classes_and_case_equivalents() {
+        use super::{Alphabet::*, translate_pattern};
+
+        for (mode, pattern, yes, no) in [
+            (
+                UnicodeIgnoreCase,
+                r"é(?a:(?P<letter>[a-z])(?u:\w))(?-i:I)[a-z]",
+                "éAéIı",
+                "éKéIı",
+            ),
+            (AsciiIgnoreCase, r"(?u:[a-z])(?a:[a-z])[^a-z]", "KKı", "KKı"),
+            (Unicode, r"(?a:(?i:[^\x69])(?i:i))(?i:i)i", "İIıi", "iIıi"),
+            (UnicodeIgnoreCase, r"(?a:(?u:ſ)ſ).", "Sſé", "SSé"),
+            (Unicode, r"(?a:\w(?u:\w)\W).", "aéé🌍", "ééé🌍"),
+            (UnicodeIgnoreCase, r"(?-i:I)(?a:\x6b)\u0130", "IKı", "ıKı"),
+        ] {
+            let translated = translate_pattern(pattern, false, mode, false, true).unwrap();
+            let regex = regex::RegexBuilder::new(&format!(r"\A(?:{})\z", translated.source))
+                .case_insensitive(mode == UnicodeIgnoreCase)
+                .build()
+                .unwrap();
+            assert!(regex.is_match(yes), "{pattern} on {yes}");
+            assert!(!regex.is_match(no), "{pattern} on {no}");
+        }
+        for pattern in [r"(?-a:a)", r"(?au:a)"] {
+            assert!(
+                translate_pattern(pattern, false, Unicode, false, false).is_err(),
+                "{pattern}"
+            );
+        }
+        assert!(super::lookahead_source(r"(?i:(?=\w)(a)\1)", false, Unicode, false).is_err());
+        assert!(translate_pattern(r"(?u:.)", false, Bytes, false, false).is_err());
+        let named = "(?P<é>.)(?-i:I)";
+        assert!(super::lookahead_source(named, false, UnicodeIgnoreCase, false).is_err());
+        assert!(super::lookahead_source(r"(?u:\b)", false, Unicode, false).is_err());
+        let (source, groups) =
+            super::lookahead_or_scoped_source(named, false, UnicodeIgnoreCase, false).unwrap();
+        assert_eq!(groups, [None, Some("é".to_owned())]);
+        let compiled = regex::RegexBuilder::new(&source)
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+        assert!(compiled.is_match("aI"));
+        assert!(!compiled.is_match("aİ"));
+    }
 
     #[test]
     fn subtracts_single_literal_guards_from_consuming_classes() {
@@ -1070,7 +1230,7 @@ mod tests {
             r"\b",
             r"(?=a)",
             r"(?P<a>x)(?P=a)",
-            r"(?i:a)",
+            r"(?au:a)",
             r"a*+",
             r"a* ?",
             r"((a)?b)+",

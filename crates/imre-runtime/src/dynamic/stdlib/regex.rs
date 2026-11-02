@@ -8,7 +8,6 @@ use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
 mod assertions;
-mod casefold;
 mod group_names;
 mod lookahead;
 mod progress;
@@ -240,18 +239,72 @@ fn byte_pattern(bytes: &[u8]) -> String {
     source
 }
 
+/// Only Python's redundant positive Unicode mode can fall back to the raw engine.
+fn raw_unicode_compatible(source: &str, ascii: bool, boundaries: &[usize]) -> bool {
+    use regex_syntax::ast::{Ast, Flag, parse::Parser};
+
+    let Ok(ast) = Parser::new().parse(source) else {
+        // The ordinary builder reports its syntax error if translation also fails.
+        return true;
+    };
+    let mut nodes = vec![&ast];
+    while let Some(node) = nodes.pop() {
+        let flags = match node {
+            Ast::Group(group) => {
+                nodes.push(&group.ast);
+                group.flags()
+            }
+            Ast::Flags(set) => Some(&set.flags),
+            Ast::Repetition(rep) => {
+                nodes.push(&rep.ast);
+                None
+            }
+            Ast::Concat(concat) => {
+                nodes.extend(&concat.asts);
+                None
+            }
+            Ast::Alternation(alt) => {
+                nodes.extend(&alt.asts);
+                None
+            }
+            _ => None,
+        };
+        if let Some(unicode) = flags.and_then(|f| f.flag_state(Flag::Unicode))
+            && (!unicode || ascii)
+            && boundaries.binary_search(&node.span().start.offset).is_err()
+        {
+            return false;
+        }
+    }
+    true
+}
+
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
-fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool) {
+fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)> {
+    if flags & VERBOSE != 0 {
+        return None;
+    }
+    let check_unicode =
+        pattern.contains("(?") && pattern.contains('u') && (ascii || pattern.contains('-'));
+    let mut boundaries = Vec::new();
     let mut prefer_translation = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
     while let Some(c) = chars.next() {
         if c != '\\' {
-            if c == '(' && !in_class && chars.clone().take(3).eq(['?', 'x', ':']) {
-                prefer_translation = true;
+            if c == '(' && !in_class && chars.peek() == Some(&'?') {
+                let mut group = chars.clone();
+                group.next();
+                let mut prefer_python_flags = false;
+                while let Some(flag) = group.next_if(|c| "aiLmsux-".contains(*c)) {
+                    prefer_python_flags |= matches!(flag, 'a' | 'u' | 'i' | 'x');
+                }
+                if group.peek() == Some(&':') {
+                    prefer_translation |= prefer_python_flags;
+                }
             }
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
@@ -262,7 +315,7 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool)
                     continue;
                 }
             }
-            if c == '$' && !in_class && !multiline && chars.peek().is_none() {
+            if c == '$' && !in_class && flags & MULTILINE == 0 && chars.peek().is_none() {
                 result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
                 continue;
             }
@@ -299,8 +352,16 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool)
         }
         match escaped {
             Some('b') if in_class => result.push_str(r"\x08"),
-            Some('b') if ascii => result.push_str(r"(?-u:\b)"),
-            Some('B') if ascii && !in_class => result.push_str(r"(?-u:\B)"),
+            Some(boundary @ ('b' | 'B')) if ascii && !in_class => {
+                if check_unicode {
+                    boundaries.push(result.len());
+                }
+                result.push_str(if boundary == 'b' {
+                    r"(?-u:\b)"
+                } else {
+                    r"(?-u:\B)"
+                });
+            }
             Some('w') => result.push_str(r"[\p{L}\p{N}_]"),
             Some('W') => result.push_str(r"[^\p{L}\p{N}_]"),
             Some('s') => result.push_str(r"[\s\x1c-\x1f]"),
@@ -314,7 +375,10 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool)
             }
         }
     }
-    (result, prefer_translation)
+    if check_unicode && !raw_unicode_compatible(&result, ascii, &boundaries) {
+        return None;
+    }
+    Some((result, prefer_translation))
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -421,6 +485,8 @@ fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
     use imre_regex::Alphabet;
     if bytes {
         Alphabet::Bytes
+    } else if ascii && flags & IGNORECASE != 0 {
+        Alphabet::AsciiIgnoreCase
     } else if ascii {
         Alphabet::Ascii
     } else if flags & IGNORECASE != 0 {
@@ -506,31 +572,39 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         }
         Ok(translated)
     };
-    let fold = |source: String| {
-        if flags & IGNORECASE != 0 && !bytes {
-            casefold::expand(&source, ascii)
-        } else {
-            Ok(source)
-        }
-    };
     let build = |source: String| {
-        let source = fold(source)?;
         let matcher = build_regex(&source, bytes, flags, &[])?;
         Ok((source, matcher))
     };
+    let backtrack = |error| {
+        if bytes {
+            Err(error)
+        } else {
+            lookahead::compile(&source, flags, error)
+        }
+    };
     let global_verbose = source.starts_with("(?x)");
-    let prepared = if flags & VERBOSE != 0 {
-        translate(&source).and_then(build)
-    } else {
-        let (raw, prefer_translation) = python_escapes(&source, ascii, flags & MULTILINE != 0);
-        let original = || imre_regex::preserve_zero_repeat_groups(raw).and_then(build);
+    let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
+        let original = || {
+            let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
+            if flags & IGNORECASE != 0 && !bytes {
+                build(imre_regex::expand_case(&raw, ascii)?)
+            } else {
+                build(raw)
+            }
+        };
         if prefer_translation || global_verbose {
             // Python has its own verbose layout and literal-brace rules. Keep the
             // direct parser for features outside the subset translator.
-            translate(&source).and_then(build).or_else(|_| original())
+            translate(&source)
+                .and_then(build)
+                .or_else(backtrack)
+                .or_else(|_| original())
         } else {
             original()
         }
+    } else {
+        translate(&source).and_then(build)
     };
     let prepared = match prepared {
         Err(original)
@@ -552,7 +626,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             let syntax = syntax(bytes, flags);
             let mut guards = Vec::new();
             for (name, body) in extracted.guards {
-                let mut translated = fold(translate(&body)?)?;
+                let mut translated = translate(&body)?;
                 // Matching the guard only needs a boolean. A terminal dollar still admits a
                 // final newline, but its private capture is unnecessary in this submatcher.
                 if translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
@@ -578,18 +652,12 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
                     .map_err(|err| err.to_string())?;
                 guards.push((name, guard));
             }
-            let source = fold(translate(&extracted.source)?)?;
+            let source = translate(&extracted.source)?;
             let matcher = build_regex(&source, bytes, flags, &guards)?;
             assertions = guards;
             Ok((source, matcher))
         })
-        .or_else(|original| {
-            if bytes {
-                Err(original)
-            } else {
-                lookahead::compile(&source, flags, original)
-            }
-        })
+        .or_else(backtrack)
         .map_err(|message| pattern_error(ctx, id, flags, message))?;
     // GroupInfo contains the synthetic final-newline capture as well as user names.
     let names = regex.group_info().pattern_names(PatternID::ZERO).flatten();
