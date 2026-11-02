@@ -1583,7 +1583,13 @@ impl Context {
             .filter(|name| !matches!(*name, "builtins" | "__main__"));
         }
         // CPython checks descriptor slots without binding the other protocol's methods.
-        let supports_async = ["__aenter__", "__aexit__"].iter().all(|name| {
+        let asynchronous = matches!(name, "__aenter__" | "__aexit__");
+        let other_methods = if asynchronous {
+            ["__enter__", "__exit__"]
+        } else {
+            ["__aenter__", "__aexit__"]
+        };
+        let supports_other = other_methods.iter().all(|name| {
             self.slot(obj, name).is_some_and(|slot| {
                 matches!(
                     self.builtin_type_name(slot),
@@ -1599,17 +1605,23 @@ impl Context {
                     || builtins::method_name(self.heap.get(slot), "__get__").is_some()
             })
         });
-        let suggestion = if supports_async {
-            " but it supports the asynchronous context manager protocol. Did you mean to use 'async with'?"
-        } else {
-            ""
+        let suggestion = match (supports_other, asynchronous) {
+            (true, true) => {
+                " but it supports the context manager protocol. Did you mean to use 'with'?"
+            }
+            (true, false) => {
+                " but it supports the asynchronous context manager protocol. Did you mean to use 'async with'?"
+            }
+            _ => "",
         };
         let parts = [
             "'",
             module.unwrap_or(""),
             if module.is_some() { "." } else { "" },
             kind,
-            "' object does not support the context manager protocol (missed ",
+            "' object does not support the ",
+            if asynchronous { "asynchronous " } else { "" },
+            "context manager protocol (missed ",
             name,
             " method)",
             suggestion,
