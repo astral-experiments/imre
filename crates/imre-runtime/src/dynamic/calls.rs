@@ -6020,11 +6020,11 @@ impl Context {
                 for (key, value) in extras {
                     self.put_item(dict, key, value)?;
                 }
-                let warnings = self.module("warnings")?;
-                let warn = self.lookup_attr(warnings, "warn")?;
-                let message = self.text(format!("non-string key in the __dict__ of class {name:.200}"));
-                let category = self.builtin("RuntimeWarning");
-                self.call(warn, vec![message, category], Vec::new())?;
+                self.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::RuntimeWarning,
+                    &format!("non-string key in the __dict__ of class {name:.200}"),
+                    1,
+                )?;
             }
         }
         self.initialize_class_members(class, scope)?;
