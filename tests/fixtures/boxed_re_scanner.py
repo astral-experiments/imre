@@ -37,13 +37,31 @@ def current():
     assert re.compile("a").scanner("aa", 1, 0).match() is None
 
     data = bytearray(b"abcd")
-    m = re.compile(b"(bc)d").search(data)
+    matches = re.finditer(b"(bc)d", data)
+    m = next(matches)
+    assert m.string is data
+    data[1] = ord("B")
+    assert m.group(1) == b"Bc"
     try:
-        re.compile(b"bc").scanner(data)
-    except NotImplementedError as error:
-        assert str(error) == "exporting a bytearray to a regex scanner is unsupported"
+        data.extend(b"x")
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("a live iterator must keep the buffer exported")
+    assert next(matches, None) is None
     data[:] = b"x"
     assert (m.group(), m.group(1), m.span(), m.span(1)) == (b"", b"", (1, 4), (1, 3))
+
+    cursor = re.compile(b"q").scanner(data)
+    assert cursor.search() is None
+    try:
+        data.extend(b"y")
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("an exhausted scanner must keep the buffer exported")
+    del cursor
+    data.extend(b"y")
 
     calls = []
 

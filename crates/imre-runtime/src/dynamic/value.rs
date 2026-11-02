@@ -1095,6 +1095,7 @@ pub(super) enum Value {
     RegexScanner {
         pattern: Id,
         subject: Id,
+        buffer_view: Option<Id>,
         start: Option<usize>,
         end: usize,
         retry: bool,
@@ -1700,8 +1701,14 @@ impl Value {
                 visit.extend(*text_encoding_override);
             }
             Self::RegexScanner {
-                pattern, subject, ..
-            } => visit.extend([*pattern, *subject]),
+                pattern,
+                subject,
+                buffer_view,
+                ..
+            } => {
+                visit.extend([*pattern, *subject]);
+                visit.extend(*buffer_view);
+            }
             Self::RegexPattern(pattern) => visit.push(pattern.source),
             Self::RegexMatch(m) => visit.extend([m.pattern, m.subject]),
             Self::File(file) => {
