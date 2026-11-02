@@ -766,7 +766,8 @@ ACCEPTED = {
     "zip_source_spec": {
         "main.py": (
             "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
-            "from importlib.util import find_spec\nfrom witness import seen\n"
+            "from importlib.util import find_spec\nfrom importlib.resources import files\nfrom witness import seen\n"
+            "sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/zip-provider')\n"
             "def refresh():\n    assert sys.exception() is None\n    refresh_finder()\n"
             "for name in ('stored', 'deflated'):\n"
             "    sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/' + name + '.zip')\n"
@@ -781,6 +782,12 @@ ACCEPTED = {
             "    leaf = import_module(name + '.leaf')\n"
             "    adjacent = leaf.__loader__.get_resource_reader(leaf.__name__)\n"
             "    assert adjacent.archive == reader.archive and adjacent.prefix == reader.prefix\n"
+            "    for anchor in (package, leaf):\n"
+            "        root = files(anchor)\n"
+            "        assert root.joinpath('message.txt').read_bytes() == b'hello'\n"
+            "        try:\n            root.joinpath('missing.txt').read_bytes()\n"
+            "        except FileNotFoundError:\n            pass\n"
+            "        else:\n            raise AssertionError('missing ZIP resource opened')\n"
             "    print(seen, spec.loader.get_data(package.__path__[0] + '/message.txt'))\n"
             "finder = spec.loader\n"
             "with open(finder.archive, \"rb\") as archive:\n"
@@ -1188,6 +1195,16 @@ def main() -> None:
             if name == "zip_source_spec":
                 if os.name != "posix":
                     continue
+                # The boxed ZIP reader uses the reference interpreter's zipfile.Path.
+                location = run([args.python, "-I", "-c", "import zipfile; print(zipfile.__file__)"], case)
+                require_success(location)
+                source = Path(location.stdout.strip())
+                provider = case / "zip-provider"
+                provider.mkdir()
+                if source.name == "__init__.py":
+                    shutil.copytree(source.parent, provider / "zipfile", ignore=shutil.ignore_patterns("__pycache__"))
+                else:
+                    shutil.copyfile(source, provider / "zipfile.py")
                 for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
                     with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
                         archive.writestr(f"{pkg}/__init__.py", "# coding: (ordinary comment)\nfrom witness import seen\nseen.append(__name__)\n")
