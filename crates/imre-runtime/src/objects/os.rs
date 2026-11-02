@@ -573,7 +573,7 @@ fn set_cloexec(fd: i32) -> Result<()> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_os_pipe(out: *mut usize) {
     // SAFETY: the caller supplies the two uninitialized integer slots.
-    finish(unsafe { make_pipe(out, libc::O_CLOEXEC) }, ());
+    finish(unsafe { write_fd_pair(out, pipe(libc::O_CLOEXEC)) }, ());
 }
 
 /// Atomically create a pipe with the caller's flags, including inheritable ends for zero.
@@ -585,14 +585,24 @@ pub unsafe extern "C" fn imre_os_pipe(out: *mut usize) {
 pub unsafe extern "C" fn imre_os_pipe2(out: *mut usize, flags: usize) {
     // SAFETY: no descriptor is published until both ends were created successfully.
     finish(
-        c_int(flags).and_then(|flags| unsafe { make_pipe(out, flags) }),
+        unsafe { write_fd_pair(out, c_int(flags).and_then(pipe)) },
         (),
     );
 }
 
-/// Initialize the caller's two tuple slots only after establishing the requested flags.
-unsafe fn make_pipe(out: *mut usize, flags: libc::c_int) -> Result<()> {
-    let fds = pipe(flags)?;
+/// Return a pseudoterminal master and slave, both non-inheritable.
+///
+/// # Safety
+/// The caller supplies two writable word slots in a fresh tuple.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_openpty(out: *mut usize) {
+    // SAFETY: both slots belong to the caller's unpublished tuple.
+    finish(unsafe { write_fd_pair(out, openpty()) }, ());
+}
+
+/// Initialize the caller's two tuple slots after successfully opening the descriptor pair.
+unsafe fn write_fd_pair(out: *mut usize, fds: Result<[i32; 2]>) -> Result<()> {
+    let fds = fds?;
     for (index, fd) in fds.into_iter().enumerate() {
         // SAFETY: each initialized slot takes one immediate integer.
         unsafe {
@@ -601,6 +611,28 @@ unsafe fn make_pipe(out: *mut usize, flags: libc::c_int) -> Result<()> {
         };
     }
     Ok(())
+}
+
+/// Open a terminal pair and retain ownership until both ends are marked close-on-exec.
+pub(crate) fn openpty() -> Result<[i32; 2]> {
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+    let (mut master, mut slave) = (-1, -1);
+    // SAFETY: both output slots are writable. Null optional parameters select terminal defaults.
+    checked(unsafe {
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    })?;
+    // SAFETY: openpty succeeded and transferred two distinct open descriptors.
+    let pair = unsafe { [OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)] };
+    for fd in &pair {
+        INHERITABLE.update(fd.as_raw_fd(), false)?;
+    }
+    Ok(pair.map(OwnedFd::into_raw_fd))
 }
 
 /// Return both descriptors after establishing the requested flags on each end.

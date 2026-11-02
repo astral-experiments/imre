@@ -5,6 +5,16 @@ from os import mkfifo, supports_dir_fd, supports_effective_ids, supports_fd, sup
 
 
 def current():
+    assert os.openpty is posix.openpty
+    master, slave = os.openpty()
+    try:
+        assert os.isatty(master) and os.isatty(slave)
+        assert not os.get_inheritable(master) and not os.get_inheritable(slave)
+        assert os.write(slave, b"pty") == 3
+        assert os.read(master, 3) == b"pty"
+    finally:
+        os.close(slave)
+        os.close(master)
     assert os.listdir in os.supports_fd
     capabilities = (supports_dir_fd, supports_fd, supports_follow_symlinks, supports_effective_ids)
     operations = (os.lstat, os.open, os.rmdir, os.stat, os.unlink, os.remove, os.fstat)

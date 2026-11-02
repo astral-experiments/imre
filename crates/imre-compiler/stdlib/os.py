@@ -1,6 +1,7 @@
 """POSIX filesystem spellings for runtime-loaded modules."""
 import abc
 import sys
+from posix import openpty
 import posixpath as path
 import stat as st
 from _collections_abc import _check_methods

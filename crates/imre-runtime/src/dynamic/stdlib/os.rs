@@ -363,6 +363,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "lseek"
             | "ftruncate"
             | "pipe"
+            | "openpty"
             | "read"
             | "write"
             | "close"
@@ -863,12 +864,17 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
-    if matches!(name, "pipe" | "pipe2") {
-        let flags = match (name, args) {
-            ("pipe", []) => libc::O_CLOEXEC,
-            ("pipe2", [flags]) => c_int(ctx, *flags)?,
+    if matches!(name, "openpty" | "pipe" | "pipe2") {
+        let mut result = Vec::new();
+        result
+            .try_reserve_exact(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let fds = match (name, args) {
+            ("openpty", []) => native::openpty()?,
+            ("pipe", []) => native::pipe(libc::O_CLOEXEC)?,
+            ("pipe2", [flags]) => native::pipe(c_int(ctx, *flags)?)?,
             _ => {
-                let arity = if name == "pipe" {
+                let arity = if name != "pipe2" {
                     "no arguments"
                 } else {
                     "exactly one argument"
@@ -879,11 +885,7 @@ pub(super) fn descriptor(
                 ));
             }
         };
-        let mut result = Vec::new();
-        result
-            .try_reserve_exact(2)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        for fd in native::pipe(flags)? {
+        for fd in fds {
             result.push(ctx.int(i64::from(fd)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));

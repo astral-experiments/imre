@@ -164,7 +164,7 @@ impl Checker<'_> {
             default: None,
             sign_only: false,
         };
-        let mut params = if op == Pipe {
+        let mut params = if matches!(op, Pipe | OpenPty) {
             vec![]
         } else {
             vec![param("fd")]
@@ -199,7 +199,7 @@ impl Checker<'_> {
             Close | SetBlocking | SetInheritable | Unlink | Remove => Type::None,
             TransferFd | Write | Open | Seek | Dup | Dup2 => Type::Int,
             Read => Type::Bytes,
-            Pipe | Pipe2 => self.types.tuple(vec![Type::Int, Type::Int]),
+            Pipe | Pipe2 | OpenPty => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
         };
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
