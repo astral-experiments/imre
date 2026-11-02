@@ -1014,6 +1014,7 @@ impl Value {
             Self::ClassMethod(_) => "classmethod",
             Self::ThreadLocal(_) => super::thread_local::CLASS,
             Self::ThreadHandle(_) => "_thread._ThreadHandle",
+            Self::HandlerLock(_) => super::thread_rlock::CLASS,
             Self::PrimitiveLock(_) => super::thread_lock::CLASS,
             Self::FormatIterator { kind, .. } => match kind {
                 FormatKind::Markup => "formatteriterator",

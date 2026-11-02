@@ -2169,6 +2169,15 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::HandlerLock(lock) = self.heap.get(self.scalar_value(id)) {
+            let (state, owner, depth) = match lock.state() {
+                Some((owner, depth)) => ("locked", owner, depth),
+                None => ("unlocked", 0, 0),
+            };
+            let class = self.type_name(id);
+            return format!("<{state} {class} object owner={owner} count={depth} at {id:#x}>");
+        }
+
         if let Value::Instance { class, .. } = value
             && self.classes.get("re.RegexFlag") == Some(class)
             && let Some((_, name, bits)) = self.enum_member(id)

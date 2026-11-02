@@ -34,6 +34,7 @@ mod super_object;
 mod thread_callback;
 mod thread_local;
 mod thread_lock;
+mod thread_rlock;
 mod thread_worker;
 mod typing;
 mod union;
@@ -1996,6 +1997,10 @@ impl Context {
         origin: Option<Id>,
         source: Option<(PathBuf, importlib::SourceBody)>,
     ) -> Result<()> {
+        if name == "_thread" && source.is_none() {
+            let rlock = self.builtin(thread_rlock::CLASS);
+            self.bind(scope, "RLock", rlock);
+        }
         match name {
             "_thread" => {
                 for name in ["allocate_lock", "allocate"] {
