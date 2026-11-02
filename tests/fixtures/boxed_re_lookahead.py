@@ -1,13 +1,17 @@
 import re
+import sys
+from re._constants import MAXGROUPS
 
 
 def current():
+    assert sys.modules["re._constants"] is re._constants
+    assert re._constants.PatternError is re.error is re.PatternError
     # Zero and over-limit numeric conditions fail when read, before later syntax.
     for pattern, message, pos in (
         (r'(abc\1)', 'cannot refer to an open group', 4),
         (r'µ(?P<g>x(?P=g))', 'cannot refer to an open group', 12),
         (b'\xff(a\\1)', 'cannot refer to an open group', 3),
-        ('(?P<a>)(?(1073741823))', 'invalid group reference 1073741823', 10),
+        (f'(?P<a>)(?({MAXGROUPS}))', f'invalid group reference {MAXGROUPS}', 10),
         ('(?(2)x)(?(1073741824)a)[', 'invalid group reference 1073741824', 10),
         (b'\xff(?(000)y)', 'bad group number', 4),
         ('a*+(?(0)x)', 'bad group number', 6),

@@ -987,6 +987,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "opcode",
     "platform",
     "re",
+    "re._constants",
     "signal",
     "stat",
     "string",

@@ -183,7 +183,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                              "    if module_globals is not _native_import_warning:\n        import linecache\n        linecache.getlines(filename, module_globals)")
             })))
         }
-        "re" => Some(("re.py", include_str!("../stdlib/re.py"))),
+        "re" => Some(("re/__init__.py", include_str!("../stdlib/re/__init__.py"))),
+        "re._constants" => Some((
+            "re/_constants.py",
+            include_str!("../stdlib/re/_constants.py"),
+        )),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
         "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
@@ -615,6 +619,7 @@ pub(crate) enum IntrinsicModule {
     Csv,
     StringFormatting,
     Re,
+    ReConstants,
     Enum,
     Zlib,
     Json,
@@ -1035,6 +1040,7 @@ impl IntrinsicModule {
         matches!(
             self,
             Self::Opcode
+                | Self::ReConstants
                 | Self::StringFormatting
                 | Self::CollectionsNative
                 | Self::DatetimeNative
@@ -1159,6 +1165,7 @@ impl IntrinsicModule {
             "csv" => Some(Self::Csv),
             "_string" => Some(Self::StringFormatting),
             "re" => Some(Self::Re),
+            "re._constants" => Some(Self::ReConstants),
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
             "json" => Some(Self::Json),
@@ -1193,6 +1200,9 @@ impl IntrinsicModule {
         }
         if self == Self::Logging && name == "config" {
             return Some(Binding::IntrinsicModule(Self::LoggingConfig));
+        }
+        if self == Self::Re && name == "_constants" {
+            return Some(Binding::IntrinsicModule(Self::ReConstants));
         }
         if self == Self::Sys && name == "_jit" {
             return Some(Binding::IntrinsicModule(Self::SysJit));
@@ -2537,6 +2547,9 @@ impl IntrinsicModule {
             }
             (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
+            (Self::ReConstants, "MAXGROUPS") => {
+                Intrinsic::IntConstant(i64::from(imre_regex::MAX_GROUPS))
+            }
             (Self::Re, "escape") => Intrinsic::ObjectRuntimeExport("re.escape"),
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
@@ -4856,6 +4869,9 @@ impl<'a> Loader<'a> {
                                 .entry(child)
                                 .or_insert(statement.end());
                         }
+                        if module.lacks_builtin_stub() {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
                         if alias.asname.is_none()
                             && let Some((local, _)) = name.split_once('.')
                             && let Some(namespace) = IntrinsicModule::named(local)
@@ -4865,9 +4881,6 @@ impl<'a> Loader<'a> {
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
-                        if module.lacks_builtin_stub() {
-                            self.checked_builtin_imports.push((id, alias.range()));
-                        }
                         continue;
                     }
                     let leaf = self.load_module(name)?;
@@ -4964,6 +4977,7 @@ impl<'a> Loader<'a> {
                         })?;
                         if binding
                             == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
+                            || binding == Binding::IntrinsicModule(IntrinsicModule::ReConstants)
                             || module == IntrinsicModule::EmailHeaderValueParser
                         {
                             self.checked_builtin_imports.push((id, alias.range()));
