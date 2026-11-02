@@ -113,11 +113,13 @@ def check_mro():
     original.clear()
     assert D.mro() == type.mro(D) == [D, C, B, A, object]
     from collections import defaultdict
+    from datetime import timezone, tzinfo
     from os import terminal_size
     from types import ModuleType
     assert bool.mro() == type.mro(bool) == [bool, int, object]
     assert terminal_size.mro() == [terminal_size, tuple, object]
     assert type.mro(defaultdict) == [defaultdict, dict, object]
+    assert timezone.mro() == [timezone, tzinfo, object]
     assert D.mro.__self__ is D and not hasattr(super(D, D()), "mro")
 
     class Meta(type): pass

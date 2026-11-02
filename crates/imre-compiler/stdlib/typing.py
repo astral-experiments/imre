@@ -654,7 +654,23 @@ def TypedDict(typename, fields=_typeddict_sentinel, /, *, total=True):
 
     """
     if fields is _typeddict_sentinel or fields is None:
-        raise NotImplementedError("the deprecated TypedDict fields argument requires warnings._deprecated")
+        import warnings
+
+        if fields is _typeddict_sentinel:
+            deprecated_thing = "Failing to pass a value for the 'fields' parameter"
+        else:
+            deprecated_thing = "Passing `None` as the 'fields' parameter"
+
+        example = f"`{typename} = TypedDict({typename!r}, {{{{}}}})`"
+        deprecation_msg = (
+            "{name} is deprecated and will be disallowed in Python {remove}. "
+            "To create a TypedDict class with 0 fields "
+            "using the functional syntax, "
+            "pass an empty dictionary, e.g. "
+        ) + example + "."
+        warnings._deprecated(deprecated_thing, message=deprecation_msg, remove=(3, 15))
+        fields = {}
+
     fields = dict(fields)
     td = _typing._new_typeddict(typename, False)
     td.__orig_bases__ = (TypedDict,)

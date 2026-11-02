@@ -40,6 +40,13 @@ pub(super) fn surrogate_repr(points: &[u32]) -> String {
     result
 }
 
+/// Leave CPython's two native-stack margins available for exception handling.
+pub(super) fn remaining_repr_words() -> Option<usize> {
+    const STACK_MARGIN_WORDS: usize = 2048;
+    stacker::remaining_stack()
+        .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS))
+}
+
 fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
@@ -131,7 +138,7 @@ enum FormatPart {
     DefaultDictFactory(Id, usize),
     DefaultDictName(Id, usize),
     DefaultDictEnd(String),
-    SetMembers(Vec<Id>, usize),
+    SnapshotMembers(Vec<Id>, usize),
     Fields(Id, usize),
     Leave(Id, &'static str),
     ContextEnd(Id),
@@ -140,14 +147,14 @@ enum FormatPart {
 }
 
 impl FormatPart {
-    /// Snapshot the member identities before any element repr can mutate the set.
-    fn set_members(entries: &[(Id, Id)]) -> Result<Self> {
+    /// Snapshot members before an element's repr can mutate the container.
+    fn snapshot(items: impl ExactSizeIterator<Item = Id>) -> Result<Self> {
         let mut members = Vec::new();
         members
-            .try_reserve_exact(entries.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        members.extend(entries.iter().map(|&(key, _)| key));
-        Ok(Self::SetMembers(members, 0))
+            .try_reserve_exact(items.len())
+            .map_err(render_allocation)?;
+        members.extend(items);
+        Ok(Self::SnapshotMembers(members, 0))
     }
 
     /// Values a suspended renderer will read after a Python callback returns.
@@ -166,7 +173,7 @@ impl FormatPart {
             | Self::Fields(id, _)
             | Self::Leave(id, _)
             | Self::ContextEnd(id) => heap.keep(*id),
-            Self::SetMembers(members, index) => {
+            Self::SnapshotMembers(members, index) => {
                 // One traced owner keeps the snapshot alive across every following callback.
                 let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
                 *self = Self::Sequence(tuple, *index);
@@ -1125,7 +1132,7 @@ impl Context {
             RenderRoot::Object(id),
             false,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -1159,7 +1166,7 @@ impl Context {
             RenderRoot::Object(id),
             true,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
     }
@@ -1251,7 +1258,9 @@ impl Context {
             root,
             quoted,
             true,
-            |ctx, id, quoted, work, ancestors| ctx.element_format(id, quoted, work, ancestors),
+            |ctx, id, quoted, work, ancestors, remaining| {
+                ctx.element_format(id, quoted, work, ancestors, remaining)
+            },
         )
     }
 
@@ -1345,6 +1354,7 @@ impl Context {
         quoted: bool,
         work: &mut [FormatPart],
         ancestors: &[Id],
+        sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
         if self.format_slot(id, "__repr__").is_none()
             && (quoted || self.format_slot(id, "__str__").is_none())
@@ -1363,11 +1373,13 @@ impl Context {
             part.keep_alive(&mut self.heap);
         }
         self.repr_ancestors.extend_from_slice(ancestors);
+        let previous = std::mem::replace(&mut self.repr_sequence_words, sequence_words);
         let converted = if quoted {
             self.repr_override(id)
         } else {
             builtins::call(self, "str", &[id], &[]).map(Some)
         };
+        self.repr_sequence_words = previous;
         let result = converted.and_then(|value| {
             value
                 .map(|s| {
@@ -1525,6 +1537,7 @@ impl Context {
             bool,
             &mut [FormatPart],
             &[Id],
+            Option<usize>,
         ) -> Result<Option<String>>,
     ) -> Result<String> {
         use FormatPart as Part;
@@ -1558,7 +1571,12 @@ impl Context {
                         else {
                             return Ok(output);
                         };
-                        ("{", end, "set(...)", Part::set_members(entries)?)
+                        (
+                            "{",
+                            end,
+                            "set(...)",
+                            Part::snapshot(entries.iter().map(|&(key, _)| key))?,
+                        )
                     }
                     Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                     Value::Tuple(items) => (
@@ -1594,13 +1612,19 @@ impl Context {
         const SLICE_FRAME_WORDS: usize = 78;
         // Nested list and tuple repr use 128 bytes per level in CPython 3.14 on x86-64.
         const SEQUENCE_FRAME_WORDS: usize = 16;
-        const STACK_MARGIN_WORDS: usize = 2048;
-        let stack_words = checked
-            .then(stacker::remaining_stack)
-            .flatten()
-            .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS));
+        // A pinned x86-64 CPython deque also formats a temporary list; each
+        // nested deque uses 832 bytes, including its ordinary sequence frame.
+        const EXTRA_DEQUE_FRAME_WORDS: usize = 104 - SEQUENCE_FRAME_WORDS;
+        let stack_words = checked.then(remaining_repr_words).flatten();
         let slice_budget = stack_words.map(|words| words / SLICE_FRAME_WORDS);
-        let sequence_budget = stack_words.map(|words| words / SEQUENCE_FRAME_WORDS);
+        // A Python callback may run on a new stack segment. Its renderer
+        // still shares the logical space left by the suspended containers.
+        let sequence_stack_words = if checked {
+            ctx.repr_sequence_words.or(stack_words)
+        } else {
+            None
+        };
+        let mut extra_deque_words = 0usize;
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
         // Pinned CPython 3.14 uses 192 native bytes per nested builtin alias with
@@ -1610,6 +1634,9 @@ impl Context {
         let mut type_words = 0usize;
         let mut typing_frames = 0usize;
         while let Some(part) = work.pop() {
+            let remaining_sequence_words = sequence_stack_words.map(|limit| {
+                limit.saturating_sub(active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words)
+            });
             match part {
                 Part::Closing(count) => close_parens(&mut output, count)?,
                 Part::Text(text) => append_rendered_text(&mut output, text)?,
@@ -1661,6 +1688,9 @@ impl Context {
                     append_rendered_text(&mut output, ")")?;
                 }
                 Part::Leave(id, end) => {
+                    if matches!(ctx.heap.get(id), Value::Deque(_)) {
+                        extra_deque_words -= EXTRA_DEQUE_FRAME_WORDS;
+                    }
                     ancestors.remove(&id);
                     let last = active.pop();
                     debug_assert_eq!(last, Some(id));
@@ -1705,12 +1735,12 @@ impl Context {
                         )?;
                     }
                 }
-                Part::SetMembers(members, index) => {
+                Part::SnapshotMembers(members, index) => {
                     if let Some(&member) = members.get(index) {
                         if index != 0 {
                             append_rendered_text(&mut output, ", ")?;
                         }
-                        push_frame(&mut work, Part::SetMembers(members, index + 1))?;
+                        push_frame(&mut work, Part::SnapshotMembers(members, index + 1))?;
                         push_frame(&mut work, Part::Value(member, true))?;
                     }
                 }
@@ -1766,7 +1796,14 @@ impl Context {
                     }
                 }
                 Part::SyntaxMessage(id) => {
-                    if let Some(text) = element_repr(&mut ctx, id, false, &mut work, &active)? {
+                    if let Some(text) = element_repr(
+                        &mut ctx,
+                        id,
+                        false,
+                        &mut work,
+                        &active,
+                        remaining_sequence_words,
+                    )? {
                         append_rendered_text(&mut output, &text)?;
                     } else if let Some(storage) = ctx.string_storage(id) {
                         append_rendered_text(&mut output, ctx.str_value(storage)?)?;
@@ -1787,7 +1824,14 @@ impl Context {
                     if checked
                         && repr
                         && native_storage.is_none()
-                        && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
+                        && let Some(text) = element_repr(
+                            &mut ctx,
+                            id,
+                            true,
+                            &mut work,
+                            &active,
+                            remaining_sequence_words,
+                        )?
                     {
                         append_rendered_text(&mut output, &text)?;
                         continue;
@@ -2079,6 +2123,24 @@ impl Context {
                             append_rendered_text(&mut output, ")")?;
                             continue;
                         }
+                        Value::Deque(ring) => {
+                            if ancestors.contains(&id) {
+                                append_rendered_text(&mut output, "[...]")?;
+                                continue;
+                            }
+                            let end = if let Some(maxlen) = ring.maxlen {
+                                push_frame(&mut work, Part::Suffix(format!(", maxlen={maxlen})")))?;
+                                "]"
+                            } else {
+                                "])"
+                            };
+                            (
+                                "deque([",
+                                end,
+                                "[...]",
+                                Part::snapshot(ring.items.iter().copied())?,
+                            )
+                        }
                         Value::List(_) => ("[", "]", "[...]", Part::Sequence(storage, 0)),
                         Value::Tuple(items) => (
                             "(",
@@ -2173,13 +2235,18 @@ impl Context {
                         append_rendered_text(&mut output, placeholder)?;
                         continue;
                     }
-                    if matches!(ctx.heap.get(storage), Value::List(_) | Value::Tuple(_))
-                        && sequence_budget.is_some_and(|limit| active.len() >= limit)
+                    if matches!(
+                        ctx.heap.get(storage),
+                        Value::List(_) | Value::Tuple(_) | Value::Deque(_)
+                    ) && remaining_sequence_words == Some(0)
                     {
                         return Err(Error::new(
                             "RecursionError",
                             "maximum recursion depth exceeded while getting the repr of an object",
                         ));
+                    }
+                    if matches!(ctx.heap.get(storage), Value::Deque(_)) {
+                        extra_deque_words += EXTRA_DEQUE_FRAME_WORDS;
                     }
                     push_frame(&mut active, id)?;
                     append_rendered_text(&mut output, start)?;
@@ -2190,7 +2257,10 @@ impl Context {
                             let Value::Set { entries, .. } = ctx.heap.get(storage) else {
                                 unreachable!()
                             };
-                            push_frame(&mut work, Part::set_members(entries)?)?;
+                            push_frame(
+                                &mut work,
+                                Part::snapshot(entries.iter().map(|&(key, _)| key))?,
+                            )?;
                         }
                         part => push_frame(&mut work, part)?,
                     }
@@ -2215,7 +2285,7 @@ impl Context {
             RenderRoot::Exception(error),
             false,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -2237,19 +2307,17 @@ impl Context {
     }
 
     fn qualified_class_name(&self, class: Id, scope: Id) -> String {
-        let scope = self.scope_data(scope);
-        let module = match scope.names.get("__module__") {
-            Some(&value) => self.str_value(value).ok(),
-            None => Some(scope.module.as_str()),
+        let module = match self.namespace_binding(self.scope_data(scope), "__module__") {
+            Some(value) => self.str_value(value).ok(),
+            None => Some(self.scope_data(scope).module.as_str()),
         };
         let name = self.class_name(class);
         match module {
             None | Some("builtins") => name.to_owned(),
             Some(module) => {
-                let qualname = scope
-                    .names
-                    .get("__qualname__")
-                    .and_then(|&value| self.str_value(value).ok())
+                let qualname = self
+                    .namespace_binding(self.scope_data(scope), "__qualname__")
+                    .and_then(|value| self.str_value(value).ok())
                     .unwrap_or(name);
                 format!("{module}.{qualname}")
             }
@@ -2480,7 +2548,7 @@ impl Context {
                 RenderRoot::Exception(error),
                 repr,
                 false,
-                |_, _, _, _, _| Ok(None),
+                |_, _, _, _, _, _| Ok(None),
             )
             .unwrap_or_else(|_| {
                 if repr {

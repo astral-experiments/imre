@@ -1675,8 +1675,8 @@ impl Context {
         if bases.iter().any(|&base| {
             matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
         }) {
-            let fields = self.scope_data(scope).names.get("__annotations__")
-                .and_then(|&annotations| self.dict_entries(annotations))
+            let fields = self.scope_name(scope, "__annotations__")
+                .and_then(|annotations| self.dict_entries(annotations))
                 .unwrap_or_default();
             let named_fields: std::rc::Rc<[String]> = fields
                 .iter()
@@ -1774,6 +1774,7 @@ impl Context {
                         "typing.TypeVar"
                             | "typing.TypeVarTuple"
                             | "NoDefaultType"
+                            | "datetime.timezone"
                             | super::stdlib::flags::TYPE
                             | "slice"
                             | "NoneType"
@@ -1831,7 +1832,7 @@ impl Context {
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         // type.__new__ wraps plain functions only, before the class becomes observable.
         for name in ["__init_subclass__", "__class_getitem__"] {
-            if let Some(&function) = self.scope_data(scope).names.get(name)
+            if let Some(function) = self.namespace_binding(self.scope_data(scope), name)
                 && matches!(self.heap.get(function), Value::Function { .. })
             {
                 let method = self.alloc(Value::ClassMethod(function));

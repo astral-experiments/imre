@@ -108,7 +108,18 @@ enum Instruction {
         item: ast::WithItem,
         handler: usize,
     },
+    AsyncWithMethods(Option<ast::Expr>),
+    CallAsyncEnter,
+    AwaitWithResult(&'static str),
+    EnterAsyncWith {
+        target: Option<Box<ast::Expr>>,
+        handler: usize,
+        end: usize,
+    },
     ExitWith,
+    CallAsyncExit,
+    TestAsyncExit,
+    FinishAsyncExit,
     EnterExcept {
         handler: usize,
         end: usize,
@@ -850,6 +861,47 @@ pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Resul
     Ok(starts)
 }
 
+/// Check explicit keyword names before lowering can mangle class-private names.
+fn repeated_keyword(module: &ast::Mod) -> Option<&ast::Keyword> {
+    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
+
+    struct Children<'a>(Vec<ast::AnyNodeRef<'a>>);
+    impl<'a> SourceOrderVisitor<'a> for Children<'a> {
+        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
+            self.0.push(node);
+            TraversalSignal::Skip
+        }
+    }
+
+    let mut pending = Children(vec![module.into()]);
+    while let Some(node) = pending.0.pop() {
+        let args = match node {
+            // A call's own keyword list is validated before its callable is compiled.
+            ast::AnyNodeRef::ExprCall(call) => Some(&call.arguments),
+            ast::AnyNodeRef::StmtClassDef(class) => class.arguments.as_deref(),
+            _ => None,
+        };
+        if let Some(args) = args {
+            for (index, keyword) in args.keywords.iter().enumerate() {
+                if let Some(name) = &keyword.arg
+                    && let Some(repeated) = args.keywords[index + 1..].iter().find(|other| {
+                        other
+                            .arg
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == name.as_str())
+                    })
+                {
+                    return Some(repeated);
+                }
+            }
+        }
+        let start = pending.0.len();
+        node.visit_source_order(&mut pending);
+        pending.0[start..].reverse();
+    }
+    None
+}
+
 /// Interactive input accepts one compound statement or one logical line of simple statements.
 fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result<()> {
     use ast::token::TokenKind::{Dedent, Newline};
@@ -936,6 +988,11 @@ impl Program {
                         }
                     }
                 }
+                Instruction::AsyncWithMethods(Some(context)) => strings.visit_expr(context),
+                Instruction::EnterAsyncWith {
+                    target: Some(target),
+                    ..
+                } => strings.visit_expr(target),
                 Instruction::EnterWith { item, .. } => {
                     strings.visit_expr(&item.context_expr);
                     if let Some(target) = &item.optional_vars {
@@ -1072,7 +1129,14 @@ impl Program {
                 | Instruction::Jump(_)
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
+                | Instruction::AsyncWithMethods(None)
+                | Instruction::EnterAsyncWith { target: None, .. }
                 | Instruction::ExitWith
+                | Instruction::CallAsyncExit
+                | Instruction::CallAsyncEnter
+                | Instruction::AwaitWithResult(_)
+                | Instruction::TestAsyncExit
+                | Instruction::FinishAsyncExit
                 | Instruction::EnterExcept { .. }
                 | Instruction::StartFinally
                 | Instruction::EndFinally
@@ -1481,17 +1545,22 @@ impl Program {
                     }
                 }
                 Stmt::AnnAssign(s) if function => {
-                    let ast::Expr::Name(name) = &*s.target else {
+                    if let ast::Expr::Name(name) = &*s.target {
+                        if let Some((kind, _)) = self.directives.get(name.id.as_str()) {
+                            return Err(Error::new(
+                                "SyntaxError",
+                                format!("annotated name '{}' can't be {}", name.id, kind.keyword()),
+                            ));
+                        }
+                        self.locals.insert(name.id.to_string());
+                    } else if s.value.is_none() {
                         return Err(unsupported("annotated assignment target"));
-                    };
-                    if let Some((kind, _)) = self.directives.get(name.id.as_str()) {
-                        return Err(Error::new(
-                            "SyntaxError",
-                            format!("annotated name '{}' can't be {}", name.id, kind.keyword()),
-                        ));
                     }
-                    self.locals.insert(name.id.to_string());
-                    // Local annotations establish the binding without evaluating the annotation.
+                    annotations::validate(
+                        &s.annotation,
+                        matches!(s.target.as_ref(), ast::Expr::Name(_)),
+                    )?;
+                    // Function-local annotations don't evaluate the annotation expression.
                     let Some(value) = s.value else { continue };
                     match self.lower_suspension(*value, line, function)? {
                         Some(value) => Instruction::Assign(vec![*s.target], value),
@@ -1676,27 +1745,62 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::With(s) if !s.is_async => {
-                    let first = self.instructions.len();
+                Stmt::With(s) => {
+                    if s.is_async && self.kind != FunctionKind::Coroutine {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            "'async with' outside async function",
+                        ));
+                    }
+                    let mut entered = Vec::new();
                     for item in s.items {
                         if let Some(target) = &item.optional_vars {
                             self.declare_target(target)?;
                         }
-                        self.instructions
-                            .push((line, Instruction::EnterWith { item, handler: 0 }));
+                        let entry = if s.is_async {
+                            let context =
+                                self.lower_suspension(item.context_expr, line, function)?;
+                            self.instructions
+                                .push((line, Instruction::AsyncWithMethods(context)));
+                            self.instructions.push((line, Instruction::CallAsyncEnter));
+                            self.instructions
+                                .push((line, Instruction::AwaitWithResult("__aenter__")));
+                            self.instructions.push((line, Instruction::Delegate));
+                            Instruction::EnterAsyncWith {
+                                target: item.optional_vars,
+                                handler: 0,
+                                end: 0,
+                            }
+                        } else {
+                            Instruction::EnterWith { item, handler: 0 }
+                        };
+                        entered.push(self.instructions.len());
+                        self.instructions.push((line, entry));
                     }
-                    let entered = first..self.instructions.len();
                     self.lower(s.body, lines, function, active.as_deref_mut())?;
-                    for i in entered.rev() {
+                    for i in entered.into_iter().rev() {
                         self.instructions.push((line, Instruction::StartFinally));
                         let cleanup = self.instructions.len();
-                        self.instructions.push((line, Instruction::ExitWith));
+                        if s.is_async {
+                            self.instructions.push((line, Instruction::CallAsyncExit));
+                            self.instructions
+                                .push((line, Instruction::AwaitWithResult("__aexit__")));
+                            self.instructions.push((line, Instruction::Delegate));
+                            self.instructions.push((line, Instruction::TestAsyncExit));
+                            self.instructions.push((line, Instruction::FinishAsyncExit));
+                        } else {
+                            self.instructions.push((line, Instruction::ExitWith));
+                        }
                         self.instructions.push((line, Instruction::EndFinally));
-                        let Instruction::EnterWith { handler, .. } = &mut self.instructions[i].1
-                        else {
-                            unreachable!("context manager entry")
-                        };
-                        *handler = cleanup;
+                        let after = self.instructions.len();
+                        match &mut self.instructions[i].1 {
+                            Instruction::EnterWith { handler, .. } => *handler = cleanup,
+                            Instruction::EnterAsyncWith { handler, end, .. } => {
+                                *handler = cleanup;
+                                *end = after;
+                            }
+                            _ => unreachable!("context manager entry"),
+                        }
                     }
                     continue;
                 }
@@ -2110,6 +2214,7 @@ impl Context {
             }
             _ => Cow::Borrowed(self.str_value(source)?),
         };
+        let filename_id = filename;
         let filename = filename_text;
         let source = if strip_indent {
             source.trim_start_matches([' ', '\t'])
@@ -2123,6 +2228,39 @@ impl Context {
         }
         let spellings = string_replacements(source, parsed.tokens());
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
+        if let Some(keyword) = repeated_keyword(parsed.syntax()) {
+            let message = format!(
+                "keyword argument repeated: {}",
+                keyword.arg.as_ref().unwrap()
+            );
+            let position = |offset: usize| {
+                let mut line = 1;
+                let mut line_start = 0;
+                for (at, newline) in source[..offset].match_indices(['\r', '\n']) {
+                    if newline == "\n" || !source[at + 1..].starts_with('\n') {
+                        line += 1;
+                        line_start = at + 1;
+                    }
+                }
+                (line, offset - line_start + 1)
+            };
+            let (line, column) = position(keyword.start().to_usize());
+            let (end_line, end_column) = position(keyword.end().to_usize());
+            let msg = self.text(&message);
+            let details = vec![
+                filename_id,
+                self.int(line as i64),
+                self.int(column as i64),
+                NONE,
+                self.int(end_line as i64),
+                self.int(end_column as i64),
+            ];
+            let location = self.alloc(Value::Tuple(details));
+            let args = [msg, location];
+            let mut error = self.exception("SyntaxError", &args);
+            self.retain_syntax_fields(&mut error, self.syntax_fields(&args))?;
+            return Err(error);
+        }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
@@ -2399,7 +2537,7 @@ impl Context {
             ));
         }
         for &cell in cells {
-            if !matches!(self.heap.get(cell), Value::Cell(_) | Value::ClassCell(_)) {
+            if !matches!(self.heap.get(cell), Value::Cell(_)) {
                 return Err(Error::new(
                     "TypeError",
                     format!(
@@ -3137,7 +3275,15 @@ impl Context {
                     op,
                     Some((
                         _,
-                        Instruction::BindSent(_) | Instruction::ReturnSent | Instruction::Delegate
+                        Instruction::BindSent(_)
+                            | Instruction::ReturnSent
+                            | Instruction::Delegate
+                            | Instruction::AsyncWithMethods(None)
+                            | Instruction::CallAsyncEnter
+                            | Instruction::AwaitWithResult(_)
+                            | Instruction::EnterAsyncWith { .. }
+                            | Instruction::TestAsyncExit
+                            | Instruction::FinishAsyncExit
                     ))
                 ) {
                     cursor.sent = NONE;
@@ -3587,6 +3733,56 @@ impl Context {
                     *ip = *destination;
                 }
             }
+            Instruction::AsyncWithMethods(context) => {
+                cursor
+                    .protected
+                    .try_reserve(1)
+                    .map_err(|_| crate::Error::allocation())?;
+                iterators
+                    .try_reserve(2)
+                    .map_err(|_| crate::Error::allocation())?;
+                let manager = match context {
+                    Some(expr) => eval(self, expr)?,
+                    None => *sent,
+                };
+                let exit = self.context_method(manager, "__aexit__")?;
+                self.heap.keep(exit);
+                *sent = self.context_method(manager, "__aenter__")?;
+                // Keep the bound exit below the delegate while __aenter__ is suspended.
+                iterators.push(exit);
+                self.heap.weak_edge_removed(manager);
+                self.heap.release_unbound_finalizers();
+            }
+            Instruction::CallAsyncEnter => {
+                let enter = *sent;
+                *sent = self.call(enter, Vec::new(), Vec::new())?;
+                self.heap.weak_edge_removed(enter);
+                self.heap.release_unbound_finalizers();
+            }
+            Instruction::AwaitWithResult(method) => {
+                let value = std::mem::replace(sent, NONE);
+                iterators.push(self.await_iterator(value, Some(method))?);
+                self.heap.weak_edge_removed(value);
+                self.heap.release_unbound_finalizers();
+            }
+            Instruction::EnterAsyncWith {
+                target,
+                handler,
+                end,
+            } => {
+                let exit = iterators.pop().expect("saved asynchronous context exit");
+                cursor.protected.push(FinallyBlock {
+                    start: *ip,
+                    handler: *handler,
+                    end: *end,
+                    depth: iterators.len(),
+                    pending: None,
+                    kind: HandlerKind::With(exit),
+                });
+                if let Some(target) = target {
+                    self.bind_target(code, scope, target, *sent)?;
+                }
+            }
             Instruction::EnterWith { item, handler } => {
                 cursor
                     .protected
@@ -3610,7 +3806,10 @@ impl Context {
                     self.bind_target(code, scope, target, value)?;
                 }
             }
-            Instruction::ExitWith => {
+            Instruction::ExitWith
+            | Instruction::CallAsyncExit
+            | Instruction::TestAsyncExit
+            | Instruction::FinishAsyncExit => {
                 let block = cursor.protected.last_mut().expect("active context manager");
                 let HandlerKind::With(exit) = block.kind else {
                     unreachable!("context manager exit");
@@ -3619,9 +3818,45 @@ impl Context {
                     Some(Transfer::Raise(error)) => error,
                     _ => NONE,
                 };
-                let active = self.heap.active_exception();
-                let result = self.op("exit_context", exit, exception, active)?;
-                if exception != NONE && result == TRUE {
+                let suppress = match op {
+                    Instruction::CallAsyncExit => {
+                        let (class, tb) = if exception == NONE {
+                            (NONE, NONE)
+                        } else {
+                            (
+                                self.exact_type(exception)?,
+                                self.exception_traceback(exception)?,
+                            )
+                        };
+                        *sent = self.call(exit, vec![class, exception, tb], Vec::new())?;
+                        if exception == NONE {
+                            // Only exceptional cleanup retains its callable during the await and truth test.
+                            block.kind = HandlerKind::With(NONE);
+                            self.heap.weak_edge_removed(exit);
+                            self.heap.release_unbound_finalizers();
+                        }
+                        return Ok(None);
+                    }
+                    Instruction::TestAsyncExit => {
+                        let result = *sent;
+                        *sent = if exception != NONE && self.truth(result)? {
+                            TRUE
+                        } else {
+                            FALSE
+                        };
+                        // Release the result while a raised body exception is still active.
+                        self.heap.weak_edge_removed(result);
+                        self.heap.release_unbound_finalizers();
+                        return Ok(None);
+                    }
+                    Instruction::FinishAsyncExit => *sent == TRUE,
+                    _ => {
+                        let active = self.heap.active_exception();
+                        let result = self.op("exit_context", exit, exception, active)?;
+                        exception != NONE && result == TRUE
+                    }
+                };
+                if suppress {
                     block.pending = Some(Transfer::Jump {
                         destination: block.end,
                         pop_iter: false,
@@ -3673,7 +3908,7 @@ impl Context {
             }
             Instruction::Await(e) => {
                 let value = eval(self, e)?;
-                iterators.push(self.await_iterator(value)?);
+                iterators.push(self.await_iterator(value, None)?);
             }
             Instruction::Next(_, _) | Instruction::Delegate => {
                 let delegated = matches!(op, Instruction::Delegate);
@@ -4137,6 +4372,84 @@ impl Context {
         Ok(())
     }
 
+    fn source_keyword_mapping(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        callable: Id,
+        keywords: &[ast::Keyword],
+    ) -> Result<Id> {
+        let merged = self.dict(Vec::new());
+        self.heap.keep(merged);
+        // Merge each ** mapping immediately, but evaluate adjacent named arguments as a group.
+        for group in keywords.chunk_by(|left, right| left.arg.is_some() && right.arg.is_some()) {
+            let mapping = if group[0].arg.is_none() {
+                self.source_expr(code, scope, &group[0].value)?
+            } else {
+                let named = self.dict(Vec::new());
+                self.heap.keep(named);
+                for item in group {
+                    let key = self
+                        .heap
+                        .code_name(item.arg.as_ref().expect("named keyword").as_str());
+                    let value = self.source_expr(code, scope, &item.value)?;
+                    self.put_item(named, key, value)?;
+                }
+                named
+            };
+            self.op("keywords", merged, mapping, callable)?;
+        }
+        Ok(merged)
+    }
+
+    fn extend_source_call_args(
+        &mut self,
+        args: &mut Vec<Id>,
+        iterable: Id,
+        sole_star_callable: Option<Id>,
+    ) -> Result<()> {
+        let iter = match self.iterator(iterable) {
+            Err(error)
+                if error.kind == "TypeError"
+                    && self.slot(iterable, "__iter__").is_none()
+                    && self.slot(iterable, "__getitem__").is_none() =>
+            {
+                let prefix = if let Some(callable) = sole_star_callable {
+                    format!("{} argument after *", self.keyword_callable(callable)?)
+                } else {
+                    "Value after *".into()
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{prefix} must be an iterable, not {}",
+                        self.type_name(iterable)
+                    ),
+                ));
+            }
+            other => other?,
+        };
+        self.heap.keep(iter);
+        if sole_star_callable.is_none() {
+            let default = self.int(8);
+            let hint = self.length_hint(iterable, Some(default))?;
+            let hint = self.as_integer(hint)? as usize;
+            if hint <= isize::MAX as usize - args.len() {
+                args.try_reserve(hint)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+            }
+        }
+        while let Some(item) = self.next_item(iter)? {
+            args.try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            // Further arguments may clear the iterable and invoke Python callbacks.
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(item);
+            args.push(item);
+        }
+        Ok(())
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -4362,19 +4675,37 @@ impl Context {
                 } else {
                     eval(self, &v.func)?
                 };
-                let args = v
-                    .arguments
-                    .args
-                    .iter()
-                    .map(|a| eval(self, a))
-                    .collect::<Result<Vec<_>>>()?;
+                let mut args = Vec::new();
+                let mut sole_star = None;
+                for arg in &v.arguments.args {
+                    if let Expr::Starred(star) = arg {
+                        let value = eval(self, &star.value)?;
+                        if v.arguments.args.len() == 1 {
+                            // CALL_FUNCTION_EX consumes a sole iterable after evaluating keywords.
+                            sole_star = Some(value);
+                        } else {
+                            self.extend_source_call_args(&mut args, value, None)?;
+                        }
+                    } else {
+                        args.push(eval(self, arg)?);
+                    }
+                }
+                let keywords = &v.arguments.keywords;
                 let mut kwargs = Vec::new();
-                for item in &v.arguments.keywords {
-                    let key = item
-                        .arg
-                        .as_ref()
-                        .ok_or_else(|| unsupported("keyword unpack"))?;
-                    kwargs.push((key.to_string(), eval(self, &item.value)?));
+                let mapping = if keywords.iter().any(|item| item.arg.is_none()) {
+                    Some(self.source_keyword_mapping(code, scope, f, keywords)?)
+                } else {
+                    for item in keywords {
+                        let key = item.arg.as_ref().expect("named keyword");
+                        kwargs.push((key.to_string(), eval(self, &item.value)?));
+                    }
+                    None
+                };
+                if let Some(value) = sole_star {
+                    self.extend_source_call_args(&mut args, value, Some(f))?;
+                }
+                if let Some(mapping) = mapping {
+                    kwargs = self.keyword_args(mapping)?;
                 }
                 let result = self.call_in_scope(scope, f, args, kwargs)?;
                 self.finish_call_operands(mark, result);

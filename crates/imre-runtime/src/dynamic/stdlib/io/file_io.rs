@@ -345,14 +345,18 @@ pub(in crate::dynamic) fn open(
             "Cannot use closefd=False with file name",
         ));
     }
-    if buffering > 0 {
-        return Err(Error::new(
-            "ValueError",
-            "explicit buffer sizes are unsupported",
-        ));
-    }
-    let path = ctx.str_value(filename)?;
     let mode = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
+    let writer_capacity = match (buffering, mode) {
+        (2.., "wb" | "ab" | "xb" | "bw" | "ba" | "bx") => Some(buffering as usize),
+        (1.., _) => {
+            return Err(Error::new(
+                "ValueError",
+                "explicit buffer sizes are unsupported",
+            ));
+        }
+        _ => None,
+    };
+    let path = ctx.str_value(filename)?;
     if errors
         .map(|v| ctx.str_value(v))
         .transpose()?
@@ -377,9 +381,12 @@ pub(in crate::dynamic) fn open(
     let writing = mode.contains(['w', 'a', 'x']);
     let file = match mode {
         "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
-            .map(Value::TextFile)
+            .map(|file| {
+                Value::TextFile(crate::dynamic::value::BoxedTextFile { file, buffer: None })
+            })
             .map_err(Error::from),
-        _ => files::BinaryFile::open(path, filename, mode).and_then(files::BinaryFile::into_value),
+        _ => files::BinaryFile::open(path, filename, mode, writer_capacity)
+            .and_then(files::BinaryFile::into_value),
     };
     match file {
         Ok(file) if writing => ctx.heap.alloc_file_writer(file),
