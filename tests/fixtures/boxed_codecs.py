@@ -6,6 +6,28 @@ class EchoDecoder(codecs.IncrementalDecoder):
         return self.errors, input, final
 
 
+def check_text_encoding_flag():
+    entry = codecs.lookup("utf-8")
+    assert entry._is_text_encoding is True
+    marker = []
+    entry._is_text_encoding = marker
+    assert codecs.lookup("UTF-8")._is_text_encoding is marker
+    assert codecs.lookup("u8")._is_text_encoding is True
+    entry._is_text_encoding = None
+    assert entry._is_text_encoding is None
+    del entry._is_text_encoding
+    assert entry._is_text_encoding is True
+    try:
+        del entry._is_text_encoding
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("deleted the inherited flag")
+
+
+check_text_encoding_flag()
+
+
 def check_raw_unicode_escape():
     for alias in ("raw-unicode-escape", "raw_unicode_escape", "RAW Unicode ESCAPE"):
         assert str(b"A\xff\x00", alias) == "A\xff\x00"

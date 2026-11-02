@@ -2592,6 +2592,9 @@ impl<'a> Checker<'a> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
         }
+        if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "_is_text_encoding" {
+            return Err(self.object_builtin_error("CodecInfo._is_text_encoding", attribute));
+        }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
         }
