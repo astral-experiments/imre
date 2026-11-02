@@ -267,10 +267,13 @@ impl Drop for Registry {
     }
 }
 
-enum Operation {
+pub(super) enum Operation {
     Python(Box<Callback>),
     Empty,
-    Acquire(Arc<PrimitiveLock>),
+    Acquire {
+        lock: Arc<PrimitiveLock>,
+        release: Option<Arc<PrimitiveLock>>,
+    },
 }
 
 struct Started {
@@ -289,6 +292,7 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
     let thread = thread::Builder::new()
         .spawn(move || {
             // A failed bootstrap publishes no identity and contributes nothing to the live count.
+            let mut prefix = None;
             let (python, acquire) = match operation {
                 Operation::Python(callback) => match callback.load() {
                     Ok((mut worker, function, arguments)) => {
@@ -302,9 +306,20 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                     }
                 },
                 Operation::Empty => (None, None),
-                Operation::Acquire(lock) => (None, Some(lock)),
+                Operation::Acquire { lock, release } => {
+                    prefix = release;
+                    (None, Some(lock))
+                }
             };
             let _running = Running::enter(count, worker_active);
+            // Consume the nonblocking prefix and bind the final receiver before the
+            // parent resumes and can rebind either closure cell.
+            if let Some(lock) = prefix
+                && let Err(error) = lock.release()
+            {
+                let _ = ready.send(Err(Error::from(error).to_string()));
+                return Ok(());
+            }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             let native_id = Some(crate::objects::locks::native_thread_id());
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -355,10 +370,10 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
 /// A low-level caller owns only the bootstrap roots after the native worker is detached.
 pub(super) fn start_detached(
     ctx: &Context,
-    callback: Callback,
+    callback: Operation,
     label: String,
 ) -> Result<(usize, Arc<AtomicBool>)> {
-    let worker = launch(ctx, Operation::Python(Box::new(callback)), Some(label))?;
+    let worker = launch(ctx, callback, Some(label))?;
     Ok((worker.ident, worker.active))
 }
 
@@ -369,7 +384,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         return Ok((Operation::Empty, vec![target, args, kwargs]));
     }
     if let Some((callback, roots)) = Callback::capture_for_thread(ctx, target, args, kwargs)? {
-        return Ok((Operation::Python(Box::new(callback)), roots));
+        return Ok((callback, roots));
     }
     if let Value::Method {
         callable, receiver, ..
@@ -381,7 +396,10 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         && let Value::PrimitiveLock(lock) = ctx.heap.get(receiver)
     {
         return Ok((
-            Operation::Acquire(Arc::clone(lock)),
+            Operation::Acquire {
+                lock: Arc::clone(lock),
+                release: None,
+            },
             vec![target, args, kwargs],
         ));
     }
