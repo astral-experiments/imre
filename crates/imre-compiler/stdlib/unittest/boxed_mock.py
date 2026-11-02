@@ -1,4 +1,5 @@
 from types import MethodType
+from unittest.util import safe_repr
 
 
 class _ANY:
@@ -18,7 +19,7 @@ ANY = _ANY()
 class _CallList(list):
     def __contains__(self, value):
         if not isinstance(value, list):
-            return list.__contains__(self, value)
+            return any(item is value or item == value for item in self)
         size = len(value)
         return any(self[i:i + size] == value for i in range(len(self) - size + 1))
 
@@ -47,6 +48,16 @@ def _call_parts(value, size, name=""):
         else:
             kwargs = first
     return name, args, kwargs
+
+
+# The boxed tuple type does not expose its class dictionary. These are the
+# members in CPython 3.14's tuple.__dict__ that _Call hides on explicit lookup.
+_tuple_call_names = {
+    "__new__", "__repr__", "__hash__", "__lt__", "__le__", "__eq__", "__ne__",
+    "__gt__", "__ge__", "__iter__", "__len__", "__getitem__", "__add__", "__mul__",
+    "__rmul__", "__contains__", "__getnewargs__", "index", "count",
+    "__class_getitem__", "__doc__",
+}
 
 
 class _Call(tuple):
@@ -103,7 +114,7 @@ class _Call(tuple):
 
     def __getattribute__(self, attr):
         # A tuple method such as count can name a call in the same way as any other attribute.
-        if attr in tuple.__dict__:
+        if attr in _tuple_call_names:
             raise AttributeError(attr)
         return object.__getattribute__(self, attr)
 
@@ -117,7 +128,9 @@ class _Call(tuple):
             name = self._mock_name or "call"
             return "call" + name if name.startswith("()") else name
         name = self[0] if len(self) == 3 else ""
-        prefix = "call" if not name or name.startswith("()") else "call."
+        if not name:
+            return self._format("call")
+        prefix = "call" if name.startswith("()") else "call."
         return self._format(prefix + name)
 
     def call_list(self):
@@ -131,9 +144,6 @@ class _Call(tuple):
 
 
 call = _Call(from_kall=False)
-
-
-from unittest.util import safe_repr
 
 
 def _new_call(args, kwargs):
