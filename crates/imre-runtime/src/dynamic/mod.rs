@@ -2133,7 +2133,7 @@ impl Context {
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" | "wrapper_descriptor" => &["__get__"],
-            "tuple" => &["__repr__", "__getitem__", "count", "index"],
+            "tuple" => &["__repr__", "__getitem__", "__len__", "count", "index"],
             "set" => &[
                 "__repr__",
                 "__reduce__",

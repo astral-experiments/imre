@@ -8893,6 +8893,15 @@ impl<'a> Checker<'a> {
             return self.boxed_deque_repr_call(call);
         }
         if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "__len__"
+            && self
+                .graph
+                .session
+                .is_builtin_sequence_class(self.module, &method.value)
+        {
+            return Err(self.scoped_builtin_error("sequence length descriptor", call));
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "reverse"
         {
             if self.unshadowed_builtin(&method.value, "list") {

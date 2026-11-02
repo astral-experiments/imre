@@ -82,7 +82,9 @@ mod paths;
 pub(crate) use paths::{directory_entries, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::{BoxedPipe, BoxedPopen, change_environment, initial_environment};
+pub(crate) use processes::{
+    BoxedPipe, BoxedPopen, CStrings, change_environment, initial_environment,
+};
 mod random;
 pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
