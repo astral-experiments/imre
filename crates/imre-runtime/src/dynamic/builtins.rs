@@ -639,6 +639,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "discard"
                     | "difference"
                     | "intersection"
+                    | "pop"
                     | "remove"
                     | "union"
                     | "difference_update"
