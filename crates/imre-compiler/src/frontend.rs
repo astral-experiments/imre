@@ -4797,6 +4797,13 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if receiver.ty == Type::CodecInfo
+                            && attr.attr.as_str() == "_is_text_encoding"
+                        {
+                            return Err(
+                                self.object_builtin_error("CodecInfo._is_text_encoding", attr)
+                            );
+                        }
                         if matches!(receiver.ty, Type::Popen(..)) && attr.attr.as_str() == "poll" {
                             statements.push(Statement::Expr(Expr {
                                 ty: Type::None,
