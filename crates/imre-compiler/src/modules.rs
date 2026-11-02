@@ -2201,7 +2201,9 @@ impl IntrinsicModule {
             }
             (Self::Thread, "allocate") => Intrinsic::ObjectRuntimeExport("_thread.allocate"),
             (Self::Thread, "error") => Intrinsic::ObjectRuntimeExport("_thread.error"),
-            (Self::Threading, "ThreadError") => Intrinsic::ObjectRuntimeExport("threading.ThreadError"),
+            (Self::Threading, "ThreadError") => {
+                Intrinsic::ObjectRuntimeExport("threading.ThreadError")
+            }
             (Self::Thread | Self::Threading, "TIMEOUT_MAX") => {
                 Intrinsic::ObjectRuntimeExport("_thread.TIMEOUT_MAX")
             }

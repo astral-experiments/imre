@@ -13,9 +13,6 @@ except ImportError:
     from collections import deque as _deque
 
 
-ThreadError = _thread.error
-
-
 __all__ = ["Thread", "ThreadError", "Lock", "RLock", "Condition", "Event", "Semaphore", "BoundedSemaphore",
            "Barrier", "BrokenBarrierError", "TIMEOUT_MAX", "local", "get_ident",
            "main_thread", "current_thread", "enumerate", "active_count"]
@@ -26,6 +23,7 @@ except ImportError:
 else:
     _HAVE_THREAD_NATIVE_ID = True
     __all__.append("get_native_id")
+ThreadError = _thread.error
 try:
     _CRLock = _thread.RLock
 except AttributeError:
