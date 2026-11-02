@@ -4,6 +4,21 @@ import re
 def current():
     from string import Template
 
+    unknown = re.compile("(?i)ab", 0x123001)
+    assert unknown.flags == (0x123001 | re.I | re.U)
+    assert repr(unknown) == "re.compile('(?i)ab', re.IGNORECASE|0x123001)"
+    assert unknown.fullmatch("AB") and unknown.fullmatch("AC") is None
+    assert re.fullmatch("ab", "AB", 0x123001) is None
+    signed = re.compile(b"x+", -512)
+    assert signed.flags == -512 and repr(signed) == "re.compile(b'x+', 0xfffffe00)"
+    assert signed.fullmatch(b"xx") and signed.fullmatch(b"X") is None
+    try:
+        re.compile("x", 1 << 31)
+    except OverflowError as error:
+        assert str(error) == "Python int too large to convert to C int"
+    else:
+        raise AssertionError("out-of-range pattern flags accepted")
+
     high = chr(0xd800)
     assert "<%-4.2s>" % ("é" + high + "a") == "<é" + high + "  >"
     members = "[%s]" % ("é" + high)
