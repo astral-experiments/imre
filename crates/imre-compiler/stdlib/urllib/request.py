@@ -2,6 +2,7 @@
 # Lib/urllib/request.py. See ../docstrings/LICENSE.
 import base64
 import bisect
+import http.client
 import io
 import os
 import re
@@ -14,15 +15,15 @@ from email.message import Message
 from urllib.error import ContentTooShortError, HTTPError, URLError
 from urllib.response import addinfourl
 from urllib.parse import (
-    _splithost, _splitport, _splittag, _splittype, quote, unquote, unquote_to_bytes, unwrap, urljoin, urlparse, urlsplit, urlunparse,
+    _splithost, _splitpasswd, _splitport, _splittag, _splittype, _splituser, quote, unquote, unquote_to_bytes, unwrap, urljoin, urlparse, urlsplit, urlunparse,
 )
 
 
 __all__ = [
     "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "UnknownHandler",
-    "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
+    "ProxyHandler", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
-    "pathname2url", "url2pathname",
+    "pathname2url", "url2pathname", "getproxies",
 ]
 
 
@@ -395,14 +396,13 @@ class OpenerDirector:
 def build_opener(*handlers):
     """Create an opener object from a list of handlers.
 
-    The default opener supports local files. Other protocols can be
-    supplied by handlers.
+    The default opener supports HTTP, local files and data URLs.
 
     If any of the handlers passed as arguments are subclasses of the
     default handlers, the default handlers will not be used.
     """
     opener = OpenerDirector()
-    default_classes = [UnknownHandler, HTTPDefaultErrorHandler, HTTPRedirectHandler, FileHandler,
+    default_classes = [ProxyHandler, UnknownHandler, HTTPHandler, HTTPDefaultErrorHandler, HTTPRedirectHandler, FileHandler,
                        HTTPErrorProcessor, DataHandler]
     skip = set()
     for klass in default_classes:
@@ -580,6 +580,209 @@ class HTTPRedirectHandler(BaseHandler):
               "The last 30x error message was:\n"
 
 
+def _parse_proxy(proxy):
+    """Return (scheme, user, password, host/port) given a URL or an authority.
+
+    If a URL is supplied, it must have an authority (host:port) component.
+    According to RFC 3986, having an authority component means the URL must
+    have two slashes after the scheme.
+    """
+    scheme, r_scheme = _splittype(proxy)
+    if not r_scheme.startswith("/"):
+        # authority
+        scheme = None
+        authority = proxy
+    else:
+        # URL
+        if not r_scheme.startswith("//"):
+            raise ValueError("proxy URL with no authority: %r" % proxy)
+        # We have an authority, so for RFC 3986-compliant URLs (by ss 3.
+        # and 3.3.), path is empty or starts with '/'
+        if '@' in r_scheme:
+            host_separator = r_scheme.find('@')
+            end = r_scheme.find("/", host_separator)
+        else:
+            end = r_scheme.find("/", 2)
+        if end == -1:
+            end = None
+        authority = r_scheme[2:end]
+    userinfo, hostport = _splituser(authority)
+    if userinfo is not None:
+        user, password = _splitpasswd(userinfo)
+    else:
+        user = password = None
+    return scheme, user, password, hostport
+
+class ProxyHandler(BaseHandler):
+    # Proxies must be in front
+    handler_order = 100
+
+    def __init__(self, proxies=None):
+        if proxies is None:
+            proxies = getproxies()
+        assert hasattr(proxies, 'keys'), "proxies must be a mapping"
+        self.proxies = proxies
+        for type, url in proxies.items():
+            type = type.lower()
+            setattr(self, '%s_open' % type,
+                    lambda r, proxy=url, type=type, meth=self.proxy_open:
+                        meth(r, proxy, type))
+
+    def proxy_open(self, req, proxy, type):
+        orig_type = req.type
+        proxy_type, user, password, hostport = _parse_proxy(proxy)
+        if proxy_type is None:
+            proxy_type = orig_type
+
+        if req.host and proxy_bypass(req.host):
+            return None
+
+        if user and password:
+            user_pass = '%s:%s' % (unquote(user),
+                                   unquote(password))
+            creds = base64.b64encode(user_pass.encode()).decode("ascii")
+            req.add_header('Proxy-authorization', 'Basic ' + creds)
+        hostport = unquote(hostport)
+        req.set_proxy(hostport, proxy_type)
+        if orig_type == proxy_type or orig_type == 'https':
+            # let other handlers take care of it
+            return None
+        else:
+            # need to start over, because the other handlers don't
+            # grok the proxy's URL type
+            # e.g. if we have a constructor arg proxies like so:
+            # {'http': 'ftp://proxy.example.com'}, we may end up turning
+            # a request for http://acme.example.com/a into one for
+            # ftp://proxy.example.com/a
+            return self.parent.open(req, timeout=req.timeout)
+
+class AbstractHTTPHandler(BaseHandler):
+
+    def __init__(self, debuglevel=None):
+        self._debuglevel = debuglevel if debuglevel is not None else http.client.HTTPConnection.debuglevel
+
+    def set_http_debuglevel(self, level):
+        self._debuglevel = level
+
+    def _get_content_length(self, request):
+        return http.client.HTTPConnection._get_content_length(
+            request.data,
+            request.get_method())
+
+    def do_request_(self, request):
+        host = request.host
+        if not host:
+            raise URLError('no host given')
+
+        if request.data is not None:  # POST
+            data = request.data
+            if isinstance(data, str):
+                msg = "POST data should be bytes, an iterable of bytes, " \
+                      "or a file object. It cannot be of type str."
+                raise TypeError(msg)
+            if not request.has_header('Content-type'):
+                request.add_unredirected_header(
+                    'Content-type',
+                    'application/x-www-form-urlencoded')
+            if (not request.has_header('Content-length')
+                    and not request.has_header('Transfer-encoding')):
+                content_length = self._get_content_length(request)
+                if content_length is not None:
+                    request.add_unredirected_header(
+                            'Content-length', str(content_length))
+                else:
+                    request.add_unredirected_header(
+                            'Transfer-encoding', 'chunked')
+
+        sel_host = host
+        if request.has_proxy():
+            scheme, sel = _splittype(request.selector)
+            sel_host, sel_path = _splithost(sel)
+        if not request.has_header('Host'):
+            request.add_unredirected_header('Host', sel_host)
+        for name, value in self.parent.addheaders:
+            name = name.capitalize()
+            if not request.has_header(name):
+                request.add_unredirected_header(name, value)
+
+        return request
+
+    def do_open(self, http_class, req, **http_conn_args):
+        """Return an HTTPResponse object for the request, using http_class.
+
+        http_class must implement the HTTPConnection API from http.client.
+        """
+        host = req.host
+        if not host:
+            raise URLError('no host given')
+
+        # will parse host:port
+        h = http_class(host, timeout=req.timeout, **http_conn_args)
+        h.set_debuglevel(self._debuglevel)
+
+        headers = dict(req.unredirected_hdrs)
+        headers.update({k: v for k, v in req.headers.items()
+                        if k not in headers})
+
+        # TODO(jhylton): Should this be redesigned to handle
+        # persistent connections?
+
+        # We want to make an HTTP/1.1 request, but the addinfourl
+        # class isn't prepared to deal with a persistent connection.
+        # It will try to read all remaining data from the socket,
+        # which will block while the server waits for the next request.
+        # So make sure the connection gets closed after the (only)
+        # request.
+        headers["Connection"] = "close"
+        headers = {name.title(): val for name, val in headers.items()}
+
+        if req._tunnel_host:
+            tunnel_headers = {}
+            proxy_auth_hdr = "Proxy-Authorization"
+            if proxy_auth_hdr in headers:
+                tunnel_headers[proxy_auth_hdr] = headers[proxy_auth_hdr]
+                # Proxy-Authorization should not be sent to origin
+                # server.
+                del headers[proxy_auth_hdr]
+            h.set_tunnel(req._tunnel_host, headers=tunnel_headers)
+
+        try:
+            try:
+                h.request(req.get_method(), req.selector, req.data, headers,
+                          encode_chunked=req.has_header('Transfer-encoding'))
+            except OSError as err: # timeout error
+                raise URLError(err)
+            r = h.getresponse()
+        except:
+            h.close()
+            raise
+
+        # If the server does not send us a 'Connection: close' header,
+        # HTTPConnection assumes the socket should be left open. Manually
+        # mark the socket to be closed when this response object goes away.
+        if h.sock:
+            h.sock.close()
+            h.sock = None
+
+        r.url = req.get_full_url()
+        # This line replaces the .msg attribute of the HTTPResponse
+        # with .headers, because urllib clients expect the response to
+        # have the reason in .msg.  It would be good to mark this
+        # attribute is deprecated and get then to use info() or
+        # .headers.
+        r.msg = r.reason
+        return r
+
+
+class HTTPHandler(AbstractHTTPHandler):
+
+    def http_open(self, req):
+        return self.do_open(http.client.HTTPConnection, req)
+
+    http_request = AbstractHTTPHandler.do_request_
+
+
+
 class UnknownHandler(BaseHandler):
     def unknown_open(self, req):
         raise URLError('unknown url type: %s' % req.type)
@@ -587,7 +790,7 @@ class UnknownHandler(BaseHandler):
 
 class _DefaultUnknownHandler(UnknownHandler):
     def unknown_open(self, req):
-        if req.type in ("http", "https", "ftp"):
+        if req.type in ("https", "ftp"):
             raise NotImplementedError("urllib.request has no default %s handler" % req.type)
         return super().unknown_open(req)
 
@@ -861,3 +1064,7 @@ def proxy_bypass_environment(host, proxies=None):
                 return True
     # otherwise, don't bypass
     return False
+
+
+getproxies = getproxies_environment
+proxy_bypass = proxy_bypass_environment

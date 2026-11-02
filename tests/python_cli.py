@@ -2059,6 +2059,7 @@ def report(text):
             "boxed_socket_timeout.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
+            "boxed_urllib_http.py",
             "boxed_http_transport.py",
             "boxed_message_parameters.py",
             "boxed_unicodedata.py",
