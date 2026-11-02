@@ -507,6 +507,15 @@ pub(crate) fn read<E: From<Error>>(
     Ok(bytes)
 }
 
+/// Read once into a borrowed writable buffer. Report EINTR to the caller for signal dispatch.
+pub(crate) fn try_read_into(fd: i32, data: &mut [u8]) -> Result<Option<usize>> {
+    let length = data.len();
+    #[cfg(target_os = "macos")]
+    let length = length.min(i32::MAX as usize);
+    // SAFETY: read borrows the descriptor and fills at most length bytes of this slice.
+    transferred(unsafe { libc::read(fd, data.as_mut_ptr().cast(), length) })
+}
+
 pub(crate) fn try_write(fd: i32, data: &[u8]) -> Result<Option<usize>> {
     crate::initialize_io();
     let length = data.len();
