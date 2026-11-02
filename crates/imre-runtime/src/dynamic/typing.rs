@@ -431,7 +431,13 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         Value::Native(n)
             if matches!(
                 n.as_str(),
-                "dict" | "list" | "tuple" | "set" | "type" | super::value::REGEX_PATTERN_TYPE
+                "dict"
+                    | "list"
+                    | "tuple"
+                    | "set"
+                    | "type"
+                    | super::value::REGEX_PATTERN_TYPE
+                    | super::value::REGEX_MATCH_TYPE
             ) =>
         {
             AliasKind::Builtin
@@ -1461,6 +1467,7 @@ impl Context {
                             | "NotImplementedType"
                             | "ellipsis"
                             | super::value::REGEX_PATTERN_TYPE
+                            | super::value::REGEX_MATCH_TYPE
                             | super::value::TEMPLATE_ITER_TYPE
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE
