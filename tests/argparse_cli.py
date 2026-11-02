@@ -46,7 +46,11 @@ CASES = {
         ["--unit", "ab"], ["--unit=c", "-.１２"], ["--label"], ["--label=-42"],
         ["--note", "red"], ["--note=42"],
     ],
-    "format": [[], ["--help"], ["--mode", "text"], ["--unknown"]],
+    "format": [
+        [], ["--help"], ["--mode", "text", "--fast", "--choice", "a"], ["--mode", "invalid"], ["--unknown"],
+        ["empty", "--help"], ["empty", "--nil", "ok", "--a", "value"], ["empty", "--nil"],
+        ["hidden", "--help"], ["hidden", "--param1"], ["hidden", "--param1", "--param2"],
+    ],
     "blank_help": [[], ["format"], ["print"], ["parse"]],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
@@ -178,6 +182,7 @@ REJECTED = {
     "mixed_positionals": 'parser.add_argument("input", "--other")',
     "foreign_converter": 'parser.add_argument("--number", type=complex)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
+    "metavar_digit_limit": f"parser.add_argument('-n', type=int, choices=[0x{'f' * 600}], metavar='N')",
     "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
     "escaped_builder": "copy = parser",
     "bad_template": 'parser.add_argument("--key", help="%(value)s")',
