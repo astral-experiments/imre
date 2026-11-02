@@ -66,4 +66,9 @@ def current():
         pass
     else:
         raise AssertionError("accepted a virtual subclass as a namespace")
+    constructor, args, state = original.__reduce__()
+    assert constructor is Initialized and args == ()
+    assert state is vars(original)
+    state["through_state"] = True
+    assert original.through_state
     print("passed")

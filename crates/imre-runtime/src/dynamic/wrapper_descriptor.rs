@@ -154,7 +154,9 @@ impl BuiltinDescriptor {
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
             }
-            Some((namespace::CLASS, attr)) => Some((namespace::CLASS, attr, &["__replace__"][..])),
+            Some((namespace::CLASS, attr)) => {
+                Some((namespace::CLASS, attr, &["__reduce__", "__replace__"][..]))
+            }
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
             }
@@ -425,6 +427,12 @@ impl BuiltinDescriptor {
                     ("__length_hint__", _) => "Private method returning an estimate of len(list(it)).",
                     _ => "Return state information for pickling.",
                 })
+            }
+            "__doc__" if self.owner == namespace::CLASS && self.name == "__reduce__" => {
+                ctx.text("Return state information for pickling")
+            }
+            "__text_signature__" if self.owner == namespace::CLASS && self.name == "__reduce__" => {
+                ctx.text("($self, /)")
             }
             "__doc__" if self.owner == namespace::CLASS && self.name == "__replace__" => ctx.text(
                 "Return a copy of the namespace object with new values for the specified attributes.",
