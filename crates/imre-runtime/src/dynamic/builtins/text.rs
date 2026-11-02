@@ -1737,13 +1737,25 @@ pub(super) fn method(
                 &collected
             }
         };
-        if let [item] = values {
-            return ctx
-                .string_storage(*item)
-                .ok_or_else(|| type_error("expected str"));
+        let mut surrogate = matches!(
+            ctx.heap.get(ctx.scalar_value(receiver)),
+            Value::SurrogateStr(_)
+        );
+        for (index, &item) in values.iter().enumerate() {
+            let Some(storage) = ctx.string_storage(item) else {
+                let class = ctx.exact_type(item)?;
+                let name = ctx.class_name(class);
+                return Err(type_error(format!(
+                    "sequence item {index}: expected str instance, {} found",
+                    &name[..name.floor_char_boundary(80)]
+                )));
+            };
+            if values.len() == 1 {
+                return Ok(storage);
+            }
+            surrogate |= matches!(ctx.heap.get(storage), Value::SurrogateStr(_));
         }
-        let surrogate = |id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_));
-        if surrogate(receiver) || values.iter().copied().any(surrogate) {
+        if surrogate {
             let sep = ctx.string_codepoints(receiver)?;
             let mut output = Vec::new();
             for (index, &item) in values.iter().enumerate() {
