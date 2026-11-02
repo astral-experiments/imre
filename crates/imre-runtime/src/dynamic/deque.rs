@@ -108,21 +108,11 @@ pub(super) fn member(name: &str) -> Option<&'static Member> {
 
 /// Expose the immutable native type's own members through the same objects as class lookup.
 pub(super) fn class_dictionary(ctx: &mut Context, class: Id) -> Result<Id> {
-    const STORAGE: &str = "<collections.deque namespace>";
-    let dictionary = if let Some(&dictionary) = ctx.builtins.get(STORAGE) {
-        dictionary
-    } else {
-        let mut entries = Vec::with_capacity(MEMBERS.len() + 1);
-        for name in MEMBERS.iter().map(|entry| entry.name).chain(["__module__"]) {
-            let key = ctx.heap.code_name(name);
-            let value = ctx.lookup_attr(class, name)?;
-            entries.push((key, value));
-        }
-        let dictionary = ctx.dict(entries);
-        ctx.builtins.insert(STORAGE.into(), dictionary);
-        dictionary
-    };
-    Ok(ctx.alloc(Value::MappingProxy(dictionary)))
+    ctx.native_class_dictionary(
+        class,
+        "<collections.deque namespace>",
+        MEMBERS.iter().map(|entry| entry.name),
+    )
 }
 
 pub(super) enum IndexOp {
