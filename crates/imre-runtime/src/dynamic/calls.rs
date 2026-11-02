@@ -2109,16 +2109,26 @@ impl Context {
                 owner, anonymous, ..
             } if matches!(
                 name,
-                "obj" | "readonly" | "nbytes" | "itemsize" | "format" | "shape" | "ndim" | "strides" | "suboffsets" | "c_contiguous" | "f_contiguous" | "contiguous"
+                "obj"
+                    | "readonly"
+                    | "nbytes"
+                    | "itemsize"
+                    | "format"
+                    | "shape"
+                    | "ndim"
+                    | "strides"
+                    | "suboffsets"
+                    | "c_contiguous"
+                    | "f_contiguous"
+                    | "contiguous"
             ) =>
             {
                 let owner = Self::memoryview_owner(owner)?;
                 let view = self.view_layout(obj)?;
                 let len = view.len;
-                let (format, width, readonly) = match self.heap.get(self.view_storage_id(owner)) {
-                    Value::Array(array) => { let (fmt,w) = array.view_layout(); (fmt,w,false) },
-                    Value::Bytes(_) => ("B",1,true),
-                    _ => ("B",1,false),
+                let (format, width) = match self.heap.get(self.view_storage_id(owner)) {
+                    Value::Array(array) => array.view_layout(),
+                    _ => ("B", 1),
                 };
                 return Ok(match name {
                     "obj" => {
@@ -2128,11 +2138,16 @@ impl Context {
                             owner
                         }
                     }
-                    "readonly" => builtins::boolean(readonly || self.view_is_readonly(obj)?),
+                    "readonly" => builtins::boolean(self.view_is_readonly(obj)?),
                     "ndim" => self.int(1),
-                    "strides" => { let stride = self.int(view.stride.wrapping_mul(width as i64)); self.alloc(Value::Tuple(vec![stride])) },
+                    "strides" => {
+                        let stride = self.int(view.stride.wrapping_mul(width as i64));
+                        self.alloc(Value::Tuple(vec![stride]))
+                    }
                     "suboffsets" => self.alloc(Value::Tuple(vec![])),
-                    "contiguous" | "c_contiguous" | "f_contiguous" => builtins::boolean(len <= 1 || view.stride == 1),
+                    "contiguous" | "c_contiguous" | "f_contiguous" => {
+                        builtins::boolean(len <= 1 || view.stride == 1)
+                    }
                     "nbytes" => self.int((len * width) as i64),
                     "itemsize" => self.int(width as i64),
                     "format" => self.text(format),

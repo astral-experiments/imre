@@ -295,7 +295,16 @@ pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
 pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
     if let Some((storage, _)) = ctx.writable_byte_span(object)? {
         // Some paths validate before delegating. Keep a callback's byte window intact.
-        return Ok(if matches!(ctx.heap.get(object), Value::MemoryView { .. } | Value::BytesIoBuffer {..}) { object } else { storage });
+        return Ok(
+            if matches!(
+                ctx.heap.get(object),
+                Value::MemoryView { .. } | Value::BytesIoBuffer { .. }
+            ) {
+                object
+            } else {
+                storage
+            },
+        );
     }
     let kind = if object == NONE {
         "None"
@@ -310,7 +319,9 @@ pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
 
 pub(super) fn readinto_bytes(ctx: &mut Context, object: Id) -> Result<&mut [u8]> {
     let object = readinto_target(ctx, object)?;
-    let (target, range) = ctx.writable_byte_span(object)?.expect("validated writable buffer");
+    let (target, range) = ctx
+        .writable_byte_span(object)?
+        .expect("validated writable buffer");
     let bytes = ctx.writable_storage_bytes(target)?;
     Ok(&mut bytes[range])
 }

@@ -241,7 +241,10 @@ impl Writer {
                 if b.len() < self.capacity
                     && matches!(
                         ctx.buffer_storage(id)?,
-                        Value::ByteArray(_) | Value::Array(_) | Value::BytesIoStorage(_) | Value::RawReadWindow(_)
+                        Value::ByteArray(_)
+                            | Value::Array(_)
+                            | Value::BytesIoStorage(_)
+                            | Value::RawReadWindow(_)
                     ) =>
             {
                 Some(id)
@@ -369,7 +372,10 @@ impl Writer {
             && files::output_bytes(ctx, args[0])?.len() >= self.capacity
             && matches!(
                 ctx.buffer_storage(args[0])?,
-                Value::ByteArray(_) | Value::Array(_) | Value::BytesIoStorage(_) | Value::RawReadWindow(_)
+                Value::ByteArray(_)
+                    | Value::Array(_)
+                    | Value::BytesIoStorage(_)
+                    | Value::RawReadWindow(_)
             )
             && native_writer(ctx, raw).is_none()
         {

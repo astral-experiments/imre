@@ -21,10 +21,16 @@ fn copied(data: &[u8]) -> Result<Bytes> {
 
 impl Memory {
     pub(crate) fn new(data: crate::BytesOwner) -> Self {
-        Self { size: data.len(), data, position: 0 }
+        Self {
+            size: data.len(),
+            data,
+            position: 0,
+        }
     }
 
-    pub(crate) fn bytes(&self) -> &[u8] { &self.data[..self.size] }
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.data[..self.size]
+    }
 
     // A failed __init__ resets the logical length while prior exports retain their full span.
     pub(crate) fn reset_position_and_size(&mut self) {
@@ -32,12 +38,14 @@ impl Memory {
         self.size = 0;
     }
 
-    pub(crate) fn storage(&self) -> &[u8] { &self.data }
+    pub(crate) fn storage(&self) -> &[u8] {
+        &self.data
+    }
 
     pub(crate) fn storage_mut(&mut self) -> Result<&mut Vec<u8>> {
         if crate::BytesOwner::get_mut(&mut self.data).is_none() {
-            self.data = crate::BytesOwner::try_new(copied(&self.data)?)
-                .map_err(|_| Error::allocation())?;
+            self.data =
+                crate::BytesOwner::try_new(copied(&self.data)?).map_err(|_| Error::allocation())?;
         }
         Ok(crate::BytesOwner::get_mut(&mut self.data).unwrap())
     }
@@ -92,10 +100,17 @@ impl Memory {
     }
     pub(crate) fn seek_memory(&mut self, offset: i64, whence: i32) -> Result<u64> {
         let at = match whence {
-            0 => SeekFrom::Start(u64::try_from(offset).map_err(|_| Error::new(Kind::ValueError, format!("negative seek value {offset}")))?),
+            0 => SeekFrom::Start(u64::try_from(offset).map_err(|_| {
+                Error::new(Kind::ValueError, format!("negative seek value {offset}"))
+            })?),
             1 => SeekFrom::Current(offset),
             2 => SeekFrom::End(offset),
-            _ => return Err(Error::new(Kind::ValueError, format!("invalid whence ({whence}, should be 0, 1 or 2)"))),
+            _ => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("invalid whence ({whence}, should be 0, 1 or 2)"),
+                ));
+            }
         };
         self.seek(at)
     }
@@ -121,7 +136,11 @@ impl Memory {
     }
 
     /// Shrink a memory buffer without changing its cursor. Larger sizes leave the contents intact.
-    pub(crate) fn truncate_memory(&mut self, size: Option<i64>, retain_storage: bool) -> Result<(u64, bool)> {
+    pub(crate) fn truncate_memory(
+        &mut self,
+        size: Option<i64>,
+        retain_storage: bool,
+    ) -> Result<(u64, bool)> {
         let size = match size {
             None => self.position,
             Some(n) => u64::try_from(n)
@@ -137,11 +156,11 @@ impl Memory {
                     .map_err(|_| Error::allocation())?;
             }
         }
-        if changed { self.size = size as usize; }
+        if changed {
+            self.size = size as usize;
+        }
         Ok((size, changed))
     }
-
-
 }
 
 impl FileState {
@@ -228,7 +247,9 @@ impl FileState {
 
     /// Validate BytesIO's whence and apply it to the shared native cursor.
     pub(crate) fn seek_memory(&mut self, offset: i64, whence: i32) -> Result<u64> {
-        let Stream::Memory(memory) = self.stream()? else { unreachable!() };
+        let Stream::Memory(memory) = self.stream()? else {
+            unreachable!()
+        };
         memory.seek_memory(offset, whence)
     }
 

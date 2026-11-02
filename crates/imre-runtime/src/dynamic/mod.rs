@@ -376,8 +376,16 @@ impl Context {
             Value::Array(a) => Ok(a.as_bytes()),
             Value::RawReadWindow(w) => self.window_bytes(*w),
             Value::BytesIoStorage(Some(file)) => Ok(file.storage()),
-            Value::BytesIoStorage(None) => Err(Error::new("ValueError", "I/O operation on closed file.")),
-            _ => Err(Error::new("TypeError", format!("a bytes-like object is required, not '{}'", self.type_name(owner)))),
+            Value::BytesIoStorage(None) => {
+                Err(Error::new("ValueError", "I/O operation on closed file."))
+            }
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(owner)
+                ),
+            )),
         }
     }
 
@@ -397,7 +405,9 @@ impl Context {
         match value {
             Value::ByteArray(bytes) => Ok(bytes.as_mut_slice()),
             Value::Array(a) => Ok(a.as_bytes_mut()?),
-            Value::BytesIoStorage(Some(file)) => Ok(std::rc::Rc::make_mut(file).storage_mut()?.as_mut_slice()),
+            Value::BytesIoStorage(Some(file)) => {
+                Ok(std::rc::Rc::make_mut(file).storage_mut()?.as_mut_slice())
+            }
             _ => Err(Error::new("TypeError", "cannot modify read-only memory")),
         }
     }
@@ -418,7 +428,13 @@ impl Context {
                 _ => Err(Error::new("ValueError", "I/O operation on closed file.")),
             },
             Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
-            _ => Err(Error::new("TypeError", format!("a bytes-like object is required, not '{}'", self.type_name(id)))),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(id)
+                ),
+            )),
         }
     }
 
@@ -430,14 +446,23 @@ impl Context {
     }
 
     fn invalidate_stream_snapshot(&self, owner: Id) {
-        if let Value::BytesIoBuffer {stream, ..} = self.heap.get(owner)
-            && let Value::Instance {memory_stream: Some(stdlib::io::MemoryStream::Bytes(state)), ..} = self.heap.get(*stream) {
+        if let Value::BytesIoBuffer { stream, .. } = self.heap.get(owner)
+            && let Value::Instance {
+                memory_stream: Some(stdlib::io::MemoryStream::Bytes(state)),
+                ..
+            } = self.heap.get(*stream)
+        {
             state.snapshot.set(None);
         }
     }
 
     fn view_is_readonly(&self, view: Id) -> Result<bool> {
-        let Value::MemoryView {owner, readonly, ..} = *self.heap.get(view) else { unreachable!() };
+        let Value::MemoryView {
+            owner, readonly, ..
+        } = *self.heap.get(view)
+        else {
+            unreachable!()
+        };
         let owner = Self::memoryview_owner(owner)?;
         Ok(readonly || matches!(self.heap.get(self.view_storage_id(owner)), Value::Bytes(_)))
     }
@@ -446,22 +471,60 @@ impl Context {
         self.check_buffer_exporter(object)?;
         let (owner, anonymous, layout) = match *self.heap.get(self.scalar_value(object)) {
             Value::Bytes(_) | Value::ByteArray(_) => (object, false, None),
-            Value::MemoryView { owner, anonymous, layout, .. } => (Self::memoryview_owner(owner)?, anonymous, layout),
+            Value::MemoryView {
+                owner,
+                anonymous,
+                layout,
+                ..
+            } => (Self::memoryview_owner(owner)?, anonymous, layout),
             Value::BytesIoBuffer { .. } => {
                 let len = self.view_element_count(object)?;
                 self.invalidate_stream_snapshot(object);
-                (object, false, Some(memoryview::ViewLayout {start: 0, len, stride: 1}))
+                (
+                    object,
+                    false,
+                    Some(memoryview::ViewLayout {
+                        start: 0,
+                        len,
+                        stride: 1,
+                    }),
+                )
             }
             Value::Array(ref a) if a.view_layout().0 != "w" => (object, false, None),
-            Value::Array(_) => return Err(Error::new("NotImplementedError", "memoryview of a mutable buffer is unsupported")),
-            _ => return Err(Error::new("TypeError", format!("memoryview: a bytes-like object is required, not '{}'", self.type_name(object)))),
+            Value::Array(_) => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "memoryview of a mutable buffer is unsupported",
+                ));
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "memoryview: a bytes-like object is required, not '{}'",
+                        self.type_name(object)
+                    ),
+                ));
+            }
         };
         let storage = self.view_storage_id(owner);
-        if matches!(self.heap.get(storage), Value::Array(_) | Value::ByteArray(_) | Value::BytesIoStorage(_)) {
+        if matches!(
+            self.heap.get(storage),
+            Value::Array(_) | Value::ByteArray(_) | Value::BytesIoStorage(_)
+        ) {
             self.heap.note_buffer_view(storage);
         }
-        let readonly = matches!(self.heap.get(object), Value::MemoryView {readonly: true,..});
-        Ok(self.alloc(Value::MemoryView { owner: Some(owner), anonymous, layout, readonly, hash: None }))
+        let readonly = matches!(
+            self.heap.get(object),
+            Value::MemoryView { readonly: true, .. }
+        );
+        Ok(self.alloc(Value::MemoryView {
+            owner: Some(owner),
+            anonymous,
+            layout,
+            readonly,
+            hash: None,
+        }))
     }
 
     /// Keep the buffer exported while an argument conversion runs Python.
@@ -473,7 +536,11 @@ impl Context {
         let input = self.scalar_value(input);
         if !matches!(
             self.heap.get(input),
-            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. } | Value::BytesIoBuffer { .. } | Value::BytesIoStorage(_)
+            Value::ByteArray(_)
+                | Value::Array(_)
+                | Value::MemoryView { .. }
+                | Value::BytesIoBuffer { .. }
+                | Value::BytesIoStorage(_)
         ) {
             return convert(self);
         }

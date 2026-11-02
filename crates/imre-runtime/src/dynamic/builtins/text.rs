@@ -1573,7 +1573,11 @@ pub(super) fn method(
             ctx.check_buffer_exporter(needle)?;
             let byte;
             let needle = match ctx.heap.get(ctx.scalar_value(needle)) {
-                Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView {..} | Value::BytesIoBuffer {..} | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
+                Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::MemoryView { .. }
+                | Value::BytesIoBuffer { .. }
+                | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
                 _ => {
                     let index = ctx.index_value(needle)?.ok_or_else(|| {
                         type_error(format!(

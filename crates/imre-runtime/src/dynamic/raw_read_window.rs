@@ -86,7 +86,11 @@ impl Context {
 
     pub(super) fn writable_byte_span(&self, object: Id) -> Result<Option<(Id, Range<usize>)>> {
         self.check_buffer_exporter(object)?;
-        if matches!(self.heap.get(object), Value::MemoryView {..}) && self.view_is_readonly(object)? { return Ok(None); }
+        if matches!(self.heap.get(object), Value::MemoryView { .. })
+            && self.view_is_readonly(object)?
+        {
+            return Ok(None);
+        }
         if let Some(w) = self.raw_read_window(object) {
             self.window_bytes(w)?;
             return Ok(Some((w.backing, w.start..w.start + w.len)));
@@ -96,7 +100,7 @@ impl Context {
                 let owner = Self::memoryview_owner(owner)?;
                 let view = self.view_layout(object)?;
                 if view.len > 1 && view.stride != 1 {
-                    return Err(Error::new("BufferError", "memoryview: underlying buffer is not C-contiguous"));
+                    return Ok(None);
                 }
                 let width = match self.heap.get(self.view_storage_id(owner)) {
                     Value::Array(a) => a.view_layout().1,
@@ -104,12 +108,17 @@ impl Context {
                 };
                 (owner, view.start * width, view.len * width)
             }
-            Value::BytesIoBuffer {..} => (object, 0, self.view_element_count(object)?),
-            _ => { let storage = self.scalar_value(object); return Ok(self.mutable_storage_len(storage).map(|n| (storage, 0..n))); }
+            Value::BytesIoBuffer { .. } => (object, 0, self.view_element_count(object)?),
+            _ => {
+                let storage = self.scalar_value(object);
+                return Ok(self.mutable_storage_len(storage).map(|n| (storage, 0..n)));
+            }
         };
         self.invalidate_stream_snapshot(owner);
         let storage = self.view_storage_id(owner);
-        Ok(self.mutable_storage_len(storage).map(|_| (storage, start..start+len)))
+        Ok(self
+            .mutable_storage_len(storage)
+            .map(|_| (storage, start..start + len)))
     }
 
     fn raw_view_index(&mut self, id: Id, key: Id) -> Result<usize> {
@@ -158,7 +167,9 @@ impl Context {
 
     pub(super) fn raw_view_set(&mut self, id: Id, key: Id, value: Id) -> Result<()> {
         let w = self.checked_window(id)?;
-        if self.view_is_readonly(id)? {return Err(Error::new("TypeError", "cannot modify read-only memory"));}
+        if self.view_is_readonly(id)? {
+            return Err(Error::new("TypeError", "cannot modify read-only memory"));
+        }
         self.with_buffer_export(w.backing, |ctx| {
             let (range, input) = if let Value::Slice(parts) = *ctx.heap.get(key) {
                 let range = ctx.raw_view_slice(id, parts)?;

@@ -40,15 +40,16 @@ pub(super) fn call(
     };
     let capacity = range.len();
     // Keep the destination exported while looking up and calling the reader override.
-    let data = ctx.with_buffer_export(*buffer, |ctx| ctx.with_buffer_export(target, |ctx| {
-        let method = if name == "readinto1" { "read1" } else { "read" };
-        let read = ctx.lookup_attr(receiver, method)?;
-        let size = ctx.int(capacity as i64);
-        ctx.call(read, vec![size], Vec::new())
-    }))?;
+    let data = ctx.with_buffer_export(*buffer, |ctx| {
+        ctx.with_buffer_export(target, |ctx| {
+            let method = if name == "readinto1" { "read1" } else { "read" };
+            let read = ctx.lookup_attr(receiver, method)?;
+            let size = ctx.int(capacity as i64);
+            ctx.call(read, vec![size], Vec::new())
+        })
+    })?;
     let source = ctx.scalar_value(data);
-    let Some((Value::Bytes(bytes), destination)) =
-        ctx.heap.source_and_target(source, target)
+    let Some((Value::Bytes(bytes), destination)) = ctx.heap.source_and_target(source, target)
     else {
         return Err(Error::new("TypeError", "read() should return bytes"));
     };
@@ -60,6 +61,6 @@ pub(super) fn call(
         ));
     }
     let destination = Context::mutable_storage_bytes(destination)?;
-    destination[range.start..range.start+count].copy_from_slice(bytes);
+    destination[range.start..range.start + count].copy_from_slice(bytes);
     Ok(ctx.int(count as i64))
 }

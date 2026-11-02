@@ -86,7 +86,11 @@ pub(super) fn call_openssl(
 /// Borrows the bytes of a boxed hash input, including mutable buffers.
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
     match ctx.heap.get(ctx.scalar_value(id)) {
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView {..} | Value::BytesIoBuffer {..} | Value::Array(_) => ctx.native_buffer_bytes(id),
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::MemoryView { .. }
+        | Value::BytesIoBuffer { .. }
+        | Value::Array(_) => ctx.native_buffer_bytes(id),
         Value::Str(_) => Err(Error::new(
             "TypeError",
             "Strings must be encoded before hashing",

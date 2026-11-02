@@ -376,8 +376,14 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
 }
 
 pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
-    "__enter__", "__exit__", "release", "tobytes", "toreadonly",
-    "__getitem__", "__setitem__", "__delitem__",
+    "__enter__",
+    "__exit__",
+    "release",
+    "tobytes",
+    "toreadonly",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
 ];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
@@ -1377,15 +1383,27 @@ pub(super) fn call(
             }
             "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
                 if method == "tobytes" {
-                    if args.is_empty() { return Err(type_error("unbound method memoryview.tobytes() needs an argument")); }
-                    let [order] = bind_method_arguments("tobytes", &args[1..], kwargs, ["order"], 1)?;
+                    if args.is_empty() {
+                        return Err(type_error(
+                            "unbound method memoryview.tobytes() needs an argument",
+                        ));
+                    }
+                    let [order] =
+                        bind_method_arguments("tobytes", &args[1..], kwargs, ["order"], 1)?;
                     if let Some(order) = order.filter(|&id| id != NONE) {
-                        let value = ctx.str_value(order).map_err(|_| type_error(format!("tobytes() argument 'order' must be str or None, not {}",ctx.type_name(order))))?;
+                        let value = ctx.str_value(order).map_err(|_| {
+                            type_error(format!(
+                                "tobytes() argument 'order' must be str or None, not {}",
+                                ctx.type_name(order)
+                            ))
+                        })?;
                         if !matches!(value, "C" | "F" | "A") {
                             return Err(Error::new("ValueError", "order must be 'C', 'F' or 'A'"));
                         }
                     }
-                    if !matches!(ctx.heap.get(args[0]), Value::MemoryView {..}) {return Err(type_error("expected memoryview"));}
+                    if !matches!(ctx.heap.get(args[0]), Value::MemoryView { .. }) {
+                        return Err(type_error("expected memoryview"));
+                    }
                     let bytes = ctx.memoryview_bytes(args[0])?;
                     return Ok(ctx.alloc(Value::Bytes(bytes)));
                 }
@@ -1394,9 +1412,13 @@ pub(super) fn call(
                 let max_args = if method == "__exit__" { usize::MAX } else { 1 };
                 arity(name, args, 1, max_args)?;
                 if method == "toreadonly" {
-                    if !matches!(ctx.heap.get(args[0]), Value::MemoryView {..}) {return Err(type_error("expected memoryview"));}
+                    if !matches!(ctx.heap.get(args[0]), Value::MemoryView { .. }) {
+                        return Err(type_error("expected memoryview"));
+                    }
                     let child = ctx.new_memoryview(args[0])?;
-                    if let Value::MemoryView { readonly, .. } = ctx.heap.get_mut(child) { *readonly = true; }
+                    if let Value::MemoryView { readonly, .. } = ctx.heap.get_mut(child) {
+                        *readonly = true;
+                    }
                     return Ok(child);
                 }
                 let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {

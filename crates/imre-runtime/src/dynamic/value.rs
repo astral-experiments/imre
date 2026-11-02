@@ -785,7 +785,10 @@ pub(super) enum Value {
     Bytes(Vec<u8>),
     RawReadWindow(super::raw_read_window::Window),
     BytesIoStorage(Option<std::rc::Rc<crate::objects::Memory>>),
-    BytesIoBuffer { stream: Id, storage: Id },
+    BytesIoBuffer {
+        stream: Id,
+        storage: Id,
+    },
     /// A contiguous view retains its original exporter until release.
     MemoryView {
         owner: Option<Id>,
