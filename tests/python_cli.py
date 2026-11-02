@@ -11,6 +11,58 @@ import tempfile
 from pathlib import Path
 
 
+def check_command_stdin(imre, run):
+    source = (
+        "import os, sys\n"
+        "from io import BytesIO, StringIO\n"
+        "s = sys.stdin\n"
+        "assert s is sys.__stdin__ and s.fileno() == 0 and not s.buffer.raw.closefd\n"
+        "print(s.name, repr(input()), repr(s.readline()), repr(s.read(1)), repr(s.read()), repr(s.read()))\n"
+        "s.close()\n"
+        "print(os.read(0, 1))\n"
+        "sys.stdin = StringIO('redirected\\n')\n"
+        "print(input())\n"
+        "sys.stdin = BytesIO(b'binary\\n')\n"
+        "modules = sys.modules\n"
+        "original_sys = modules['sys']\n"
+        "modules['sys'] = None\n"
+        "result = input()\n"
+        "modules['sys'] = original_sys\n"
+        "print(result)\n"
+    )
+    # Hold the write end open until each read returns. The alarm also bounds the
+    # compiled child if a regression makes it wait for another write or EOF.
+    live_pipe = (
+        "import os, signal, sys\n"
+        "read_fd, write_fd = os.pipe()\n"
+        "os.dup2(read_fd, 0)\n"
+        "os.close(read_fd)\n"
+        "signal.alarm(5)\n"
+        "os.write(write_fd, b'line\\n')\n"
+        "assert input() == 'line'\n"
+        "buffer = sys.stdin.buffer\n"
+        "os.write(write_fd, b'ab')\n"
+        "assert buffer.read1(0) == b'' and buffer.read1(1) == b'a'\n"
+        "assert os.read(0, 1) == b'b'\n"
+        "os.write(write_fd, b'xyz')\n"
+        "assert buffer.read(1) == b'x' and buffer.read1(-1) == b'yz'\n"
+        "os.close(write_fd)\n"
+        "assert buffer.read1() == b''\n"
+        "signal.alarm(0)\n"
+    )
+    cases = [
+        ("import sys; print(repr(sys.stdin.read()))", b""),
+        (source, "one\r\ntwo\nλtail".encode()),
+    ]
+    if os.name == "posix":
+        cases.append((live_pipe, b""))
+    for command, data in cases:
+        reference = run(sys.executable, "-B", "-c", command, stdin=data)
+        actual = run(imre, "-B", "-c", command, stdin=data)
+        assert reference.returncode == actual.returncode == 0, (reference.stderr, actual.stderr)
+        assert actual.stdout == reference.stdout and actual.stderr == reference.stderr == b""
+
+
 def check_io_compaction_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "refuse_io_compaction.c"
     wrapper = root / "refuse_io_compaction.o"
@@ -980,6 +1032,8 @@ def main():
             actual = run(exe, "-B", "-c", "import reader", stdin="one\r\n\nλ".encode())
             assert actual.returncode == 0 and not actual.stderr, actual.stderr
             assert actual.stdout == "'one\\r'\n''\n'λ'\nEOF\n".encode()
+
+        check_command_stdin(imre, run)
 
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
