@@ -486,11 +486,12 @@ pub(super) fn call(
                     result => result,
                 };
             }
-            let fd = reg_fd(ctx, &handle, obj)?;
-            let entry = builtins::call(ctx, "dict.pop", &[keys, fd, NONE], &[])?;
-            if entry == NONE {
-                return missing(ctx, obj);
-            }
+            let entry = reg_fd(ctx, &handle, obj)
+                .and_then(|fd| builtins::call(ctx, "dict.pop", &[keys, fd], &[]));
+            let entry = match entry {
+                Err(e) if ctx.is_builtin_error(&e, "KeyError") => return missing(ctx, obj),
+                result => result?,
+            };
             let key = Registration::unpack(ctx, entry).key;
             ctx.heap.keep(key);
             if handle.borrow().poll.is_some() {
