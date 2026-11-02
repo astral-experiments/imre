@@ -1570,6 +1570,11 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("inspect.BoundArguments")
             }
             (Self::Inspect, "getmodule") => Intrinsic::ObjectRuntimeExport("inspect.getmodule"),
+            (Self::Inspect, "isroutine") => Intrinsic::ObjectRuntimeExport("inspect.isroutine"),
+            (Self::Inspect, "ismethodwrapper") => {
+                Intrinsic::ObjectRuntimeExport("inspect.ismethodwrapper")
+            }
+            (Self::Inspect, "isbuiltin") => Intrinsic::ObjectRuntimeExport("inspect.isbuiltin"),
             (Self::Inspect, "signature") => Intrinsic::ObjectRuntimeExport("inspect.signature"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
@@ -1717,6 +1722,9 @@ impl IntrinsicModule {
             (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "partial") => Intrinsic::Partial,
+            (Self::Functools, "singledispatchmethod") => {
+                Intrinsic::ObjectRuntimeExport("functools.singledispatchmethod")
+            }
             (Self::Functools, "partialmethod") => {
                 Intrinsic::ObjectRuntimeExport("functools.partialmethod")
             }
