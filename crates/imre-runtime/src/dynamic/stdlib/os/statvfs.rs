@@ -69,16 +69,16 @@ pub(in crate::dynamic::stdlib) fn call(
     let s = unsafe { output.assume_init() };
     // CPython converts the ten tuple fields through C long/long long, but f_fsid is unsigned.
     let values = [
-        s.f_bsize as libc::c_long as i64,
-        s.f_frsize as libc::c_long as i64,
+        s.f_bsize as libc::c_long,
+        s.f_frsize as libc::c_long,
         s.f_blocks as i64,
         s.f_bfree as i64,
         s.f_bavail as i64,
         s.f_files as i64,
         s.f_ffree as i64,
         s.f_favail as i64,
-        s.f_flag as libc::c_long as i64,
-        s.f_namemax as libc::c_long as i64,
+        s.f_flag as libc::c_long,
+        s.f_namemax as libc::c_long,
     ]
     .into_iter()
     .map(|n| ctx.int(n))

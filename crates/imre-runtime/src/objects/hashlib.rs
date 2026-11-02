@@ -140,12 +140,9 @@ impl State {
     fn new(algorithm: Algorithm, class: Option<&'static str>) -> Self {
         // Compatibility aliases select the generic native constructor even when
         // their canonical spelling is provided by a dedicated Python class.
-        let class = class.unwrap_or_else(|| {
-            if matches!(algorithm, Algorithm::Shake128(_) | Algorithm::Shake256(_)) {
-                Self::XOF_CLASS
-            } else {
-                Self::CLASS
-            }
+        let class = class.unwrap_or(match algorithm {
+            Algorithm::Shake128(_) | Algorithm::Shake256(_) => Self::XOF_CLASS,
+            _ => Self::CLASS,
         });
         Self { algorithm, class }
     }

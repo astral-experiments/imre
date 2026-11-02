@@ -52,7 +52,7 @@ pub(crate) fn file_encoding(name: Option<&str>) -> Cow<'_, str> {
 /// Return the locale codeset even when UTF-8 mode overrides the default file encoding.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_locale_encoding() -> *const crate::Str {
-    crate::StrOwner::into_raw(crate::StrOwner::new(crate::Str::new(&file_encoding(Some(
+    crate::StrOwner::into_raw(crate::StrOwner::new(crate::Str::new(file_encoding(Some(
         "locale",
     )))))
 }
@@ -116,8 +116,11 @@ pub(super) fn initialize(isolated: bool, utf8: Option<bool>) {
             // SAFETY: both interpreter entry points initialize before running user code
             // or starting threads. Do not mutate the environment from lazy settings reads.
             unsafe { std::env::set_var("LC_CTYPE", name) };
-            // CPython reapplies the environment for all categories after coercion.
-            with_process_locale(|| unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) });
+            with_process_locale(|| {
+                // SAFETY: the locale lock serializes this startup update, and the
+                // static empty C string selects the environment for all categories.
+                unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) };
+            });
         }
     });
 }
