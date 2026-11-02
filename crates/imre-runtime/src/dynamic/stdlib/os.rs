@@ -17,10 +17,17 @@ pub(in crate::dynamic) fn install_capabilities(
     for (capability, functions) in [
         (
             "supports_dir_fd",
-            &["lstat", "mkdir", "open", "rmdir", "stat", "unlink"][..],
+            &["chmod", "lstat", "mkdir", "open", "rmdir", "stat", "unlink"][..],
         ),
-        ("supports_fd", &["listdir", "scandir", "stat"][..]),
-        ("supports_follow_symlinks", &["stat"][..]),
+        ("supports_fd", &["chmod", "listdir", "scandir", "stat"][..]),
+        (
+            "supports_follow_symlinks",
+            &[
+                #[cfg(target_os = "macos")]
+                "chmod",
+                "stat",
+            ][..],
+        ),
         ("supports_effective_ids", &[][..]),
     ] {
         let set = ctx.alloc(Value::Set {
@@ -306,6 +313,7 @@ pub(super) fn change_environment(
     Ok(NONE)
 }
 
+mod chmod;
 mod unlink;
 
 /// POSIX functions exported as the same builtins by both os and posix.
@@ -318,6 +326,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "unlink"
             | "rmdir"
             | "mkdir"
+            | "chmod"
             | "dup"
             | "dup2"
             | "isatty"
@@ -337,6 +346,44 @@ fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+enum PathArg {
+    Fd(i32),
+    Name(CString),
+}
+
+/// Convert a POSIX path and retain the Python spelling for audits and OSError.filename.
+fn path_or_fd(
+    ctx: &mut Context,
+    name: &str,
+    path: Id,
+    allow_fd: bool,
+    warn_bool_fd: fn(&Context, Id) -> Result<()>,
+) -> Result<(PathArg, Id)> {
+    let spelling = matches!(
+        ctx.heap.get(ctx.scalar_value(path)),
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+    );
+    if allow_fd
+        && !spelling
+        && let Some(index) = ctx.index_value(path)?
+    {
+        warn_bool_fd(ctx, path)?;
+        return Ok((PathArg::Fd(native::directory_fd_number(&index)?), path));
+    }
+    let kinds = if allow_fd {
+        "string, bytes, os.PathLike or integer"
+    } else {
+        "string, bytes or os.PathLike"
+    };
+    let filename = posixpath::path_arg(ctx, path, &format!("{name}: path should be {kinds}"))?;
+    let pathname = c_path(
+        ctx,
+        filename,
+        &format!("{name}: embedded null character in path"),
+    )?;
+    Ok((PathArg::Name(pathname), filename))
 }
 
 /// Convert an optional dir_fd after the path and preceding arguments.
@@ -441,6 +488,9 @@ pub(super) fn descriptor(
     }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
+    }
+    if name == "chmod" {
+        return chmod::call(ctx, args, kwargs);
     }
     if name == "mkdir" {
         return mkdir(ctx, args, kwargs);

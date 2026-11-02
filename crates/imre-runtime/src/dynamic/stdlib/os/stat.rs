@@ -1,6 +1,6 @@
 //! POSIX stat and its ten-element Python struct sequence.
-use super::{Context, Error, Id, NONE, Result, Value, builtins, c_int, c_path, native, posixpath};
-use std::ffi::CString;
+use super::PathArg;
+use super::{Context, Error, Id, NONE, Result, Value, builtins, c_int, native};
 use std::io;
 
 pub(in crate::dynamic) const CLASS: &str = "os.stat_result";
@@ -163,11 +163,6 @@ pub(super) fn warn_bool_fd(ctx: &Context, value: Id) -> Result<()> {
     Ok(())
 }
 
-enum PathArg {
-    Fd(i32),
-    Name(CString),
-}
-
 pub(in crate::dynamic::stdlib) fn call(
     ctx: &mut Context,
     name: &str,
@@ -231,32 +226,7 @@ pub(super) fn query(
             ));
         }
         let path = path.expect("path is required");
-        let spelling = matches!(
-            ctx.heap.get(ctx.scalar_value(path)),
-            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
-        );
-        let (arg, filename) = if name == "stat"
-            && !spelling
-            && let Some(index) = ctx.index_value(path)?
-        {
-            warn_bool_fd(ctx, path)?;
-            (PathArg::Fd(native::directory_fd_number(&index)?), path)
-        } else {
-            let expected = if name == "stat" {
-                "stat: path should be string, bytes, os.PathLike or integer"
-            } else {
-                "lstat: path should be string, bytes or os.PathLike"
-            };
-            let spelling = posixpath::path_arg(ctx, path, expected)?;
-            (
-                PathArg::Name(c_path(
-                    ctx,
-                    spelling,
-                    &format!("{name}: embedded null character in path"),
-                )?),
-                spelling,
-            )
-        };
+        let (arg, filename) = super::path_or_fd(ctx, name, path, name == "stat", warn_bool_fd)?;
         let dir = if let Some(id) = dir.filter(|&v| v != NONE) {
             warn_bool_fd(ctx, id)?;
             let index = ctx.index_value(id)?.ok_or_else(|| {
