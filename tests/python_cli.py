@@ -2148,6 +2148,7 @@ def report(text):
             "boxed_urllib_cleanup.py",
             "boxed_urllib_retrieve.py",
             "boxed_socket_timeout.py",
+            "boxed_socketserver_source.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
             "boxed_urllib_http.py",
