@@ -2856,14 +2856,20 @@ impl Context {
                 });
             }
             Value::Native(ref symbol)
-                if name == "__self__"
+                if matches!(name, "__self__" | "__qualname__" | "__module__")
                     && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
-                let owner = owner.to_owned();
-                return Ok(self.builtin(&owner));
+                return Ok(match name {
+                    "__self__" => self.builtin(&owner.to_owned()),
+                    "__qualname__" => {
+                        let class = owner.rsplit('.').next().unwrap_or(owner);
+                        self.text(format!("{class}.__new__"))
+                    }
+                    _ => NONE,
+                });
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "int" | "float") && name == "__new__" =>
+                if matches!(class.as_str(), "int" | "float" | "function") && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
             }
@@ -3586,6 +3592,7 @@ impl Context {
                     return Ok(self.builtin("dict.__new__"));
                 }
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
