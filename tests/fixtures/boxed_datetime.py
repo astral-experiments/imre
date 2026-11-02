@@ -450,6 +450,36 @@ def test_calendar_reduction():
     assert super(Mixed, item).__reduce_ex__(4) == 4
 
 
+def test_fixed_timezone_methods():
+    class Offset(timedelta):
+        pass
+
+    class Name(str):
+        pass
+
+    class Stamp(dt):
+        pass
+
+    offset = Offset(hours=-2, microseconds=1)
+    name = Name("")
+    zone = timezone(offset, name)
+    foreign = Stamp(2020, 1, 1, tzinfo=UTC)
+    assert zone.utcoffset(foreign) is offset and zone.tzname(None) is name
+    assert timezone.dst(zone, foreign) is None
+    assert timezone(offset).tzname(foreign) == "UTC-01:59:59.999999"
+    assert UTC.tzname(None) == "UTC"
+    for descriptor in (timezone.utcoffset, timezone.tzname, timezone.dst):
+        assert descriptor.__objclass__ is timezone
+        assert descriptor.__text_signature__ == "($self, object, /)"
+        try:
+            descriptor(zone, date(2020, 1, 1))
+        except TypeError as exc:
+            assert str(exc) == (descriptor.__name__
+                + "(dt) argument must be a datetime instance or None, not datetime.date")
+        else:
+            raise AssertionError("fixed timezone accepted a plain date")
+
+
 def test_tzinfo_reduction():
     from datetime import tzinfo
 
@@ -522,6 +552,7 @@ def test_calendar_strftime():
 def current():
     test_calendar_strftime()
     test_calendar_reduction()
+    test_fixed_timezone_methods()
     test_tzinfo_reduction()
     test_calendar_format()
     test_timedelta_negation()

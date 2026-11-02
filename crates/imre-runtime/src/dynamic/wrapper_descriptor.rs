@@ -346,6 +346,10 @@ impl BuiltinDescriptor {
                 let value = match (self.name, name) {
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
+                    ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",
+                    ("utcoffset", "__doc__") if self.owner == "datetime.timezone" => "Return fixed offset.",
+                    ("dst", "__doc__") if self.owner == "datetime.timezone" => "Return None.",
+                    ("tzname" | "utcoffset" | "dst", _) if self.owner == "datetime.timezone" => "($self, object, /)",
                     ("__getinitargs__", "__doc__") if self.owner == "datetime.timezone" => "pickle support",
                     ("__getinitargs__", _) if self.owner == "datetime.timezone" => "($self, /)",
                     ("__getstate__" | "__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
