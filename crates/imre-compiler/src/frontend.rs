@@ -9823,10 +9823,12 @@ impl<'a> Checker<'a> {
                     ),
                 ));
             }
+            self.check_namedtuple_asdict(attribute, None)?;
             let receiver = match receiver {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
             if let Some(result) =
                 self.url_result_method(&receiver, attribute.attr.as_str(), call)?
             {
