@@ -6,7 +6,7 @@ use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
-use super::super::{builtins, files, os_error};
+use super::super::{builtins, files, os::stat::warn_bool_fd, os_error};
 use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
 use crate::objects::{BoxedPipe, os};
 
@@ -725,15 +725,7 @@ fn initialize_file(
         *memory_stream = Some(MemoryStream::Raw(raw.clone()));
         raw
     };
-    if matches!(ctx.heap.get(path), Value::Bool(_)) {
-        let location = ctx.heap.current_location();
-        crate::objects::runtime_warning(
-            "_io",
-            location.as_ref().map_or("_io", |p| p.file.as_ref()),
-            location.as_ref().map_or(1, |p| p.line as isize),
-            "bool is used as a file descriptor",
-        )?;
-    }
+    warn_bool_fd(ctx, path)?;
     let descriptor = match descriptor {
         DescriptorLookup::FromArgument => descriptor_from_argument(ctx, path),
         DescriptorLookup::Resolved(fd) => fd,
