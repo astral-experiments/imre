@@ -17,6 +17,7 @@ mod buffered;
 mod gzip;
 mod path_text;
 mod random;
+pub(crate) use random::Random;
 mod seekable;
 mod text_memory;
 use seekable::Memory;

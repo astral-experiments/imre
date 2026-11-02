@@ -1,4 +1,4 @@
-//! Buffered read/write windows on anonymous seekable binary files.
+//! Buffered read/write windows on seekable binary files.
 
 use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
@@ -7,8 +7,8 @@ use std::ops::Range;
 use super::super::exceptions::Result;
 use super::{Bytes, Error, close_file, errno_error};
 
-pub(super) struct Random {
-    file: File,
+pub(crate) struct Random<F = File> {
+    file: F,
     buffer: Vec<u8>,
     // Kernel and Python positions relative to the same window. The descriptor
     // can also move through fileno(), so an absolute starting offset can go stale.
@@ -18,8 +18,8 @@ pub(super) struct Random {
     dirty: Option<Range<usize>>,
 }
 
-impl Random {
-    pub(super) fn new(file: File, capacity: usize) -> Result<Self> {
+impl<F: Read + Write + Seek> Random<F> {
+    pub(crate) fn new(file: F, capacity: usize) -> Result<Self> {
         let mut buffer = Vec::new();
         buffer
             .try_reserve_exact(capacity)
@@ -35,7 +35,7 @@ impl Random {
         })
     }
 
-    pub(super) fn tell(&mut self) -> io::Result<u64> {
+    pub(crate) fn tell(&mut self) -> io::Result<u64> {
         let raw = self.file.stream_position()?;
         Ok(raw.saturating_add_signed(self.pos as i64 - self.raw_pos as i64))
     }
@@ -71,7 +71,7 @@ impl Random {
     }
 
     /// Flush pending edits and leave the descriptor at the caller's logical position.
-    pub(super) fn flush(&mut self) -> io::Result<()> {
+    pub(crate) fn flush(&mut self) -> io::Result<()> {
         self.write_back()?;
         if self.raw_pos != self.pos {
             self.file
@@ -81,12 +81,7 @@ impl Random {
         Ok(())
     }
 
-    pub(super) fn close(mut self) -> io::Result<()> {
-        let flushed = self.flush();
-        close_file(self.file).and(flushed)
-    }
-
-    pub(super) fn seek(&mut self, at: SeekFrom) -> io::Result<u64> {
+    pub(crate) fn seek(&mut self, at: SeekFrom) -> io::Result<u64> {
         let current = self.tell()?;
         let target = match at {
             SeekFrom::Start(n) => Some(n),
@@ -113,7 +108,7 @@ impl Random {
         Ok(position)
     }
 
-    pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+    pub(crate) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
@@ -136,7 +131,7 @@ impl Random {
         Ok(())
     }
 
-    pub(super) fn read_bytes(&mut self, limit: Option<usize>) -> Result<Bytes> {
+    pub(crate) fn read_bytes(&mut self, limit: Option<usize>) -> Result<Bytes> {
         let mut result = Vec::new();
         match limit {
             Some(n) => self.take(n as u64).read_to_end(&mut result),
@@ -158,6 +153,26 @@ impl Random {
         Ok(offset)
     }
 
+    pub(crate) fn capacity(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Read buffered data or issue a single raw read without reading ahead.
+    pub(crate) fn read_once(&mut self, dest: &mut [u8]) -> io::Result<usize> {
+        if dest.is_empty() {
+            return Ok(0);
+        }
+        if self.pos < self.read_end {
+            let count = dest.len().min(self.read_end - self.pos);
+            dest[..count].copy_from_slice(&self.buffer[self.pos..self.pos + count]);
+            self.pos += count;
+            Ok(count)
+        } else {
+            self.flush()?;
+            self.file.read(dest)
+        }
+    }
+
     pub(super) fn readline(&mut self) -> Result<Bytes> {
         let mut result = Vec::new();
         self.read_until(b'\n', &mut result).map_err(errno_error)?;
@@ -165,7 +180,14 @@ impl Random {
     }
 }
 
-impl BufRead for Random {
+impl Random<File> {
+    pub(super) fn close(mut self) -> io::Result<()> {
+        let flushed = self.flush();
+        close_file(self.file).and(flushed)
+    }
+}
+
+impl<F: Read + Write + Seek> BufRead for Random<F> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         if self.pos >= self.read_end {
             self.flush()?;
@@ -180,7 +202,7 @@ impl BufRead for Random {
     }
 }
 
-impl Read for Random {
+impl<F: Read + Write + Seek> Read for Random<F> {
     fn read(&mut self, dest: &mut [u8]) -> io::Result<usize> {
         if dest.is_empty() {
             return Ok(0);

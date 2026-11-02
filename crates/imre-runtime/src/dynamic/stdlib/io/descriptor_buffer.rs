@@ -7,7 +7,7 @@ use std::rc::Rc;
 use super::super::{builtins, files, os_error};
 use super::file_io::RawFile;
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::BoxedPipe;
+use crate::objects::{BoxedPipe, Random};
 
 struct Descriptor {
     handle: Rc<RawFile>,
@@ -151,6 +151,7 @@ fn read_bytes(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Option<Ve
 enum Buffer {
     Reader(BufReader<Descriptor>),
     Writer(BufWriter<Descriptor>),
+    Random(Random<Descriptor>),
     // The process engine allocated this buffer before launching the child.
     Pipe(BoxedPipe),
 }
@@ -159,6 +160,7 @@ impl Buffer {
     fn position(&mut self) -> io::Result<u64> {
         // The caller can reposition the descriptor through another handle.
         match self {
+            Self::Random(file) => file.tell(),
             Self::Pipe(_) => Err(io::Error::from_raw_os_error(libc::ESPIPE)),
             Self::Reader(r) => Ok(r
                 .get_mut()
@@ -170,6 +172,7 @@ impl Buffer {
 
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         let reader = match self {
+            Self::Random(file) => return file.seek(position),
             Self::Pipe(_) => return Err(io::Error::from_raw_os_error(libc::ESPIPE)),
             Self::Reader(r) => r,
             Self::Writer(w) => return w.seek(position),
@@ -202,6 +205,7 @@ impl Buffer {
 pub(in crate::dynamic) struct BufferedFd {
     pub(in crate::dynamic) raw: Id,
     pub(in crate::dynamic) reading: bool,
+    pub(in crate::dynamic) writing: bool,
     handle: Rc<RawFile>,
     buffer: RefCell<Option<Buffer>>,
 }
@@ -222,9 +226,29 @@ impl BufferedFd {
         Self {
             raw,
             reading,
+            writing: !reading,
             handle,
             buffer: RefCell::new(Some(buffer)),
         }
+    }
+
+    pub(super) fn update(raw: Id, handle: Rc<RawFile>, capacity: usize) -> Result<Self> {
+        let mut descriptor = Descriptor {
+            handle: handle.clone(),
+            raw_position: None,
+            last_read: 0,
+        };
+        descriptor
+            .stream_position()
+            .map_err(|_| Error::new("UnsupportedOperation", "File or stream is not seekable."))?;
+        let buffer = Random::new(descriptor, capacity)?;
+        Ok(Self {
+            raw,
+            handle,
+            reading: true,
+            writing: true,
+            buffer: RefCell::new(Some(Buffer::Random(buffer))),
+        })
     }
 
     pub(super) fn pipe(raw: Id, handle: Rc<RawFile>, reading: bool, pipe: BoxedPipe) -> Self {
@@ -232,6 +256,7 @@ impl BufferedFd {
             raw,
             handle,
             reading,
+            writing: !reading,
             buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
         }
     }
@@ -247,6 +272,7 @@ impl BufferedFd {
     fn close(&self) -> Result<()> {
         let pending = match self.buffer.borrow_mut().take() {
             Some(Buffer::Pipe(pipe)) => pipe.close().map_err(Into::into),
+            Some(Buffer::Random(mut file)) if !self.closed() => file.flush().map_err(os_error),
             Some(Buffer::Writer(mut writer)) => {
                 let flushed = if self.closed() {
                     Ok(())
@@ -331,7 +357,7 @@ impl BufferedFd {
             "__enter__" => Ok(receiver),
             "fileno" => Ok(ctx.int(i64::from(fd))),
             "readable" => Ok(builtins::boolean(self.reading)),
-            "writable" => Ok(builtins::boolean(!self.reading)),
+            "writable" => Ok(builtins::boolean(self.writing)),
             // SAFETY: isatty inspects the integer descriptor without retaining a reference.
             "isatty" => Ok(builtins::boolean(unsafe { libc::isatty(fd) } != 0)),
             "seekable" => Ok(builtins::boolean(
@@ -340,6 +366,7 @@ impl BufferedFd {
             )),
             "flush" => {
                 match buffer {
+                    Buffer::Random(file) => file.flush().map_err(os_error)?,
                     Buffer::Writer(w) => w.flush().map_err(os_error)?,
                     Buffer::Pipe(pipe) => pipe.flush()?,
                     Buffer::Reader(_) => {}
@@ -360,6 +387,17 @@ impl BufferedFd {
                 if name == "read1" {
                     let bytes = match buffer {
                         Buffer::Reader(r) => read_once(r, size)?,
+                        Buffer::Random(file) => {
+                            let size = if size < 0 {
+                                file.capacity() as i64
+                            } else {
+                                size
+                            };
+                            let mut bytes = builtins::zeroed_bytes(size)?;
+                            let count = file.read_once(&mut bytes).map_err(os_error)?;
+                            bytes.truncate(count);
+                            bytes
+                        }
                         Buffer::Pipe(pipe) => pipe.read1(usize::try_from(size).ok())?,
                         Buffer::Writer(_) => unreachable!(),
                     };
@@ -378,14 +416,20 @@ impl BufferedFd {
                     let data = pipe.read(usize::try_from(size).ok(), name == "readline")?;
                     return Ok(ctx.alloc(Value::Bytes(data)));
                 }
-                let Buffer::Reader(r) = buffer else {
-                    unreachable!()
+                let r: &mut dyn BufRead = match buffer {
+                    Buffer::Reader(r) if name == "read" => {
+                        return Ok(
+                            read_bytes(r, size)?.map_or(NONE, |data| ctx.alloc(Value::Bytes(data)))
+                        );
+                    }
+                    Buffer::Random(file) if name == "read" => {
+                        let data = file.read_bytes(usize::try_from(size).ok())?;
+                        return Ok(ctx.alloc(Value::Bytes(data)));
+                    }
+                    Buffer::Reader(r) => r,
+                    Buffer::Random(file) => file,
+                    _ => unreachable!(),
                 };
-                if name == "read" {
-                    return Ok(
-                        read_bytes(r, size)?.map_or(NONE, |data| ctx.alloc(Value::Bytes(data)))
-                    );
-                }
                 let mut reader = r.take(if size < 0 { u64::MAX } else { size as u64 });
                 let mut data = Vec::new();
                 reader.read_until(b'\n', &mut data).map_err(os_error)?;
@@ -406,8 +450,10 @@ impl BufferedFd {
                     bytes[..data.len()].copy_from_slice(&data);
                     return Ok(ctx.int(data.len() as i64));
                 }
-                let Buffer::Reader(r) = buffer else {
-                    unreachable!()
+                let r: &mut dyn Read = match buffer {
+                    Buffer::Reader(r) => r,
+                    Buffer::Random(file) => file,
+                    _ => unreachable!(),
                 };
                 let mut total = 0;
                 while total < bytes.len() {
@@ -420,13 +466,14 @@ impl BufferedFd {
                 Ok(ctx.int(total as i64))
             }
             "write" if args.len() == 1 => {
-                if self.reading {
+                if !self.writing {
                     return Err(Error::new("UnsupportedOperation", "write"));
                 }
                 let data = ctx.bytes_like(args[0])?;
                 match buffer {
                     Buffer::Pipe(pipe) => pipe.write(data)?,
                     Buffer::Writer(w) => w.write_all(data).map_err(os_error)?,
+                    Buffer::Random(file) => file.write(data).map_err(os_error)?,
                     Buffer::Reader(_) => unreachable!(),
                 }
                 Ok(ctx.int(data.len() as i64))

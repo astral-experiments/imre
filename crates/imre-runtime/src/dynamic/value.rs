@@ -1084,6 +1084,9 @@ impl Value {
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(file) => match file.as_ref() {
+                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
+                    "_io.BufferedRandom"
+                }
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
