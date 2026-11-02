@@ -2515,6 +2515,7 @@ def report(text):
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
             "boxed_itertools_batched.py",
+            "boxed_itertools_tee.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
