@@ -2873,7 +2873,7 @@ impl Context {
                 });
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "int" | "float" | "function") && name == "__new__" =>
+                if matches!(class.as_str(), "int" | "float" | "function" | "type") && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
             }
@@ -3387,6 +3387,9 @@ impl Context {
                 scope,
                 ..
             } => {
+                if name == "__abstractmethods__" {
+                    return self.own_class_attr(obj, name).ok_or_else(|| self.missing_attribute(obj, name));
+                }
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
                 }
@@ -5179,6 +5182,12 @@ impl Context {
             {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
+            Value::Native(name) if name == "type.__new__" => {
+                let Some((&meta, rest)) = args.split_first() else {
+                    return Err(Error::new("TypeError", "type.__new__(): not enough arguments"));
+                };
+                self.type_from_namespace(meta, rest, &kwargs, true)
+            }
             Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
@@ -5498,10 +5507,7 @@ impl Context {
                 ..
             } => {
                 if self.builtins.get("abc.ABCMeta") == Some(&callable) {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "direct ABCMeta construction is unsupported",
-                    ));
+                    return self.type_from_namespace(callable, &args, &kwargs, false);
                 }
                 if let Some(meta) = metaclass
                     && let Some(slot) = self.class_attr(meta, "__call__")
@@ -5631,10 +5637,7 @@ impl Context {
                     }
                     instance
                 } else if self.has_base(callable, "type") {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "direct metaclass construction is unsupported",
-                    ));
+                    return self.type_from_namespace(callable, &args, &kwargs, false);
                 } else if self.has_base(callable, "module") {
                     self.allocate_module(callable)
                 } else if let Some(kind) = string_base {
@@ -5967,13 +5970,17 @@ impl Context {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        let members = class_scope
-            .class_body
-            .take()
-            .unwrap()
-            .into_iter()
-            .map(|name| (class_scope.names[&name], name))
-            .collect::<Vec<_>>();
+        let names = class_scope.class_body.take().unwrap();
+        let dictionary = class_scope.class_namespace.as_ref().and_then(|ns| ns.dictionary);
+        let members = if let Some(dict) = dictionary {
+            self.dict_entries(dict).expect("class dictionary").to_vec()
+        } else {
+            names.into_iter().map(|name| {
+                let value = self.scope_name(scope, &name).expect("class member");
+                (self.text(name), value)
+            }).collect()
+        };
+        let Value::Scope(class_scope) = self.heap.get_mut(scope) else { unreachable!() };
         if let Some(dict) = class_scope.class_namespace.as_ref().and_then(|namespace| {
             namespace.annotation_dict_cell.and(namespace.dictionary)
         }) {
@@ -5981,31 +5988,100 @@ impl Context {
             class_scope.names.retain(|name, _| name == "__qualname__");
         }
         // A hook may replace an attribute and execute code that triggers collection.
-        for &(value, _) in &members {
+        for &(key, value) in &members {
+            self.heap.keep(key);
             self.heap.keep(value);
         }
-        for (value, name) in members {
+        for (name, value) in members {
             if matches!(self.heap.get(value), Value::Property(_)) {
-                let name = self.text(name);
                 let Value::Property(property) = self.heap.get_mut(value) else {
                     unreachable!()
                 };
                 property.name = Some(name);
             } else if let Some(set_name) = self.slot(value, "__set_name__") {
-                let name = self.text(name);
-                self.call(set_name, vec![value, class, name], Vec::new())?;
+                if let Err(error) = self.call(set_name, vec![value, class, name], Vec::new()) {
+                    let exception = self.raised_instance(error);
+                    let note = self.text(format!(
+                        "Error calling __set_name__ on '{:.100}' instance {} in '{:.100}'",
+                        self.type_name(value), self.repr(name), self.class_name(class),
+                    ));
+                    let _ = self.add_exception_note(exception, note);
+                    return self.op("reraise", exception, NONE, NONE).map(|_| ());
+                }
             }
         }
         Ok(())
     }
 
+    pub(super) fn install_class_attributes(
+        &mut self,
+        class: Id,
+        scope: Id,
+        name: &str,
+        cell: Id,
+        exposed_body: Option<ExposedClassBody>,
+    ) -> Result<()> {
+        self.install_weakref_descriptor(class, scope);
+        self.heap.replace_cell(cell, Some(class));
+        let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        // The class body can read the enclosing module's docstring before the
+        // type supplies a default for an undocumented class.
+        let has_doc_slot = class_scope
+            .class_namespace
+            .as_deref()
+            .and_then(|namespace| namespace.slot_names.as_deref())
+            .is_some_and(|slots| slots.iter().any(|slot| slot == "__doc__"));
+        if !has_doc_slot {
+            class_scope
+                .names
+                .entry("__doc__".to_owned())
+                .or_insert(NONE);
+        }
+        if let Some(body) = exposed_body {
+            // type.__new__ replaces the body namespace with the finished type's dictionary.
+            let dict = self.class_namespace_dict(scope, false);
+            if let Some(cell) = body.annotation_cell {
+                self.heap.replace_cell(cell, Some(dict));
+            }
+            let entries = self.dict_entries(body.mapping).expect("class body dictionary");
+            if entries.iter().any(|&(key, _)| self.string_storage(key).is_none()) {
+                // Keep non-string descriptor keys interleaved with the surviving declared names.
+                let mut fields = self.scope_data(scope).names.clone();
+                fields.shift_remove("__qualname__");
+                let mut ordered = Vec::new();
+                for (key, original) in entries.to_vec() {
+                    if let Some(text) = self.string_storage(key) {
+                        if let Some(value) = fields.shift_remove(self.str_value(text)?) {
+                            ordered.push((key, value));
+                        }
+                    } else {
+                        ordered.push((key, original));
+                    }
+                }
+                for (field, value) in fields {
+                    ordered.push((self.text(field), value));
+                }
+                *self.heap.get_mut(dict) = Value::Dict(ordered.into());
+                self.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::RuntimeWarning,
+                    &format!("non-string key in the __dict__ of class {name:.200}"),
+                    1,
+                )?;
+            }
+        }
+        self.initialize_class_members(class, scope)
+    }
+
     /// Select the most derived compatible metaclass before executing a boxed class body.
-    fn select_class_metaclass(
+    pub(super) fn select_class_metaclass(
         &mut self,
         bases: &[Id],
         explicit: Option<Id>,
         typed_dict_meta: Option<Id>,
         enum_base: bool,
+        direct_new: bool,
     ) -> Result<Option<Id>> {
         if explicit.is_none()
             && !bases.iter().any(|&base| {
@@ -6084,15 +6160,15 @@ impl Context {
         // inheriting type's normal namespace preparation, allocation, and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (["__prepare__", "__new__", "__init__"]
-                .iter()
-                .any(|name| self.class_attr(winner, name).is_some())
-                || self
-                    .class_attr(winner, "mro")
+            && (self.class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
-                || ["__call__", "__getattr__", "__getattribute__"]
-                    .iter()
-                    .any(|name| self.slot(winner, name).is_some()))
+                || (!(direct_new && explicit == Some(winner))
+                    && (["__prepare__", "__new__", "__init__"]
+                        .iter()
+                        .any(|name| self.class_attr(winner, name).is_some())
+                        || ["__call__", "__getattr__", "__getattribute__"]
+                            .iter()
+                            .any(|name| self.slot(winner, name).is_some()))))
         {
             return Err(Error::new(
                 "NotImplementedError",
@@ -6151,6 +6227,7 @@ impl Context {
             explicit_metaclass,
             typed_dict_meta,
             enum_namespace.is_some(),
+            false,
         )?;
         let Value::Function {
             scope: parent,
@@ -6312,49 +6389,7 @@ impl Context {
             unreachable!()
         };
         *metaclass = class_meta;
-        self.install_weakref_descriptor(class, scope);
-        self.heap.replace_cell(cell, Some(class));
-        let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
-            unreachable!()
-        };
-        // The class body can read the enclosing module's docstring before the
-        // type supplies a default for an undocumented class.
-        let has_doc_slot = class_scope
-            .class_namespace
-            .as_deref()
-            .and_then(|namespace| namespace.slot_names.as_deref())
-            .is_some_and(|slots| slots.iter().any(|slot| slot == "__doc__"));
-        if !has_doc_slot {
-            class_scope
-                .names
-                .entry("__doc__".to_owned())
-                .or_insert(NONE);
-        }
-        if let Some(body) = exposed_body {
-            // type.__new__ replaces the body namespace with the finished type's dictionary.
-            let dict = self.class_namespace_dict(scope, false);
-            let extras = self
-                .dict_entries(body.mapping)
-                .expect("class body dictionary")
-                .iter()
-                .copied()
-                .filter(|&(key, _)| self.string_storage(key).is_none())
-                .collect::<Vec<_>>();
-            if let Some(cell) = body.annotation_cell {
-                self.heap.replace_cell(cell, Some(dict));
-            }
-            if !extras.is_empty() {
-                for (key, value) in extras {
-                    self.put_item(dict, key, value)?;
-                }
-                self.emit_builtin_warning(
-                    crate::objects::exceptions::Kind::RuntimeWarning,
-                    &format!("non-string key in the __dict__ of class {name:.200}"),
-                    1,
-                )?;
-            }
-        }
-        self.initialize_class_members(class, scope)?;
+        self.install_class_attributes(class, scope, &name, cell, exposed_body)?;
         if let Some(kind) = enum_kind {
             let scalar = if let Some((member_type, first_enum)) = float_enum {
                 self.bind(scope, "_member_type_", member_type);

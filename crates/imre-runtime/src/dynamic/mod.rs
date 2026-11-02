@@ -43,6 +43,7 @@ mod thread_local;
 mod thread_lock;
 mod thread_rlock;
 mod thread_worker;
+mod type_constructor;
 mod typing;
 mod union;
 mod unraisable;
