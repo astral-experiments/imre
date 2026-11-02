@@ -33,8 +33,106 @@ def type_repr(value):
         return "..."
     from string.templatelib import Template
     if isinstance(value, Template):
-        raise NotImplementedError("template annotation strings require AST unparsing")
+        return _template_repr(value)
     return repr(value)
+
+
+_TEMPLATE_QUOTES = ("'", '"', '"""', "'''")
+
+
+def _template_constant(value):
+    def simple(item):
+        text = repr(item)
+        if isinstance(item, (float, complex)):
+            return text.replace("inf", "1e309").replace("nan", "(1e309-1e309)")
+        return text
+
+    if isinstance(value, tuple):
+        if len(value) == 1:
+            return "(" + simple(value[0]) + ",)"
+        return "(" + ", ".join(simple(item) for item in value) + ")"
+    return "..." if value is ... else simple(value)
+
+
+def _template_constructor(template):
+    parts = []
+    for part in template:
+        if isinstance(part, str):
+            parts.append(_template_constant(part))
+        else:
+            arguments = (part.value, part.expression, part.conversion, part.format_spec)
+            arguments = ", ".join(_template_constant(arg) for arg in arguments)
+            parts.append("Interpolation(" + arguments + ")")
+    return "Template(" + ", ".join(parts) + ")"
+
+
+def _template_interpolation(part):
+    expression = part.expression
+    text = "{ " if expression.startswith("{") else "{"
+    text += expression
+    if part.conversion:
+        text += "!" + part.conversion
+    if part.format_spec:
+        spec = part.format_spec.replace("{", "{{").replace("}", "}}")
+        spec = spec.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+        spec = spec.replace("\n", "\\n")
+        text += ":" + spec
+    return text + "}"
+
+
+def _quoted_template(parts):
+    # Match _ast_unparse.Unparser._ftstring_helper: earlier parts restrict the
+    # delimiters available to the rest of this literal.
+    quotes = list(_TEMPLATE_QUOTES)
+    rendered = []
+    for part, literal in parts:
+        if literal:
+            # Single-character repr preserves printable characters and escapes
+            # backslashes and nonprintable code points, including surrogates.
+            escaped = "".join(repr(char)[1:-1] for char in part)
+            choices = [q for q in quotes if q not in escaped]
+            if not choices:
+                text = repr(part)
+                choices = [next((q for q in quotes if text[0] in q), text[0])]
+                if choices[0] not in quotes:
+                    # No common delimiter works for all parts. Match CPython's
+                    # triple-single-quoted fallback and force repr's single quotes.
+                    return "t'''" + "".join(
+                        repr('"' + s)[2:-1] if is_literal else s for s, is_literal in parts
+                    ) + "'''"
+                escaped = text[1:-1]
+            elif escaped:
+                choices.sort(key=lambda q: q[0] == escaped[-1])
+                if choices[0][0] == escaped[-1]:
+                    escaped = escaped[:-1] + "\\" + escaped[-1]
+            part, quotes = escaped, choices
+        else:
+            if "\n" in part:
+                quotes = [q for q in quotes if len(q) == 3]
+                assert quotes
+            quotes = [q for q in quotes if q not in part] or quotes
+        rendered.append(part)
+    quote = quotes[0]
+    return "t" + quote + "".join(rendered) + quote
+
+
+def _template_repr(template):
+    from typing import _check_annotation_syntax
+
+    if any(part.expression.strip() == "" for part in template.interpolations):
+        return _template_constructor(template)
+    try:
+        for part in template.interpolations:
+            _check_annotation_syntax(f"({part.expression})")
+    except SyntaxError:
+        return _template_constructor(template)
+    parts = []
+    for part in template:
+        if isinstance(part, str):
+            parts.append((part.replace("{", "{{").replace("}", "}}"), True))
+        else:
+            parts.append((_template_interpolation(part), False))
+    return _quoted_template(parts)
 
 
 def annotations_to_string(annotations):

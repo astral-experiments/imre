@@ -1633,6 +1633,45 @@ fn typevar(
     })))
 }
 
+/// Parse annotation text without evaluating it or constructing Python AST objects.
+fn parse_annotation_expression(
+    source: &str,
+) -> Result<ruff_python_parser::Parsed<ruff_python_ast::ModExpression>> {
+    use ruff_python_ast::token::TokenKind;
+
+    if source.contains('\0') {
+        return Err(Error::new(
+            "SyntaxError",
+            "source code string cannot contain null bytes",
+        ));
+    }
+    // CPython's tokenizer caps the combined nesting of (), [] and {} at 200.
+    // Keep deeply nested input out of the recursive parser. Short references only lex once.
+    const MAX_NESTING: usize = 200;
+    if source.len() > MAX_NESTING {
+        let mut lexer =
+            ruff_python_parser::lexer::lex(source, ruff_python_parser::Mode::Expression);
+        let mut depth = 0_usize;
+        loop {
+            match lexer.next_token() {
+                TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
+                    depth += 1;
+                    if depth > MAX_NESTING {
+                        return Err(Error::new("SyntaxError", "too many nested parentheses"));
+                    }
+                }
+                TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenKind::EndOfFile | TokenKind::Unknown => break,
+                _ => {}
+            }
+        }
+    }
+    ruff_python_parser::parse_expression(source)
+        .map_err(|error| Error::new("SyntaxError", error.to_string()))
+}
+
 /// Check a forward reference without evaluating names or converting the tree into Python AST objects.
 fn validate_forward_ref(source: &str) -> Result<()> {
     use ruff_python_ast::token::TokenKind;
@@ -1676,37 +1715,7 @@ fn validate_forward_ref(source: &str) -> Result<()> {
             });
         }
     }
-    if source.contains('\0') {
-        return Err(Error::new(
-            "SyntaxError",
-            "source code string cannot contain null bytes",
-        ));
-    }
-    // CPython's tokenizer caps the combined nesting of (), [] and {} at 200.
-    // Keep deeply nested input out of the recursive parser. Short references only lex once.
-    const MAX_NESTING: usize = 200;
-    if source.len() > MAX_NESTING {
-        let mut lexer =
-            ruff_python_parser::lexer::lex(source, ruff_python_parser::Mode::Expression);
-        let mut depth = 0_usize;
-        loop {
-            match lexer.next_token() {
-                TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
-                    depth += 1;
-                    if depth > MAX_NESTING {
-                        return Err(Error::new("SyntaxError", "too many nested parentheses"));
-                    }
-                }
-                TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
-                    depth = depth.saturating_sub(1)
-                }
-                TokenKind::EndOfFile | TokenKind::Unknown => break,
-                _ => {}
-            }
-        }
-    }
-    let parsed = ruff_python_parser::parse_expression(source)
-        .map_err(|error| Error::new("SyntaxError", error.to_string()))?;
+    let parsed = parse_annotation_expression(source)?;
     let body = parsed.syntax().body.as_ref();
     let invalid = match body {
         Expr::Yield(_) => Some("'yield' outside function"),
@@ -2238,6 +2247,13 @@ pub(super) fn call(
             "_GenericAlias.__init__() requires an origin and arguments",
         )),
         ("_finish_field_ref", [value]) => finish_field_ref(ctx, *value),
+        ("_check_annotation_syntax", [text]) => {
+            if matches!(ctx.heap.get(ctx.scalar_value(*text)), Value::SurrogateStr(_)) {
+                ctx.encode_utf8_codepoints(*text, false, "strict")?;
+            }
+            parse_annotation_expression(ctx.str_value(*text)?)?;
+            Ok(NONE)
+        }
         ("_validate_forward_ref", [text]) => {
             validate_forward_ref(ctx.str_value(*text)?)?;
             Ok(NONE)

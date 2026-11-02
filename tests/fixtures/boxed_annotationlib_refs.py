@@ -24,6 +24,15 @@ def current():
     assert rendered["text"] is text and annotations["type"] is int
     assert module.type_repr(module.type_repr) == "annotationlib.type_repr"
 
+    from string.templatelib import Interpolation, Template
+
+    literal = Template("a{", Interpolation(1, "{x: y}", "r", "{spec}"))
+    assert module.type_repr(literal) == "t'a{{{ {x: y}!r:{{spec}}}'"
+    fallback = Template(Interpolation(..., "ok"), Interpolation(1, "x +"))
+    assert module.annotations_to_string({"a": fallback}) == {
+        "a": "Template(Interpolation(..., 'ok', None, ''), Interpolation(1, 'x +', None, ''))"
+    }
+
     ref = module.ForwardRef("Thing", module="models", is_class=True)
     same = module.ForwardRef("Thing", module="models", is_class=True, is_argument=False)
     print(repr(ref), ref.__forward_arg__, ref.__forward_module__, ref.__forward_is_class__)
