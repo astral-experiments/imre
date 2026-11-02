@@ -2248,7 +2248,7 @@ def report(text):
         shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
         sink = root / "callback-shutdown.bin"
         command = ("run", shutdown_writer, "--quiet", "--", sink)
-        for mode in ("close", "temporary-close"):
+        for mode in ("close", "temporary-close", "file-finalize", "callback-finalize"):
             compare("-IB", shutdown_writer, sink, mode, native_args=(*command, mode))
             assert sink.read_bytes() == b"abc"
         pending = run(imre, *command, "pending")
