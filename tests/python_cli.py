@@ -2785,6 +2785,7 @@ for name in ("md4", "ripemd160"):
             "boxed_dataclasses.py",
             "boxed_mapping_proxy_type.py",
             "boxed_types_new_class.py",
+            "boxed_dynamic_class_attribute.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
