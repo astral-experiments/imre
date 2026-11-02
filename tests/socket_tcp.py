@@ -101,7 +101,9 @@ def observe(programs, *, operations_timeout=TIMEOUT):
                     else:
                         assert drain(peer) == b"\x00\xffYX" * (1 << 17)
                 assert collect(proc) == b"client passed\n"
-    return echo, listener, operations
+    with child(programs["metadata"]) as proc:
+        metadata = collect(proc)
+    return echo, listener, operations, metadata
 
 
 def main():
