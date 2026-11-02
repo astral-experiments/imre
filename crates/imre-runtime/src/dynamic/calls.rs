@@ -189,6 +189,9 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
+            Value::Native(kind) if kind == "type" && name == "mro" => {
+                self.builtins.get("type.mro").copied()
+            }
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
                 "__ne__" => self.builtins.get("object.__ne__").copied(),
@@ -922,10 +925,7 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if (child == stdlib::flags::TYPE
-                || stdlib::fixed_structseq::fixed_type(child).is_some())
-                && parent == "tuple"
-            {
+            if Self::native_base(child) == Some(parent) {
                 return true;
             }
             if parent == "object" {
@@ -936,22 +936,30 @@ impl Context {
             }
             return matches!(
                 (child.as_str(), parent.as_str()),
-                ("bool", "int")
-                    | ("datetime.datetime", "datetime.date")
-                    | ("datetime.timezone", stdlib::datetime::TZINFO)
-                    | ("typing._UnpackGenericAlias", "typing._GenericAlias")
-                    | (HashState::XOF_CLASS, HashState::CLASS)
-                    | (stdlib::os::stat::CLASS, "tuple")
-                    | ("collections.defaultdict", "dict")
-                    | ("odict_keys", "dict_keys")
-                    | ("odict_items", "dict_items")
-                    | ("odict_values", "dict_values")
-                    | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
+                ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
         }
         false
     }
+    /// Immediate native parent shared by subclass checks and the class lineage.
+    pub(super) fn native_base(class: &str) -> Option<&'static str> {
+        Some(match class {
+            "bool" => "int",
+            "datetime.datetime" => "datetime.date",
+            "datetime.timezone" => stdlib::datetime::TZINFO,
+            stdlib::flags::TYPE | stdlib::os::stat::CLASS => "tuple",
+            class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
+            "typing._UnpackGenericAlias" => "typing._GenericAlias",
+            HashState::XOF_CLASS => HashState::CLASS,
+            "collections.defaultdict" => "dict",
+            "odict_keys" => "dict_keys",
+            "odict_items" => "dict_items",
+            "odict_values" => "dict_values",
+            _ => return None,
+        })
+    }
+
     fn equal_class(&self, a: Id, b: Id) -> bool {
         a == b
             || matches!((self.heap.get(a),self.heap.get(b)),(Value::Native(x),Value::Native(y)) if x==y)
@@ -1004,6 +1012,14 @@ impl Context {
     /// Check whether an inline value is an immutable tuple position.
     fn has_namedtuple_field(&self, class: Id, name: &str) -> bool {
         matches!(self.heap.get(class), Value::Class { namedtuple_fields: Some(names), .. } if names.iter().any(|field| field == name))
+    }
+
+    pub(super) fn is_type_object(&self, obj: Id) -> bool {
+        match self.heap.get(obj) {
+            Value::Class { .. } => true,
+            Value::Native(_) => matches!(self.builtin_type_name(obj), Some("type" | "typing._AnyMeta")),
+            _ => false,
+        }
     }
 
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
@@ -3389,6 +3405,12 @@ impl Context {
     }
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if name == "mro" && self.is_type_object(obj) {
+            let owner = self.builtin("type");
+            let descriptor = self.builtin("type.mro");
+            let receiver = if obj == owner { NONE } else { obj };
+            return self.bind_attribute(descriptor, receiver, owner);
+        }
         if name == "__init_subclass__" {
             let class = if self.builtin_type_name(obj) == Some("type") {
                 obj
@@ -4956,6 +4978,7 @@ impl Context {
             {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
+            Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
@@ -5861,9 +5884,12 @@ impl Context {
         // inheriting type's normal namespace preparation, allocation, and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (["__prepare__", "__new__", "__init__", "mro"]
+            && (["__prepare__", "__new__", "__init__"]
                 .iter()
                 .any(|name| self.class_attr(winner, name).is_some())
+                || self
+                    .class_attr(winner, "mro")
+                    .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
                 || ["__call__", "__getattr__", "__getattribute__"]
                     .iter()
                     .any(|name| self.slot(winner, name).is_some()))

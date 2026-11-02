@@ -47,6 +47,7 @@ impl BuiltinDescriptor {
                 Some((class, attr, DictIterator::methods(class)))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -198,6 +199,7 @@ impl BuiltinDescriptor {
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
             "object" => true,
+            "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
@@ -259,6 +261,7 @@ impl BuiltinDescriptor {
                     && let Some(receiver) = receiver
                 {
                     match ctx.heap.get(receiver) {
+                        _ if self.owner == "type" => ctx.class_qualname(receiver),
                         Value::NamedTuple { class: Some(stdlib::os::stat::CLASS), .. } => "stat_result",
                         value if let Some(class) = value.instance_class() => ctx
                             .class_attr(class, "__qualname__")
@@ -351,6 +354,8 @@ impl BuiltinDescriptor {
                         | "swapcase",
                         _,
                     ) => "($self, /)",
+                    ("mro", "__doc__") => "Return a type's method resolution order.",
+                    ("mro", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
