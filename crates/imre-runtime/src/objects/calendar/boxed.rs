@@ -172,6 +172,14 @@ impl Calendar {
         .map(Self)
     }
 
+    /// Return the datetime's local clock and fold without carrying over its timezone.
+    pub(crate) fn time_of_day(&self) -> Result<Self, Error> {
+        with(&self.0, |value| match value {
+            Value::Date { local, fold, .. } => Self::time(local.rem_euclid(DAY), *fold, None),
+            _ => unreachable!(),
+        })
+    }
+
     pub(crate) fn clock_parts(&self) -> [i64; 5] {
         clock_parts(&self.0)
     }

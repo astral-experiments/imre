@@ -19,6 +19,7 @@ const FIELDS: [&str; 8] = [
     "microsecond",
     "fold",
 ];
+const CLOCK_FIELDS: [&str; 6] = ["hour", "minute", "second", "microsecond", "tzinfo", "fold"];
 const UNITS: [&str; 7] = [
     "days",
     "seconds",
@@ -74,6 +75,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__repr__",
                 "__str__",
                 "ctime",
+                "time",
                 "timestamp",
                 "timetuple",
             ],
@@ -83,6 +85,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
             &[
                 "__format__",
+                "__replace__",
+                "replace",
                 "__reduce__",
                 "__reduce_ex__",
                 "__repr__",
@@ -321,7 +325,7 @@ fn field_type_error(ctx: &Context, owner: &str, field: &str, receiver: Id) -> Er
     )
 }
 
-fn delta_component(ctx: &mut Context, value: Id) -> Result<i32> {
+fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
@@ -347,7 +351,7 @@ fn split_delta_component(ctx: &mut Context, value: Id, unit: i32) -> Result<(Id,
             format!("divmod() returned a tuple of size {}", tuple.len()),
         ));
     };
-    let remainder = delta_component(ctx, *remainder)?;
+    let remainder = c_int(ctx, *remainder)?;
     if !(0..unit).contains(&remainder) {
         return Err(Error::new(
             "TypeError",
@@ -364,7 +368,7 @@ fn result_microseconds(ctx: &mut Context, result: Id) -> Result<crate::Int> {
     } else {
         let (seconds, micros) = split_delta_component(ctx, result, 1_000_000)?;
         let (days, seconds) = split_delta_component(ctx, seconds, 86_400)?;
-        let days = delta_component(ctx, days)?;
+        let days = c_int(ctx, days)?;
         let total =
             (i128::from(days) * 86_400 + i128::from(seconds)) * 1_000_000 + i128::from(micros);
         Ok(crate::Int::new(total.into()))
@@ -629,6 +633,9 @@ pub(super) fn call(
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
+        "datetime.time" | "time.replace" | "time.__replace__" => {
+            clock_method(ctx, method, args, kwargs)
+        }
         "timedelta.__neg__"
         | "timedelta.__pos__"
         | "timedelta.__abs__"
@@ -963,7 +970,7 @@ pub(super) fn call(
 
 /// Convert all integer-index operands before validating ranges and timezone, as in _datetime.
 fn time(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let names = ["hour", "minute", "second", "microsecond", "tzinfo", "fold"];
+    let names = CLOCK_FIELDS;
     let count = args.len() + kwargs.len();
     if count > names.len() {
         return Err(Error::new(
@@ -1017,12 +1024,86 @@ fn time(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
             _ => {}
         }
     }
+    new_time(ctx, fields, tz)
+}
+
+fn new_time(ctx: &mut Context, fields: [i32; 5], tz: Id) -> Result<Id> {
     let local = Calendar::time_micros(fields)?;
     Ok(store(
         ctx,
         Calendar::time(local, fields[4], zone(ctx, tz)?.as_ref())?,
         tz,
     ))
+}
+
+/// Read native civil fields even when the receiver overrides their descriptors.
+fn clock_method(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (kind, operation) = method.split_once('.').unwrap();
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method {method}() needs an argument"),
+        ));
+    };
+    let (value, tz) = match ctx.heap.get(ctx.scalar_value(receiver)) {
+        Value::Calendar { value, tzinfo, .. } if value.class() == kind => (value.clone(), *tzinfo),
+        _ => {
+            return Err(field_type_error(
+                ctx,
+                &format!("datetime.{kind}"),
+                operation,
+                receiver,
+            ));
+        }
+    };
+    if operation == "time" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{method}() takes no keyword arguments"),
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{method}() takes no arguments ({} given)", rest.len()),
+            ));
+        }
+        return Ok(store(ctx, value.time_of_day()?, NONE));
+    }
+    let mut fields = value.clock_parts().map(|n| n as i32);
+    let [hour, minute, second, microsecond, tzinfo, fold] =
+        crate::dynamic::builtins::bind_method_arguments("replace", rest, kwargs, CLOCK_FIELDS, 5)?;
+    for (field, replacement) in fields
+        .iter_mut()
+        .zip([hour, minute, second, microsecond, fold])
+    {
+        if let Some(id) = replacement {
+            *field = c_int(ctx, id)?;
+        }
+    }
+    let tz = tzinfo.unwrap_or(tz);
+    let class = ctx.exact_type(receiver)?;
+    if class == ctx.builtin("datetime.time") {
+        return new_time(ctx, fields, tz);
+    }
+    let mut args = fields[..4]
+        .iter()
+        .map(|&n| ctx.int(i64::from(n)))
+        .collect::<Vec<_>>();
+    args.push(tz);
+    // Older subtype constructors may predate the keyword-only fold argument.
+    let kwargs = if fields[4] == 0 {
+        vec![]
+    } else {
+        vec![("fold".into(), ctx.int(i64::from(fields[4])))]
+    };
+    ctx.call(class, args, kwargs)
 }
 
 /// Allocate the native payload for the requested calendar subtype before its initializer runs.
