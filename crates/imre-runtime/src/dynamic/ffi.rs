@@ -447,7 +447,10 @@ impl Context {
                 Ok(a)
             }
             "annotate" => {
-                if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
+                if self.scope_data(a).class_body.is_some() {
+                    let mapping = self.lookup_class_local(a, "__annotations__")?;
+                    self.put_item(mapping, b, c)?;
+                } else if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
