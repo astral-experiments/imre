@@ -1220,6 +1220,7 @@ def main():
 
         instance_check = root / "unittest_instance.py"
         for statement in (
+            "check = case.assertNotRegex\ncheck('abc', 'x')",
             "case.assertIsSubclass(bool, int)",
             "check = Case.assertNotIsSubclass\ncheck(case, int, str)",
             "case.assertIsInstance(1, int)",
