@@ -68,6 +68,14 @@ def unsigned_cast():
         pass
     else:
         raise AssertionError("cast slice failed to hold exporter")
+    only = part.toreadonly()
+    try:
+        hash(only)
+    except TypeError as err:
+        assert "unhashable type" in str(err)
+    else:
+        raise AssertionError("hashed a view whose exporter is unhashable")
+    only.release()
     part.release()
     data.append(1)
     try:
