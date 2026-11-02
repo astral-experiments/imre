@@ -915,12 +915,36 @@ impl Match {
             let value = crate::dynamic::copy_ids(&points[span.range()])?;
             return Ok(ctx.text_codepoints(value));
         }
-        let bytes = self.pattern(ctx).bytes;
-        let text = subject_bytes(ctx, self.subject, bytes)?;
-        // A bytearray may have changed size since the search.
-        let data = &text[span.start.min(text.len())..span.end.min(text.len())];
-        let value = group_value(data, bytes);
+        let value = group_value(self.captured_bytes(ctx, span)?, self.pattern(ctx).bytes);
         Ok(ctx.alloc(value))
+    }
+
+    fn captured_bytes<'a>(&self, ctx: &'a Context, span: Span) -> Result<&'a [u8]> {
+        let text = subject_bytes(ctx, self.subject, self.pattern(ctx).bytes)?;
+        // A bytearray may have changed size since the search.
+        Ok(&text[span.start.min(text.len())..span.end.min(text.len())])
+    }
+
+    pub(in crate::dynamic) fn repr(&self, ctx: &Context) -> Result<String> {
+        let span = self.spans[0].expect("a match owns group zero");
+        let quoted =
+            if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(self.subject)) {
+                super::super::operators::surrogate_repr(&points[span.range()])
+            } else {
+                let data = self.captured_bytes(ctx, span)?;
+                if self.pattern(ctx).bytes {
+                    let mut quoted = String::new();
+                    crate::objects::write_bytes_repr(&mut quoted, data);
+                    quoted
+                } else {
+                    let text = std::str::from_utf8(data).expect("capture is UTF-8");
+                    crate::objects::exceptions::string_repr(text).into_string()
+                }
+            };
+        let (start, end) = self.bounds(ctx, 0)?;
+        Ok(format!(
+            "<re.Match object; span=({start}, {end}), match={quoted:.50}>"
+        ))
     }
 
     fn bounds(&self, ctx: &Context, index: usize) -> Result<(i64, i64)> {
