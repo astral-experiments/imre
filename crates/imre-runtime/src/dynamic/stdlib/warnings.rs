@@ -17,6 +17,15 @@ impl Context {
         )
     }
 
+    pub(in crate::dynamic) fn warn_legacy_load(&mut self) -> Result<()> {
+        self.emit_warning(
+            crate::objects::exceptions::Kind::DeprecationWarning,
+            "the load_module() method is deprecated and slated for removal in Python 3.15; use exec_module() instead",
+            Origin::FrozenImport(533),
+            NONE,
+        )
+    }
+
     pub(in crate::dynamic) fn warn_external_loader(
         &mut self,
         globals: Id,
