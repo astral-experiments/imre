@@ -77,3 +77,35 @@ def current():
                 return name
     except TypeError as error:
         print(str(error))
+
+    class Index:
+        def __index__(self):
+            return -31
+
+    assert hex(Index()) == "-0x1f"
+
+    calls = []
+    class Flags(IntFlag):
+        ONE = 1
+
+        @classmethod
+        def _numeric_repr_(cls, unknown):
+            calls.append(unknown)
+            if len(calls) == 1:
+                raise ValueError("retry this formatter")
+            if len(calls) == 2:
+                assert cls(3).name == "ONE|inner"
+                return "outer"
+            return ("inner",)
+
+    assert Flags(2).name is None and not calls
+    try:
+        Flags(3)
+    except ValueError as exc:
+        assert exc.args == ("retry this formatter",)
+    else:
+        raise AssertionError("expected the formatter exception")
+    assert 3 not in Flags._value2member_map_
+    member = Flags(3)
+    assert member.name == "ONE|inner" and Flags(3) is member
+    assert calls == [2, 2, 2]
