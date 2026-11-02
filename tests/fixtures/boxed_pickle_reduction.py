@@ -110,6 +110,13 @@ def consume(streams):
             raise AssertionError("accepted invalid pickle")
 
 
+class Plain:
+    __slots__ = ("slot", "__dict__")
+
+    def __init__(self, item):
+        self.slot = self.link = item
+
+
 def check_object_reducer():
     class Child(WithoutProtocol):
         def reduce_from_super(self):
@@ -147,6 +154,31 @@ def check_object_reducer():
     else:
         raise AssertionError("ignored an error inspecting the class reducer")
     assert events == [False, True]
+
+    import copy
+    import copyreg
+
+    plain = Plain({})
+    for protocol in (2, 3, 4, 5):
+        constructor, args, state, listitems, dictitems = plain.__reduce_ex__(protocol)
+        assert constructor is copyreg.__newobj__ and args == (Plain,)
+        assert state[0] is plain.__dict__ and state[1]["slot"] is plain.slot
+        assert listitems is None and dictitems is None
+        restored = pickle.loads(pickle.dumps(plain, protocol))
+        assert type(restored) is Plain and restored.link is restored.slot
+    for args, message in (((), "expected at least 1 argument"),
+                          ((23,), "must be a class"),
+                          ((Plain,), "first argument to __newobj__() must be")):
+        try:
+            pickle.dumps(BadReturn((copyreg.__newobj__, args)), 4)
+        except pickle.PicklingError as error:
+            assert message in str(error)
+        else:
+            raise AssertionError("accepted invalid __newobj__ arguments")
+    clone = copy.copy(plain)
+    assert type(clone) is Plain and clone is not plain
+    assert clone.__dict__ is not plain.__dict__
+    assert clone.link is clone.slot is plain.slot
 
 
 def produce():
