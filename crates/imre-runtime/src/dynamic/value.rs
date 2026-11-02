@@ -2521,6 +2521,10 @@ impl Heap {
         })
     }
 
+    pub fn current_code(&self) -> Id {
+        self.frames.last().unwrap().code
+    }
+
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
     }
