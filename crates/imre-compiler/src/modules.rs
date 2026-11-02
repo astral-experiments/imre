@@ -243,11 +243,13 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "logging" => Some((
             "logging/__init__.py",
             concat!(
-                include_str!("../stdlib/logging/stream.py"),
-                "\n",
                 include_str!("../stdlib/logging/records.py"),
                 "\n",
                 include_str!("../stdlib/logging/formatters.py"),
+                "\n",
+                include_str!("../stdlib/logging/boxed_handler.py"),
+                "\n",
+                include_str!("../stdlib/logging/stream.py.inc"),
                 "\n",
                 include_str!("../stdlib/logging/boxed.py"),
             ),
@@ -4323,7 +4325,9 @@ impl<'a> Loader<'a> {
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 concat!(
-                    include_str!("../stdlib/logging/stream.py"),
+                    include_str!("../stdlib/logging/typed_handler.py"),
+                    "\n",
+                    include_str!("../stdlib/logging/stream.py.inc"),
                     "\n",
                     include_str!("../stdlib/logging/classes.py")
                 ),
