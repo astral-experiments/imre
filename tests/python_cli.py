@@ -3133,6 +3133,10 @@ else:
                     "-c", imports + "arithmetic.interpreter_flags()")
             plugin.write_bytes((fixtures / "boxed_subprocess_interruptible_read.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-B", "-c", "from subprocess import call; "
+                    "print(call(['/bin/sh', '-c', 'exit 47'], startupinfo=None, creationflags=0.0))")
+            plugin.write_bytes((fixtures / "boxed_subprocess_platform_options.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_pass_fds.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_returncode.py").read_bytes())

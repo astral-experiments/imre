@@ -158,7 +158,7 @@ class Popen:
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
-                 umask=-1, pipesize=-1, process_group=None):
+                 umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0):
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -174,6 +174,10 @@ class Popen:
             import warnings
             warnings.warn("pass_fds overriding close_fds.", RuntimeWarning)
             close_fds = True
+        if startupinfo is not None:
+            raise ValueError("startupinfo is only supported on Windows platforms")
+        if creationflags != 0:
+            raise ValueError("creationflags is only supported on Windows platforms")
         if (text is not None and universal_newlines is not None
                 and bool(text) != bool(universal_newlines)):
             raise SubprocessError("Cannot disambiguate when both text and universal_newlines "
