@@ -7,6 +7,7 @@ import typing as _typing
 from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from collections import Counter as _Counter, defaultdict as _defaultdict
+from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
@@ -1629,6 +1630,30 @@ def _is_param_expr(arg):
     return arg is ... or isinstance(arg, (tuple, list, _typing.ParamSpec, _typing._ConcatenateGenericAlias))
 
 
+def _should_unflatten_callable_args(typ, args):
+    """Internal helper for munging collections.abc.Callable's __args__.
+
+    The canonical representation for a Callable's __args__ flattens the
+    argument types, see https://github.com/python/cpython/issues/86361.
+
+    For example::
+
+        >>> import collections.abc
+        >>> P = ParamSpec('P')
+        >>> collections.abc.Callable[[int, int], str].__args__ == (int, int, str)
+        True
+        >>> collections.abc.Callable[P, str].__args__ == (P, str)
+        True
+
+    As a result, if we need to reconstruct the Callable from its __args__,
+    we need to unflatten it.
+    """
+    return (
+        typ.__origin__ is _ABCCallable
+        and not (len(args) == 2 and _is_param_expr(args[0]))
+    )
+
+
 def _paramspec_subst(self, arg):
     if isinstance(arg, (list, tuple)):
         arg = tuple(_type_check(a, "Expected a type.") for a in arg)
@@ -1883,7 +1908,7 @@ def _reduce_generic_alias(alias):
 def _reduce_callable_alias(alias):
     from operator import getitem
     args = alias.__args__
-    if not (len(args) == 2 and (args[0] is ... or isinstance(args[0], (list, tuple, _typing.ParamSpec)))):
+    if _should_unflatten_callable_args(alias, args):
         args = list(args[:-1]), args[-1]
     return getitem, (Callable, args)
 
