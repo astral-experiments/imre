@@ -462,6 +462,10 @@ fn directory_fd(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
     Ok(native::directory_fd_number(&fd)?)
 }
 
+fn audit_fd(ctx: &mut Context, fd: i32) -> Id {
+    ctx.int(i64::from(if fd == libc::AT_FDCWD { -1 } else { fd }))
+}
+
 /// Bind the path and keyword-only directory descriptor in Argument Clinic order.
 fn path_and_dir_fd(
     ctx: &mut Context,
