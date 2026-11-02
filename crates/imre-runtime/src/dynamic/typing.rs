@@ -3020,6 +3020,7 @@ impl Context {
                             | "ellipsis"
                             | super::value::REGEX_PATTERN_TYPE
                             | super::value::REGEX_MATCH_TYPE
+                            | super::value::REGEX_SCANNER_TYPE
                             | super::value::TEMPLATE_ITER_TYPE
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE

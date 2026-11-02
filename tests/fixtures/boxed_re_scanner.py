@@ -15,6 +15,23 @@ def current():
     assert [m.group() for m in re.finditer(pattern=b"a", string=b"Aa", flags=re.I)] == [b"A", b"a"]
 
     cursor = pattern.scanner(string="xαβy", pos=1, endpos=3)
+    scanner_type = type(cursor)
+    assert type(scanner_type) is type
+    assert (scanner_type.__module__, scanner_type.__qualname__) == ("_sre", "SRE_Scanner")
+    assert scanner_type.__new__ is object.__new__
+    for construct in (lambda: scanner_type(), lambda: scanner_type.__new__(scanner_type)):
+        try:
+            construct()
+        except TypeError as exc:
+            assert str(exc) == "cannot create '_sre.SRE_Scanner' instances"
+        else:
+            raise AssertionError("constructed a scanner without a compiled pattern")
+    try:
+        scanner_type.foo = 1
+    except TypeError as exc:
+        assert str(exc) == "cannot set 'foo' attribute of immutable type '_sre.SRE_Scanner'"
+    else:
+        raise AssertionError("modified the scanner type")
     print(cursor.pattern is pattern)
     for advance in (cursor.search, cursor.match, cursor.match, cursor.search,
                     cursor.search, cursor.search, cursor.match):
