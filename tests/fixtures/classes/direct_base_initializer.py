@@ -17,11 +17,6 @@ class Grandchild(Child):
     pass
 
 
-print(Child().value)
-print(Grandchild(42).value)
-print(Grandchild().tag)
-
-
 class Forward(Parent):
     tag: str
 
@@ -34,6 +29,9 @@ class InheritedForward(Forward):
     pass
 
 
+print(Child().value)
+print(Grandchild(42).value)
+print(Grandchild().tag)
 print(Forward().value)
 print(Forward(29).value)
 print(InheritedForward(value=31).value)
