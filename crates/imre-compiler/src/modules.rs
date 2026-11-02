@@ -2006,6 +2006,12 @@ impl IntrinsicModule {
             (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
+            (Self::LoggingHandlers, "QueueHandler") => {
+                Intrinsic::ObjectRuntimeExport("logging.handlers.QueueHandler")
+            }
+            (Self::LoggingHandlers, "QueueListener") => {
+                Intrinsic::ObjectRuntimeExport("logging.handlers.QueueListener")
+            }
             (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Datetime, "date") => Intrinsic::Calendar(crate::ir::CalendarType::Date),
             (Self::Datetime, "datetime") => Intrinsic::Calendar(crate::ir::CalendarType::DateTime),

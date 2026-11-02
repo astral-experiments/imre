@@ -2453,6 +2453,15 @@ def report(text):
         compare("-IB", pair_fixture, native_args=("run", pair_fixture, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
+        queue_exports = fixtures / "logging_queue_exports.py"
+        compare("-IB", queue_exports, native_args=("run", queue_exports, "--quiet"), native_timeout=600)
+        # A from-import elsewhere in the same program would already select the boxed runtime.
+        queue_lookup = root / "queue_lookup.py"
+        for statement, name in (("import logging.handlers", "logging.handlers"),
+                                ("import logging.handlers as h", "h")):
+            queue_lookup.write_text(f"{statement}\nprint({name}.QueueListener.__name__)\n")
+            checked = run(imre, "check", queue_lookup)
+            assert checked.returncode == 0, checked.stderr
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         for name in ("boxed_prelinked_coroutine.py", "boxed_coroutine_origin.py"):
