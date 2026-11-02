@@ -610,11 +610,11 @@ impl BufferedFd {
             self.close(Some(ctx), true)?;
             return Ok(NONE);
         }
-        if let ("readinto", [target]) = (name, args)
-            && !self.reading
-        {
+        if let ("readinto", [target]) = (name, args) {
             files::readinto_target(ctx, *target)?;
-            return Err(Error::new("UnsupportedOperation", "read"));
+            if !self.reading {
+                return Err(Error::new("UnsupportedOperation", "read"));
+            }
         }
         let closed = || {
             Error::new(
@@ -626,7 +626,7 @@ impl BufferedFd {
                     "truncate" => "truncate of closed file",
                     "seek" => "seek of closed file",
                     "write" => "write to closed file",
-                    "flush" if !self.reading => "flush of closed file",
+                    "flush" if self.writing => "flush of closed file",
                     "flush" | "__enter__" => "I/O operation on closed file.",
                     _ => "I/O operation on closed file",
                 },
