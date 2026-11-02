@@ -2171,6 +2171,12 @@ impl Context {
                 if name == "__globals__" {
                     return self.module_globals(scope);
                 }
+                if name == "__builtins__" {
+                    return match self.scope_data(self.root_scope(scope)).exec_globals {
+                        Some(globals) => Ok(globals.builtins),
+                        None => self.default_source_builtins(),
+                    };
+                }
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
                 }
@@ -5592,9 +5598,7 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind_local(scope, "__annotations__", annotations);
-        if typed_dict_meta.is_none()
-            && let Value::Scope(frame) = self.heap.get_mut(scope)
-        {
+        if let Value::Scope(frame) = self.heap.get_mut(scope) {
             frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
@@ -5656,16 +5660,13 @@ impl Context {
             bases.extend(generic);
             bases.push(dict);
             let parents = self.alloc(Value::Tuple(parents));
-            let (fields, thunks) = self.prepare_typeddict_namespace(scope, annotations)?;
-            Some((parents, fields, thunks, generic))
+            let (fields, annotate) = self.prepare_typeddict_namespace(scope, annotations)?;
+            Some((parents, fields, annotate, generic))
         } else {
             None
         };
         if typed_dict_meta.is_none() && self.scope_name(scope, "__annotate_func__").is_some() {
             self.enable_class_annotation_provider(scope);
-            if let Value::Scope(frame) = self.heap.get_mut(scope) {
-                frame.class_namespace.as_mut().unwrap().annotation_sites = None;
-            }
             if self.scope_name(scope, "__annotations__") == Some(annotations) {
                 let key = self.heap.code_name("__annotations__");
                 self.remove_binding(scope, "__annotations__", key)?;
@@ -5731,7 +5732,7 @@ impl Context {
                 .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, scope)?;
-        if let Some((parents, fields, thunks, generic)) = typed_dict_fields {
+        if let Some((parents, fields, annotate, generic)) = typed_dict_fields {
             if let Some(generic) = generic {
                 // Generic.__init_subclass__ reads the declared bases after __set_name__.
                 let raw = self
@@ -5746,7 +5747,7 @@ impl Context {
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
             self.call(
                 configure,
-                vec![class, fields, total.unwrap_or(TRUE), thunks, parents],
+                vec![class, fields, total.unwrap_or(TRUE), annotate, parents],
                 Vec::new(),
             )?;
         }

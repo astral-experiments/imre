@@ -512,6 +512,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_UnpackGenericAlias"
             | "_eval_type_expression"
             | "_validate_forward_ref"
+            | "_finish_field_ref"
             | "Any"
             | "Callable"
             | "cast"
