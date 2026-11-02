@@ -322,7 +322,10 @@ impl<'a> Visitor<'a> for Imports {
                     || crate::classes::defines_pickle_reducer(class)
                     || class.arguments.as_ref().is_some_and(|arguments| {
                         arguments.keywords.iter().any(|keyword| {
-                            keyword.arg.as_deref().is_some_and(|name| name != "metaclass")
+                            keyword
+                                .arg
+                                .as_deref()
+                                .is_some_and(|name| name != "metaclass")
                         })
                     }) =>
             {
@@ -486,7 +489,7 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
-        && !(startup.is_some() && src.contains("urllib"))
+        && !(startup.is_some() && (src.contains("urllib") || src.contains("ftplib")))
         && !(src.contains("class") && src.contains('='))
         && !(cfg!(unix) && src.contains("signal"))
         && ![
@@ -531,19 +534,24 @@ pub(crate) fn compile(
     ) else {
         return Ok(None);
     };
-    // Python scripts load urllib.request and its transport dependencies as boxed modules.
-    let request_script = startup.is_some()
-        && !options.runtime_imports
-        && first
-            .names
-            .iter()
-            .any(|(level, name)| *level == 0 && name == "urllib.request");
+    // Python scripts load the URL opener and FTP client as boxed modules.
+    let imports_transport = |transport: &str| {
+        startup.is_some()
+            && !options.runtime_imports
+            && first
+                .names
+                .iter()
+                .any(|(level, name)| *level == 0 && name == transport)
+    };
+    let request_script = imports_transport("urllib.request");
+    let ftp_script = imports_transport("ftplib");
+    let transport_script = request_script || ftp_script;
     if !(module_entry.is_some()
         || first.runtime_imports
         || operation.is_some()
         || (runtime_imports && !first.names.is_empty())
         || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
-        || request_script)
+        || transport_script)
     {
         return Ok(None);
     }
@@ -644,7 +652,7 @@ pub(crate) fn compile(
         if module_entry.is_none()
             && !options.runtime_imports
             && !registered_imports.called
-            && (!request_script || owner == "__main__")
+            && (!transport_script || owner == "__main__")
             && imports.needs_typed_machinery()
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
@@ -772,8 +780,11 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
-                    // The boxed urllib transport cannot stand in for an earlier project package.
-                    if request_script && prefix == "urllib" && initial.contains(root) {
+                    // Bundled transports cannot stand in for earlier project modules.
+                    if initial.contains(root)
+                        && ((request_script && prefix == "urllib")
+                            || (ftp_script && prefix == "ftplib"))
+                    {
                         return Ok(None);
                     }
                     let src = std::fs::read_to_string(&path)

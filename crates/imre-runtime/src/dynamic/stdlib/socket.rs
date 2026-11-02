@@ -852,35 +852,74 @@ pub(super) fn call(
         return getsockopt(ctx, &s, args, kwargs);
     }
     if method == "makefile" {
-        check_args(method, args, kwargs, 2, &["mode", "buffering"])?;
-        let binary_reader = if let Some(mode) = option(args, 0, kwargs, "mode")? {
-            let storage = ctx
-                .string_storage(mode)
-                .ok_or_else(|| Error::new("TypeError", "expected str"))?;
-            match ctx.heap.get(storage) {
-                Value::Str(text) if text.bytes().all(|c| matches!(c, b'r' | b'w' | b'b')) => {
-                    text == "rb"
-                }
-                _ => {
-                    let repr = ctx.repr(mode);
-                    return Err(Error::new(
-                        "ValueError",
-                        format!("invalid mode {repr} (only r, w, b allowed)"),
-                    ));
-                }
+        check_args(
+            method,
+            args,
+            kwargs,
+            2,
+            &["mode", "buffering", "encoding", "errors", "newline"],
+        )?;
+        let mode = option(args, 0, kwargs, "mode")?.unwrap_or_else(|| ctx.text("r"));
+        let storage = ctx
+            .string_storage(mode)
+            .ok_or_else(|| Error::new("TypeError", "expected str"))?;
+        let text = match ctx.heap.get(storage) {
+            Value::Str(text) if text.bytes().all(|c| matches!(c, b'r' | b'w' | b'b')) => text,
+            _ => {
+                return Err(Error::new(
+                    "ValueError",
+                    format!("invalid mode {} (only r, w, b allowed)", ctx.repr(mode)),
+                ));
             }
-        } else {
-            false
         };
-        let buffering = int_option(ctx, args, kwargs, 1, "buffering", -1)?;
-        if !binary_reader || buffering != -1 {
+        let binary = text.contains('b');
+        let write = text.contains('w');
+        let buffering = match option(args, 1, kwargs, "buffering")? {
+            None | Some(NONE) => -1,
+            Some(value) => integer(ctx, value)?,
+        };
+        if !binary && buffering == 0 {
             return Err(Error::new(
-                "NotImplementedError",
-                "socket.makefile supports the default buffered binary reader",
+                "ValueError",
+                "unbuffered streams must be binary",
             ));
         }
+        if write || buffering >= 0 {
+            return Err(Error::new(
+                "NotImplementedError",
+                "socket.makefile supports default buffered readers",
+            ));
+        }
+        let wrapper = if binary {
+            None
+        } else {
+            let io = ctx.module("io")?;
+            Some(ctx.lookup_attr(io, "TextIOWrapper")?)
+        };
+        let roots = ctx.heap.temporary_mark();
         let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
-        return Ok(ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?));
+        let buffer = ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?);
+        let Some(cls) = wrapper else {
+            return Ok(buffer);
+        };
+        let encoding = option(&[], 0, kwargs, "encoding")?.unwrap_or(NONE);
+        let errors = option(&[], 0, kwargs, "errors")?.unwrap_or(NONE);
+        let newline = option(&[], 0, kwargs, "newline")?.unwrap_or(NONE);
+        let args = vec![buffer, encoding, errors, newline];
+        return ctx
+            .call(cls, args, Vec::new())
+            .and_then(|text| {
+                ctx.set_attr(text, "mode", mode)?;
+                Ok(text)
+            })
+            .inspect_err(|error| {
+                // A replacement text factory can retain the socket reader before raising.
+                ctx.heap.release_temporaries_since(roots);
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
+                ctx.collect_unreachable();
+            });
     }
     let max = match method {
         "bind" | "connect" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
