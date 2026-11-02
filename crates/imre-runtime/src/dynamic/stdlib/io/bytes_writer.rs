@@ -1,10 +1,13 @@
-//! BufferedWriter over an exact native BytesIO. No Python callback sees a borrowed byte slice.
+//! BufferedWriter over a Python raw stream. No Python callback sees a borrowed byte slice.
 
 use std::cell::{Cell, RefCell};
+use std::io::{self, Write};
 use std::rc::Rc;
 
+use crate::{BinaryOutput, BlockedWrite};
+
 use super::super::files;
-use super::bytes_io::BytesIo;
+use super::bytes_io::{BytesIo, copy_bytes};
 use super::text_wrapper::invoke;
 use super::{Context, Error, Id, MemoryStream, NONE, Result, TRUE, Value};
 
@@ -12,6 +15,9 @@ pub(in crate::dynamic) struct Writer {
     pub(in crate::dynamic) raw: Cell<Option<Id>>,
     capacity: usize,
     pending: RefCell<Vec<u8>>,
+    written: Cell<usize>,
+    unflushed: Cell<usize>,
+    busy: Cell<bool>,
 }
 
 pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<Writer>> {
@@ -24,34 +30,37 @@ pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<Writer>> {
     }
 }
 
-pub(super) fn is_bytes_io(ctx: &Context, raw: Id) -> bool {
-    ctx.heap
-        .get(raw)
-        .instance_class()
-        .and_then(|class| ctx.heap.get(class).io_kind())
-        == Some("BytesIO")
+/// Detect bytes that would be discarded when the VM drops a live Python-backed
+/// writer. During shutdown, inspecting the raw or resolving close could run Python.
+pub(in crate::dynamic) fn has_pending_callback_write(ctx: &Context) -> bool {
+    ctx.heap.pending_finalizers().iter().copied().any(|owner| {
+        state(ctx, owner).is_some_and(|w| {
+            w.unflushed.get() != 0
+                && w.raw
+                    .get()
+                    .is_some_and(|raw| native_writer(ctx, raw).is_none())
+        })
+    })
 }
 
-fn native_writer(ctx: &Context, raw: Id) -> Result<Rc<BytesIo>> {
-    if ctx.raw_instance_field(raw, "write").is_none()
-        && let Value::Instance {
-            memory_stream: Some(MemoryStream::Bytes(stream)),
-            ..
-        } = ctx.heap.get(raw)
+/// Bypass Python only on an exact BytesIO whose write method is still native.
+fn native_writer(ctx: &Context, raw: Id) -> Option<Rc<BytesIo>> {
+    if let Value::Instance {
+        class,
+        memory_stream: Some(MemoryStream::Bytes(stream)),
+        ..
+    } = ctx.heap.get(raw)
+        && ctx.heap.get(*class).io_kind() == Some("BytesIO")
+        && ctx.raw_instance_field(raw, "write").is_none()
     {
-        return Ok(stream.clone());
+        return Some(stream.clone());
     }
-    Err(Error::new(
-        "NotImplementedError",
-        "BufferedWriter with Python raw write methods is unsupported",
-    ))
+    None
 }
 
 pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, capacity: usize) -> Result<Id> {
-    native_writer(ctx, raw)?;
     // CPython probes the initial position, including when the stream is not seekable.
     let _ = invoke(ctx, raw, "tell", vec![]);
-    native_writer(ctx, raw)?;
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         return Err(Error::new(
             "NotImplementedError",
@@ -72,19 +81,112 @@ pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, capacity: usi
         raw: Cell::new(Some(raw)),
         capacity,
         pending: RefCell::new(pending),
+        written: Cell::new(0),
+        unflushed: Cell::new(0),
+        busy: Cell::new(false),
     })));
     Ok(NONE)
 }
 
-/// Python seek/truncate overrides could reenter while CPython holds its buffer lock.
-fn require_native_method(ctx: &Context, raw: Id, name: &str) -> Result<()> {
-    if ctx.raw_instance_field(raw, name).is_some() {
-        return Err(Error::new(
-            "NotImplementedError",
-            format!("BufferedWriter with a Python raw {name} method is unsupported"),
-        ));
+/// Adapt a raw stream to BinaryOutput, carrying Python exceptions through std::io::Write.
+struct RawWriter<'a> {
+    ctx: &'a mut Context,
+    raw: Id,
+    unflushed: &'a Cell<usize>,
+    writing: bool,
+    error: Option<Error>,
+}
+
+impl RawWriter<'_> {
+    fn raw_write(&mut self, data: &[u8]) -> Result<Option<usize>> {
+        let ctx = &mut *self.ctx;
+        if let Some(stream) = native_writer(ctx, self.raw) {
+            stream.write(data)?;
+            return Ok(Some(data.len()));
+        }
+        let bytes = ctx.alloc(Value::Bytes(copy_bytes(data)?));
+        let view = ctx.alloc(Value::MemoryView {
+            owner: Some(bytes),
+            anonymous: true,
+            hash: None,
+        });
+        // Attribute lookup itself can invoke Python and collect temporaries.
+        ctx.heap.keep(view);
+        let retry_mark = ctx.heap.temporary_mark();
+        let result = loop {
+            match invoke(ctx, self.raw, "write", vec![view]) {
+                Err(error) if ctx.has_errno(&error, libc::EINTR) => {
+                    ctx.heap.release_temporaries_since(retry_mark);
+                    continue;
+                }
+                result => break result?,
+            }
+        };
+        if result == NONE {
+            return Ok(None);
+        }
+        let count = ctx
+            .index_integer(result)
+            .ok()
+            .and_then(|n| n.to_i64())
+            .unwrap_or(-1);
+        if count < 0 || count as u64 > data.len() as u64 {
+            return Err(Error::new(
+                "OSError",
+                format!(
+                    "raw write() returned invalid length {count} (should have been between 0 and {})",
+                    data.len()
+                ),
+            ));
+        }
+        Ok(Some(count as usize))
     }
-    Ok(())
+}
+
+impl Write for RawWriter<'_> {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        let mark = self.ctx.heap.temporary_mark();
+        let result = self.raw_write(data);
+        self.ctx.heap.release_temporaries_since(mark);
+        match result {
+            // CPython retries a zero result without consuming any input.
+            Ok(Some(0)) => Err(io::ErrorKind::Interrupted.into()),
+            Ok(Some(count)) => {
+                self.unflushed
+                    .set(self.unflushed.get().saturating_sub(count));
+                Ok(count)
+            }
+            Ok(None) => Err(io::ErrorKind::WouldBlock.into()),
+            Err(error) => {
+                for id in error.roots() {
+                    self.ctx.heap.keep(id);
+                }
+                if self.writing && self.unflushed.get() != 0 {
+                    // A blocked preflush can still accept new input into the buffer.
+                    // A direct raw write or explicit flush propagates the original error.
+                    let blocking = self.ctx.builtin("BlockingIOError");
+                    if self.ctx.raised_error_matches(&error, blocking) {
+                        return Err(io::ErrorKind::WouldBlock.into());
+                    }
+                }
+                self.error = Some(error);
+                Err(io::ErrorKind::Other.into())
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        // BufferedWriter.flush drains pending writes without calling raw.flush().
+        Ok(())
+    }
+}
+
+struct Lock<'a>(&'a Cell<bool>);
+
+impl Drop for Lock<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
 }
 
 fn position(ctx: &mut Context, result: Id) -> Result<i64> {
@@ -110,28 +212,87 @@ impl Writer {
             .ok_or_else(|| Error::new("ValueError", "raw stream has been detached"))
     }
 
-    fn drain(&self, ctx: &Context, raw: Id) -> Result<()> {
-        let mut pending = self.pending.borrow_mut();
-        if !pending.is_empty() {
-            native_writer(ctx, raw)?.write(&pending)?;
-            pending.clear();
+    fn lock(&self) -> Result<Lock<'_>> {
+        if self.busy.replace(true) {
+            Err(Error::new(
+                "RuntimeError",
+                "reentrant call inside <_io.BufferedWriter>",
+            ))
+        } else {
+            Ok(Lock(&self.busy))
         }
-        Ok(())
     }
 
-    fn write(&self, ctx: &mut Context, raw: Id, data: Id) -> Result<Id> {
-        let stream = native_writer(ctx, raw)?;
-        let bytes = files::output_bytes(ctx, data)?;
-        let n = bytes.len();
-        if n >= self.capacity || n > self.capacity - self.pending.borrow().len() {
-            self.drain(ctx, raw)?;
-        }
-        if n >= self.capacity {
-            stream.write(bytes)?;
-        } else {
+    /// Take the buffer out before callbacks so reentry cannot alias Rust storage.
+    fn transfer(&self, ctx: &mut Context, raw: Id, data: Option<Id>) -> Result<Id> {
+        let bytes = data.map(|id| files::output_bytes(ctx, id)).transpose()?;
+        if let Some(bytes) = bytes
+            && bytes.len() < self.capacity
+            && bytes.len() <= self.capacity - self.pending.borrow().len()
+        {
             self.pending.borrow_mut().extend_from_slice(bytes);
+            self.unflushed.set(self.unflushed.get() + bytes.len());
+            return Ok(ctx.int(bytes.len() as i64));
         }
-        Ok(ctx.int(n as i64))
+        let refresh = match (data, bytes) {
+            (Some(id), Some(b))
+                if b.len() < self.capacity
+                    && matches!(
+                        ctx.buffer_storage(id)?,
+                        Value::ByteArray(_) | Value::Array(_)
+                    ) =>
+            {
+                Some(id)
+            }
+            _ => None,
+        };
+        let bytes = bytes.map(copy_bytes).transpose()?;
+        let length = bytes.as_ref().map(Vec::len);
+        let mut output = BinaryOutput {
+            buffer: self.pending.take(),
+            written: self.written.get(),
+            inner: RawWriter {
+                ctx,
+                raw,
+                unflushed: &self.unflushed,
+                writing: data.is_some(),
+                error: None,
+            },
+        };
+        let result = match bytes {
+            Some(data) => output.write_all(&data),
+            None => output.flush(),
+        };
+        self.unflushed.set(output.buffer.len() - output.written);
+        self.written.set(output.written);
+        self.pending.replace(output.buffer);
+        if let Some(error) = output.inner.error {
+            return Err(error);
+        }
+        let blocked = result
+            .as_ref()
+            .err()
+            .and_then(|error| error.get_ref())
+            .and_then(|e| e.downcast_ref::<BlockedWrite>())
+            .map(|e| e.accepted);
+        // A preflush may have changed a mutable input in-place. Short writes
+        // only place new bytes into our buffer; copy the accepted prefix now.
+        if let Some(input) = refresh {
+            let count = if result.is_ok() {
+                length.unwrap()
+            } else {
+                blocked.unwrap_or(0)
+            };
+            let mut pending = self.pending.borrow_mut();
+            let start = pending.len() - count;
+            pending[start..].copy_from_slice(&files::output_bytes(ctx, input)?[..count]);
+        }
+        if let Some(accepted) = blocked {
+            // A raw callback returning None need not have set errno.
+            return Err(super::descriptor_buffer::blocking_error(ctx, 0, accepted));
+        }
+        result.map_err(super::super::os_error)?;
+        Ok(length.map_or(NONE, |n| ctx.int(n as i64)))
     }
 
     pub(super) fn call(
@@ -156,6 +317,22 @@ impl Writer {
         };
         let raw = self.raw()?;
         ctx.heap.keep(raw);
+        if name == "seek"
+            && !matches!(
+                whence,
+                libc::SEEK_SET
+                    | libc::SEEK_CUR
+                    | libc::SEEK_END
+                    | libc::SEEK_DATA
+                    | libc::SEEK_HOLE
+            )
+        {
+            return Err(Error::new(
+                "ValueError",
+                format!("whence value {whence} unsupported"),
+            ));
+        }
+
         if matches!(name, "closed" | "name" | "mode") {
             return ctx.lookup_attr(raw, name);
         }
@@ -168,6 +345,44 @@ impl Writer {
                 Err(error) => Err(error),
             };
         }
+        if matches!(name, "writable" | "seekable" | "isatty") {
+            return invoke(ctx, raw, name, vec![]);
+        }
+        if name == "tell" {
+            let value = invoke(ctx, raw, "tell", vec![])?;
+            let pos = position(ctx, value)?
+                .checked_add(self.unflushed.get() as i64)
+                .ok_or_else(|| Error::new("OverflowError", "file position out of range"))?;
+            return Ok(ctx.int(pos));
+        }
+        if name == "detach" {
+            invoke(ctx, receiver, "flush", vec![])?;
+            let _guard = self.lock()?;
+            let raw = self.raw()?;
+            self.raw.set(None);
+            ctx.heap.weak_edge_removed(raw);
+            return Ok(raw);
+        }
+        if name == "write"
+            && files::output_bytes(ctx, args[0])?.len() >= self.capacity
+            && matches!(
+                ctx.buffer_storage(args[0])?,
+                Value::ByteArray(_) | Value::Array(_)
+            )
+            && native_writer(ctx, raw).is_none()
+        {
+            // A direct raw.write view must observe in-place mutations to the input.
+            // Retaining a Rust borrow across a Python callback cannot implement it.
+            return Err(Error::new(
+                "NotImplementedError",
+                "direct buffered writes from a mutable exporter to Python raw methods are unsupported",
+            ));
+        }
+        let guard = if matches!(name, "write" | "close") {
+            Some(self.lock()?)
+        } else {
+            None
+        };
         let closed = ctx.lookup_attr(raw, "closed")?;
         if ctx.truth(closed)? {
             if name == "close" {
@@ -186,15 +401,28 @@ impl Writer {
         }
         match name {
             "__enter__" => Ok(receiver),
-            "write" => self.write(ctx, raw, args[0]),
+            "write" => self.transfer(ctx, self.raw()?, Some(args[0])),
             "flush" => {
-                self.drain(ctx, raw)?;
-                Ok(NONE)
+                let _guard = self.lock()?;
+                self.transfer(ctx, self.raw()?, None)
             }
             "close" => {
+                // Public flush takes the lock itself and can be overridden.
+                drop(guard);
                 let flushed = invoke(ctx, receiver, "flush", vec![]);
+                let _guard = self.lock()?;
                 // invoke retains the exception roots across raw.close().
-                match (flushed, invoke(ctx, self.raw()?, "close", vec![])) {
+                let raw = self.raw()?;
+                let python_raw = native_writer(ctx, raw).is_none();
+                let closed = invoke(ctx, raw, "close", vec![]);
+                if python_raw && closed.is_ok() {
+                    // CPython retires its buffer after calling raw.close, even if
+                    // public flush was overridden. An already-closed raw skips this.
+                    self.pending.borrow_mut().clear();
+                    self.unflushed.set(0);
+                    self.written.set(0);
+                }
+                match (flushed, closed) {
                     (Err(flush), Err(mut close)) => {
                         close.context = ctx.raised_instance(flush);
                         Err(close)
@@ -203,34 +431,7 @@ impl Writer {
                     (_, result) => result,
                 }
             }
-            "detach" => {
-                invoke(ctx, receiver, "flush", vec![])?;
-                let raw = self.raw()?;
-                self.raw.set(None);
-                ctx.heap.weak_edge_removed(raw);
-                Ok(raw)
-            }
-            "tell" => {
-                let value = invoke(ctx, raw, "tell", vec![])?;
-                let pos = position(ctx, value)?
-                    .checked_add(self.pending.borrow().len() as i64)
-                    .ok_or_else(|| Error::new("OverflowError", "file position out of range"))?;
-                Ok(ctx.int(pos))
-            }
             "seek" => {
-                if !matches!(
-                    whence,
-                    libc::SEEK_SET
-                        | libc::SEEK_CUR
-                        | libc::SEEK_END
-                        | libc::SEEK_DATA
-                        | libc::SEEK_HOLE
-                ) {
-                    return Err(Error::new(
-                        "ValueError",
-                        format!("whence value {whence} unsupported"),
-                    ));
-                }
                 if invoke(ctx, raw, "seekable", vec![])? != TRUE {
                     return Err(Error::new(
                         "UnsupportedOperation",
@@ -243,20 +444,22 @@ impl Writer {
                         "cannot fit 'int' into an offset-sized integer",
                     )
                 })?;
+                let _guard = self.lock()?;
                 let raw = self.raw()?;
-                require_native_method(ctx, raw, name)?;
-                self.drain(ctx, raw)?;
+                self.transfer(ctx, raw, None)?;
                 let args = vec![ctx.int(offset), ctx.int(i64::from(whence))];
                 let value = invoke(ctx, raw, "seek", args)?;
                 let pos = position(ctx, value)?;
                 Ok(ctx.int(pos))
             }
             "truncate" => {
-                require_native_method(ctx, raw, name)?;
-                self.drain(ctx, raw)?;
-                invoke(ctx, raw, name, args.to_vec())
+                let _guard = self.lock()?;
+                let raw = self.raw()?;
+                self.transfer(ctx, raw, None)?;
+                let value = invoke(ctx, raw, name, vec![args.first().copied().unwrap_or(NONE)])?;
+                let _ = invoke(ctx, raw, "tell", vec![]);
+                Ok(value)
             }
-            "writable" | "seekable" | "isatty" => invoke(ctx, raw, name, vec![]),
             _ => unreachable!("registered BufferedWriter method"),
         }
     }

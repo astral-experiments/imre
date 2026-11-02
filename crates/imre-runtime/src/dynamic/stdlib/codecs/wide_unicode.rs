@@ -1,19 +1,13 @@
 //! Stateless UTF-16 and UTF-32 decoding into Python code points.
 use super::{Context, DecodeIssue, Id, Result, resume_decode};
-use crate::objects::FixedUnicode;
-use FixedUnicode::{Utf16Be, Utf16Le, Utf32Be, Utf32Le};
+use crate::objects::{FixedUnicode, Utf16Order};
+use FixedUnicode::{Utf16, Utf32Be, Utf32Le};
+use Utf16Order::{Big, Little};
 
 /// A codec without an explicit byte order strips one BOM or uses native order.
 pub(super) fn encoding(key: &str) -> Option<(FixedUnicode, bool)> {
     match key {
-        "utf16" | "u16" | "utf_16" => Some((
-            if cfg!(target_endian = "little") {
-                Utf16Le
-            } else {
-                Utf16Be
-            },
-            true,
-        )),
+        "utf16" | "u16" | "utf_16" => Some((Utf16(Utf16Order::from_sign(0)), true)),
         "utf32" | "u32" | "utf_32" => Some((
             if cfg!(target_endian = "little") {
                 Utf32Le
@@ -33,86 +27,69 @@ pub(super) fn decode(
     format: FixedUnicode,
     bom: bool,
 ) -> Result<Id> {
+    if let Utf16(order) = format {
+        let sign = match (bom, order) {
+            (true, _) => 0,
+            (false, Little) => -1,
+            (false, Big) => 1,
+        };
+        let (text, _, _) = super::utf16::decode(ctx, input, errors, sign, true)?;
+        return Ok(text);
+    }
     let data = ctx.bytes_like(input)?;
-    let (format, start) = if bom {
-        match (format, data) {
-            (Utf16Le | Utf16Be, [0xff, 0xfe, ..]) => (Utf16Le, 2),
-            (Utf16Le | Utf16Be, [0xfe, 0xff, ..]) => (Utf16Be, 2),
-            (Utf32Le | Utf32Be, [0xff, 0xfe, 0, 0, ..]) => (Utf32Le, 4),
-            (Utf32Le | Utf32Be, [0, 0, 0xfe, 0xff, ..]) => (Utf32Be, 4),
-            _ => (format, 0),
-        }
-    } else {
-        (format, 0)
+    let (little, start) = match (bom, data) {
+        (true, [0xff, 0xfe, 0, 0, ..]) => (true, 4),
+        (true, [0, 0, 0xfe, 0xff, ..]) => (false, 4),
+        _ => (matches!(format, Utf32Le), 0),
     };
     let mut points = Vec::new();
-    let Some(issue) = prefix(format, &mut points, data, start)? else {
+    let Some(issue) = utf32_prefix(little, &mut points, data, start)? else {
         return Ok(ctx.text_codepoints(points));
     };
     let error = issue.error(data);
     resume_decode(ctx, errors, points, error, |out, bytes, pos| {
-        prefix(format, out, bytes, pos)
+        utf32_prefix(little, out, bytes, pos)
     })
 }
 
-fn unit(format: FixedUnicode, data: &[u8]) -> Option<(u32, usize)> {
-    Some(match format {
-        Utf16Le => (u32::from(u16::from_le_bytes(*data.first_chunk()?)), 2),
-        Utf16Be => (u32::from(u16::from_be_bytes(*data.first_chunk()?)), 2),
-        Utf32Le => (u32::from_le_bytes(*data.first_chunk()?), 4),
-        Utf32Be => (u32::from_be_bytes(*data.first_chunk()?), 4),
+fn utf32_unit(little: bool, data: &[u8]) -> Option<u32> {
+    let unit = *data.first_chunk()?;
+    Some(if little {
+        u32::from_le_bytes(unit)
+    } else {
+        u32::from_be_bytes(unit)
     })
 }
 
-fn prefix(
-    format: FixedUnicode,
+fn utf32_prefix(
+    little: bool,
     points: &mut Vec<u32>,
     data: &[u8],
-    mut offset: usize,
+    mut start: usize,
 ) -> Result<Option<DecodeIssue>> {
-    let width = match format {
-        Utf16Le | Utf16Be => 2,
-        Utf32Le | Utf32Be => 4,
-    };
     points
-        .try_reserve((data.len() - offset) / width)
+        .try_reserve((data.len() - start) / 4)
         .map_err(|_| crate::Error::allocation())?;
-    while offset < data.len() {
-        let start = offset;
-        let issue = |end, reason| {
-            Ok(Some(DecodeIssue {
-                encoding: format.name(),
-                start,
-                end,
-                reason,
-            }))
-        };
-        let Some((point, _)) = unit(format, &data[offset..]) else {
-            return issue(data.len(), "truncated data");
-        };
-        offset += width;
-        let point = match point {
-            0xd800..=0xdbff if width == 2 => {
-                let Some((trail, _)) = unit(format, &data[offset..]) else {
-                    return issue(data.len(), "unexpected end of data");
-                };
-                if !(0xdc00..=0xdfff).contains(&trail) {
-                    return issue(offset, "illegal UTF-16 surrogate");
-                }
-                offset += 2;
-                0x10000 + ((point - 0xd800) << 10) + (trail - 0xdc00)
+    while start < data.len() {
+        let (reason, end) = match utf32_unit(little, &data[start..]) {
+            Some(0xd800..=0xdfff) => (
+                "code point in surrogate code point range(0xd800, 0xe000)",
+                start + 4,
+            ),
+            Some(0x110000..) => ("code point not in range(0x110000)", start + 4),
+            None => ("truncated data", data.len()),
+            Some(scalar) => {
+                points.push(scalar);
+                start += 4;
+                continue;
             }
-            0xdc00..=0xdfff if width == 2 => return issue(offset, "illegal encoding"),
-            0xd800..=0xdfff => {
-                return issue(
-                    offset,
-                    "code point in surrogate code point range(0xd800, 0xe000)",
-                );
-            }
-            0x110000.. => return issue(offset, "code point not in range(0x110000)"),
-            scalar => scalar,
         };
-        points.push(point);
+        return Ok(Some(DecodeIssue {
+            encoding: if little { "utf-32-le" } else { "utf-32-be" },
+            start,
+            end,
+            reason,
+        }));
     }
     Ok(None)
 }
@@ -138,8 +115,8 @@ pub(super) fn surrogate_encoding(name: &str) -> Option<FixedUnicode> {
         }
     };
     match (width, little) {
-        ("16", true) => Some(Utf16Le),
-        ("16", false) => Some(Utf16Be),
+        ("16", true) => Some(Utf16(Little)),
+        ("16", false) => Some(Utf16(Big)),
         ("32", true) => Some(Utf32Le),
         ("32", false) => Some(Utf32Be),
         _ => None,
@@ -147,5 +124,9 @@ pub(super) fn surrogate_encoding(name: &str) -> Option<FixedUnicode> {
 }
 
 pub(super) fn surrogate(format: FixedUnicode, data: &[u8]) -> Option<(u32, usize)> {
-    unit(format, data).filter(|(point, _)| (0xd800..=0xdfff).contains(point))
+    let (point, width) = match format {
+        Utf16(order) => (u32::from(order.unit(*data.first_chunk()?)), 2),
+        Utf32Le | Utf32Be => (utf32_unit(matches!(format, Utf32Le), data)?, 4),
+    };
+    (0xd800..=0xdfff).contains(&point).then_some((point, width))
 }

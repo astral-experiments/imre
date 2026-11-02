@@ -778,15 +778,18 @@ pub(super) enum Value {
     /// A contiguous view retains its original exporter until release.
     MemoryView {
         owner: Option<Id>,
+        // An ownerless C buffer has private backing storage but exposes obj as None.
+        anonymous: bool,
         hash: Option<i64>,
     },
     ByteArray(Vec<u8>),
     CodecInfo {
         entry: crate::objects::CodecInfo,
         decode: Id,
+        text_encoding_override: Option<Id>,
     },
     CodecDecoder(crate::objects::Codec),
-    Hash(crate::objects::SharedHash),
+    Hash(super::stdlib::hashlib::digest::SharedHash),
     Hmac(Hmac),
     Struct {
         format: String,
@@ -1592,7 +1595,14 @@ impl Value {
             }
             Self::IoOpen { reader, writer } => visit.extend([*reader, *writer]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
-            Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::CodecInfo {
+                decode,
+                text_encoding_override,
+                ..
+            } => {
+                visit.push(*decode);
+                visit.extend(*text_encoding_override);
+            }
             Self::RegexScanner {
                 pattern, subject, ..
             } => visit.extend([*pattern, *subject]),
@@ -2592,6 +2602,7 @@ impl Heap {
                     | Value::Float(_)
                     | Value::Complex(_)
                     | Value::Str(_)
+                    | Value::SurrogateStr(_)
                     | Value::Bytes(_)
                     | Value::ByteArray(_)
                     | Value::Native(_)
@@ -2608,7 +2619,7 @@ impl Heap {
     }
 
     /// Release an expression while preserving its result and earlier operands.
-    pub(super) fn discard_operands(&mut self, mark: usize, result: Id) -> bool {
+    pub(super) fn discard_operands(&mut self, mark: usize, result: Id, modules: Id) -> bool {
         if !self.tracks_finalizers() {
             return false;
         }
@@ -2621,12 +2632,18 @@ impl Heap {
             .skip(mark)
             .any(|&id| {
                 // A one-argument call roots its operand through a private list.
-                if let Value::List(items) = self.get(id)
-                    && let [item] = items.as_slice()
+                let operand = match self.get(id) {
+                    Value::List(items) if items.len() == 1 => items[0],
+                    _ => id,
+                };
+                // The import registry already keeps this exact module and its globals alive.
+                if matches!(self.get(operand), Value::Module { .. })
+                    && let Value::Dict(entries) = self.get(modules)
+                    && entries.iter().any(|&(_, module)| module == operand)
                 {
-                    return self.could_own_finalizer(*item, false);
+                    return false;
                 }
-                self.could_own_finalizer(id, false)
+                self.could_own_finalizer(operand, false)
             });
         if !could_own_finalizer {
             return false;
@@ -2649,7 +2666,7 @@ impl Heap {
 
     /// A consumed truth value cannot retain its receiver into the next operand.
     /// Earlier operands of enclosing expressions stay below this mark.
-    pub(super) fn discard_truth_operands(&mut self, mark: usize) -> bool {
+    pub(super) fn discard_truth_operands(&mut self, mark: usize, modules: Id) -> bool {
         let weak_release = self.has_weak_values
             && self
                 .frames
@@ -2659,7 +2676,7 @@ impl Heap {
                 .iter()
                 .skip(mark)
                 .any(|&id| self.weak_edge(id) && !self.bound_in_active_frame(id));
-        let finalizer_release = self.discard_operands(mark, NONE);
+        let finalizer_release = self.discard_operands(mark, NONE, modules);
         self.release_temporaries_since(mark);
         weak_release || finalizer_release
     }
@@ -3547,6 +3564,27 @@ mod tests {
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
+    }
+
+    #[test]
+    fn releasing_a_cached_module_cannot_finalize_its_globals() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let module = heap.alloc(Value::Module {
+            name: "sample".into(),
+            scope: owner,
+            origin: None,
+            initializing: false,
+            locale_error: None,
+            constructor: None,
+        });
+        let modules = heap.alloc(Value::Dict(vec![(NONE, module)].into()));
+        let mark = heap.temporary_mark();
+        heap.keep(module);
+        assert!(!heap.discard_operands(mark, NONE, modules));
+        *heap.get_mut(modules) = Value::Dict(Default::default());
+        assert!(heap.discard_operands(mark, NONE, modules));
     }
 
     #[test]

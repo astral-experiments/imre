@@ -31,8 +31,8 @@ mod chainmap;
 mod charmaps;
 mod codecs;
 pub(crate) use codecs::{
-    Codec, CodecInfo, FixedUnicode, StrEncoder, decoding_error, normalize as normalize_codec,
-    unknown_handler, utf8_prefix,
+    Codec, CodecInfo, FixedUnicode, StrEncoder, Utf16Order, decoding_error,
+    normalize as normalize_codec, unknown_handler, utf8_prefix,
 };
 mod contexts;
 mod contextvars;
@@ -53,7 +53,7 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::{SharedHash, State as HashState};
+pub(crate) use hashlib::{State as HashState, hex_text as hash_hex};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;

@@ -4,10 +4,12 @@ use std::collections::HashMap;
 mod bytes_escape;
 mod raw_unicode_escape;
 mod surrogate_utf8;
+mod utf16;
 mod wide_unicode;
+pub(super) use utf16::extended as utf16_extended;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder};
+use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder, Utf16Order};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
@@ -151,7 +153,12 @@ pub(super) fn builtin_handler(
     let (start, end) = (ctx.as_integer(start)?, ctx.as_integer(end)?);
     let (pass_utf8, pass_wide) = if name == "surrogatepass" {
         let encoding = ctx.lookup_attr(*exception, "encoding")?;
-        let encoding = ctx.str_value(encoding)?;
+        // The C codec handler reads the encoding name up to its first NUL.
+        let encoding = ctx
+            .str_value(encoding)?
+            .split('\0')
+            .next()
+            .unwrap_or_default();
         let utf8 = ["utf-8", "utf_8", "utf8", "cp65001"]
             .iter()
             .any(|key| encoding.eq_ignore_ascii_case(key));
@@ -253,7 +260,12 @@ pub(super) fn lookup(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
         ctx.codec_entries.functions.insert(codec.name(), id);
         id
     };
-    let id = ctx.alloc(Value::CodecInfo { entry, decode });
+    let id = ctx.alloc(Value::CodecInfo {
+        entry,
+        decode,
+        // All codecs in the native lookup registry inherit CodecInfo's True default.
+        text_encoding_override: None,
+    });
     ctx.codec_entries.entries.insert(key, id);
     Ok(id)
 }
@@ -321,7 +333,7 @@ fn encode_fixed_codepoints(
             return Err(Error::new(
                 "NotImplementedError",
                 match encoder {
-                    FixedUnicode::Utf16Le | FixedUnicode::Utf16Be => {
+                    FixedUnicode::Utf16(_) => {
                         "custom UTF-16 encoding error handlers are unsupported"
                     }
                     FixedUnicode::Utf32Le | FixedUnicode::Utf32Be => {

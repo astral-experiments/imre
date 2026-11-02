@@ -31,24 +31,16 @@ def _boxedCheckFixtures(cls):
 def _runRegistered(result, test, name, stopTestRun=None):
     result.startTest(test)
     try:
-        _runBoxedCase(result, test, name)
+        _runBoxedCase(result, test)
     finally:
         result.stopTest(test)
         if stopTestRun is not None:
             stopTestRun()
 
 
-def _runBoxedCase(result, test, name):
+def _runBoxedCase(result, test):
     cls = type(test)
     method = getattr(test, test._testMethodName)
-    if not name and isinstance(result, TextTestResult):
-        name = str(test)
-        if result.descriptions:
-            description = test.shortDescription()
-            if description:
-                name += "\n" + description
-    if isinstance(result, TestResult):
-        result._startCase(name)
     if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
         reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
         case._addSkip(result, test, reason)
@@ -73,8 +65,6 @@ def _runBoxedCase(result, test, name):
         if outcome.success:
             if not expecting_failure:
                 result.addSuccess(test)
-                if isinstance(result, TestResult):
-                    result._mark(".", "ok")
             elif outcome.expectedFailure is None:
                 test._addUnexpectedSuccess(result)
             else:
@@ -318,12 +308,8 @@ def _boxedFixturePhase(hook, method, parent, result):
 def _boxedFixtureProblem(parent, method, result, exc, tb):
     label = method + " (" + parent + ")"
     holder = _ErrorHolder(label)
-    if isinstance(result, TextTestResult):
-        result._startCase(label)
     if isinstance(exc, SkipTest):
         result.addSkip(holder, str(exc))
-        if isinstance(result, TextTestResult):
-            result._mark("s", "skipped " + repr(str(exc)))
     else:
         result.addError(holder, (type(exc), exc, tb))
 

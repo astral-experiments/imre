@@ -155,6 +155,35 @@ def current():
     chain.maps.append({"owner": chain})
     print(repr(chain))
 
+    class Local(ChainMap):
+        pass
+
+    parent = {"inherited": 1}
+    first = {}
+    child = Local(parent).new_child(first, current=2)
+    assert type(child) is Local and child.maps[0] is first
+    assert child.parents.maps[0] is parent and first == {"current": 2}
+    clone = child.copy()
+    assert clone.maps[0] is not first and clone.maps[1] is parent
+    assert clone.maps == child.maps and Local.__copy__ is Local.copy
+    assert child.pop("inherited", None) is None
+    try:
+        child.pop("inherited")
+    except KeyError as exc:
+        assert exc.args == ("Key not found in the first mapping: 'inherited'",)
+    else:
+        raise AssertionError("popped a parent key")
+    assert child.popitem() == ("current", 2)
+    original = child
+    child |= [("local", 3)]
+    assert child is original and first == {"local": 3}
+    merged = child | {"local": 4}
+    assert type(merged) is Local and merged.maps == [{"local": 4}, parent]
+    assert merged.maps[1] is parent and merged.maps[0] is not first
+    assert ({"inherited": 0} | child).maps == [{"inherited": 1, "local": 3}]
+    child.clear()
+    assert first == {} and parent == {"inherited": 1}
+
     class Registered:
         pass
 

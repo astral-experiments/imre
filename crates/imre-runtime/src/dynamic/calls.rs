@@ -26,6 +26,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
     let (module, function) = symbol.split_once('.')?;
     match module {
+        "_typing" if function == "_idfunc" => Some((module, function)),
         "posix"
             if !function.contains('.')
                 && !matches!(
@@ -38,7 +39,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "functools" if matches!(function, "cmp_to_key" | "reduce") => {
             Some(("_functools", function))
         }
-        "codecs" if matches!(function, "encode" | "escape_decode") => Some(("_codecs", function)),
+        "codecs" if matches!(function, "encode" | "escape_decode" | "utf_16_ex_decode") => {
+            Some(("_codecs", function))
+        }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
@@ -50,6 +53,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
         "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
+        "_hashlib" if !function.contains('.') => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>
@@ -241,10 +245,10 @@ impl Context {
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
             Value::Native(kind) if kind == "collections.defaultdict" => {
-                let owner = match name {
-                    "__init__" | "__missing__" | "__repr__" | "copy" | "__copy__"
-                    | "__reduce__" => kind.as_str(),
-                    _ => "dict",
+                let owner = if super::defaultdict::METHODS.contains(&name) {
+                    kind.as_str()
+                } else {
+                    "dict"
                 };
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
@@ -301,7 +305,7 @@ impl Context {
                     .is_some_and(|members| members.owns(name))
                     || (kind == "function" && name == "__call__")
                     || (kind == "set" && name == "update")
-                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "issubset")
+                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "issubset" | "union")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
@@ -2044,11 +2048,12 @@ impl Context {
             Value::None if name == "__doc__" => {
                 return Ok(self.text("The type of the None singleton."));
             }
-            Value::MemoryView { owner, .. }
-                if matches!(
-                    name,
-                    "obj" | "readonly" | "nbytes" | "itemsize" | "format" | "shape"
-                ) =>
+            Value::MemoryView {
+                owner, anonymous, ..
+            } if matches!(
+                name,
+                "obj" | "readonly" | "nbytes" | "itemsize" | "format" | "shape"
+            ) =>
             {
                 let owner = Self::memoryview_owner(owner)?;
                 let (format, width, len, readonly) = match self.heap.get(self.scalar_value(owner)) {
@@ -2060,7 +2065,13 @@ impl Context {
                     _ => ("B", 1, self.bytes_like(owner)?.len(), true),
                 };
                 return Ok(match name {
-                    "obj" => owner,
+                    "obj" => {
+                        if anonymous {
+                            NONE
+                        } else {
+                            owner
+                        }
+                    }
                     "readonly" => builtins::boolean(readonly),
                     "nbytes" => self.int((len * width) as i64),
                     "itemsize" => self.int(width as i64),
@@ -2163,6 +2174,10 @@ impl Context {
             }
             Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
+                    "__text_signature__" if symbol == "_typing._idfunc" => {
+                        return Ok(self.text("($module, x, /)"));
+                    }
+                    "__doc__" if symbol == "_typing._idfunc" => return Ok(NONE),
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
                     "__doc__" if symbol == "_signal.default_int_handler" => {
@@ -2657,6 +2672,12 @@ impl Context {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(short.to_owned()));
                     }
+                    "__dict__" if class == super::deque::CLASS => {
+                        return super::deque::class_dictionary(self, obj);
+                    }
+                    "__module__" if class == super::deque::CLASS => {
+                        return Ok(self.heap.code_name(module));
+                    }
                     "__module__" => return Ok(self.text(module.to_owned())),
                     "MISSING" if class == "_contextvars.Token" => return Ok(self.token_missing),
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
@@ -2680,7 +2701,7 @@ impl Context {
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
-                    _ if class == super::deque::CLASS && super::deque::METHODS.contains(&name) => {
+                    _ if class == super::deque::CLASS && super::deque::member(name).is_some() => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}
@@ -2823,19 +2844,16 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if class == "mappingproxy" && matches!(name, "__repr__" | "__str__") =>
+                if class == "mappingproxy"
+                    && (matches!(name, "__repr__" | "__str__") || builtins::MAPPING_PROXY_METHODS.contains(&name)) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
-            Value::MappingProxy(_) if matches!(name, "__repr__" | "__str__") => {
+            Value::MappingProxy(_)
+                if matches!(name, "__repr__" | "__str__") || builtins::MAPPING_PROXY_METHODS.contains(&name) => {
                 let descriptor = self.builtin(&format!("mappingproxy.{name}"));
                 let owner = self.builtin("mappingproxy");
                 return self.bind_attribute(descriptor, obj, owner);
-            }
-            Value::MappingProxy(_)
-                if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
-            {
-                return self.lookup_attr(self.mapping_proxy_target(obj), name);
             }
             Value::Native(ref symbol) if symbol == "open" && name == "__self__" => {
                 if !self.builtins.contains_key("_io.open.__self__") {
@@ -3052,9 +3070,18 @@ impl Context {
                 return Ok(self.bind_native_classmethod(method, obj));
             }
             Value::Native(ref class)
-                if class == "collections.defaultdict" && name == "__module__" =>
+                if class == super::defaultdict::CLASS && name == "__dict__" =>
             {
-                return Ok(self.text("collections"));
+                return self.native_class_dictionary(
+                    obj,
+                    "<collections.defaultdict namespace>",
+                    super::defaultdict::METHODS.iter().copied(),
+                );
+            }
+            Value::Native(ref class)
+                if class == super::defaultdict::CLASS && name == "__module__" =>
+            {
+                return Ok(self.heap.code_name("collections"));
             }
             Value::Native(ref class)
                 if class == "collections.defaultdict"
@@ -3121,7 +3148,12 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::CodecInfo { ref entry, decode } => match name {
+            Value::CodecInfo {
+                ref entry,
+                decode,
+                text_encoding_override,
+            } => match name {
+                "_is_text_encoding" => return Ok(text_encoding_override.unwrap_or(TRUE)),
                 "name" => return Ok(self.text(entry.codec().name())),
                 "decode" => return Ok(decode),
                 _ => {}
@@ -3288,7 +3320,7 @@ impl Context {
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
-                    || (matches!(name, "__repr__" | "difference" | "issubset")
+                    || (matches!(name, "__repr__" | "difference" | "issubset" | "union")
                         && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
                         && matches!(
@@ -3618,6 +3650,34 @@ impl Context {
         }
         Err(self.missing_attribute(obj, name))
     }
+    fn update_codec_text_encoding(
+        &mut self,
+        obj: Id,
+        name: &str,
+        value: Option<Id>,
+    ) -> Result<bool> {
+        if name != "_is_text_encoding" {
+            return Ok(false);
+        }
+        let Value::CodecInfo {
+            text_encoding_override,
+            ..
+        } = self.heap.get_mut(obj)
+        else {
+            return Ok(false);
+        };
+        let previous = std::mem::replace(text_encoding_override, value);
+        if previous.is_none() && value.is_none() {
+            return Err(self.missing_attribute(obj, name));
+        }
+        if let Some(old) = previous
+            && Some(old) != value
+        {
+            self.heap.weak_edge_removed(old);
+        }
+        Ok(true)
+    }
+
     /// A missing T_OBJECT member reads as None, even after repeated deletions.
     fn update_key_wrapper_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<bool> {
         let Value::KeyWrapper { object, .. } = self.heap.get_mut(obj) else {
@@ -3769,6 +3829,7 @@ impl Context {
             return self.update_exception_field(obj, name, None);
         }
         if self.update_key_wrapper_field(obj, name, None)?
+            || self.update_codec_text_encoding(obj, name, None)?
             || self.update_os_field(obj, name, None)?
         {
             return Ok(());
@@ -4484,6 +4545,7 @@ impl Context {
             return self.update_exception_field(obj, name, Some(value));
         }
         if self.update_key_wrapper_field(obj, name, Some(value))?
+            || self.update_codec_text_encoding(obj, name, Some(value))?
             || self.update_os_field(obj, name, Some(value))?
         {
             return Ok(());
@@ -5270,6 +5332,7 @@ impl Context {
                     name.as_str(),
                     HashState::CLASS
                         | HashState::XOF_CLASS
+                        | HashState::OPENSSL_CLASS
                         | KEY_WRAPPER
                         | value::REGEX_PATTERN_TYPE
                         | value::REGEX_MATCH_TYPE

@@ -8,6 +8,7 @@ mod builtins;
 mod calls;
 mod class_annotations;
 mod complex;
+mod defaultdict;
 mod deque;
 mod dictionary;
 mod displayhook;
@@ -1535,6 +1536,29 @@ impl Context {
         self.alloc(Value::MappingProxy(dictionary))
     }
 
+    /// Expose the implemented members of an immutable native type through ordinary class lookup.
+    fn native_class_dictionary(
+        &mut self,
+        class: Id,
+        storage: &'static str,
+        members: impl Iterator<Item = &'static str>,
+    ) -> Result<Id> {
+        let dictionary = if let Some(&dictionary) = self.builtins.get(storage) {
+            dictionary
+        } else {
+            let mut entries = Vec::with_capacity(members.size_hint().0 + 1);
+            for name in members.chain(["__module__"]) {
+                let key = self.heap.code_name(name);
+                let value = self.lookup_attr(class, name)?;
+                entries.push((key, value));
+            }
+            let dictionary = self.dict(entries);
+            self.builtins.insert(storage.into(), dictionary);
+            dictionary
+        };
+        Ok(self.alloc(Value::MappingProxy(dictionary)))
+    }
+
     /// Materialize a mutable class namespace for an annotation closure.
     fn class_namespace_dict(&mut self, scope: Id, building: bool) -> Id {
         let frame = self.scope_data(scope);
@@ -1919,22 +1943,22 @@ impl Context {
             ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
-            "collections.defaultdict" => {
+            defaultdict::CLASS => {
                 self.builtin("dict");
-                &[
-                    "__init__",
-                    "__missing__",
-                    "__repr__",
-                    "copy",
-                    "__copy__",
-                    "__reduce__",
-                ]
+                defaultdict::METHODS
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "index"],
-            "set" => &["__repr__", "__reduce__", "difference", "issubset", "update"],
-            "frozenset" => &["__repr__", "__reduce__", "difference", "issubset"],
+            "set" => &[
+                "__repr__",
+                "__reduce__",
+                "difference",
+                "issubset",
+                "union",
+                "update",
+            ],
+            "frozenset" => &["__repr__", "__reduce__", "difference", "issubset", "union"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
@@ -2582,6 +2606,7 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            "_hashlib" if source.is_none() => stdlib::hashlib::install_openssl(self, scope)?,
             "hashlib" => {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
@@ -2781,6 +2806,7 @@ impl Context {
                 let deque = self.builtin(deque::CLASS);
                 self.bind(scope, "deque", deque);
                 let namedtuple = self.builtin("collections.namedtuple");
+                self.bind(scope, "_namedtuple_factory", namedtuple);
                 self.bind(scope, "namedtuple", namedtuple);
                 let abc = self.module("_collections_abc")?;
                 self.bind(scope, "abc", abc);

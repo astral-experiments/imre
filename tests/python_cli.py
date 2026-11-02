@@ -1242,6 +1242,24 @@ def main():
         (later / "__init__.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
 
+        decorated = root / "method_decorators.py"
+        decorated.write_text(
+            "def prefix(tag):\n"
+            "    print('evaluate', tag)\n"
+            "    def decorate(method):\n"
+            "        print('apply', tag)\n"
+            "        return lambda self: tag + method(self)\n"
+            "    return decorate\n"
+            "\n"
+            "class Example:\n"
+            "    @prefix('outer/')\n"
+            "    @prefix('inner/')\n"
+            "    def value(self):\n"
+            "        return 'method'\n"
+            "\n"
+            "print(Example().value())\n"
+        )
+        compare("-IB", decorated)
 
         locale_script = root / "get_locale.py"
         locale_script.write_text(
@@ -1909,12 +1927,25 @@ def report(text):
         compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        callback_writer = fixtures / "io_buffered_writer_callbacks.py"
+        compare("-IB", callback_writer, native_args=("run", callback_writer, "--quiet"))
+        shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
+        sink = root / "callback-shutdown.bin"
+        command = ("run", shutdown_writer, "--quiet", "--", sink)
+        for mode in ("close", "temporary-close"):
+            compare("-IB", shutdown_writer, sink, mode, native_args=(*command, mode))
+            assert sink.read_bytes() == b"abc"
+        pending = run(imre, *command, "pending")
+        assert pending.returncode == 1 and b"unflushed bytes at shutdown" in pending.stderr, pending
+        assert sink.read_bytes() == b""
         memory_writer = fixtures / "io_buffered_writer_bytesio.py"
         compare("-IB", memory_writer, native_args=("run", memory_writer, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
+        coroutine_fixture = fixtures / "boxed_prelinked_coroutine.py"
+        compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         for name in (
@@ -2084,6 +2115,7 @@ def report(text):
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
+            "boxed_typing_new_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
             "boxed_typing_optional.py",
@@ -2266,6 +2298,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_registry.py",
+            "boxed_unittest_get_description.py",
             "boxed_unittest_default_result.py",
             "boxed_unittest_runner_warnings.py",
             "boxed_unittest_runner_durations.py",
@@ -2345,6 +2378,7 @@ def report(text):
             "boxed_zlib.py",
             "boxed_hashlib_names.py",
             "bytes/hashlib_sha3_provider.py",
+            "bytes/hashlib_kdf.py",
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",
