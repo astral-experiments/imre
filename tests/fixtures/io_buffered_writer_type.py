@@ -65,6 +65,26 @@ try:
         with io.FileIO(path, "r") as source:
             assert source.read() == b"abcd"
             raises(io.UnsupportedOperation, NativeWriter, source)
+    allocate = NativeWriter.__new__
+    assert allocate is object.__new__
+    raises(TypeError, allocate, 7)
+    raises(TypeError, allocate, int)
+    for cls in (NativeWriter, Writer):
+        writer = allocate(cls)
+        assert type(writer) is cls and writer.raw is None
+        raises(ValueError, writer.write, b"")
+        raises(ValueError, writer.flush)
+        raises(ValueError, writer.close)
+        with io.FileIO(path, "w") as raw:
+            writer.__init__(raw, 8)
+            assert writer.raw is raw and writer.write(b"bare") == 4
+            assert raw.tell() == 0
+            writer.flush()
+            assert raw.tell() == 4
+            writer.close()
+            assert raw.closed
+        with io.FileIO(path, "r") as source:
+            assert source.read() == b"bare"
     with io.FileIO(path, "w") as raw:
         raises(ValueError, NativeWriter, raw, 0)
     with io.open(path, "wb") as stream:

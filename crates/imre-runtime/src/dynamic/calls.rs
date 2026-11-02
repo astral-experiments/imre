@@ -5199,7 +5199,12 @@ impl Context {
             || base.is_some_and(|base| {
                 matches!(
                     self.heap.get(base).io_kind(),
-                    Some(stdlib::io::NEWLINE_DECODER | "BufferedRWPair" | "BufferedReader")
+                    Some(
+                        stdlib::io::NEWLINE_DECODER
+                            | "BufferedRWPair"
+                            | "BufferedReader"
+                            | "BufferedWriter"
+                    )
                 )
             })
     }
