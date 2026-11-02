@@ -1158,9 +1158,9 @@ impl Context {
             "datetime.timezone" => stdlib::datetime::TZINFO,
             stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
             class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
-            "typing._UnpackGenericAlias" | "typing._ConcatenateGenericAlias" => {
-                "typing._GenericAlias"
-            }
+            "typing._LiteralGenericAlias"
+            | "typing._UnpackGenericAlias"
+            | "typing._ConcatenateGenericAlias" => "typing._GenericAlias",
             HashState::XOF_CLASS => HashState::CLASS,
             "collections.defaultdict" => "dict",
             "odict_keys" => "dict_keys",
