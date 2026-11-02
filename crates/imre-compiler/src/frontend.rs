@@ -6448,12 +6448,14 @@ impl<'a> Checker<'a> {
                 Intrinsic::SysExecutable
                 | Intrinsic::SysPlatform
                 | Intrinsic::OsName
+                | Intrinsic::OsLinesep
                 | Intrinsic::OsPathsep { posix: false } => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
                             Builtin::Process(ir::ProcessOperation::Executable)
                         }
                         Intrinsic::OsName => Builtin::OsName,
+                        Intrinsic::OsLinesep => Builtin::OsLinesep,
                         Intrinsic::OsPathsep { .. } => Builtin::OsPathsep,
                         _ => Builtin::SysPlatform,
                     };
