@@ -297,7 +297,18 @@ impl Checker<'_> {
     }
 
     pub(super) fn compile_regex(&self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let verbose = self.regex_flags(call, 1)? & 64 != 0;
+        let flags = self.regex_flags(call, 1);
+        // A bytes or dynamic pattern can be constructed before the method using
+        // it is lowered, including in a first-party module imported by the caller.
+        if (flags.is_err()
+            || !matches!(
+                call.arguments.args.first(),
+                Some(ast::Expr::StringLiteral(_))
+            )) && self.graph.uses_boxed_pattern_method()
+        {
+            return Err(self.scoped_builtin_error("re.compile", call));
+        }
+        let verbose = flags? & 64 != 0;
         self.fixed_regex(&call.arguments.args[0], verbose)
     }
 

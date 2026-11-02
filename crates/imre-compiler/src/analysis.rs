@@ -456,6 +456,27 @@ impl Session {
         resolves_to_stdlib_function(&model, expression, owner, name)
     }
 
+    /// Recognize the sealed regex receiver even when its pattern cannot be lowered statically.
+    pub(crate) fn is_regex_pattern(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(ty @ Type::NominalInstance(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        let Some(TypeDefinition::StaticClass(class)) =
+            ty.definition(&self.db, &model.program_environment())
+        else {
+            return false;
+        };
+        class.name(&self.db).as_deref() == Some("Pattern")
+            && class.file(&self.db).path(&self.db).is_vendored_path()
+            && model
+                .resolve_module(Some("re"), 0)
+                .and_then(|module| module.file(&self.db))
+                == Some(class.file(&self.db))
+    }
+
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
         use ty_python_semantic::types::Type as Ty;
         self.hint_reads.set(self.hint_reads.get() + 1);
