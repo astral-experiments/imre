@@ -216,15 +216,18 @@ fn byte_pattern(bytes: &[u8]) -> String {
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
 fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool) {
-    let mut literal_brace = false;
+    let mut prefer_translation = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
     while let Some(c) = chars.next() {
         if c != '\\' {
+            if c == '(' && !in_class && chars.clone().take(3).eq(['?', 'x', ':']) {
+                prefer_translation = true;
+            }
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
-                    literal_brace = true;
+                    prefer_translation = true;
                 } else if chars.peek() == Some(&',') {
                     // Python treats an omitted lower bound as zero, including in {,}.
                     result.push_str("{0");
@@ -283,7 +286,7 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool)
             }
         }
     }
-    (result, literal_brace)
+    (result, prefer_translation)
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -482,14 +485,15 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         let matcher = build_regex(&source, bytes, flags)?;
         Ok((source, matcher))
     };
+    let global_verbose = source.starts_with("(?x)");
     let prepared = if flags & VERBOSE != 0 {
         translate().and_then(build)
     } else {
-        let (raw, literal_brace) = python_escapes(&source, ascii, flags & MULTILINE != 0);
+        let (raw, prefer_translation) = python_escapes(&source, ascii, flags & MULTILINE != 0);
         let original = || imre_regex::preserve_zero_repeat_groups(raw).and_then(build);
-        if literal_brace {
-            // The subset parser checks adjacent quantifiers before quoting a Python literal.
-            // Keep accepted engine syntax such as an inline verbose comment containing '{'.
+        if prefer_translation || global_verbose {
+            // Python has its own verbose layout and literal-brace rules. Keep the
+            // direct parser for features outside the subset translator.
             translate().and_then(build).or_else(|_| original())
         } else {
             original()
@@ -527,6 +531,11 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             ));
         }
     }
+    let flags = if global_verbose {
+        flags | VERBOSE
+    } else {
+        flags
+    };
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },
