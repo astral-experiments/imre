@@ -225,7 +225,7 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             "map" => ("itertools", "imap"),
             "filter" => ("itertools", "ifilter"),
             "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "iter"
-            | "list" | "object" | "set" | "slice" | "tuple" | "type" | "Ellipsis"
+            | "list" | "object" | "set" | "slice" | "super" | "tuple" | "type" | "Ellipsis"
             | "NotImplemented" => ("__builtin__", name),
             _ => return Err(unsupported()),
         });
