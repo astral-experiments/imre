@@ -72,7 +72,7 @@ pub(crate) struct Class {
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
-    /// Single storage-bearing lineage, nearest base first.
+    /// Bases in lookup order. The first lineage supplies storage.
     pub(crate) bases: Vec<usize>,
     pub(crate) abstract_methods: HashSet<String>,
     pub(crate) abc: bool,
@@ -325,6 +325,7 @@ fn unittest_skip_decorator(
     graph: &SourceGraph,
     module: usize,
     decorator: &ast::Decorator,
+    class_names: Option<&HashSet<String>>,
 ) -> Result<Option<SkipDecorator>, String> {
     let ast::Expr::Call(call) = &decorator.expression else {
         return Ok(None);
@@ -332,6 +333,13 @@ fn unittest_skip_decorator(
     let ast::Expr::Attribute(attr) = call.func.as_ref() else {
         return Ok(None);
     };
+    if class_names.is_some_and(|names| {
+        attr.value
+            .as_name_expr()
+            .is_none_or(|owner| names.contains(owner.id.as_str()))
+    }) {
+        return Ok(None);
+    }
     let Some(Binding::Module(owner)) = graph.resolve(module, &attr.value) else {
         return Ok(None);
     };
@@ -366,7 +374,7 @@ fn identity_skip_decorator(graph: &SourceGraph, module: usize, decorator: &ast::
     let ast::Expr::Attribute(attr) = &*call.func else {
         return false;
     };
-    let Ok(Some(skip)) = unittest_skip_decorator(graph, module, decorator) else {
+    let Ok(Some(skip)) = unittest_skip_decorator(graph, module, decorator, None) else {
         return false;
     };
     if !matches!(skip.reason, ast::Expr::StringLiteral(_))
@@ -430,10 +438,11 @@ fn collect_class(
     module: &SourceModule,
     definition: DefinitionId,
     node: &ast::StmtClassDef,
-    base: Option<(usize, &Class)>,
+    parents: [Option<(usize, &Class)>; 2],
     exception_layout: bool,
     exceptions: &HashMap<DefinitionId, u32>,
 ) -> Result<Class, String> {
+    let base = parents[0];
     if defines_pickle_reducer(node) {
         graph.needs_object_runtime.set(true);
         return Err(module.error(node, "pickle reducers require the object runtime"));
@@ -499,7 +508,7 @@ fn collect_class(
     }
     let mut skip_decorators = Vec::new();
     for decorator in &node.decorator_list {
-        let Some(skip) = unittest_skip_decorator(graph, definition.module, decorator)? else {
+        let Some(skip) = unittest_skip_decorator(graph, definition.module, decorator, None)? else {
             skip_decorators.clear();
             break;
         };
@@ -783,6 +792,24 @@ fn collect_class(
                     );
                 }
                 let kind = if abstract_method {
+                    MethodKind::Instance
+                } else if let [decorator] = method.decorator_list.as_slice()
+                    && unittest_skip_decorator(
+                        graph,
+                        definition.module,
+                        decorator,
+                        Some(&class_bindings),
+                    )?
+                    .is_some()
+                {
+                    // The public decorator can wrap even a direct method call and evaluates
+                    // its arguments while the class namespace is being constructed.
+                    let error = module.error(
+                        decorator,
+                        "unittest method skips require native class construction",
+                    );
+                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    graph.check_decorated_method_calls.set(true);
                     MethodKind::Instance
                 } else {
                     method_kind(graph, definition.module, method, &class_bindings)?
@@ -1151,7 +1178,8 @@ fn collect_class(
         }
     };
     let mut bases = Vec::new();
-    if let Some((id, base)) = base {
+    for (position, (id, base)) in parents.into_iter().flatten().enumerate() {
+        // A trailing independent root follows the entire primary lineage in the MRO.
         bases.push(id);
         bases.extend_from_slice(&base.bases);
         for (index, method) in base.methods.iter().enumerate() {
@@ -1160,6 +1188,19 @@ fn collect_class(
                     && !graph.inherits_class_method(definition, method.name.as_str())
                 {
                     continue;
+                }
+                if position > 0 {
+                    let name = method.name.as_str();
+                    if methods.iter().any(|earlier| earlier.name.as_str() == name) {
+                        continue;
+                    }
+                    if fields.iter().any(|field| field.name == name)
+                        || static_bindings.contains_key(name)
+                        || exception_aliases.contains_key(name)
+                    {
+                        return Err(module
+                            .error(node, "a mixin method conflicts with a fixed class member"));
+                    }
                 }
                 methods.push(method.clone());
                 method_kinds.push(base.method_kinds[index]);

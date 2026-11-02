@@ -342,7 +342,8 @@ fn object_fallback<T>(
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
             let entry = &graph.modules[graph.entry];
-            let all_calls = !entry.optional_imports.is_empty()
+            let all_calls = graph.check_decorated_method_calls.get()
+                || !entry.optional_imports.is_empty()
                 || !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error);
             let checked_calls = if all_calls {
