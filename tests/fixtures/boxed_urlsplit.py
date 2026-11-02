@@ -1,6 +1,6 @@
 import urllib
 from urllib import parse
-from urllib.parse import SplitResult, SplitResultBytes, unquote, urlsplit, urlunsplit
+from urllib.parse import SplitResult, SplitResultBytes, unquote, unquote_plus, urlsplit, urlunsplit
 
 
 def current():
@@ -80,6 +80,7 @@ def current():
     print(urlsplit(url=" /a\tb#f", scheme="http", allow_fragments=False))
     print(unquote(string="%FF+caf%C3%A9"), unquote(b"%FF", encoding="latin-1"))
     print(unquote("%", errors="werkzeug.url_quote"), unquote("untouched", encoding=None))
+    print(unquote_plus("x+%2B%FF", encoding="latin-1"), parse.unquote_plus("a+b%FF", errors="ignore"))
     parts = urlsplit("https://example:bad/path")
     print(parts.path, parts.hostname)
     try:

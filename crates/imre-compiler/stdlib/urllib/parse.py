@@ -1,6 +1,7 @@
-# Structured results from CPython 3.14.5 Lib/urllib/parse.py (PSF-2.0).
+# URL helpers from CPython 3.14.5 Lib/urllib/parse.py (PSF-2.0).
 
 from collections import namedtuple
+from urllib.parse import unquote
 
 
 class _ResultMixinStr(object):
@@ -138,3 +139,13 @@ def urldefrag(url):
         fragment = ''
     result = DefragResult(url, fragment)
     return result if text_input else result.encode('ascii', 'strict')
+
+
+def unquote_plus(string, encoding='utf-8', errors='replace'):
+    """Like unquote(), but also replace plus signs by spaces, as required for
+    unquoting HTML form values.
+
+    unquote_plus('%7e/abc+def') -> '~/abc def'
+    """
+    string = string.replace('+', ' ')
+    return unquote(string, encoding, errors)

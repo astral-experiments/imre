@@ -1721,6 +1721,9 @@ impl IntrinsicModule {
             (Self::UrllibParse, "quote_plus") => Intrinsic::QuotePlus,
             (Self::UrllibParse, "urlencode") => Intrinsic::UrlEncode,
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
+            (Self::UrllibParse, "unquote_plus") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.unquote_plus")
+            }
             (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
             (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
             (Self::EmailUtils, "formatdate") => Intrinsic::EmailFormatDate,
