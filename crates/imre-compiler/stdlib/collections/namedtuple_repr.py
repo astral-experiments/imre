@@ -27,6 +27,22 @@ def _namedtuple_repr(typename, field_names):
     return __repr__
 
 
+def _namedtuple_make(typename, field_names):
+    tuple_new, _len = tuple.__new__, len
+    num_fields = _len(field_names)
+
+    @classmethod
+    def _make(cls, iterable):
+        result = tuple_new(cls, iterable)
+        if _len(result) != num_fields:
+            raise TypeError(f'Expected {num_fields} arguments, got {len(result)}')
+        return result
+
+    _make.__func__.__doc__ = f'Make a new {typename} object from a sequence or iterable'
+    _make.__func__.__qualname__ = f'{typename}._make'
+    return _make
+
+
 def _namedtuple_replace(typename, field_names):
     _map = map
 
