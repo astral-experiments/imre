@@ -886,6 +886,7 @@ impl Context {
                             | "bytes.count"
                             | "bytes.decode"
                             | "bytes.find"
+                            | "bytes.index"
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"
@@ -5249,6 +5250,7 @@ impl Context {
                         stdlib::io::NEWLINE_DECODER
                             | "BufferedRWPair"
                             | "BufferedReader"
+                            | "BufferedWriter"
                             | "IOBase"
                             | "BufferedIOBase"
                     )
