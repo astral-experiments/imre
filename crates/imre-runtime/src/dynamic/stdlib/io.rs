@@ -585,8 +585,8 @@ pub(in super::super) fn call(
     };
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
-            (Some("BytesIO"), "__init__") => {
-                "descriptor '__init__' of '_io.BytesIO' object needs an argument".into()
+            (Some(class @ ("BytesIO" | "BufferedReader")), "__init__") => {
+                format!("descriptor '__init__' of '_io.{class}' object needs an argument")
             }
             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
             _ => format!("unbound I/O method {name} needs a receiver"),
@@ -603,8 +603,8 @@ pub(in super::super) fn call(
     else {
         let actual = ctx.type_name(receiver);
         let message = match (descriptor, name) {
-            (Some("BytesIO"), "__init__") => format!(
-                "descriptor '__init__' requires a '_io.BytesIO' object but received a '{actual}'"
+            (Some(class @ ("BytesIO" | "BufferedReader")), "__init__") => format!(
+                "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
             ),
             (Some(class), _) => format!(
                 "descriptor '{name}' for '_io.{class}' objects doesn't apply to a '{actual}' object"

@@ -1624,8 +1624,11 @@ impl Context {
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
         if self.heap.get(obj).native_io_class_name() == Some("_io.BufferedReader") {
             let class = self.exact_type(obj)?;
-            if let Some(member) = self.own_class_attr(class, name)
-                && matches!(self.heap.get(member), Value::IoMethod { .. } | Value::GetSetDescriptor { .. })
+            if let Some(member) = self.class_attr(class, name)
+                && matches!(
+                    self.heap.get(member),
+                    Value::IoMethod { .. } | Value::GetSetDescriptor { .. }
+                )
             {
                 return self.bind_attribute(member, obj, class);
             }

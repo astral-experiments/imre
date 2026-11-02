@@ -16,6 +16,7 @@ class PrivateReader(NativeReader):
 
 assert ReaderCase.tp is NativeReader
 with io.open(__file__, "rb") as source:
+    assert source.__iter__() is source
     assert type(source) is ReaderCase.tp
     assert isinstance(source, io.BufferedIOBase)
     assert source.read(1) == b"i"
@@ -35,3 +36,10 @@ for cls in (PublicReader, PrivateReader):
         assert reader.raw is raw
         assert NativeReader.read(reader, 1) == b"i"
         assert reader.read(5) == b"mport"
+
+try:
+    NativeReader.__init__(object())
+except TypeError as exc:
+    assert str(exc) == "descriptor '__init__' requires a '_io.BufferedReader' object but received a 'object'"
+else:
+    raise AssertionError("BufferedReader.__init__ accepted an unrelated receiver")
