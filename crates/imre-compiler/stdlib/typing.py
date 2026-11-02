@@ -5,6 +5,9 @@ from functools import lru_cache
 from typing import Generic, TypeVar
 
 
+T = TypeVar("T")
+KT = TypeVar("KT")
+VT = TypeVar("VT")
 AnyStr = TypeVar("AnyStr", bytes, str)
 
 
