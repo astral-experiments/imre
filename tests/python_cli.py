@@ -1964,6 +1964,11 @@ except ImportError:
         compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
         compare(
             "-IB", "-c",
+            "with open('chunks.bin', 'rb') as stream:\n    print(stream.name, stream.mode)\n"
+            "print(stream.name, stream.mode)",
+        )
+        compare(
+            "-IB", "-c",
             "import sys, hashlib\nsys.path\n"
             "def factory(data=b''):\n    return hashlib.sha1(data)\n"
             "class Flag:\n    def __bool__(self):\n        raise ValueError('hash flag')\n"
