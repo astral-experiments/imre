@@ -122,7 +122,10 @@ enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
     GeneratorFunction(&'a [ast::Stmt]),
+    ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(Vec<(&'a str, &'a ast::Expr)>),
+    AnnotationValue(&'a ast::Expr),
+    AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
     Generator(&'a [ast::Comprehension], &'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
@@ -227,6 +230,7 @@ impl Output {
         let mut f = Function {
             output: self,
             source,
+            class_sites: None,
             class_locals: match &body {
                 Body::Namespace(stmts) if !prefix.is_empty() => {
                     Some(statements::class_locals(stmts))
@@ -256,19 +260,33 @@ impl Output {
                     f.bind("__doc__", &value);
                 }
                 f.declare_globals(stmts);
-                f.statements(stmts);
+                if f.class_locals.is_some() && !f.source.string_annotations {
+                    f.annotated_class_body(stmts);
+                } else {
+                    f.statements(stmts);
+                }
             }
             Body::Statements(stmts) => {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
             Body::GeneratorFunction(_) => {}
+            Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries) => f.annotations(&entries),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
             }
             Body::Generator(generators, element) => f.generator_step(generators, element),
+            Body::AnnotationThunk(entry, range) => {
+                f.checkpoint(&range);
+                let value = f.checked(&format!("call i64 {entry}(ptr %ctx, i64 {})", f.scope));
+                f.end(&format!("ret i64 {value}"));
+            }
+            Body::AnnotationValue(expr) => {
+                let value = f.expr(expr);
+                f.end(&format!("ret i64 {value}"));
+            }
             Body::Expression(expr) => {
                 f.checkpoint(expr);
                 let value = f.expr(expr);
@@ -307,6 +325,7 @@ struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
     prefix: String,
+    class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<BTreeSet<String>>,
     ir: String,
     block: String,

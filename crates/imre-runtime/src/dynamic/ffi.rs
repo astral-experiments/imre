@@ -345,6 +345,16 @@ impl Context {
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_annotation_environment" => self.class_annotation_environment(a, b),
+            "class_annotation_locals" => {
+                let parent = self.scope_data(a).parent.expect("annotation globals");
+                let local = self.scope("", Some(parent));
+                let Value::Scope(frame) = self.heap.get_mut(local) else {
+                    unreachable!()
+                };
+                frame.exec_locals = Some(b);
+                Ok(local)
+            }
             "class_base_scope" => {
                 if self.scope_data(b).class_body.is_none() {
                     return Ok(a);
