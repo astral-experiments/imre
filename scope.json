@@ -1,0 +1,20 @@
+{
+  "stage": "baseline",
+  "imre_baseline": "ff034f7b2538e67bc41efd6c9eedd59dec7a7e66",
+  "imre_current": "ff034f7b2538e67bc41efd6c9eedd59dec7a7e66",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "reference_registration": 43,
+  "stock_pass": 43,
+  "stock_provider_skips": 0,
+  "upstream_sha256": "6325b930f5fc9aa8537640423d410e2237811952ae41c097fbb03100cf26f0af",
+  "callback_controls": {
+    "reference": {
+      "rows": 6,
+      "matches": null
+    },
+    "base": {
+      "rows": 12,
+      "matches": 4
+    }
+  }
+}

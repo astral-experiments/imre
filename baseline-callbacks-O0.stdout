@@ -1,0 +1,113 @@
+FIXTURE	test.test_io.CBufferedWriterTest	'io and _io writer identity; CMockRawIO'
+REGISTER	test.test_io.CBufferedWriterTest.test_args_error	1
+REGISTER	test.test_io.CBufferedWriterTest.test_buffer_freeing	2
+REGISTER	test.test_io.CBufferedWriterTest.test_close_error_on_close	3
+REGISTER	test.test_io.CBufferedWriterTest.test_constructor	4
+REGISTER	test.test_io.CBufferedWriterTest.test_context_manager	5
+REGISTER	test.test_io.CBufferedWriterTest.test_destructor	6
+REGISTER	test.test_io.CBufferedWriterTest.test_detach	7
+REGISTER	test.test_io.CBufferedWriterTest.test_detach_flush	8
+REGISTER	test.test_io.CBufferedWriterTest.test_error_through_destructor	9
+REGISTER	test.test_io.CBufferedWriterTest.test_fileno	10
+REGISTER	test.test_io.CBufferedWriterTest.test_flush	11
+REGISTER	test.test_io.CBufferedWriterTest.test_flush_error_on_close	12
+REGISTER	test.test_io.CBufferedWriterTest.test_garbage_collection	13
+REGISTER	test.test_io.CBufferedWriterTest.test_initialization	14
+REGISTER	test.test_io.CBufferedWriterTest.test_invalid_args	15
+REGISTER	test.test_io.CBufferedWriterTest.test_max_buffer_size_removal	16
+REGISTER	test.test_io.CBufferedWriterTest.test_misbehaved_io	17
+REGISTER	test.test_io.CBufferedWriterTest.test_multi_close	18
+REGISTER	test.test_io.CBufferedWriterTest.test_nonnormalized_close_error_on_close	19
+REGISTER	test.test_io.CBufferedWriterTest.test_override_destructor	20
+REGISTER	test.test_io.CBufferedWriterTest.test_pickling_subclass	21
+REGISTER	test.test_io.CBufferedWriterTest.test_readonly_attributes	22
+REGISTER	test.test_io.CBufferedWriterTest.test_recursive_repr	23
+REGISTER	test.test_io.CBufferedWriterTest.test_repr	24
+REGISTER	test.test_io.CBufferedWriterTest.test_sizeof	25
+REGISTER	test.test_io.CBufferedWriterTest.test_slow_close_from_thread	26
+REGISTER	test.test_io.CBufferedWriterTest.test_threads	27
+REGISTER	test.test_io.CBufferedWriterTest.test_truncate	28
+REGISTER	test.test_io.CBufferedWriterTest.test_truncate_after_write	29
+REGISTER	test.test_io.CBufferedWriterTest.test_uninitialized	30
+REGISTER	test.test_io.CBufferedWriterTest.test_unseekable	31
+REGISTER	test.test_io.CBufferedWriterTest.test_write	32
+REGISTER	test.test_io.CBufferedWriterTest.test_write_and_rewind	33
+REGISTER	test.test_io.CBufferedWriterTest.test_write_error_on_close	34
+REGISTER	test.test_io.CBufferedWriterTest.test_write_non_blocking	35
+REGISTER	test.test_io.CBufferedWriterTest.test_write_overflow	36
+REGISTER	test.test_io.CBufferedWriterTest.test_writelines	37
+REGISTER	test.test_io.CBufferedWriterTest.test_writelines_error	38
+REGISTER	test.test_io.CBufferedWriterTest.test_writelines_userlist	39
+REGISTER	test.test_io.CBufferedWriterTest.test_writes	40
+REGISTER	test.test_io.CBufferedWriterTest.test_writes_and_flushes	41
+REGISTER	test.test_io.CBufferedWriterTest.test_writes_and_seeks	42
+REGISTER	test.test_io.CBufferedWriterTest.test_writes_and_truncates	43
+DENOMINATOR		43
+START	test.test_io.CBufferedWriterTest.test_args_error	''
+PASS	test.test_io.CBufferedWriterTest.test_args_error	''
+STOP	test.test_io.CBufferedWriterTest.test_args_error	''
+START	test.test_io.CBufferedWriterTest.test_buffer_freeing	''
+SKIP	test.test_io.CBufferedWriterTest.test_buffer_freeing	'implementation detail specific to cpython'
+STOP	test.test_io.CBufferedWriterTest.test_buffer_freeing	''
+START	test.test_io.CBufferedWriterTest.test_close_error_on_close	''
+ERROR	test.test_io.CBufferedWriterTest.test_close_error_on_close	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_close_error_on_close	''
+START	test.test_io.CBufferedWriterTest.test_constructor	''
+ERROR	test.test_io.CBufferedWriterTest.test_constructor	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_constructor	''
+START	test.test_io.CBufferedWriterTest.test_context_manager	''
+ERROR	test.test_io.CBufferedWriterTest.test_context_manager	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_context_manager	''
+START	test.test_io.CBufferedWriterTest.test_destructor	''
+ERROR	test.test_io.CBufferedWriterTest.test_destructor	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_destructor	''
+START	test.test_io.CBufferedWriterTest.test_detach	''
+ERROR	test.test_io.CBufferedWriterTest.test_detach	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_detach	''
+START	test.test_io.CBufferedWriterTest.test_detach_flush	''
+ERROR	test.test_io.CBufferedWriterTest.test_detach_flush	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_detach_flush	''
+START	test.test_io.CBufferedWriterTest.test_error_through_destructor	''
+ERROR	test.test_io.CBufferedWriterTest.test_error_through_destructor	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_error_through_destructor	''
+START	test.test_io.CBufferedWriterTest.test_fileno	''
+ERROR	test.test_io.CBufferedWriterTest.test_fileno	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_fileno	''
+START	test.test_io.CBufferedWriterTest.test_flush	''
+ERROR	test.test_io.CBufferedWriterTest.test_flush	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_flush	''
+START	test.test_io.CBufferedWriterTest.test_flush_error_on_close	''
+ERROR	test.test_io.CBufferedWriterTest.test_flush_error_on_close	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_flush_error_on_close	''
+START	test.test_io.CBufferedWriterTest.test_garbage_collection	''
+FAIL	test.test_io.CBufferedWriterTest.test_garbage_collection	"AssertionError: filter ('', ResourceWarning) did not catch any warning"
+STOP	test.test_io.CBufferedWriterTest.test_garbage_collection	''
+START	test.test_io.CBufferedWriterTest.test_initialization	''
+ERROR	test.test_io.CBufferedWriterTest.test_initialization	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_initialization	''
+START	test.test_io.CBufferedWriterTest.test_invalid_args	''
+ERROR	test.test_io.CBufferedWriterTest.test_invalid_args	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_invalid_args	''
+START	test.test_io.CBufferedWriterTest.test_max_buffer_size_removal	''
+PASS	test.test_io.CBufferedWriterTest.test_max_buffer_size_removal	''
+STOP	test.test_io.CBufferedWriterTest.test_max_buffer_size_removal	''
+START	test.test_io.CBufferedWriterTest.test_misbehaved_io	''
+ERROR	test.test_io.CBufferedWriterTest.test_misbehaved_io	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_misbehaved_io	''
+START	test.test_io.CBufferedWriterTest.test_multi_close	''
+ERROR	test.test_io.CBufferedWriterTest.test_multi_close	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_multi_close	''
+START	test.test_io.CBufferedWriterTest.test_nonnormalized_close_error_on_close	''
+ERROR	test.test_io.CBufferedWriterTest.test_nonnormalized_close_error_on_close	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_nonnormalized_close_error_on_close	''
+START	test.test_io.CBufferedWriterTest.test_override_destructor	''
+ERROR	test.test_io.CBufferedWriterTest.test_override_destructor	'NotImplementedError: BufferedWriter with Python raw methods is unsupported'
+STOP	test.test_io.CBufferedWriterTest.test_override_destructor	''
+START	test.test_io.CBufferedWriterTest.test_pickling_subclass	''
+SUBERROR	test.test_io.CBufferedWriterTest.test_pickling_subclass	'test_pickling_subclass (test.test_io.CBufferedWriterTest.test_pickling_subclass) (protocol=0) NotImplementedError: native pickle has no reducer for MyBufferedIO'
+SUBERROR	test.test_io.CBufferedWriterTest.test_pickling_subclass	'test_pickling_subclass (test.test_io.CBufferedWriterTest.test_pickling_subclass) (protocol=1) NotImplementedError: native pickle has no reducer for MyBufferedIO'
+SUBERROR	test.test_io.CBufferedWriterTest.test_pickling_subclass	"test_pickling_subclass (test.test_io.CBufferedWriterTest.test_pickling_subclass) (protocol=2) PicklingError: Can't pickle local object 'CommonBufferedTests.test_pickling_subclass.<locals>.MyBufferedIO'"
+SUBERROR	test.test_io.CBufferedWriterTest.test_pickling_subclass	"test_pickling_subclass (test.test_io.CBufferedWriterTest.test_pickling_subclass) (protocol=3) PicklingError: Can't pickle local object 'CommonBufferedTests.test_pickling_subclass.<locals>.MyBufferedIO'"
+SUBERROR	test.test_io.CBufferedWriterTest.test_pickling_subclass	"test_pickling_subclass (test.test_io.CBufferedWriterTest.test_pickling_subclass) (protocol=4) PicklingError: Can't pickle local object 'CommonBufferedTests.test_pickling_subclass.<locals>.MyBufferedIO'"
+SUBERROR	test.test_io.CBufferedWriterTest.test_pickling_subclass	"test_pickling_subclass (test.test_io.CBufferedWriterTest.test_pickling_subclass) (protocol=5) PicklingError: Can't pickle local object 'CommonBufferedTests.test_pickling_subclass.<locals>.MyBufferedIO'"
+STOP	test.test_io.CBufferedWriterTest.test_pickling_subclass	''
