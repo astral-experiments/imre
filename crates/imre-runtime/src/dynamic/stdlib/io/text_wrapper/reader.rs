@@ -12,6 +12,8 @@ pub(super) struct Reader {
     // Keep only positions at which those sizes differ or the newline decoder has state.
     boundaries: Vec<Boundary>,
     mapped: bool,
+    // Iteration reads ahead without saving a new position for tell().
+    pub(super) has_snapshot: bool,
 }
 
 struct Boundary {
@@ -37,6 +39,7 @@ impl Reader {
             seen: 0,
             boundaries: Vec::new(),
             mapped: true,
+            has_snapshot: false,
         }
     }
     pub(super) fn discard(&mut self) {
@@ -46,8 +49,12 @@ impl Reader {
         self.cr = false;
         self.boundaries.clear();
         self.mapped = true;
+        self.has_snapshot = false;
     }
     pub(super) fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
+        if !self.has_snapshot {
+            return Ok(end);
+        }
         let rest = &self.text[self.cursor..];
         if self
             .boundaries
