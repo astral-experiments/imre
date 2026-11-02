@@ -421,6 +421,23 @@ fn transfer(mut syscall: impl FnMut() -> isize) -> Result<usize> {
     }
 }
 
+/// Copy through the kernel, borrowing both descriptors and any explicit input offset.
+#[cfg(target_os = "linux")]
+pub(crate) fn sendfile(
+    out_fd: i32,
+    in_fd: i32,
+    mut offset: Option<libc::off_t>,
+    count: isize,
+) -> Result<usize> {
+    crate::initialize_io();
+    let offset = offset
+        .as_mut()
+        .map_or(std::ptr::null_mut(), std::ptr::from_mut);
+    // SAFETY: a non-null offset points to our live, writable off_t throughout the call.
+    // The kernel validates the raw descriptors and receives the count as size_t.
+    transfer(|| unsafe { libc::sendfile(out_fd, in_fd, offset, count as usize) })
+}
+
 pub(crate) fn read(fd: i32, length: isize) -> Result<Vec<u8>> {
     let length = usize::try_from(length)
         .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
