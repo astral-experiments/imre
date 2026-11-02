@@ -2275,6 +2275,7 @@ pub(super) fn call(
             );
         }
         "file.seek" => (3, &["whence"]),
+        "file.truncate" => (2, &[]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
