@@ -324,7 +324,7 @@ impl Context {
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
                     || (kind == "set" && name == "update")
-                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "issubset" | "union")
+                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "issubset" | "union")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
@@ -3474,8 +3474,10 @@ impl Context {
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
-                    || (matches!(name, "__repr__" | "difference" | "issubset" | "union")
-                        && matches!(class.as_str(), "set" | "frozenset"))
+                    || (matches!(
+                        name,
+                        "__repr__" | "difference" | "intersection" | "issubset" | "union"
+                    ) && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
                         && matches!(
                             name,
