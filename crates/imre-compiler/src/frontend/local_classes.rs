@@ -133,6 +133,9 @@ impl Checker<'_> {
                     }
                     self.fixed_class_attributes(id)
                 } else {
+                    if self.graph.is_protocol_base(self.module, base) {
+                        return Err(self.object_runtime_export("typing.Protocol", base));
+                    }
                     if let Some(crate::modules::Binding::Intrinsic(kind)) = self.resolve(base)
                         && kind.is_subclassable_calendar()
                     {
