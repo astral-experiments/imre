@@ -4,26 +4,31 @@
 use super::{Error, Int, Kind, Object, Result, Storage, StorageCell, finish, object};
 use crate::objects::locks::{timeout_float, timeout_int};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::{self, ThreadId};
+#[cfg(test)]
+use std::thread;
 use std::time::Duration;
 
 #[derive(Default)]
 pub(crate) struct HandlerLock {
-    owner: Mutex<Option<(ThreadId, usize)>>,
+    owner: Mutex<Option<(usize, usize)>>,
     available: Condvar,
+}
+
+fn owner_ident() -> usize {
+    // SAFETY: pthread_self has no preconditions and returns the calling thread's identifier.
+    unsafe { libc::pthread_self() as usize }
 }
 
 impl HandlerLock {
     /// An owner may acquire recursively; other callers wait for the final release.
     pub(crate) fn acquire(&self, blocking: bool, timeout: Option<Duration>) -> Result<bool> {
-        let id = thread::current().id();
+        let id = owner_ident();
         let mut owner = self.owner.lock().unwrap();
         if let Some((thread, depth)) = owner.as_mut()
             && *thread == id
         {
-            *depth = depth
-                .checked_add(1)
-                .ok_or_else(|| Error::new(Kind::OverflowError, "Internal lock count overflowed"))?;
+            // CPython's unsigned recursion counter also wraps after a forged saved count.
+            *depth = depth.wrapping_add(1);
             return Ok(true);
         }
         if owner.is_some() {
@@ -51,9 +56,9 @@ impl HandlerLock {
     pub(crate) fn release(&self) -> Result<()> {
         let mut owner = self.owner.lock().unwrap();
         if let Some((id, depth)) = owner.as_mut()
-            && *id == thread::current().id()
+            && *id == owner_ident()
         {
-            *depth -= 1;
+            *depth = depth.wrapping_sub(1);
             if *depth == 0 {
                 *owner = None;
                 self.available.notify_one();
@@ -67,12 +72,48 @@ impl HandlerLock {
     }
 
     /// Report the current thread's recursion count, even if another thread owns it.
-    fn depth(&self) -> usize {
+    pub(crate) fn depth(&self) -> usize {
         self.owner
             .lock()
             .unwrap()
-            .filter(|(id, _)| *id == thread::current().id())
+            .filter(|(id, _)| *id == owner_ident())
             .map_or(0, |(_, depth)| depth)
+    }
+
+    /// Ownership is independent of depth when a private saved count wraps to zero.
+    pub(crate) fn owned(&self) -> bool {
+        self.state()
+            .is_some_and(|(owner, _)| owner == owner_ident())
+    }
+
+    /// Read the pthread owner and raw recursion count together for repr.
+    pub(crate) fn state(&self) -> Option<(usize, usize)> {
+        *self.owner.lock().unwrap()
+    }
+
+    /// Fully release a recursively acquired lock for a condition wait.
+    pub(crate) fn release_save(&self) -> Result<(usize, usize)> {
+        let mut state = self.owner.lock().unwrap();
+        let Some((owner, depth)) = state.filter(|(owner, _)| *owner == owner_ident()) else {
+            return Err(Error::new(
+                Kind::RuntimeError,
+                "cannot release un-acquired lock",
+            ));
+        };
+        *state = None;
+        self.available.notify_one();
+        Ok((depth, owner))
+    }
+
+    /// Wait for the underlying lock, then restore its saved recursion depth and owner.
+    pub(crate) fn acquire_restore(&self, depth: usize, owner: usize) {
+        let current = owner_ident();
+        let state = self.owner.lock().unwrap();
+        let mut state = self
+            .available
+            .wait_while(state, |s| s.is_some_and(|(owner, _)| owner != current))
+            .unwrap();
+        *state = Some((owner, depth));
     }
 
     /// Reinitialize ownership, as Handler._at_fork_reinit requests in the child.
@@ -170,7 +211,7 @@ pub unsafe extern "C" fn imre_log_lock_release(value: *const Object) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_lock_owned(value: *const Object) -> bool {
     // SAFETY: only the current thread's ownership flag escapes.
-    unsafe { lock(value) }.depth() != 0
+    unsafe { lock(value) }.owned()
 }
 
 /// # Safety
@@ -178,7 +219,7 @@ pub unsafe extern "C" fn imre_log_lock_owned(value: *const Object) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_lock_locked(value: *const Object) -> bool {
     // SAFETY: only the owner-present flag escapes.
-    unsafe { lock(value) }.owner.lock().unwrap().is_some()
+    unsafe { lock(value) }.state().is_some()
 }
 
 /// # Safety
@@ -201,6 +242,88 @@ pub unsafe extern "C" fn imre_log_lock_reset(value: *const Object) {
 mod tests {
     use super::*;
     use std::sync::mpsc;
+
+    #[test]
+    fn condition_save_and_restore_hands_the_lock_to_another_thread() {
+        let lock = HandlerLock::default();
+        assert_eq!(lock.acquire(true, None).ok(), Some(true));
+        assert_eq!(lock.acquire(true, None).ok(), Some(true));
+        let (stage, progress) = mpsc::channel();
+        let (release, finish) = mpsc::channel();
+        let limit = Duration::from_secs(5);
+        thread::scope(|scope| {
+            let lock = &lock;
+            scope.spawn(move || {
+                assert_eq!(lock.acquire(false, None).ok(), Some(false));
+                assert_eq!(
+                    lock.acquire(true, Some(Duration::from_millis(10))).ok(),
+                    Some(false)
+                );
+                assert!(lock.release_save().is_err());
+                stage.send(()).unwrap();
+                assert_eq!(lock.acquire(true, Some(limit)).ok(), Some(true));
+                stage.send(()).unwrap();
+                finish.recv_timeout(limit).unwrap();
+                assert!(lock.release().is_ok());
+            });
+            progress.recv_timeout(limit).unwrap();
+            let (depth, owner) = lock.release_save().ok().unwrap();
+            assert_eq!(depth, 2);
+            assert_eq!(owner, owner_ident());
+            progress.recv_timeout(limit).unwrap();
+            assert!(!lock.owned());
+            assert!(lock.release().is_err());
+            release.send(()).unwrap();
+            lock.acquire_restore(depth, owner);
+            assert!(lock.owned());
+            assert_eq!(lock.depth(), 2);
+        });
+        assert!(lock.release().is_ok());
+        assert!(lock.release().is_ok());
+        assert!(lock.state().is_none());
+    }
+
+    #[test]
+    fn restored_state_can_name_another_live_owner_and_wrap_its_count() {
+        let lock = HandlerLock::default();
+        let (identify, ids) = mpsc::channel();
+        let (restored, proceed) = mpsc::channel();
+        let limit = Duration::from_secs(5);
+        thread::scope(|scope| {
+            let lock = &lock;
+            let child = scope.spawn(move || {
+                let me = owner_ident();
+                identify.send(me).unwrap();
+                proceed.recv_timeout(limit).unwrap();
+                assert!(lock.owned());
+                assert_eq!(lock.depth(), usize::MAX);
+                assert_eq!(lock.acquire(false, None).ok(), Some(true));
+                assert_eq!(lock.depth(), 0);
+                assert!(lock.owned());
+                assert!(lock.release().is_ok());
+                assert_eq!(lock.release_save().ok(), Some((usize::MAX, me)));
+            });
+            let peer = ids.recv_timeout(limit).unwrap();
+            assert_ne!(peer, owner_ident());
+            assert_eq!(lock.acquire(false, None).ok(), Some(true));
+            lock.acquire_restore(usize::MAX, peer);
+            assert_eq!(lock.state(), Some((peer, usize::MAX)));
+            assert!(!lock.owned());
+            assert_eq!(lock.depth(), 0);
+            assert_eq!(lock.acquire(false, None).ok(), Some(false));
+            assert!(lock.release().is_err());
+            restored.send(()).unwrap();
+            child.join().unwrap();
+        });
+        assert!(lock.state().is_none());
+        lock.acquire_restore(2, 0);
+        assert_eq!(lock.state(), Some((0, 2)));
+        assert!(!lock.owned());
+        assert_eq!(lock.acquire(false, None).ok(), Some(false));
+        assert!(lock.release_save().is_err());
+        lock.reset();
+        assert!(lock.state().is_none());
+    }
 
     #[test]
     fn only_the_outermost_release_unblocks_another_thread() {

@@ -1160,6 +1160,12 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("_thread.lock.") {
         return super::thread_lock::method(ctx, method, args, kwargs);
     }
+    if name == super::thread_rlock::CLASS {
+        return Ok(ctx.alloc(Value::HandlerLock(Default::default())));
+    }
+    if let Some(method) = name.strip_prefix("_thread.RLock.") {
+        return super::thread_rlock::method(ctx, method, args, kwargs);
+    }
     if name.starts_with("_weakref.") || name.starts_with("weakref.") {
         return super::weakref::call(ctx, name, args, kwargs);
     }
