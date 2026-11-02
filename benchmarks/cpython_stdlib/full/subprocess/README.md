@@ -109,6 +109,13 @@ the first `communicate()` raises `TimeoutExpired` and that a second call on the
 same child returns all 262,144 stdout bytes. Pinned CPython supplies the
 original fixtures and runs the literal child program.
 
+`--case test.test_subprocess.ProcessTestCase.test_communicate_timeout` runs the
+text-mode retry original. The native `unittest.TestCase` checks `TimeoutExpired`
+and compares the complete stdout and stderr on the second `communicate()`
+call. Pinned CPython runs the original fixtures and child. The
+[Linux receipt](communicate-timeout-text-linux.json) records the partial stderr
+and both complete streams at O0 and O3.
+
 The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
 rejection of new input, repeated output, text newline conversion, and shared
