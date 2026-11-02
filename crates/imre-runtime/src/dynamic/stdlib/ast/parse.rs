@@ -298,6 +298,18 @@ impl Parser<'_> {
                 }
                 ("Dict", vec![self.list(keys), self.list(values)])
             }
+            // literal_eval rejects the outer comparison regardless of its operands.
+            Expr::Compare(v) if !self.literal => {
+                let mut operands = v.operands.into_iter();
+                let left = self.expr(operands.next().expect("comparison has a left operand"))?;
+                let ops = v
+                    .ops
+                    .iter()
+                    .map(|op| self.ctx.builtins[&format!("ast._{op:?}")])
+                    .collect();
+                let comparators = self.exprs(operands)?;
+                ("Compare", vec![left, self.list(ops), comparators])
+            }
             Expr::If(v) => (
                 "IfExp",
                 vec![
