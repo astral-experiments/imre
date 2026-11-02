@@ -386,7 +386,7 @@ impl Function<'_, '_> {
                         .collect::<Vec<_>>();
                     let generator = imre_ast::code_flags::is_generator(&v.body);
                     let body = if v.is_async && generator {
-                        Body::Unsupported(stmt, "async function")
+                        Body::UnsupportedAsyncGenerator(v)
                     } else if v.is_async || generator {
                         Body::GeneratorFunction((&v.body, v.is_async))
                     } else {
@@ -680,19 +680,13 @@ impl Function<'_, '_> {
             {
                 self.source.docstring(&qualname, stmts)
             }
-            Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
+            Body::UnsupportedAsyncGenerator(f) if self.output.keep_docstrings => {
                 self.source.docstring(&qualname, &f.body)
             }
             _ => None,
         };
-        let flags = match (&body, params) {
-            (
-                Body::Namespace(_)
-                | Body::Annotations(..)
-                | Body::ModuleAnnotations(..)
-                | Body::ClassAnnotations(..),
-                _,
-            ) => None,
+        let flags = match &body {
+            Body::Namespace(_) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -723,13 +717,7 @@ impl Function<'_, '_> {
                     | Body::Generator(..)
                     | Body::YieldingLambda(_) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
-                    Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
-                        if is_generator(&f.body) {
-                            ASYNC_GENERATOR
-                        } else {
-                            COROUTINE
-                        }
-                    }
+                    Body::UnsupportedAsyncGenerator(_) => ASYNC_GENERATOR,
                     _ => 0,
                 };
                 Some(flags | kind)
@@ -1492,27 +1480,8 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     let mut captures = ClassCell(false);
     match body {
         Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => captures.visit_body(stmts),
-        Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
-            captures.visit_expr(expr)
-        }
-        Body::Generator(generators, element) => {
-            for (index, generator) in generators.iter().enumerate() {
-                if index != 0 {
-                    captures.visit_expr(&generator.iter);
-                }
-                for filter in &generator.ifs {
-                    captures.visit_expr(filter);
-                }
-            }
-            captures.visit_expr(element);
-        }
-        Body::Namespace(_)
-        | Body::Annotations(..)
-        | Body::ModuleAnnotations(..)
-        | Body::ClassAnnotations(..)
-        | Body::AnnotationThunk(..)
-        | Body::AnnotationValue(_)
-        | Body::Unsupported(..) => {}
+        Body::Expression(expr) | Body::YieldingLambda(expr) => captures.visit_expr(expr),
+        _ => return false,
     }
     captures.0
 }
