@@ -321,6 +321,36 @@ pub(crate) fn mapping_base(graph: &SourceGraph, module: usize, expression: &ast:
     )
 }
 
+/// Recognize a factory on an imported source module while the class namespace is still being built.
+fn source_method_factory(
+    graph: &SourceGraph,
+    module: usize,
+    decorator: &ast::Decorator,
+    class_names: &HashSet<String>,
+) -> bool {
+    let ast::Expr::Call(call) = &decorator.expression else {
+        return false;
+    };
+    let mut root = call.func.as_ref();
+    while let ast::Expr::Attribute(attr) = root {
+        root = &attr.value;
+    }
+    let Some(owner) = root.as_name_expr() else {
+        return false;
+    };
+    let Some(Binding::Definition(id)) = graph.resolve(module, &call.func) else {
+        return false;
+    };
+    let source = &graph.modules[id.module];
+    id.module != module
+        && !class_names.contains(owner.id.as_str())
+        && !source.bundled
+        && matches!(
+            source.parsed.syntax().body[id.statement],
+            ast::Stmt::FunctionDef(_)
+        )
+}
+
 fn unittest_skip_decorator(
     graph: &SourceGraph,
     module: usize,
@@ -844,6 +874,22 @@ fn collect_class(
                         {
                             // An arbitrary decorator may bind a descriptor or a non-callable.
                             // Preserve the class name without inventing a fixed method slot.
+                            if method.decorator_list.iter().any(|decorator| {
+                                source_method_factory(
+                                    graph,
+                                    definition.module,
+                                    decorator,
+                                    &class_bindings,
+                                )
+                            }) {
+                                // The class builder evaluates the factory and binds its result.
+                                graph
+                                    .class_body_error
+                                    .borrow_mut()
+                                    .get_or_insert(error.clone());
+                                graph.check_method_factories.set(true);
+                                decorators.has_runtime_method = true;
+                            }
                             decorators.unsupported.get_or_insert(error);
                             if !names.insert(name.to_owned()) {
                                 return Err(module
