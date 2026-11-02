@@ -941,6 +941,9 @@ def check_pickle_reductions(imre, root, run):
                 payload = bytes(range(256))
                 assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
                 assert value[7][2] is value[7][3]
+                mapping = value[9]
+                assert list(mapping) == ["z", "a", "m"] and mapping["m"] == 42
+                assert mapping["z"] is mapping and mapping.state is mapping["a"]
                 singleton, live, pair, iterator = value[8]
                 assert singleton == ([7] if protocol else [7, "added"])
                 assert live == [7, "second", "added"]
