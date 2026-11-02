@@ -1054,6 +1054,17 @@ def basicConfig(**kwargs):
                 raise ValueError('Unrecognised argument(s): %s' % keys)
 
 
+def critical(msg, *args, **kwargs):
+    """
+    Log a message with severity 'CRITICAL' on the root logger. If the logger
+    has no handlers, call basicConfig() to add a console handler with a
+    pre-defined format.
+    """
+    if len(root.handlers) == 0:
+        basicConfig()
+    root.critical(msg, *args, **kwargs)
+
+
 def error(msg, *args, **kwargs):
     """
     Log a message with severity 'ERROR' on the root logger. If the logger has
@@ -1085,6 +1096,17 @@ def warning(msg, *args, **kwargs):
     root.warning(msg, *args, **kwargs)
 
 
+def info(msg, *args, **kwargs):
+    """
+    Log a message with severity 'INFO' on the root logger. If the logger has
+    no handlers, call basicConfig() to add a console handler with a pre-defined
+    format.
+    """
+    if len(root.handlers) == 0:
+        basicConfig()
+    root.info(msg, *args, **kwargs)
+
+
 def debug(msg, *args, **kwargs):
     """
     Log a message with severity 'DEBUG' on the root logger. If the logger has
@@ -1094,6 +1116,17 @@ def debug(msg, *args, **kwargs):
     if len(root.handlers) == 0:
         basicConfig()
     root.debug(msg, *args, **kwargs)
+
+
+def log(level, msg, *args, **kwargs):
+    """
+    Log 'msg % args' with the integer severity 'level' on the root logger. If
+    the logger has no handlers, call basicConfig() to add a console handler
+    with a pre-defined format.
+    """
+    if len(root.handlers) == 0:
+        basicConfig()
+    root.log(level, msg, *args, **kwargs)
 
 # Warnings integration
 
