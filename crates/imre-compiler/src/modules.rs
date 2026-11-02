@@ -59,6 +59,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/signals.py",
             include_str!("../stdlib/unittest/signals.py"),
         )),
+        // CPython 3.14.5 Lib/unittest/_log.py. See stdlib/docstrings/LICENSE.
+        "unittest._log" => Some((
+            "unittest/_log.py",
+            include_str!("../stdlib/unittest/_log.py"),
+        )),
         // CPython 3.14.5 Lib/unittest/util.py. See stdlib/docstrings/LICENSE.
         "unittest.util" => Some((
             "unittest/util.py",
