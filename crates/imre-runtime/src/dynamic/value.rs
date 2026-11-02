@@ -3338,7 +3338,7 @@ impl Heap {
     }
 
     pub(super) fn acyclic_finalizer(
-        &self,
+        &mut self,
         roots: impl Iterator<Item = Id>,
         stdin: Option<&[Id; 3]>,
     ) -> Result<Option<Id>> {
@@ -3373,7 +3373,7 @@ impl Heap {
                 .ordinary_finalizers
                 .iter()
                 .find(|owner| !stdin.is_some_and(|chain| chain.contains(owner)))
-            && self.frame_keeps_instance_owner(owner)
+            && (self.caller_keeps_finalizer(owner) || self.frame_keeps_instance_owner(owner))
         {
             return Ok(None);
         }
@@ -3429,9 +3429,14 @@ impl Heap {
 
     /// Recheck the strong path from a caller-held method to the sole pending finalizer.
     pub(super) fn caller_keeps_only_finalizer(&mut self) -> bool {
-        let [owner] = self.ordinary_finalizers.as_slice() else {
+        let [owner] = self.ordinary_finalizers[..] else {
             return false;
         };
+        self.caller_keeps_finalizer(owner)
+    }
+
+    /// Verify the surviving method and receiver field before reusing a reachability result.
+    fn caller_keeps_finalizer(&mut self, owner: Id) -> bool {
         let receiver_fields = |operand: &Id| {
             let Value::Method { receiver, .. } = self.get(*operand) else {
                 return None;
@@ -3449,17 +3454,17 @@ impl Heap {
                 .and_then(|frame| frame.live.get(operand))
                 .and_then(receiver_fields)
                 .and_then(|fields| fields.get_index(field))
-                .is_some_and(|(_, value)| value == owner)
+                .is_some_and(|(_, value)| *value == owner)
         {
             return true;
         }
 
         // Earlier operands hold outer expressions such as pending context manager exits.
-        // Learn the position while its frame is the immediate caller, before recursion.
-        if let Some((frame_index, caller)) = self.frames.iter().enumerate().rev().nth(1) {
+        // Learn the position near the call, then validate it at any recursion depth.
+        for (frame_index, caller) in self.frames.iter().enumerate().rev().skip(1).take(8) {
             for (operand_index, operand) in caller.live.iter().take(8).enumerate() {
                 if let Some(fields) = receiver_fields(operand)
-                    && let Some(field) = fields.values().take(8).position(|value| value == owner)
+                    && let Some(field) = fields.values().take(8).position(|value| *value == owner)
                 {
                     self.caller_finalizer_field = Some((frame_index, operand_index, field));
                     return true;
