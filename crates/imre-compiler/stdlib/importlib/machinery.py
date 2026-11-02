@@ -5,6 +5,7 @@ from ._bootstrap_external import (
     SOURCE_SUFFIXES,
     FileFinder,
     NamespaceLoader,
+    PathFinder,
     SourceFileLoader,
 )
 

@@ -144,7 +144,16 @@ fn boxed_opcode(name: &str) -> bool {
 fn boxed_sys_export(name: &str) -> bool {
     matches!(
         name,
-        "path" | "modules" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+        "path"
+            | "meta_path"
+            | "path_hooks"
+            | "path_importer_cache"
+            | "modules"
+            | "version_info"
+            | "implementation"
+            | "exit"
+            | "exc_info"
+            | "exception"
     )
 }
 
@@ -792,6 +801,8 @@ pub(crate) fn compile(
     for name in [
         "__future__",
         "__hello__",
+        "_frozen_importlib",
+        "_frozen_importlib_external",
         "_opcode_metadata",
         "_tokenize",
         "abc",
