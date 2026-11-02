@@ -1266,6 +1266,26 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "type" if method == "__init__" => {
+                let Some((&class, args)) = args.split_first() else {
+                    return Err(type_error(
+                        "descriptor '__init__' of 'type' object needs an argument",
+                    ));
+                };
+                if !ctx.is_type_object(class) {
+                    return Err(type_error(format!(
+                        "descriptor '__init__' requires a 'type' object but received a '{}'",
+                        ctx.type_name(class)
+                    )));
+                }
+                match args.len() {
+                    1 if !kwargs.is_empty() => {
+                        Err(type_error("type.__init__() takes no keyword arguments"))
+                    }
+                    1 | 3 => Ok(NONE),
+                    _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
+                }
+            }
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;
                 let (min, max) = match method {
@@ -1559,26 +1579,6 @@ pub(super) fn call(
         "mappingproxy" => {
             let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
             ctx.mapping_proxy(mapping.expect("required mapping"))
-        }
-        "type.__init__" => {
-            let Some((&class, args)) = args.split_first() else {
-                return Err(type_error(
-                    "descriptor '__init__' of 'type' object needs an argument",
-                ));
-            };
-            if !ctx.is_type_object(class) {
-                return Err(type_error(format!(
-                    "descriptor '__init__' requires a 'type' object but received a '{}'",
-                    ctx.type_name(class)
-                )));
-            }
-            match args.len() {
-                1 if !kwargs.is_empty() => {
-                    Err(type_error("type.__init__() takes no keyword arguments"))
-                }
-                1 | 3 => Ok(NONE),
-                _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
-            }
         }
         "type" => match args {
             [object] if kwargs.is_empty() => ctx.exact_type(*object),
