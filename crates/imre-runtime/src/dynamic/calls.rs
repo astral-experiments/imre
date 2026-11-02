@@ -6129,7 +6129,7 @@ impl Context {
         self.execute(code, scope, FrameOwner::Function(body))?;
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
-        let annotation_body = self.finish_annotation_body(scope)?;
+        let exposed_body = self.finish_class_namespace(scope)?;
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -6235,20 +6235,29 @@ impl Context {
                 .entry("__doc__".to_owned())
                 .or_insert(NONE);
         }
-        if let Some((cell, body)) = annotation_body {
+        if let Some(body) = exposed_body {
             // type.__new__ replaces the body namespace with the finished type's dictionary.
             let dict = self.class_namespace_dict(scope, false);
             let extras = self
-                .dict_entries(body)
+                .dict_entries(body.mapping)
                 .expect("class body dictionary")
                 .iter()
                 .copied()
                 .filter(|&(key, _)| self.string_storage(key).is_none())
                 .collect::<Vec<_>>();
-            for (key, value) in extras {
-                self.put_item(dict, key, value)?;
+            if let Some(cell) = body.annotation_cell {
+                self.heap.replace_cell(cell, Some(dict));
             }
-            self.heap.replace_cell(cell, Some(dict));
+            if !extras.is_empty() {
+                for (key, value) in extras {
+                    self.put_item(dict, key, value)?;
+                }
+                self.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::RuntimeWarning,
+                    &format!("non-string key in the __dict__ of class {name:.200}"),
+                    1,
+                )?;
+            }
         }
         self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {

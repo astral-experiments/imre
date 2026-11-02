@@ -93,6 +93,7 @@ const FUNCTIONS: &[&str] = &[
     "issubclass",
     "getattr",
     "globals",
+    "locals",
     "vars",
     "setattr",
     "delattr",
@@ -973,9 +974,14 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        if scope != NONE && matches!(self.heap.get(callable), Value::Native(name) if name == "eval")
-        {
-            return self.eval_source(scope, &args, &kwargs);
+        if scope != NONE && let Value::Native(name) = self.heap.get(callable) {
+            match name.as_str() {
+                "eval" => return self.eval_source(scope, &args, &kwargs),
+                "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
+                    return self.frame_locals(scope);
+                }
+                _ => {}
+            }
         }
         if scope != NONE
             && args.is_empty()
@@ -1468,27 +1474,28 @@ pub(super) fn call(
                     }
                     result => result,
                 },
-                [] => Err(Error::new(
-                    "NotImplementedError",
-                    "vars() requires caller locals",
-                )),
+                [] => ctx.frame_locals(ctx.heap.current_scope()),
                 _ => Err(type_error(format!(
                     "vars expected at most 1 argument, got {}",
                     args.len()
                 ))),
             }
         }
-        "globals" => {
+        "globals" | "locals" => {
             if !kwargs.is_empty() {
-                return Err(type_error("globals() takes no keyword arguments"));
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
             }
             if !args.is_empty() {
                 return Err(type_error(format!(
-                    "globals() takes no arguments ({} given)",
+                    "{name}() takes no arguments ({} given)",
                     args.len()
                 )));
             }
-            ctx.module_globals(ctx.heap.current_scope())
+            if name == "globals" {
+                ctx.module_globals(ctx.heap.current_scope())
+            } else {
+                ctx.frame_locals(ctx.heap.current_scope())
+            }
         }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;

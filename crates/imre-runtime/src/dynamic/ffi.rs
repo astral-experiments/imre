@@ -1092,28 +1092,33 @@ impl Context {
     ) -> Option<Vec<String>> {
         let mut freevars = Vec::new();
         for name in reads {
-            let mut cursor = Some(scope);
-            while let Some(frame_id) = cursor {
-                let frame = self.scope_data(frame_id);
-                if frame.parent.is_none()
-                    || (frame.class_body.is_none() && frame.globals.contains(name))
-                {
-                    break;
-                }
-                if frame.class_body.is_none()
-                    && (frame.closure.declared.contains(name)
-                        || frame.closure.cells.contains_key(name))
-                {
-                    freevars.push(name.to_owned());
-                    break;
-                }
-                if frame.class_body.is_none() && !frame.closure.declared_complete {
-                    return None;
-                }
-                cursor = frame.parent;
+            if self.is_enclosing_freevar(scope, name)? {
+                freevars.push(name.to_owned());
             }
         }
         Some(freevars)
+    }
+
+    /// Determine whether a read resolves to an enclosing function rather than module globals.
+    pub(super) fn is_enclosing_freevar(&self, mut scope: Id, name: &str) -> Option<bool> {
+        loop {
+            let frame = self.scope_data(scope);
+            let Some(parent) = frame.parent else {
+                return Some(false);
+            };
+            if frame.class_body.is_none() {
+                if frame.globals.contains(name) {
+                    return Some(false);
+                }
+                if frame.closure.declared.contains(name) || frame.closure.cells.contains_key(name) {
+                    return Some(true);
+                }
+                if !frame.closure.declared_complete {
+                    return None;
+                }
+            }
+            scope = parent;
+        }
     }
 
     pub(super) fn prelinked_code(
