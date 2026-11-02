@@ -364,6 +364,29 @@ impl Calendar {
         ]
     }
 
+    pub(crate) fn iso_week_ordinal(year: i32, week: i32, day: i32) -> Result<i32, Error> {
+        check(year, "year", 1, 9999)?;
+        // ISO week one contains January 4. Ordinal 1 is a Monday.
+        let week_one = |year| {
+            let jan4 = days_before_year(year) + 4;
+            jan4 - (jan4 - 1) % 7
+        };
+        let first = week_one(year);
+        if !(1..=(week_one(year + 1) - first) / 7).contains(&week) {
+            return Err(Error::new(
+                Kind::ValueError,
+                format!("Invalid week: {week}"),
+            ));
+        }
+        if !(1..=7).contains(&day) {
+            return Err(Error::new(
+                Kind::ValueError,
+                format!("Invalid weekday: {day} (range is [1, 7])"),
+            ));
+        }
+        Ok(first + (week - 1) * 7 + day - 1)
+    }
+
     pub(crate) fn ordinal_fields(ordinal: i32) -> Result<[i32; 3], Error> {
         if ordinal < 1 {
             return Err(Error::new(Kind::ValueError, "ordinal must be >= 1"));
