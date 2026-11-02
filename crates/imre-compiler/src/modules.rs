@@ -2691,9 +2691,8 @@ impl IntrinsicModule {
             (Self::Os, "environb") if cfg!(unix) => Intrinsic::EnvironBytes,
             (Self::Os, "supports_bytes_environ") => Intrinsic::BoolConstant(cfg!(unix)),
             (Self::Os, "getenv") => Intrinsic::GetEnv,
-            (Self::Os, "getcwd" | "getcwdb") => Intrinsic::GetCwd {
-                bytes: name == "getcwdb",
-            },
+            (Self::Os, "getcwd") => Intrinsic::GetCwd { bytes: false },
+            (Self::Os, "getcwdb") if cfg!(unix) => Intrinsic::GetCwd { bytes: true },
             (Self::Os, "fspath") => Intrinsic::FsPath,
             (Self::Os, "_fspath") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os._fspath"),
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,

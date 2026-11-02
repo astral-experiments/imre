@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::DirBuilderExt;
 use std::rc::Rc;
 
@@ -552,7 +553,7 @@ pub extern "C" fn imre_getcwdb() -> *const Bytes {
         .map_err(files::errno_error)
         .map(|cwd| {
             crate::BytesOwner::into_raw(crate::BytesOwner::new(
-                cwd.into_os_string().into_encoded_bytes(),
+                cwd.into_os_string().into_vec(),
             ))
         });
     finish(cwd, std::ptr::null())
