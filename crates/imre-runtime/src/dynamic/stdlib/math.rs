@@ -39,6 +39,9 @@ pub(super) fn call(
             ),
         ));
     };
+    if operation == "isnan" {
+        return Ok(builtins::boolean(as_double(ctx, value)?.is_nan()));
+    }
     if operation == "modf" {
         return modf(ctx, value);
     }
@@ -89,11 +92,10 @@ pub(super) fn call(
     ))))
 }
 
-/// Split at the integer toward zero, preserving the sign and payload of either nonfinite case.
-fn modf(ctx: &mut Context, value: Id) -> Result<Id> {
-    // PyFloat_AsDouble reads the stored double of a float subclass without calling its override.
-    let x = match *ctx.heap.get(ctx.scalar_value(value)) {
-        Value::Float(x) => x,
+/// Read a float subclass's stored double before trying the numeric conversion protocol.
+fn as_double(ctx: &mut Context, value: Id) -> Result<f64> {
+    match *ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Float(x) => Ok(x),
         _ => {
             let converted = builtins::from_numeric(ctx, value)?.ok_or_else(|| {
                 let name = ctx.type_name(value);
@@ -103,9 +105,14 @@ fn modf(ctx: &mut Context, value: Id) -> Result<Id> {
             let Value::Float(x) = *ctx.heap.get(converted) else {
                 unreachable!()
             };
-            x
+            Ok(x)
         }
-    };
+    }
+}
+
+/// Split at the integer toward zero, preserving the sign and payload of either nonfinite case.
+fn modf(ctx: &mut Context, value: Id) -> Result<Id> {
+    let x = as_double(ctx, value)?;
     let (fraction, integral) = if x.is_nan() {
         (x, x)
     } else if x.is_infinite() {
