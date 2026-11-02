@@ -115,7 +115,7 @@ branches. Skipped tests count toward the suite size only.
 | `collections` | 517 | 659 | Selected tests across development builds. Twelve additional UserString originals passed at both levels. |
 | `csv` | 122 | 128 | Complete suite on `main`, six skips |
 | `dataclasses` | 234 | 276 | Development builds. The intact runs each passed 207 of 276. Three original cases were new to the cross-build total. |
-| `datetime` | 502 | 1,098 | Development builds. The intact runs passed 499 of 1,098. Three additional numeric registrations passed in a separate focused run. |
+| `datetime` | 521 | 1,098 | Development builds. The intact runs passed 499 of 1,098. Three additional numeric registrations passed in a separate focused run. |
 | `fnmatch` | 24 | 24 | Complete suite on `main` |
 | `functools` | 91 | 329 | 89 passed in the intact 325-case primary module, plus two selected passes |
 | `hashlib` | 65 | 82 | Selected and intact runs (45 passed together on `main`) |
@@ -126,17 +126,17 @@ branches. Skipped tests count toward the suite size only.
 | `logging` | 30 | 272 | 30 source-isolated methods run together with their fixtures |
 | `os` | 38 | 579 | 25 intact genericpath cases and 13 selected OS cases whose module teardown errored |
 | `pathlib` | 233 | 1,369 | Both intact runs finished all 1,369 cases, with 724 errors and 412 skips |
-| `re` | 120 | 165 | 120 passed in an intact development run, 69 on a smaller set of changes |
-| `shutil` | 38 | 223 | Selected tests across builds. Eight original copy cases passed on the public merge with clean teardown, and seven skipped. |
+| `re` | 123 | 165 | 120 passed in an intact development run, 69 on a smaller set of changes |
+| `shutil` | 39 | 223 | Selected tests across builds. Eight original copy cases passed on the public merge with clean teardown, and seven skipped. |
 | `socket` | 48 | 746 | Four passed in the latest intact run and 44 on earlier builds |
 | `subprocess` | 33 | 353 | Selected cases |
-| `tempfile` | 50 | 118 | Development build. All four intact runs finished 118 tests. Eleven further unittest successes raised exceptions in finalizers and are excluded. |
+| `tempfile` | 61 | 118 | Development build. All four intact runs finished 118 tests. Eleven further unittest successes raised exceptions in finalizers and are excluded. |
 | `textwrap` | 68 | 68 | Complete suite on `main` |
 | `threading` | 81 | 228 | All 228 cases ran in ordinary and boxed modes on one development build |
 | `typing` | 107 | 712 | Selected tests across development builds |
 | `unittest` | 160 | 1,090 | Intact package runner discovered 244 cases and started 213 |
 | `urllib` | 84 | 178 | Selected cases |
-| **Total** | **4,422** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **4,456** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
