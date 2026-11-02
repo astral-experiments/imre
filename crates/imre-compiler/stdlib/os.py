@@ -9,6 +9,11 @@ from posix import access, environ as _environ, fspath, getcwd, getcwdb, getppid,
 from types import GenericAlias
 from posix import O_NONBLOCK, O_RDONLY, chdir, close, open, stat
 
+try:
+    from posix import waitstatus_to_exitcode
+except ImportError:
+    pass
+
 if sys.platform == "linux":
     import posix as _posix
     for _name in vars(_posix):
