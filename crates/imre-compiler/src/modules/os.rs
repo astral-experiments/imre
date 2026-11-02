@@ -204,6 +204,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "SEEK_HOLE" => Intrinsic::DescriptorConstant("seek_hole"),
         "dup" => Intrinsic::Fd(FdOperation::Dup),
         "dup2" => Intrinsic::Fd(FdOperation::Dup2),
+        "ptsname" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::PtsName),
+        "O_NOCTTY" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_noctty"),
         "openpty" => Intrinsic::Fd(FdOperation::OpenPty),
         "pipe" => Intrinsic::Fd(FdOperation::Pipe),
         "pipe2" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::Pipe2),

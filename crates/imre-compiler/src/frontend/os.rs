@@ -135,6 +135,35 @@ impl Checker<'_> {
                 })
             });
         }
+        if op == PtsName {
+            return self.posix_positional(call, "ptsname", 1, Type::Str, |checker, _, args| {
+                let value = args.into_iter().next().expect("one bound ptsname argument");
+                let fd = match value.ty {
+                    Type::Int | Type::Bool => value,
+                    Type::TextIO | Type::BinaryIO => Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::FileFileno, vec![value]),
+                    },
+                    _ => {
+                        return Err(
+                            checker.object_runtime_export("os.ptsname file descriptor", call)
+                        );
+                    }
+                };
+                let mut args = vec![fd];
+                if args[0].ty == Type::Bool {
+                    args.push(unpacking::string(
+                        checker.runtime_module_name(checker.module),
+                    ));
+                    args.push(unpacking::string(checker.source_filename()));
+                    args.push(Expr::integer(i64::from(checker.source_line(call.start()))));
+                }
+                Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Fd(op)), args),
+                })
+            });
+        }
         if op == Pipe2 {
             let returns = self.types.tuple(vec![Type::Int; 2]);
             return self.posix_positional(call, "pipe2", 1, returns, |checker, _, args| {
@@ -205,6 +234,7 @@ impl Checker<'_> {
             Pipe | Pipe2 | OpenPty => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
             DeviceEncoding => self.types.optional(Type::Str),
+            PtsName => unreachable!("positional-only ptsname handled above"),
         };
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
     }

@@ -2173,6 +2173,7 @@ pub(crate) enum FdOperation {
     Dup,
     Isatty,
     DeviceEncoding,
+    PtsName,
     GetBlocking,
     SetBlocking,
     GetInheritable,

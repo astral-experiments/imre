@@ -8812,6 +8812,7 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
+@imre_os_o_noctty = external constant i64
 @imre_os_o_path = external constant i64
 @imre_os_o_tmpfile = external constant i64
 @imre_os_seek_set = external constant i64
@@ -8836,6 +8837,7 @@ declare void @imre_os_openpty(ptr)
 declare void @imre_os_pipe(ptr)
 declare void @imre_os_pipe2(ptr, i64)
 declare i32 @imre_os_isatty(i64)
+declare ptr @imre_os_ptsname(i64, ptr, ptr, i64)
 declare i64 @imre_os_device_encoding(i64)
 declare i32 @imre_os_get_blocking(i64)
 declare void @imre_os_set_blocking(i64, i64)
