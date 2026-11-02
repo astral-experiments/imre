@@ -101,7 +101,7 @@ mod string_enums;
 mod structs;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use text::{dedent, hexadecimal};
+pub(crate) use text::{codepoint_search_window, dedent, hexadecimal, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};

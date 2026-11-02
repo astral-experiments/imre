@@ -959,7 +959,7 @@ pub unsafe extern "C" fn imre_str_find(
 }
 
 /// Resolve Python search bounds, preserving a start beyond the end even for an empty needle.
-fn search_window<'a>(
+pub(crate) fn search_window<'a>(
     source: &'a str,
     start: Option<&Int>,
     end: Option<&Int>,
@@ -983,7 +983,7 @@ pub(crate) fn count_text(
 }
 
 /// Resolve a slice of a Python string stored as code points, preserving the original offset.
-fn codepoint_search_window<'a>(
+pub(crate) fn codepoint_search_window<'a>(
     source: &'a [u32],
     start: Option<&Int>,
     end: Option<&Int>,
