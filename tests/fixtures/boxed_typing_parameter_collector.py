@@ -38,4 +38,11 @@ def current():
                 assert str(error) == message, str(error)
             else:
                 raise AssertionError("accepted invalid parameter order")
+    try:
+        typing._collect_type_parameters = lambda args, **kwargs: [T]
+        replacement = typing.List[Foreign]
+        assert replacement.__parameters__ == [T]
+        assert list[replacement].__parameters__ == ()
+    finally:
+        typing._collect_type_parameters = collect
     print("typing parameter collection and specialization")

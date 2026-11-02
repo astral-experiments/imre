@@ -310,9 +310,12 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
                 ..
             }
             | Value::Union(super::union::Union { parameters, .. }) => {
-                match ctx.heap.get(*parameters) {
-                    Value::Tuple(members) => members.as_slice(),
-                    _ => unreachable!(),
+                // Like _Py_make_parameters, ignore non-tuple metadata supplied by Python.
+                match ctx.heap.get(ctx.scalar_value(*parameters)) {
+                    Value::Tuple(members) | Value::NamedTuple { values: members, .. } => {
+                        members.as_slice()
+                    }
+                    _ => continue,
                 }
             }
             Value::Instance { class, .. }
