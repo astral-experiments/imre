@@ -803,7 +803,10 @@ impl BufferedFd {
                 };
                 let mut total = 0;
                 while total < bytes.len() {
-                    let n = r.read(&mut bytes[total..]).map_err(os_error)?;
+                    let n = match r.read(&mut bytes[total..]) {
+                        Ok(n) => n,
+                        Err(e) => return files::readinto_error(ctx, e, total),
+                    };
                     if n == 0 {
                         break;
                     }
