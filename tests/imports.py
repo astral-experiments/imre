@@ -37,6 +37,13 @@ REJECTED = {
     "function_wildcard": ({
         "main.py": "def invalid():\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
+    "warning_scope_keeps_call_contracts": ({
+        "main.py": (
+            "import warnings\n"
+            "def identity(n: int) -> int: return n\n"
+            "with warnings.catch_warnings(record=True):\n    identity('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "class_wildcard": ({
         "main.py": "class Invalid:\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
@@ -464,6 +471,12 @@ ACCEPTED = {
             "def initialize():\n    print('initialized')\n    return [41]\n"
             "if t.TYPE_CHECKING:\n    from unavailable_at_runtime import token\n"
             "else:\n    token = initialize()\n"
+        ),
+    },
+    "record_warnings": {
+        "main.py": (
+            "import warnings\n"
+            "with warnings.catch_warnings(record=True) as caught:\n    assert caught == []\n"
         ),
     },
     "contextmanager_generator_annotation": {
@@ -1024,7 +1037,8 @@ def main() -> None:
                 if args.sanitize:
                     command.append("--sanitize")
                 # Optimizing the bundled address parser and warnings modules can take several minutes.
-                timeout = 300 if name in {"email_address_parsers", "warn_named_helper"} and level > 0 else build_timeout
+                slow_optimized = name in {"email_address_parsers", "record_warnings", "warn_named_helper"}
+                timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
                 result = run([str(executable)], temporary)
                 require_success(result)
