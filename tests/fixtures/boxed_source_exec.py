@@ -667,6 +667,17 @@ def caller_namespaces(argument):
     assert Namespace.name == "in class"
     mapping = {}
     assert eval("locals()", {}, mapping) is mapping
+    exec("class Loaded:\n    raw = locals()\n    raw['flag'] = 11\n    assert raw is vars()", mapping)
+    loaded = mapping["Loaded"]
+    loaded.raw["flag"] = 12
+    assert loaded.flag == 11
+
+    class WithMethod:
+        __classcell__ = None
+        def owner(self, value: int):
+            return __class__
+
+    assert WithMethod().owner(3) is WithMethod
 
     def with_child():
         before = eval("argument")
