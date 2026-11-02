@@ -2630,6 +2630,7 @@ impl<'a> Checker<'a> {
             "union" => "set.union",
             "symmetric_difference" => "set.symmetric_difference",
             "difference_update" => "set.difference_update",
+            "intersection_update" => "set.intersection_update",
             "symmetric_difference_update" => "set.symmetric_difference_update",
             "clear" => "set.clear",
             "pop" => "set.pop",

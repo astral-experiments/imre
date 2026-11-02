@@ -2214,6 +2214,7 @@ impl Context {
                 "__reduce__",
                 "difference",
                 "intersection",
+                "intersection_update",
                 "issubset",
                 "symmetric_difference",
                 "union",
