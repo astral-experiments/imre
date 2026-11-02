@@ -28,8 +28,6 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
-const KEYWORD_SOURCE: &str = include_str!("../stdlib/keyword.py");
-
 /// Mode constants and operations from the target's POSIX stat provider.
 fn stat_mode_source() -> Option<&'static str> {
     macro_rules! modes {
@@ -152,7 +150,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/csv/sniffer.py"),
             ),
         )),
-        "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
+        "copy" => Some((
+            "copy.py",
+            include_str!("../../../benchmarks/cpython_stdlib/full/copy/upstream/Lib/copy.py"),
+        )),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "dis" => Some(("dis.py", include_str!("../stdlib/dis.py"))),
         "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
@@ -269,7 +270,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/encodings/writer_charmap.py"),
         )),
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
-        "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
+        "keyword" => Some((
+            "keyword.py",
+            include_str!("../../../benchmarks/cpython_stdlib/full/keyword/upstream/Lib/keyword.py"),
+        )),
         "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
         "tokenize" => Some((
             "tokenize.py",
@@ -5444,7 +5448,6 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/doctest_typed.py"),
                 ),
             )),
-            "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "zipimport" if cfg!(unix) => Some((
                 "zipimport.py",
