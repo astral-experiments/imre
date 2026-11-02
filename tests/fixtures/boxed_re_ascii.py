@@ -271,3 +271,15 @@ def current():
             assert (error.msg, error.pattern, error.pos) == (message, spelling, position)
         else:
             raise AssertionError("invalid group name accepted")
+
+    for flags in (0, re.X):
+        for spelling, expected in (
+            (r"[--1]", "-./01"),
+            (r"[&&1]", "1&"),
+            (r"[||1]", "1|"),
+            (r"[~~1]", "1~"),
+        ):
+            assert "".join(re.findall(spelling, "-./012&|~", flags)) == expected
+        negated = re.compile(rb"X([^--1])", flags)
+        assert negated.fullmatch(b"X2").group(1) == b"2"
+        assert negated.fullmatch(b"X/") is None

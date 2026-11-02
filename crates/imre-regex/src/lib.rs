@@ -1285,7 +1285,7 @@ fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> R
             output.push(']');
             return Ok(());
         }
-        if matches!(c, '&' | '~' | '|' | '-') && input.peek() == Some(&c) {
+        if !first && matches!(c, '&' | '~' | '|' | '-') && input.peek() == Some(&c) {
             return Err("nested or ambiguous regex character class is not supported".into());
         }
         if c == '-'
