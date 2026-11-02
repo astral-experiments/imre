@@ -320,6 +320,44 @@ impl CStrings {
         super::errno_error(io::Error::last_os_error())
     }
 
+    /// Spawn a waitable child, optionally searching the parent's PATH for the executable.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn spawn(
+        &self,
+        executable: &CStr,
+        search_path: bool,
+        environment: Option<&Self>,
+        actions: Option<&libc::posix_spawn_file_actions_t>,
+        attributes: &libc::posix_spawnattr_t,
+    ) -> io::Result<libc::pid_t> {
+        let launch = if search_path {
+            libc::posix_spawnp
+        } else {
+            libc::posix_spawn
+        };
+        let _guard = ENVIRONMENT.lock().unwrap();
+        let envp = environment.map_or_else(native_environ, |env| env.pointers.as_ptr());
+        let mut pid = 0;
+        // SAFETY: libc only reads these live, terminated argv/envp arrays and the
+        // caller's initialized actions and attributes. The lock also protects PATH
+        // lookup by posix_spawnp when the child has an explicit environment.
+        let result = unsafe {
+            launch(
+                &mut pid,
+                executable.as_ptr(),
+                actions.map_or(std::ptr::null(), std::ptr::from_ref),
+                attributes,
+                self.pointers.as_ptr().cast(),
+                envp.cast(),
+            )
+        };
+        if result == 0 {
+            Ok(pid)
+        } else {
+            Err(io::Error::from_raw_os_error(result))
+        }
+    }
+
     fn from_environment(env: StringPairs) -> Result<Self> {
         Self::from_pairs(env.iter().map(|(k, v)| (k.as_bytes(), v.as_bytes())))
     }

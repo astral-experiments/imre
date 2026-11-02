@@ -2723,6 +2723,7 @@ impl Context {
                 self.bind(scope, name, function);
             }
             stdlib::os::eventfd::initialize(self, scope);
+            stdlib::posix_spawn::initialize(self, scope);
         }
         if name == "_thread" && source.is_none() {
             let rlock = self.builtin(thread_rlock::CLASS);
