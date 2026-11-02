@@ -298,6 +298,7 @@ def current():
     source_classes()
     source_test_cases()
     source_nested_functions()
+    check_source_lambdas()
     syntax_members()
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}
@@ -460,6 +461,70 @@ def missing():
     else:
         raise AssertionError("unbound closure read a global")
 
+
+
+def check_source_lambdas():
+    namespace = {}
+    source = """events = []
+def make(x):
+    def default():
+        events.append(x)
+        return x
+    cb = lambda arg=default(), /, *, suffix=2: (x, arg, suffix)
+    x += 1
+    return cb
+
+maker = lambda x: lambda y: x + y
+def shadow(x):
+    return lambda x=x: x
+gen = lambda: (yield "ready")
+
+class Example:
+    def callback(self):
+        return lambda: __class__
+
+def from_class(x):
+    class Inner:
+        x = 99
+        callback = lambda self: x
+    return Inner().callback
+"""
+    exec(compile(source, "callbacks.py", "exec"), namespace)
+    make = namespace["make"]
+    first = make(4)
+    second = make(7)
+    assert namespace["events"] == [4, 7]
+    assert first() == (5, 4, 2)
+    assert first(9, suffix=1) == (5, 9, 1)
+    assert second() == (8, 7, 2)
+    assert first.__code__ is second.__code__
+    assert first.__closure__[0] is not second.__closure__[0]
+    assert first.__code__.co_freevars == ("x",)
+    assert first.__name__ == "<lambda>"
+    assert first.__qualname__ == "make.<locals>.<lambda>"
+    assert first.__code__.co_firstlineno == 6
+    try:
+        first(arg=1)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted positional-only argument")
+    assert namespace["shadow"](9).__closure__ is None
+    assert namespace["shadow"](9)() == 9
+    assert namespace["maker"](10)(3) == 13
+    instance = namespace["Example"]()
+    assert instance.callback()() is type(instance)
+    callback = namespace["from_class"](3)
+    assert callback() == 3
+    assert callback.__func__.__code__.co_freevars == ("x",)
+    stream = namespace["gen"]()
+    assert next(stream) == "ready"
+    try:
+        stream.send(11)
+    except StopIteration as error:
+        assert error.value == 11
+    else:
+        raise AssertionError("generator did not return")
 
 
 if __name__ == "__main__":
