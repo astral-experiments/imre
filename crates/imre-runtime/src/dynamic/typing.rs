@@ -1699,6 +1699,7 @@ impl Context {
         };
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         let class = self.alloc(Value::Class {
+            io_kind: None,
             metaclass: None,
             namedtuple_fields,
             name,
