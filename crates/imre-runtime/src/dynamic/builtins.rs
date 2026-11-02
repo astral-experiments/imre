@@ -964,6 +964,19 @@ pub(super) fn call(
             return Ok(NONE);
         }
         if args.len() != 1 || !kwargs.is_empty() {
+            if let Some(&receiver) = args.first() {
+                let tuple = ctx.builtin("tuple");
+                if ctx.instance_of(receiver, tuple) {
+                    let class = ctx.exact_type(receiver)?;
+                    if ctx
+                        .class_attr(class, "__init__")
+                        .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
+                    {
+                        // Tuple subtypes consume their constructor arguments in __new__.
+                        return Ok(NONE);
+                    }
+                }
+            }
             return Err(type_error(
                 "object.__init__() takes exactly one argument (the instance to initialize)",
             ));
