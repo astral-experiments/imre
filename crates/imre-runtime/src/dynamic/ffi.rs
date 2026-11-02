@@ -323,7 +323,7 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "class" => self.class(a, b, c),
+            "class" | "parameterized_class" => self.class(a, b, c, op == "parameterized_class"),
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
                     return Err(Error::new("SystemError", "invalid coroutine definition"));
