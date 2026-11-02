@@ -1079,6 +1079,137 @@ fn split_limit(ctx: &mut Context, max: Option<Id>) -> Result<usize> {
     Ok(usize::try_from(count).unwrap_or(usize::MAX))
 }
 
+/// Split code points in the requested direction without scalarizing lone surrogates.
+fn split_codepoints(
+    source: &[u32],
+    separator: Option<&[u32]>,
+    mut limit: usize,
+    reverse: bool,
+    mut push: impl FnMut(&[u32]),
+) {
+    let whitespace = |&point: &u32| char::from_u32(point).is_some_and(python_whitespace);
+    let mut rest = source;
+    loop {
+        if separator.is_none() {
+            rest = if reverse {
+                &rest[..rest
+                    .iter()
+                    .rposition(|p| !whitespace(p))
+                    .map_or(0, |i| i + 1)]
+            } else {
+                &rest[rest
+                    .iter()
+                    .position(|p| !whitespace(p))
+                    .unwrap_or(rest.len())..]
+            };
+            if rest.is_empty() {
+                break;
+            }
+        }
+        let boundary = if limit == 0 {
+            None
+        } else if let Some(sep) = separator {
+            let mut windows = rest.windows(sep.len());
+            if reverse {
+                windows.rposition(|s| s == sep)
+            } else {
+                windows.position(|s| s == sep)
+            }
+        } else if reverse {
+            rest.iter().rposition(whitespace)
+        } else {
+            rest.iter().position(whitespace)
+        };
+        let Some(at) = boundary else {
+            push(rest);
+            break;
+        };
+        let left = &rest[..at];
+        let right = &rest[at + separator.map_or(1, <[u32]>::len)..];
+        if reverse {
+            push(right);
+            rest = left;
+        } else {
+            push(left);
+            rest = right;
+        }
+        limit -= 1;
+    }
+}
+
+fn split_string(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;
+    let limit = split_limit(ctx, max)?;
+    let sep = sep
+        .filter(|&v| v != NONE)
+        .map(|v| {
+            ctx.string_storage(v)
+                .ok_or_else(|| type_error(format!("must be str or None, not {}", ctx.type_name(v))))
+        })
+        .transpose()?;
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated str receiver");
+    if receiver != storage
+        && let Some(sep) = sep
+    {
+        // CPython returns the original subtype when the separator cannot fit its length or kind.
+        let source = ctx.string_codepoints(storage)?;
+        let needle = ctx.string_codepoints(sep)?;
+        let kind = |s: &[u32]| match s.iter().max().copied().unwrap_or(0) {
+            0..=0xff => 1,
+            0x100..=0xffff => 2,
+            _ => 4,
+        };
+        if needle.len() > source.len() || kind(&needle) > kind(&source) {
+            return Ok(ctx.alloc(Value::List(vec![receiver])));
+        }
+    }
+    let reverse = name == "rsplit";
+    let reuse_whole = receiver == storage && (sep.is_some() || limit != 0);
+    let surrogate = |id| matches!(ctx.heap.get(id), Value::SurrogateStr(_));
+    let mut values = Vec::new();
+    if surrogate(storage) || sep.is_some_and(surrogate) {
+        let source = ctx.string_codepoints(storage)?.into_owned();
+        let needle = sep
+            .map(|id| ctx.string_codepoints(id).map(Cow::into_owned))
+            .transpose()?;
+        if needle.as_deref() == Some(&[][..]) {
+            return Err(Error::new("ValueError", "empty separator"));
+        }
+        split_codepoints(&source, needle.as_deref(), limit, reverse, |field| {
+            values.push(if reuse_whole && field.len() == source.len() {
+                storage
+            } else {
+                ctx.text_codepoints(field.to_vec())
+            });
+        });
+    } else {
+        let source = ctx.str_value(storage)?.to_owned();
+        let needle = sep
+            .map(|id| ctx.str_value(id).map(str::to_owned))
+            .transpose()?;
+        split_parts(&source, needle.as_deref(), limit, reverse, |field| {
+            values.push(if reuse_whole && field.len() == source.len() {
+                storage
+            } else {
+                ctx.text(field)
+            });
+        })
+        .map_err(|msg| Error::new("ValueError", msg))?;
+    }
+    if reverse {
+        values.reverse();
+    }
+    Ok(ctx.alloc(Value::List(values)))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -1592,6 +1723,9 @@ pub(super) fn method(
             None => ctx.string_storage(receiver).unwrap(),
         });
     }
+    if owner == "str" && matches!(name, "split" | "rsplit") {
+        return split_string(ctx, receiver, name, args, kwargs);
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => format_string(ctx, &source, args, kwargs),
@@ -1624,24 +1758,6 @@ pub(super) fn method(
                 }
             };
             Ok(ctx.alloc(Value::Tuple(fields)))
-        }
-        "split" | "rsplit" => {
-            let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;
-            let limit = split_limit(ctx, max)?;
-            let sep = sep
-                .filter(|&x| x != NONE)
-                .map(|x| ctx.str_value(x).map(str::to_owned))
-                .transpose()?;
-            let mut values = Vec::new();
-            let reverse = name == "rsplit";
-            split_parts(&source, sep.as_deref(), limit, reverse, |field| {
-                values.push(ctx.text(field))
-            })
-            .map_err(|message| Error::new("ValueError", message))?;
-            if reverse {
-                values.reverse();
-            }
-            Ok(ctx.alloc(Value::List(values)))
         }
         "splitlines" => {
             let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
