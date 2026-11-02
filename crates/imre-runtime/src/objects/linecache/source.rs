@@ -245,6 +245,12 @@ fn decode_source(bytes: &[u8]) -> Result<Cow<'_, str>, SourceDecodeError> {
     }
 }
 
+/// Decode boxed disk reads using the same cookie detection and physical lines as typed linecache.
+pub(crate) fn decode_source_lines(bytes: &[u8]) -> Result<Vec<String>, SourceDecodeError> {
+    let text = decode_source(bytes)?;
+    Ok(lines(&text).map(|line| format!("{line}\n")).collect())
+}
+
 pub(super) fn decode(bytes: &[u8]) -> Result<Option<Cow<'_, str>>, Error> {
     match decode_source(bytes) {
         Ok(text) => Ok(Some(text)),

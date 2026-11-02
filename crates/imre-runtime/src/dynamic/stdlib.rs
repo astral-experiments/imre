@@ -109,6 +109,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "posixpath"
             | "_imre_posixpath"
             | "_imre_metadata"
+            | "_imre_linecache"
             | "_imre_csv"
             | "_imre_tokenize"
             | "_imre_pkgutil"
@@ -647,6 +648,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
+        | ("_imre_linecache", "source_lines")
         | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
         | (
             "_imre_posixpath",
@@ -816,6 +818,33 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "_imre_linecache.source_lines" {
+        let ([data], []) = (args, kwargs) else {
+            return Err(Error::new(
+                "TypeError",
+                "source_lines() expects one positional argument",
+            ));
+        };
+        let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(*data)) else {
+            return Err(Error::new("TypeError", "source_lines() requires bytes"));
+        };
+        use crate::objects::SourceDecodeError::*;
+        let lines = crate::objects::decode_source_lines(bytes).map_err(|err| match err {
+            Allocation => Error::new("MemoryError", ""),
+            Null => Error::new(
+                "SyntaxError",
+                "source code string cannot contain null bytes",
+            ),
+            Invalid(message, _) => Error::new("SyntaxError", message),
+            NonText(message) => Error::new("LookupError", message),
+            Unsupported(name) => Error::new(
+                "NotImplementedError",
+                format!("linecache: native source decoder for '{name}' is unavailable"),
+            ),
+        })?;
+        let lines = lines.into_iter().map(|line| ctx.text(line)).collect();
+        return Ok(ctx.alloc(Value::List(lines)));
+    }
     if super::lowlevel_threads::function_name(name).is_some() {
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
     }
