@@ -903,6 +903,19 @@ def check_python_process_identity(imre, root, env):
                     pass
 
 
+def check_os_abort(imre, run):
+    import signal
+
+    source = (
+        "import os, resource, signal\n"
+        "resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
+        "signal.signal(signal.SIGABRT, signal.SIG_IGN)\n"
+        "os.abort()\n"
+    )
+    result = run(imre, "-c", source, timeout=600)
+    assert result.returncode == -signal.SIGABRT, result
+
+
 def check_faulthandler(imre, root, env):
     import resource
     import select
@@ -1199,6 +1212,7 @@ def main():
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
         if sys.platform.startswith("linux"):
+            check_os_abort(imre, run)
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
