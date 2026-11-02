@@ -124,6 +124,35 @@ def current():
     import _io
     tuple_directories()
     operation = dir
+    from collections.abc import Callable
+    from types import GenericAlias
+
+    class Directory(type):
+        def __dir__(cls):
+            return ["custom", "__args__", "custom"]
+
+    class Origin(metaclass=Directory):
+        pass
+
+    alias = GenericAlias(Origin, (int,))
+    fields = {"__class__", "__origin__", "__args__", "__unpacked__", "__parameters__",
+              "__typing_unpacked_tuple_args__", "__mro_entries__", "__reduce_ex__", "__reduce__"}
+    assert operation(alias) == sorted(["custom", "custom", *fields])
+    assert fields <= set(operation(Callable[..., int]))
+
+    class FailingDirectory(type):
+        def __dir__(cls):
+            raise LookupError("origin directory")
+
+    class BrokenOrigin(metaclass=FailingDirectory):
+        pass
+
+    try:
+        operation(GenericAlias(BrokenOrigin, ()))
+    except LookupError as exc:
+        assert str(exc) == "origin directory"
+    else:
+        raise AssertionError("suppressed the origin directory error")
     names = operation(len)
     print(names)
     for value in (_io.open, [].append, type(len)):
