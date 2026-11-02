@@ -275,9 +275,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/machinery.py",
             include_str!("../../stdlib/importlib/machinery.py"),
         )),
-        "_frozen_importlib" => {
+        "_frozen_importlib" | "importlib._bootstrap" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("_frozen_importlib.py", SOURCE.get_or_init(|| {
+            let file = if name == "_frozen_importlib" { "_frozen_importlib.py" } else { "importlib/_bootstrap.py" };
+            Some((file, SOURCE.get_or_init(|| {
                 const UPSTREAM: &str = include_str!(
                     "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap.py"
                 );
@@ -286,15 +287,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     UPSTREAM[begin..].split_once(end).unwrap().0
                 };
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
-                format!("{}\n{}\n{}\n{}",
+                [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
                     section("class ModuleSpec:", "def spec_from_loader("),
                     section("def _init_module_attrs(", "def _module_repr_from_spec("),
-                    section("def _verbose_message(", "def _requires_builtin("),
-                )
+                    section("def _call_with_frames_removed(", "def _requires_builtin("),
+                    section("def _resolve_name(", "def _find_spec("),
+                    section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
+                    section("def _gcd_import(", "def _builtin_from_name("),
+                ].join("\n")
             })))
         }
-        "_frozen_importlib_external" => {
+        "_frozen_importlib_external" | "importlib._bootstrap_external" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("importlib/_bootstrap_external.py", SOURCE.get_or_init(|| {
                 // A create_module hook can convert a file package into a namespace spec.
@@ -303,7 +307,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 );
                 let start = UPSTREAM.find("class _NamespacePath:").unwrap();
                 let (namespace, _) = UPSTREAM[start..].split_once("class PathFinder:").unwrap();
-                format!("{}\n{namespace}", include_str!("../../stdlib/importlib/source_loader.py"))
+                let start = UPSTREAM.find("def _set_bootstrap_module(").unwrap();
+                let (set_bootstrap, _) = UPSTREAM[start..].split_once("def _install(").unwrap();
+                [include_str!("../../stdlib/importlib/source_loader.py"), namespace, set_bootstrap].join("\n")
             })))
         }
         _ => crate::modules::bundled_runtime_source(name),

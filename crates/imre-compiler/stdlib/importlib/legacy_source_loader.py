@@ -1,8 +1,34 @@
 """Legacy direct loading with a SourceFileLoader, including replacement modules."""
 
 import sys
-from _imre_importlib import warn_legacy_load as _warn_legacy_load
+import warnings as _warnings
+from _imre_importlib import import_module as _native_import
 from os import altsep, sep
+
+
+_NEEDS_LOADING = object()
+
+if __name__ == "_frozen_importlib":
+    from _imre_importlib import warn_legacy_load as _warn_legacy_load
+else:
+    _bootstrap_external = None
+
+    def _warn_legacy_load():
+        _warnings.warn(
+            "the load_module() method is deprecated and slated for removal in Python 3.15; use exec_module() instead",
+            DeprecationWarning, stacklevel=2,
+        )
+
+
+def _setup(sys_module, _imp_module):
+    # Importer state and module locking are owned by the native resolver.
+    global sys, _imp
+    sys = sys_module
+    _imp = _imp_module
+
+
+def _find_and_load(name, import_):
+    return _native_import(name)
 
 
 def _new_module(name):

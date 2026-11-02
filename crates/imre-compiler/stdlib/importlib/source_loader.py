@@ -1,7 +1,6 @@
 """Load Python modules from registered code or filesystem source."""
 
 import sys
-import _frozen_importlib as _bootstrap
 
 from _imre_importlib import (
     cache_name as _cache_name,
@@ -9,10 +8,31 @@ from _imre_importlib import (
     loader_fields as _loader_fields,
     path_stats as _path_stats,
     source_name as _source_name,
-    warn_debug_override as _warn_debug_override,
-    warn_loader_deprecation as _warn_loader_deprecation,
 )
 from os import fspath as _fspath, sep
+
+
+if __name__ == "_frozen_importlib_external":
+    import _frozen_importlib as _bootstrap
+    from _imre_importlib import (
+        warn_debug_override as _warn_debug_override,
+        warn_loader_deprecation as _warn_loader_deprecation,
+    )
+else:
+    # The package connects the selected core after this module has executed.
+    _bootstrap = None
+    import warnings as _warnings
+
+    def _warn_debug_override():
+        _warnings.warn(
+            "the debug_override parameter is deprecated; use 'optimization' instead",
+            DeprecationWarning, stacklevel=2,
+        )
+
+    def _warn_loader_deprecation(module_globals, mismatch):
+        message = ("Module globals; __loader__ != __spec__.loader" if mismatch
+                   else "Module globals is missing a __spec__.loader")
+        _warnings.warn(message, DeprecationWarning, stacklevel=2)
 
 
 # Boxed source directories are searched directly; only ZIP path finders are cached.
