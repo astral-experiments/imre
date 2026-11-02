@@ -119,6 +119,40 @@ def ordered_dictionary():
     assert moved.popitem(last=False) == ("b", 2)
 
 
+    for method, args in (
+        (OrderedDict.__init__, (object(),)),
+        (OrderedDict.__init__, ({},)),
+        (OrderedDict.__or__, ({}, OrderedDict())),
+        (OrderedDict.__ror__, ({}, OrderedDict())),
+        (OrderedDict.__ior__, ({}, {})),
+    ):
+        try:
+            method(*args)
+        except TypeError as error:
+            assert "requires a 'collections.OrderedDict' object" in str(error)
+        else:
+            raise AssertionError("ordered descriptor accepted a foreign receiver")
+
+    class UnionChild(OrderedDict):
+        def update(self, *args, **kwargs):
+            raise AssertionError("union called update")
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, (value,))
+
+    class ItemsOnly:
+        def items(self):
+            return [("a", 4), ("c", 3)]
+
+    merged = UnionChild()
+    merged["b"] = 1
+    assert list((merged | {"a": 2}).items()) == [("b", ((1,),)), ("a", (2,))]
+    assert type({"a": 2} | merged) is UnionChild
+    assert type(OrderedDict() | merged) is OrderedDict
+    same = merged
+    merged |= ItemsOnly()
+    assert merged is same and list(merged.items()) == [("b", (1,)), ("a", (4,)), ("c", (3,))]
+
     class ClearOnRepr:
         def __repr__(self):
             snapshot.clear()
