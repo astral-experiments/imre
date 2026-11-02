@@ -40,6 +40,70 @@ fn writer_fallback(ctx: &Context, owner: Id) -> Option<(Id, &BufferedFd, &Cell<b
     Some((*class, fd, fd.drop_fallback.as_ref()?))
 }
 
+/// Argument conversion precedes invalidation. During writable() raw still names
+/// the outgoing stream; after it succeeds raw names the replacement even on error.
+fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -> Result<()> {
+    let previous = match ctx.heap.get(receiver) {
+        Value::Instance {
+            memory_stream: Some(MemoryStream::BufferedBytes(writer)),
+            ..
+        } => {
+            writer.active.check_idle()?;
+            writer.raw.get()
+        }
+        Value::Instance {
+            memory_stream: Some(MemoryStream::UninitializedWriter(raw)),
+            ..
+        } => *raw,
+        Value::Instance {
+            memory_stream: None,
+            ..
+        } => None,
+        _ => {
+            let Some((_, fd, fallback)) = writer_fallback(ctx, receiver) else {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "reinitializing a directly owned file writer is unsupported",
+                ));
+            };
+            fd.active.check_idle()?;
+            // Retiring this backing must neither flush pending writes nor close the caller's FileIO.
+            fallback.set(false);
+            Some(fd.raw)
+        }
+    };
+    let raw = replacement.or(previous);
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    *memory_stream = Some(MemoryStream::UninitializedWriter(raw));
+    if let Some(old) = previous
+        && raw != previous
+    {
+        ctx.heap.weak_edge_removed(old);
+    }
+    Ok(())
+}
+
+/// A successful nested __init__ in tell() supplies the final raw and buffer.
+/// CPython resets that buffer after the outer position probe returns.
+pub(super) fn finish_writer_probe(ctx: &Context, receiver: Id) -> Result<()> {
+    if let Some(writer) = super::bytes_writer::state(ctx, receiver) {
+        return writer.finish_probe();
+    }
+    if let Some((_, fd, _)) = writer_fallback(ctx, receiver)
+        && let Some(Buffer::Writer(output)) = fd.buffer.borrow_mut().as_mut()
+    {
+        output.buffer.clear();
+        output.written = 0;
+        return Ok(());
+    }
+    Err(Error::new(
+        "NotImplementedError",
+        "position probe left the buffered writer uninitialized",
+    ))
+}
+
 /// A Python finalizer can decline close, raise, or resurrect the writer.
 pub(in crate::dynamic) fn note_writer_finalizer(ctx: &Context, owner: Id) {
     if let Some((_, _, armed)) = writer_fallback(ctx, owner) {
@@ -155,6 +219,9 @@ pub(super) fn initialize(
     {
         return super::buffered_reader::initialize(ctx, receiver, raw, capacity);
     }
+    if owner == "BufferedWriter" {
+        invalidate_writer(ctx, receiver, None)?;
+    }
     for &capability in capabilities {
         let method = ctx.lookup_attr(raw, capability)?;
         if ctx.call(method, vec![], Vec::new())? != TRUE {
@@ -163,6 +230,13 @@ pub(super) fn initialize(
                 format!("File or stream is not {capability}."),
             ));
         }
+    }
+    let mut revived = false;
+    if owner == "BufferedWriter" {
+        // A successful nested initialization in writable() can make methods usable during tell().
+        revived = super::bytes_writer::state(ctx, receiver).is_some_and(|w| w.ready.get())
+            || backing(ctx, receiver).is_some();
+        invalidate_writer(ctx, receiver, Some(raw))?;
     }
     if capacity <= 0 {
         return Err(Error::new(
@@ -173,7 +247,7 @@ pub(super) fn initialize(
     let handle = match native_raw(ctx, raw, methods, owner) {
         Ok(handle) => handle,
         Err(_) if owner == "BufferedWriter" => {
-            return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
+            return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize, revived);
         }
         Err(error) => return Err(error),
     };
@@ -451,6 +525,7 @@ pub(in crate::dynamic) struct BufferedFd {
     drop_fallback: Option<Cell<bool>>,
     handle: Rc<RawFile>,
     truncating: Cell<bool>,
+    pub(super) active: super::native_writer::ActiveCall,
     buffer: RefCell<Option<Buffer>>,
 }
 
@@ -490,6 +565,7 @@ impl BufferedFd {
             handle,
             drop_fallback: None,
             truncating: Cell::new(false),
+            active: super::native_writer::ActiveCall::default(),
             buffer: RefCell::new(Some(buffer)),
         })
     }
@@ -511,6 +587,7 @@ impl BufferedFd {
             writing: true,
             drop_fallback: None,
             truncating: Cell::new(false),
+            active: super::native_writer::ActiveCall::default(),
             buffer: RefCell::new(Some(Buffer::Random(buffer))),
         })
     }
@@ -523,6 +600,7 @@ impl BufferedFd {
             writing: !reading,
             drop_fallback: None,
             truncating: Cell::new(false),
+            active: super::native_writer::ActiveCall::default(),
             buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
         }
     }

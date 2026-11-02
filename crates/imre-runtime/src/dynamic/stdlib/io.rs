@@ -41,6 +41,7 @@ pub(in crate::dynamic) enum MemoryStream {
     BufferedFile(Id),
     Reader(std::rc::Rc<buffered_reader::Reader>),
     UninitializedReader(Option<Id>),
+    UninitializedWriter(Option<Id>),
     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
     Pair(rwpair::Pair),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
