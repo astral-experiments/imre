@@ -2537,7 +2537,7 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
         } else if stdlib::is_module(name) || self.is_frozen(name) {
-            if matches!(name, "email" | "importlib" | "json" | "urllib") {
+            if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
@@ -3218,6 +3218,10 @@ impl Context {
                     let monitoring = stdlib::monitoring::module(self)?;
                     self.bind(scope, "monitoring", monitoring);
                 }
+            }
+            "re._constants" => {
+                let limit = self.int(i64::from(imre_regex::MAX_GROUPS));
+                self.bind(scope, "MAXGROUPS", limit);
             }
             "re" => {
                 let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
