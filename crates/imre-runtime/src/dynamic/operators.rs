@@ -3476,6 +3476,7 @@ impl Context {
         matches!(
             self.heap.get(storage),
             Value::List(_)
+                | Value::Deque(_)
                 | Value::Tuple(_)
                 | Value::Str(_)
                 | Value::SurrogateStr(_)
@@ -3485,15 +3486,12 @@ impl Context {
         .then_some(storage)
     }
 
-    /// Repeat the current contents after converting the multiplier through its index slot.
-    fn repeat_sequence(
+    pub(super) fn sequence_multiplier(
         &mut self,
-        owner: Id,
-        storage: Id,
         multiplier: Id,
-        mode: RepeatMode,
-    ) -> Result<Id> {
-        let count = if mode == RepeatMode::Wrapper {
+        wrapper: bool,
+    ) -> Result<(crate::Int, isize)> {
+        let count = if wrapper {
             self.index_integer(multiplier)?
         } else {
             self.index_value(multiplier)?.ok_or_else(|| {
@@ -3518,7 +3516,27 @@ impl Context {
                     ),
                 )
             })?;
+        Ok((count, n))
+    }
+
+    fn overrides_repeat(&self, owner: Id, name: &str) -> bool {
+        self.slot(owner, name).is_some_and(|slot| {
+            !matches!(self.heap.get(slot), Value::Native(symbol)
+                if symbol.strip_prefix("collections.deque.") == Some(name))
+        })
+    }
+
+    /// Repeat the current contents after converting the multiplier through its index slot.
+    fn repeat_sequence(
+        &mut self,
+        owner: Id,
+        storage: Id,
+        multiplier: Id,
+        mode: RepeatMode,
+    ) -> Result<Id> {
+        let (count, n) = self.sequence_multiplier(multiplier, mode == RepeatMode::Wrapper)?;
         Ok(match self.heap.get(storage) {
+            Value::Deque(_) => return deque::repeat(self, owner, n, mode == RepeatMode::InPlace),
             Value::List(items) if mode == RepeatMode::InPlace => {
                 if n <= 0 {
                     builtins::clear_container(self, storage);
@@ -4425,12 +4443,15 @@ impl Context {
                     };
                     let mode = if left
                         && inplace
-                        && matches!(self.heap.get(storage), Value::List(_) | Value::ByteArray(_))
-                        && self.slot(owner, "__imul__").is_none()
+                        && matches!(
+                            self.heap.get(storage),
+                            Value::List(_) | Value::ByteArray(_) | Value::Deque(_)
+                        )
+                        && !self.overrides_repeat(owner, "__imul__")
                     {
                         RepeatMode::InPlace
-                    } else if self.slot(owner, "__mul__").is_none()
-                        && self.slot(owner, "__rmul__").is_none()
+                    } else if !self.overrides_repeat(owner, "__mul__")
+                        && !self.overrides_repeat(owner, "__rmul__")
                     {
                         RepeatMode::Sequence
                     } else {
@@ -4682,6 +4703,17 @@ impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
+        }
+        // Native deque repetition is a sequence fallback, after numeric hooks. A subtype
+        // defining either multiply hook installs a numeric slot for both directions.
+        if matches!(name, "__mul__" | "__rmul__" | "__imul__")
+            && matches!(self.heap.get(self.scalar_value(obj)), Value::Deque(_))
+            && !self.overrides_repeat(obj, name)
+            && (name == "__imul__"
+                || (!self.overrides_repeat(obj, "__mul__")
+                    && !self.overrides_repeat(obj, "__rmul__")))
+        {
+            return Ok(None);
         }
         // Without a Python addition hook, list concatenation waits for the reflected operand.
         if name == "__add__"
