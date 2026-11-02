@@ -575,6 +575,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "TextIOWrapper"
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
+        Value::Tuple(_) | Value::NamedTuple { .. } if attr == "index" => "tuple",
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
         Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
         Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",

@@ -138,6 +138,7 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
+            "tuple.index" => ("tuple", "index"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),
             "_thread._local.__delattr__" => (thread_local::CLASS, "__delattr__"),
@@ -152,6 +153,7 @@ impl BuiltinDescriptor {
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
+                    | "index"
                     | "isascii"
                     | "isalpha"
                     | "isdigit"

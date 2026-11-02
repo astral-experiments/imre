@@ -1888,7 +1888,7 @@ impl Context {
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
-            "tuple" => &["__repr__", "__getitem__"],
+            "tuple" => &["__repr__", "__getitem__", "index"],
             "set" => &["__repr__", "__reduce__", "issubset", "update"],
             "frozenset" => &["__repr__", "__reduce__", "issubset"],
             "bytearray" => {
