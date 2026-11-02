@@ -2016,6 +2016,7 @@ def report(text):
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
+            "boxed_re_multiline_dollar.py",
             "boxed_re_positive_lookahead.py",
             "boxed_re_lookahead.py",
             "boxed_re_split.py",
