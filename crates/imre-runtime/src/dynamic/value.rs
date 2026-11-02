@@ -926,6 +926,7 @@ pub(super) enum Value {
         name: Id,
         module: Id,
         default: Id,
+        declared: bool,
     },
     NoDefault,
     GenericAlias(super::typing::Alias),
@@ -1542,6 +1543,7 @@ impl Value {
                 name,
                 module,
                 default,
+                ..
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
             Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),

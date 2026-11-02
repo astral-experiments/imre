@@ -954,10 +954,13 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             name: label,
             module,
             default,
+            declared,
         } => match name {
             "__name__" => *label,
             "__module__" => *module,
             "__default__" => *default,
+            "evaluate_default" if *declared => NONE,
+            "evaluate_default" => ctx.alloc(Value::ConstEvaluator(*default)),
             "has_default" | "__reduce__" | "__iter__" => {
                 let callable = ctx.builtin(&format!("typing.TypeVarTuple.{name}"));
                 ctx.alloc(Value::Method {
@@ -1119,6 +1122,18 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     Some(Ok(attr))
 }
 
+/// Create an unbounded compiler-declared pack, whose missing default has no evaluator.
+pub(super) fn declared_pack(ctx: &mut Context, name: Id) -> Id {
+    let module = ctx.text("typing");
+    let default = no_default(ctx);
+    ctx.alloc(Value::TypeVarTuple {
+        name,
+        module,
+        default,
+        declared: true,
+    })
+}
+
 /// Create the lexical scope for a type parameter list at a class or function definition.
 pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bool) -> Result<Id> {
     let enclosing = ctx.scope_data(outer);
@@ -1131,18 +1146,21 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
     let scope = ctx.scope(&module, Some(parent));
     let typing = ctx.text("typing");
     let mut params = Vec::new();
-    for (binding, name) in ctx
+    for (binding, declaration) in ctx
         .dict_entries(names)
         .expect("declared type parameters")
         .to_vec()
     {
-        let param = typevar(
-            ctx,
-            &[name],
-            &[("infer_variance".to_owned(), TRUE)],
-            typing,
-            true,
-        )?;
+        let param = match ctx.heap.get(declaration) {
+            Value::TypeVarTuple { .. } | Value::ParamSpec(_) => declaration,
+            _ => typevar(
+                ctx,
+                &[declaration],
+                &[("infer_variance".to_owned(), TRUE)],
+                typing,
+                true,
+            )?,
+        };
         let binding = ctx.str_value(binding)?.to_owned();
         ctx.bind(scope, &binding, param);
         params.push(param);
@@ -1155,6 +1173,12 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
     let declared = ctx.alloc(Value::Tuple(params.clone()));
     ctx.bind(scope, ".type_params", declared);
     if class {
+        // __type_params__ retains the pack itself; the implicit base is Generic[*Ts].
+        for param in &mut params {
+            if matches!(ctx.heap.get(*param), Value::TypeVarTuple { .. }) {
+                *param = unpack_parameter(ctx, *param)?;
+            }
+        }
         let generic = named_class(ctx, "typing", "Generic");
         let base = alias(ctx, AliasKind::Generic, generic, params)?;
         ctx.bind(scope, ".generic_base", base);
@@ -1533,6 +1557,7 @@ pub(super) fn call(
             name,
             module,
             default,
+            declared: false,
         }));
     }
     if operation == "TypeVar" {
