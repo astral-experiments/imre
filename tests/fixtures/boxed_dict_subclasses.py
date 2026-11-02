@@ -36,6 +36,24 @@ def ordered_dictionary():
     assert endpoints.popitem(last=False) == ("a", 1)
     assert endpoints.popitem() == ("c", 3)
     assert list(endpoints.items()) == [("b", 2)]
+    class Missing(OrderedDict):
+        def __missing__(self, key):
+            raise AssertionError("consulted __missing__")
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, [value])
+
+    mapping = Missing()
+    assert mapping.setdefault(key="a", default=1) == 1
+    assert mapping.setdefault(key="a", default=2) == [1]
+    assert mapping.pop(key="a") == [1]
+    assert mapping.pop(key="a", default=None) is None
+    try:
+        mapping.pop([], default=3)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("skipped hashing on an empty OrderedDict")
     source.clear()
     source["self"] = source
     assert repr(source) == "OrderedDict({'self': ...})"

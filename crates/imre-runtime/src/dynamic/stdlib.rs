@@ -475,8 +475,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_count_elements"
             | "_ordered_dict_equal"
             | "_ordered_dict_move_to_end"
+            | "_ordered_dict_pop"
             | "_ordered_dict_popitem"
             | "_ordered_dict_repr"
+            | "_ordered_dict_setdefault"
             | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
