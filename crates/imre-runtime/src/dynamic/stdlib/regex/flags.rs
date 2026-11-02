@@ -8,7 +8,7 @@ pub(super) struct Flags {
 }
 
 pub(super) struct DeferredError {
-    pub error: (&'static str, usize),
+    pub error: (String, usize),
     pub prefix: Vec<u8>,
 }
 
@@ -43,6 +43,15 @@ fn delimited(source: &[u8], mut i: usize, delimiter: u8) -> Option<usize> {
     (delimiter == b'\n').then_some(i)
 }
 
+// Properly ordered ASCII literals need no Python range check. Escapes and non-ASCII
+// endpoints are compared by the class parser after decoding.
+fn suspect_range(source: &[u8]) -> bool {
+    let encoded = source.contains(&b'\\') || !source.is_ascii();
+    source
+        .windows(3)
+        .any(|p| p[1] == b'-' && p[2] != b']' && (encoded || p[0] > p[2]))
+}
+
 pub(super) fn parse(
     source: &[u8],
     bits: i64,
@@ -53,7 +62,9 @@ pub(super) fn parse(
         skip: 0,
         deferred: None,
     };
-    if !source.windows(2).any(|pair| pair == b"(?") {
+    if !source.windows(2).any(|pair| pair == b"(?")
+        && !(source.contains(&b'[') && suspect_range(source))
+    {
         return Ok(result);
     }
     let position = |i| {
@@ -62,6 +73,12 @@ pub(super) fn parse(
         } else {
             std::str::from_utf8(&source[..i]).unwrap().chars().count()
         }
+    };
+    let deferred = |error: (String, usize), prefix: &[u8], depth: usize| {
+        // Close the prefix's open groups so an earlier syntax error takes precedence.
+        let mut prefix = prefix.to_vec();
+        prefix.extend(std::iter::repeat_n(b')', depth));
+        DeferredError { error, prefix }
     };
     let mut verbose = bits & VERBOSE != 0;
     let mut parents = Vec::new();
@@ -97,9 +114,28 @@ pub(super) fn parse(
             b'[' => {
                 let mut start = i + 1 + usize::from(rest.get(1) == Some(&b'^'));
                 start += usize::from(source.get(start) == Some(&b']'));
-                let Some(end) = delimited(source, start, b']') else {
-                    break;
-                };
+                let end = delimited(source, start, b']').unwrap_or(source.len());
+                let class = &source[i..end];
+                if suspect_range(class) {
+                    let text: std::borrow::Cow<'_, str> = if bytes && !class.is_ascii() {
+                        class
+                            .iter()
+                            .copied()
+                            .map(char::from)
+                            .collect::<String>()
+                            .into()
+                    } else {
+                        std::str::from_utf8(class).unwrap().into()
+                    };
+                    if let Some((msg, at)) = imre_regex::class_range_diagnostic(&text, bytes) {
+                        result.deferred = Some(deferred(
+                            (msg, position(i) + at),
+                            &source[result.skip..i],
+                            parents.len(),
+                        ));
+                        break;
+                    }
+                }
                 i = end;
             }
             b')' => {
@@ -172,14 +208,12 @@ pub(super) fn parse(
                             result.skip = i;
                             continue;
                         }
-                        // Check the actual prefix with the ordinary compiler. Closing its open
-                        // groups lets errors earlier than this token retain their precedence.
-                        let mut prefix = source[result.skip..open].to_vec();
-                        prefix.extend(std::iter::repeat_n(b')', parents.len()));
-                        result.deferred = Some(DeferredError {
-                            error: invalid.unwrap_or_else(|| (PLACEMENT, position(open))),
-                            prefix,
-                        });
+                        let (msg, at) = invalid.unwrap_or_else(|| (PLACEMENT, position(open)));
+                        result.deferred = Some(deferred(
+                            (msg.into(), at),
+                            &source[result.skip..open],
+                            parents.len(),
+                        ));
                         break;
                     }
                     if (added | removed) != 0 && source.get(j) == Some(&b':') {

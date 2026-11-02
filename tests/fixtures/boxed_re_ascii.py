@@ -283,3 +283,17 @@ def current():
         negated = re.compile(rb"X([^--1])", flags)
         assert negated.fullmatch(b"X2").group(1) == b"2"
         assert negated.fullmatch(b"X/") is None
+
+    for pattern, message, position in (
+        (r"[\w-b]", r"bad character range \w-b", 1),
+        (rb"[a-\D]", r"bad character range a-\D", 1),
+        (r"é[\x62-a]", r"bad character range \x-a", 4),
+        (rb"[\141-\w]", r"bad character range \1-\w", 3),
+    ):
+        try:
+            re.compile(pattern)
+        except re.PatternError as exc:
+            assert (exc.msg, exc.pattern, exc.pos) == (message, pattern, position)
+        else:
+            raise AssertionError("invalid range accepted")
+    assert re.fullmatch(r"[\w-]", "-") and re.fullmatch(rb"[\--0]", b"/")

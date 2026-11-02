@@ -763,7 +763,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         return Err(pattern_error_at(
             ctx,
             id,
-            bad.error.0.into(),
+            bad.error.0.clone(),
             Some(bad.error.1),
         ));
     }
@@ -789,7 +789,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         return Err(pattern_error_at(
             ctx,
             id,
-            bad.error.0.into(),
+            bad.error.0,
             Some(bad.error.1),
         ));
     }
