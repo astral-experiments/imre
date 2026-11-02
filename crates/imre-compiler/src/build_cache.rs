@@ -421,6 +421,7 @@ impl Cache {
                 file,
                 command_hash,
                 &options.module_entry,
+                options.path_entry,
                 options.python_startup(),
                 options.runtime_imports,
                 &options.extension_paths,

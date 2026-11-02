@@ -12,7 +12,8 @@ impl Context {
         };
         let path = Path::new(path);
         let bundle = self.config["bundled_root"].as_str().map(Path::new);
-        let root = if bundle.is_some_and(|dir| path.starts_with(dir)) {
+        // The finder exposes this spelling in ModuleSpec.origin and __file__.
+        let root = if path.is_absolute() || bundle.is_some_and(|dir| path.starts_with(dir)) {
             path.to_owned()
         } else if path.as_os_str().is_empty() {
             let Ok(cwd) = std::env::current_dir() else {

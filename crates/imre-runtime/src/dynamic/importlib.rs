@@ -66,7 +66,8 @@ impl Context {
         self.heap.release_temporaries_since(mark);
         self.heap.keep(run);
         let name = self.text(name);
-        self.call(run, vec![name], Vec::new())
+        let alter_argv = if self.config["path_entry"].as_bool() == Some(true) { FALSE } else { TRUE };
+        self.call(run, vec![name, alter_argv], Vec::new())
     }
 
     /// Infer the package from import globals, following the CPython fallback order.

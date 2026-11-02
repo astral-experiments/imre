@@ -105,6 +105,7 @@ fn run() -> Result<ExitCode, String> {
         (BuildOptions::parse(&command, &mut args)?, command == "run")
     } else if command.as_encoded_bytes().starts_with(b"-")
         || Path::new(&command).is_file()
+        || Path::new(&command).is_dir()
         || Path::new(&command)
             .extension()
             .is_some_and(|ext| ext == "py")
