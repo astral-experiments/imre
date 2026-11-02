@@ -830,6 +830,7 @@ impl Intrinsic {
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
     pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
+    pub(crate) const TYPING_PROTOCOL: Self = Self::ObjectRuntimeExport("typing.Protocol");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
 
     /// Subclasses of these immutable types keep their calendar value in the object runtime.
@@ -1574,6 +1575,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.no_type_check_decorator")
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
+            (Self::Typing, "Protocol") => Intrinsic::TYPING_PROTOCOL,
             (Self::Typing, "runtime_checkable") => {
                 Intrinsic::ObjectRuntimeExport("typing.runtime_checkable")
             }

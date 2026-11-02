@@ -30,6 +30,10 @@ pub(super) fn resolve(
         let mut base: Option<usize> = None;
         if let Some(args) = &node.arguments {
             for argument in &args.args {
+                if protocol_base(argument, |base| graph.resolve(definition.module, base)) {
+                    graph.needs_object_runtime.set(true);
+                    return Err(module.error(argument, "Protocol bases require object lowering"));
+                }
                 if mapping_base(graph, definition.module, argument)
                     || (args.args.len() == 1
                         && graph
