@@ -25,9 +25,6 @@ def check_text_encoding_flag():
         raise AssertionError("deleted the inherited flag")
 
 
-check_text_encoding_flag()
-
-
 def check_raw_unicode_escape():
     for alias in ("raw-unicode-escape", "raw_unicode_escape", "RAW Unicode ESCAPE"):
         assert str(b"A\xff\x00", alias) == "A\xff\x00"
@@ -107,6 +104,7 @@ def check_escape_decode():
 
 
 def current():
+    check_text_encoding_flag()
     check_escape_decode()
     utf16_encoders()
     check_raw_unicode_escape()
