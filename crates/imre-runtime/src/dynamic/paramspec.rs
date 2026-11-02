@@ -179,6 +179,8 @@ pub(super) fn names() -> impl Iterator<Item = &'static str> {
     READONLY.iter().chain(PROPERTIES).copied().chain([
         "__module__",
         "__reduce__",
+        "__typing_subst__",
+        "__typing_prepare_subst__",
         "has_default",
         "__mro_entries__",
     ])
@@ -208,9 +210,17 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "evaluate_default" => ctx.alloc(Value::ConstEvaluator(p.default)),
             _ if let Some(item) = ctx.dict_named_item(p.namespace, name) => item,
             "__module__" => ctx.text("typing"),
-            "has_default" | "__reduce__" => method(ctx, value, &format!("typing.ParamSpec.{name}")),
+            "has_default" | "__reduce__" | "__typing_subst__" | "__typing_prepare_subst__" => {
+                method(ctx, value, &format!("typing.ParamSpec.{name}"))
+            }
             _ => return None,
         },
+        Value::Native(ref class)
+            if class == "typing.ParamSpec"
+                && matches!(name, "__typing_subst__" | "__typing_prepare_subst__") =>
+        {
+            ctx.builtin(&format!("typing.ParamSpec.{name}"))
+        }
         Value::ParamSpecMarker(kind, origin) => match name {
             "__origin__" => origin,
             "__eq__" | "__ne__" => method(ctx, value, &format!("{}.{name}", kind.class())),

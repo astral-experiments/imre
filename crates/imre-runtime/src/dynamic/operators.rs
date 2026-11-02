@@ -2047,12 +2047,14 @@ impl Context {
                             work.try_reserve(args.len().saturating_mul(2).saturating_add(6))
                                 .map_err(render_allocation)?;
                             work.push(Part::TypeEnd(id, "]", python));
-                            let callable =
-                                matches!(alias.kind, AliasKind::Callable | AliasKind::AbcCallable)
-                                    && args.first().is_some_and(|&arg| {
-                                        !matches!(ctx.heap.get(arg), Value::Ellipsis)
-                                    });
+                            let callable = matches!(
+                                alias.kind,
+                                AliasKind::Callable | AliasKind::AbcCallable
+                            ) && !matches!(args.as_slice(), [arg, _] if typing::is_param_expr(&ctx, *arg));
                             if args.is_empty() {
+                                if callable {
+                                    return Err(Error::new("IndexError", "tuple index out of range"));
+                                }
                                 work.push(Part::Text("()"));
                             }
                             for (index, &arg) in args.iter().enumerate().rev() {
