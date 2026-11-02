@@ -18,7 +18,7 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat",
+                "access", "chmod", "link", "lstat", "mkdir", "open", "readlink", "rmdir", "stat",
                 "symlink", "unlink", "utime",
             ][..],
         ),
@@ -32,6 +32,7 @@ pub(in crate::dynamic) fn install_capabilities(
                 "access",
                 #[cfg(target_os = "macos")]
                 "chmod",
+                "link",
                 "stat",
                 "utime",
             ][..],
@@ -322,7 +323,7 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
-mod symlink;
+mod links;
 mod unlink;
 mod utime;
 
@@ -352,6 +353,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_blocking"
             | "get_inheritable"
             | "set_inheritable"
+            | "link"
             | "symlink"
     )
 }
@@ -471,20 +473,30 @@ fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     Ok(ctx.text_codepoints(codec.decode_filesystem(&target)?))
 }
 
-/// Test filesystem access using the credentials and link policy requested by the caller.
-fn access(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let names = ["path", "mode", "dir_fd", "effective_ids", "follow_symlinks"];
-    if args.len() > 2 && args.len() + kwargs.len() <= names.len() {
+/// Bind two required positional-or-keyword operands followed by keyword-only options.
+fn bind_two_positional<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    if args.len() > 2 && args.len() + kwargs.len() <= N {
         return Err(Error::new(
             "TypeError",
             format!(
-                "access() takes exactly 2 positional arguments ({} given)",
+                "{name}() takes exactly 2 positional arguments ({} given)",
                 args.len()
             ),
         ));
     }
+    builtins::bind_builtin_arguments(name, args, kwargs, names, 2)
+}
+
+/// Test filesystem access using the credentials and link policy requested by the caller.
+fn access(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["path", "mode", "dir_fd", "effective_ids", "follow_symlinks"];
     let [Some(path), Some(mode), dir_fd, effective, follow] =
-        builtins::bind_builtin_arguments("access", args, kwargs, names, 2)?
+        bind_two_positional("access", args, kwargs, names)?
     else {
         unreachable!("access requires path and mode")
     };
@@ -597,7 +609,10 @@ pub(super) fn descriptor(
         return access(ctx, args, kwargs);
     }
     if name == "symlink" {
-        return symlink::call(ctx, args, kwargs);
+        return links::symlink(ctx, args, kwargs);
+    }
+    if name == "link" {
+        return links::link(ctx, args, kwargs);
     }
     if name == "scandir" {
         return scandir::open(ctx, args, kwargs);

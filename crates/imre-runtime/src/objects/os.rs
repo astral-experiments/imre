@@ -14,7 +14,7 @@ use std::io;
 pub(super) mod links;
 pub(crate) mod scandir;
 pub(super) mod stat_result;
-pub(crate) use links::{readlink_at, symlink_at};
+pub(crate) use links::{link_at, readlink_at, symlink_at};
 pub(crate) use stat_result::float_seconds;
 
 /// The target's primary or alternate separator, shared by typed and boxed imports.

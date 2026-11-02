@@ -52,6 +52,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
+        "link" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.link"),
         "symlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.symlink"),
         "remove" => Intrinsic::Fd(FdOperation::Remove),
         "lseek" => Intrinsic::Fd(FdOperation::Seek),
