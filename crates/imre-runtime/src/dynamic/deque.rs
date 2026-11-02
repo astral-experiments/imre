@@ -5,7 +5,7 @@ pub(super) const CLASS: &str = "collections.deque";
 pub(super) const ITERATOR: &str = "collections._deque_iterator";
 pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
 pub(super) const ITERATOR_METHODS: &[&str] =
-    &["__iter__", "__next__", "__length_hint__", "__reduce__"];
+    &["__getattribute__", "__iter__", "__next__", "__length_hint__", "__reduce__"];
 
 pub(super) fn iterator_class(name: &str) -> Option<&'static str> {
     match name {
@@ -158,6 +158,24 @@ pub(super) fn class_dictionary(ctx: &mut Context, class: Id) -> Result<Id> {
     )
 }
 
+/// Install the iterator's own descriptors in CPython type-dictionary order.
+pub(super) fn install_iterator_namespace(ctx: &mut Context, class: Id, owner: &str) {
+    let entries = std::iter::once("__new__")
+        .chain(ITERATOR_METHODS.iter().copied())
+        .chain(["__doc__", "__module__"])
+        .map(|field| {
+            let value = match field {
+                "__doc__" => NONE,
+                "__module__" => ctx.heap.code_name("collections"),
+                _ => ctx.builtin(&format!("{owner}.{field}")),
+            };
+            (ctx.heap.code_name(field), value)
+        })
+        .collect();
+    let dictionary = ctx.dict(entries);
+    ctx.native_type_dicts.insert(class, dictionary);
+}
+
 pub(super) enum IndexOp {
     Get,
     Set(Id),
@@ -264,6 +282,9 @@ pub(super) fn iterator_method(
     };
     if ctx.heap.get(receiver).intrinsic_type_name() != Some(class) {
         return Err(Error::new("TypeError", format!("expected a {class} receiver")));
+    }
+    if name == "__getattribute__" {
+        return builtins::call(ctx, "object.__getattribute__", args, kwargs);
     }
     if !rest.is_empty() || !kwargs.is_empty() {
         return Err(Error::new("TypeError", format!("{class}.{name}() takes no arguments")));
