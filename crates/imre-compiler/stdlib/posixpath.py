@@ -1,6 +1,7 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 # os reads these constants while the two modules import each other.
 curdir = "."
+defpath = "/bin:/usr/bin"
 extsep = "."
 sep = "/"
 altsep = None
