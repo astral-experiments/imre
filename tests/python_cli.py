@@ -1640,6 +1640,7 @@ def main():
         inspect_entry.write_text("import view_inspection\n")
         compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
+        compare("-IB", "-c", "from operator import __getitem__; print(__getitem__((11,), 0))")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")

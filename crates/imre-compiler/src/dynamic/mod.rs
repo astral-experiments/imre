@@ -185,61 +185,20 @@ fn boxed_unittest_cleanup(name: &str) -> bool {
 }
 
 fn boxed_operator(name: &str) -> bool {
-    matches!(
-        name,
-        "attrgetter"
-            | "__lt__"
-            | "__le__"
-            | "__eq__"
-            | "__ne__"
-            | "__ge__"
-            | "__gt__"
-            | "__and__"
-            | "__or__"
-            | "__sub__"
-            | "__xor__"
-            | "itemgetter"
-            | "lt"
-            | "le"
-            | "eq"
-            | "ne"
-            | "gt"
-            | "ge"
-            | "add"
-            | "sub"
-            | "mul"
-            | "matmul"
-            | "truediv"
-            | "floordiv"
-            | "mod"
-            | "lshift"
-            | "rshift"
-            | "and_"
-            | "xor"
-            | "or_"
-            | "iadd"
-            | "isub"
-            | "imul"
-            | "imatmul"
-            | "itruediv"
-            | "ifloordiv"
-            | "imod"
-            | "ipow"
-            | "ilshift"
-            | "irshift"
-            | "iand"
-            | "ixor"
-            | "ior"
-            | "neg"
-            | "pos"
-            | "invert"
-            | "contains"
-            | "getitem"
-            | "setitem"
-            | "delitem"
-            | "index"
-            | "length_hint"
-    )
+    macro_rules! operator_functions {
+        ($($function:literal => $operation:expr),* $(,)?) => { &[$($function),*] };
+    }
+    const FUNCTIONS: &[&str] = include!("../../../imre-runtime/native/operator-functions.rs");
+    matches!(name, "attrgetter" | "itemgetter")
+        || FUNCTIONS.contains(&name)
+        || name
+            .strip_prefix("__")
+            .and_then(|name| name.strip_suffix("__"))
+            .is_some_and(|alias| {
+                FUNCTIONS
+                    .iter()
+                    .any(|&name| name != "length_hint" && name.trim_end_matches('_') == alias)
+            })
 }
 
 impl<'a> Visitor<'a> for Imports {

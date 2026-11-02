@@ -168,19 +168,22 @@ pub(in crate::dynamic) enum Operation {
     LengthHint,
 }
 
-// Keep the module exports and native call dispatch in sync.
-macro_rules! operations {
+macro_rules! operator_functions {
     ($($name:literal => $operation:expr),* $(,)?) => {
-        const NAMES: &[&str] = &[$($name),*];
+        impl Operation {
+            const NAMES: &[&str] = &[$($name),*];
 
-        pub(in crate::dynamic) fn named(name: &str) -> Option<Self> {
-            Some(match name {
-                $($name => $operation,)*
-                _ => return None,
-            })
+            pub(in crate::dynamic) fn named(name: &str) -> Option<Self> {
+                Some(match name {
+                    $($name => $operation,)*
+                    _ => return None,
+                })
+            }
         }
     };
 }
+
+include!("../../../native/operator-functions.rs");
 
 /// Install the same callable objects in the private extension and its public wrapper.
 pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id, module: &str) {
@@ -199,49 +202,6 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id, module: &str) {
 }
 
 impl Operation {
-    operations! {
-        "lt" => Self::Binary("<"),
-        "le" => Self::Binary("<="),
-        "eq" => Self::Binary("=="),
-        "ne" => Self::Binary("!="),
-        "gt" => Self::Binary(">"),
-        "ge" => Self::Binary(">="),
-        "add" => Self::Binary("+"),
-        "sub" => Self::Binary("-"),
-        "mul" => Self::Binary("*"),
-        "matmul" => Self::Binary("@"),
-        "truediv" => Self::Binary("/"),
-        "floordiv" => Self::Binary("//"),
-        "mod" => Self::Binary("%"),
-        "lshift" => Self::Binary("<<"),
-        "rshift" => Self::Binary(">>"),
-        "and_" => Self::Binary("&"),
-        "xor" => Self::Binary("^"),
-        "or_" => Self::Binary("|"),
-        "iadd" => Self::InPlace("+"),
-        "isub" => Self::InPlace("-"),
-        "imul" => Self::InPlace("*"),
-        "imatmul" => Self::InPlace("@"),
-        "itruediv" => Self::InPlace("/"),
-        "ifloordiv" => Self::InPlace("//"),
-        "imod" => Self::InPlace("%"),
-        "ipow" => Self::InPlace("**"),
-        "ilshift" => Self::InPlace("<<"),
-        "irshift" => Self::InPlace(">>"),
-        "iand" => Self::InPlace("&"),
-        "ixor" => Self::InPlace("^"),
-        "ior" => Self::InPlace("|"),
-        "neg" => Self::Unary("neg"),
-        "pos" => Self::Unary("pos"),
-        "invert" => Self::Unary("~"),
-        "contains" => Self::Contains,
-        "getitem" => Self::GetItem,
-        "setitem" => Self::SetItem,
-        "delitem" => Self::DelItem,
-        "index" => Self::Index,
-        "length_hint" => Self::LengthHint,
-    }
-
     pub(super) fn call(
         self,
         ctx: &mut Context,
