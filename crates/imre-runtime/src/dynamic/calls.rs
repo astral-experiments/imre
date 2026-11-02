@@ -2640,7 +2640,24 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("property.{name}")));
             }
+            Value::Native(ref class) if class == "code" && name == "co_argcount" => {
+                return Ok(self.readonly_member("code", "co_argcount"));
+            }
             Value::Code(ref code) => match name {
+                "co_argcount" => {
+                    if code.parameters == NONE {
+                        return Ok(self.int(0));
+                    }
+                    let signature: serde_json::Value =
+                        serde_json::from_str(self.str_value(code.parameters)?)
+                            .map_err(|e| Error::new("SystemError", e.to_string()))?;
+                    if let Some(count) = signature["co_argcount"].as_i64() {
+                        return Ok(self.int(count));
+                    }
+                    let count = signature["posonly"].as_array().map_or(0, Vec::len)
+                        + signature["positional"].as_array().map_or(0, Vec::len);
+                    return Ok(self.int(count as i64));
+                }
                 "co_flags" => {
                     if !code.flags_complete {
                         return Err(Error::new(
@@ -4399,7 +4416,7 @@ impl Context {
                 self.update_dictionary_field(obj, dictionary, name, None)
             }
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
-            Value::Code(_) if name == "co_qualname" => {
+            Value::Code(_) if matches!(name, "co_qualname" | "co_argcount") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
             Value::Complex(_) if matches!(name, "real" | "imag") => {
@@ -5213,7 +5230,12 @@ impl Context {
             Value::Code(_)
                 if matches!(
                     name,
-                    "co_name" | "co_qualname" | "co_filename" | "co_firstlineno" | "co_flags"
+                    "co_name"
+                        | "co_qualname"
+                        | "co_filename"
+                        | "co_firstlineno"
+                        | "co_flags"
+                        | "co_argcount"
                 ) =>
             {
                 return Err(Error::new("AttributeError", "readonly attribute"));
