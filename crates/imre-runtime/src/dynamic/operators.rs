@@ -301,12 +301,26 @@ impl Context {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some((value, integer)));
         }
+        let target = self.weak_proxy_target(value)?;
+        if target != value {
+            return self.with_weak_target(target, |ctx| ctx.exact_index_result(target).map(Some));
+        }
         let Some(index) = self.bound_slot(value, "__index__")? else {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
         let number = self.integer_slot_result(result, "__index__")?;
         Ok(Some((result, number)))
+    }
+
+    /// Return an exact int for PyNumber_Index, preserving an already exact result.
+    pub(super) fn exact_index_result(&mut self, value: Id) -> Result<(Id, crate::Int)> {
+        let (index, number) = self.require_index_result(value)?;
+        if matches!(self.heap.get(index), Value::Int(_)) {
+            Ok((index, number))
+        } else {
+            Ok((self.alloc(Value::Int(number.clone())), number))
+        }
     }
 
     fn integer_slot_result(&mut self, result: Id, slot: &str) -> Result<crate::Int> {

@@ -36,10 +36,38 @@ def orphan():
     return ref(local), proxy(local)
 
 
+def proxy_index():
+    import gc
+    import operator
+
+    expected = 10**30 + 1
+
+    class Indexed:
+        def __index__(self):
+            owners.clear()
+            gc.collect()
+            assert observed() is self
+            return expected
+
+    owners = [Indexed()]
+    observed = ref(owners[0])
+    handle = proxy(owners[0])
+    assert operator.index(handle) is expected
+    gc.collect()
+    assert observed() is None
+    try:
+        operator.index(handle)
+    except ReferenceError:
+        pass
+    else:
+        raise AssertionError("dead proxy supplied an index")
+
+
 def current():
     proxy_length()
     iterate_proxy()
     saved_bound_method()
+    proxy_index()
     observed = []
 
     def first(wr):
