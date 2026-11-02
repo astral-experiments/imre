@@ -1754,6 +1754,8 @@ pub(super) struct Heap {
     file_writers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // Non-owning positions of a frame, its bound-method operand, and a receiver field.
+    caller_finalizer_field: Option<(usize, usize, usize)>,
 }
 
 #[derive(Clone, Copy)]
@@ -1832,6 +1834,7 @@ impl Heap {
             collect_next_statement: false,
             file_writers: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            caller_finalizer_field: None,
         };
         for id in 0..heap.slots.len() {
             heap.gc_order.push(id, &heap.slots);
@@ -2564,6 +2567,49 @@ impl Heap {
         self.file_writers.push(id);
         self.frames.last_mut().unwrap().created_finalizer = true;
         Ok(id)
+    }
+
+    /// Recheck the strong path from a caller-held method to the sole pending finalizer.
+    pub(super) fn caller_keeps_only_finalizer(&mut self) -> bool {
+        let [owner] = self.ordinary_finalizers.as_slice() else {
+            return false;
+        };
+        let receiver_fields = |operand: &Id| {
+            let Value::Method { receiver, .. } = self.get(*operand) else {
+                return None;
+            };
+            let Value::Instance { fields, .. } = self.get(*receiver) else {
+                return None;
+            };
+            Some(fields)
+        };
+        // Frames, operand slots, and fields can all be removed or reused.
+        if let Some((frame, operand, field)) = self.caller_finalizer_field
+            && self
+                .frames
+                .get(frame)
+                .and_then(|frame| frame.live.get(operand))
+                .and_then(receiver_fields)
+                .and_then(|fields| fields.get_index(field))
+                .is_some_and(|(_, value)| value == owner)
+        {
+            return true;
+        }
+
+        // Earlier operands hold outer expressions such as pending context manager exits.
+        // Learn the position while its frame is the immediate caller, before recursion.
+        if let Some((frame_index, caller)) = self.frames.iter().enumerate().rev().nth(1) {
+            for (operand_index, operand) in caller.live.iter().take(8).enumerate() {
+                if let Some(fields) = receiver_fields(operand)
+                    && let Some(field) = fields.values().take(8).position(|value| value == owner)
+                {
+                    self.caller_finalizer_field = Some((frame_index, operand_index, field));
+                    return true;
+                }
+            }
+        }
+        self.caller_finalizer_field = None;
+        false
     }
 
     /// A returned writer or a surviving name keeps a direct owner.
