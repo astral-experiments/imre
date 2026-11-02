@@ -51,7 +51,7 @@ fn dotted_attribute(ctx: &mut Context, mut value: Id, name: &str) -> Result<Id> 
 }
 
 /// Find an identity match in the public module registry, before falling back to __main__.
-fn find_global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<String>> {
+fn find_global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<Id>> {
     let modules = ctx.public_modules()?;
     ctx.heap.keep(modules);
     // The accelerator uses PyDict_Next for an exact dict; a module lookup may add entries.
@@ -87,7 +87,7 @@ fn find_global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<S
         }
         ctx.heap.keep(key);
         match dotted_attribute(ctx, module, name) {
-            Ok(candidate) if candidate == obj => return Ok(Some(ctx.str_value(key)?.to_owned())),
+            Ok(candidate) if candidate == obj => return Ok(Some(key)),
             Err(error) if !ctx.is_attribute_error(&error) => return Err(error),
             _ => {}
         }
@@ -95,35 +95,37 @@ fn find_global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<S
     Ok(None)
 }
 
-fn global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<String> {
+fn global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Id> {
     let module = if matches!(obj, ELLIPSIS | NOT_IMPLEMENTED) {
-        "builtins".to_owned()
+        ctx.text("builtins")
     } else {
         let module = match ctx.lookup_attr(obj, "__module__") {
             Err(error) if ctx.is_attribute_error(&error) => NONE,
             result => result?,
         };
         if module != NONE {
-            ctx.str_value(module)?.to_owned()
+            module
         } else if let Some(module) = find_global_module(ctx, obj, name)? {
             return Ok(module);
         } else {
-            "__main__".to_owned()
+            ctx.text("__main__")
         }
     };
-    let resolved = if module == "builtins" && super::super::builtins::is_builtin(name) {
+    ctx.heap.keep(module);
+    let module_name = ctx.str_value(module)?.to_owned();
+    let resolved = if module_name == "builtins" && super::super::builtins::is_builtin(name) {
         ctx.builtin(name)
     } else {
-        let current = ctx.module(&module).map_err(|e| {
+        let current = ctx.module(&module_name).map_err(|e| {
             if ctx.is_builtin_error(&e, "ModuleNotFoundError") {
-                pickling_error(ctx, format!("Can't import module {module}"))
+                pickling_error(ctx, format!("Can't import module {module_name}"))
             } else {
                 e
             }
         })?;
         dotted_attribute(ctx, current, name).map_err(|e| {
             if ctx.is_attribute_error(&e) {
-                pickling_error(ctx, format!("Can't find {name} in {module}"))
+                pickling_error(ctx, format!("Can't find {name} in {module_name}"))
             } else {
                 e
             }
@@ -132,7 +134,7 @@ fn global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<String> {
     if resolved != obj {
         return Err(pickling_error(
             ctx,
-            format!("object differs from {module}.{name}"),
+            format!("object differs from {module_name}.{name}"),
         ));
     }
     Ok(module)
@@ -522,23 +524,25 @@ impl Pickler {
                 ctx.str_value(id)?.to_owned()
             }
         };
-        if name
-            .split('.')
-            .any(|part| part == "<locals>" || part.is_empty())
-        {
+        if name.split('.').any(|part| part == "<locals>") {
             return Err(pickling_error(
                 ctx,
                 format!("Can't pickle local object '{name}'"),
             ));
         }
         let module = global_module(ctx, obj, &name)?;
+        ctx.heap.keep(module);
+        if self.protocol >= 4 {
+            self.save(ctx, module)?;
+            let name = ctx.text(name);
+            self.save(ctx, name)?;
+            self.out.push(0x93); // STACK_GLOBAL
+            return self.remember(ctx, obj);
+        }
+
         // Before STACK_GLOBAL, rebuild dotted names as getattr(getattr(outer, ...), ...).
-        let (global_name, suffix) = if self.protocol < 4 {
-            name.split_once('.').unwrap_or((&name, ""))
-        } else {
-            (name.as_str(), "")
-        };
-        let attributes = suffix.split_terminator('.');
+        let mut attributes = name.split('.');
+        let global_name = attributes.next().unwrap();
         for _ in attributes.clone() {
             let getattr = ctx.builtin("getattr");
             self.save(ctx, getattr)?;
@@ -547,7 +551,7 @@ impl Pickler {
         encoding::global(
             &mut self.out,
             self.protocol,
-            &module,
+            ctx.str_value(module)?,
             global_name,
             self.fix_imports,
         )

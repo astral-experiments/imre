@@ -172,12 +172,7 @@ pub(super) fn global(
     name: &str,
     fix_imports: bool,
 ) -> Result<()> {
-    if protocol >= 4 {
-        string(out, protocol, module)?;
-        string(out, protocol, name)?;
-        out.push(0x93); // STACK_GLOBAL
-        return Ok(());
-    }
+    debug_assert!(protocol < 4);
     let (module, name) = if protocol < 3 && fix_imports {
         legacy_global(module, name)?
     } else {
