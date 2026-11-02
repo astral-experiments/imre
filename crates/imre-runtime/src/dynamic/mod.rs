@@ -243,7 +243,8 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("set", Value::Set { frozen: false, .. })
-            | ("frozenset", Value::Set { frozen: true, .. }) => true,
+            | ("frozenset", Value::Set { frozen: true, .. })
+            | (thread_local::CLASS, Value::ThreadLocal(_)) => true,
             _ => false,
         }
     }
@@ -1687,6 +1688,7 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
+            thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
