@@ -2265,6 +2265,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_registry.py",
+            "boxed_unittest_get_description.py",
             "boxed_unittest_default_result.py",
             "boxed_unittest_runner_warnings.py",
             "boxed_unittest_runner_durations.py",
