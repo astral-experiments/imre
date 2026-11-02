@@ -24,7 +24,7 @@ def current():
     assert re.fullmatch(r"(a*)+a", "aa")
     assert re.compile(r"a*+a")
     assert re.compile(r"\<*a++")
-    assert re.compile(rb"\b{start}*a++")
+    assert re.compile(r"x\b{start}*a++")
     assert re.compile("(?mx)# tail\\\n a**\n a")
 
     for flags in (0, re.X):
