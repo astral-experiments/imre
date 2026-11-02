@@ -2,11 +2,12 @@
 
 use std::cell::RefCell;
 use std::ffi::{OsStr, OsString};
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use super::{Context, Error, Id, NONE, Result, Value, argument, option};
+use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::objects::{FileState, errno_error};
 
 pub(in crate::dynamic) const METHODS: &[&str] = &[
@@ -92,7 +93,7 @@ fn open_named(ctx: &mut Context, name: Id, on_close: Id, write_only: bool) -> Re
         Err(error) => return Err(ctx.with_errno_filename(errno_error(error).into(), name)?),
     };
     if write_only {
-        let writer = ctx.named_temporary_writer(file, name);
+        let writer = ctx.temporary_writer(file, name);
         if writer.is_err() {
             let _ = std::fs::remove_file(path);
         }
@@ -252,58 +253,49 @@ pub(super) fn path_operation(
     }
 }
 
-/// Text update files wrap the same native anonymous binary handle as binary mode.
+/// Adopt an unnamed descriptor into the buffering and text layers requested by its mode.
 pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    if args.len() > 1
-        || kwargs.iter().any(|(key, _)| {
-            !matches!(
-                key.as_str(),
-                "mode" | "dir" | "prefix" | "suffix" | "encoding" | "errors" | "newline"
-            )
-        })
-    {
+    if args.len() > 1 {
         return Err(Error::new(
             "TypeError",
             "unsupported arguments to TemporaryFile",
         ));
     }
-    let mode = option(args, 0, kwargs, "mode")?;
-    let text = match mode
+    let [mode, directory, prefix, suffix, encoding, errors, newline] = super::builtins::bind(
+        "TemporaryFile",
+        args,
+        kwargs,
+        [
+            "mode", "dir", "prefix", "suffix", "encoding", "errors", "newline",
+        ],
+    )?;
+    if let Some(mode) = mode {
+        super::io::check_open_string(ctx, mode, "mode", "str")?;
+    }
+    let [encoding, errors, newline] =
+        [encoding, errors, newline].map(|value| value.filter(|&id| id != NONE));
+    super::io::check_text_options(ctx, encoding, errors, newline)?;
+    let mode_text = mode
         .map(|id| ctx.str_value(id))
         .transpose()?
-        .unwrap_or("w+b")
-    {
-        "w+b" | "wb+" | "r+b" | "rb+" => false,
-        "w+" | "w+t" | "wt+" => true,
-        _ => {
-            return Err(Error::new(
-                "NotImplementedError",
-                "TemporaryFile supports update mode",
-            ));
-        }
-    };
-    let mut options = Vec::new();
-    for (key, id) in kwargs {
-        if matches!(key.as_str(), "encoding" | "errors" | "newline") && *id != NONE {
-            if !text {
-                let article = if key == "newline" { "a" } else { "an" };
-                return Err(Error::new(
-                    "ValueError",
-                    format!("binary mode doesn't take {article} {key} argument"),
-                ));
-            }
-            options.push((key.clone(), *id));
-        }
+        .unwrap_or("w+b");
+    super::io::validate_open_mode(mode_text)?;
+    let binary = mode_text.contains('b');
+    if binary {
+        super::io::check_binary_options(encoding, errors, newline)?;
     }
-    if text {
+    let (_, raw_mode) = super::io::fileio_mode(&mode_text.replace('t', ""))?;
+    if !matches!(raw_mode, "wb" | "rb+") {
+        return Err(Error::new(
+            "NotImplementedError",
+            "TemporaryFile supports write and update modes",
+        ));
+    }
+    if !binary {
         ctx.module("io")?;
     }
-    let directory = option(args, 1, kwargs, "dir")?.filter(|&id| id != NONE);
-    let file = if let (Some(dir), Some(prefix), Some(suffix)) = (
-        directory,
-        option(args, 2, kwargs, "prefix")?,
-        option(args, 3, kwargs, "suffix")?,
-    ) {
+    let directory = directory.filter(|&id| id != NONE);
+    let file = if let (Some(dir), Some(prefix), Some(suffix)) = (directory, prefix, suffix) {
         let path = |ctx: &mut Context, value| {
             let value = super::posixpath::fspath(ctx, value)?;
             super::os::c_path(ctx, value, "embedded null byte")
@@ -311,28 +303,47 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         let directory = path(ctx, dir)?;
         let prefix = path(ctx, prefix)?;
         let suffix = path(ctx, suffix)?;
-        FileState::buffered_random(crate::objects::tempdirs::anonymous_file_in(
+        crate::objects::tempdirs::anonymous_file_in(
             Path::new(OsStr::from_bytes(directory.as_bytes())),
             OsStr::from_bytes(prefix.as_bytes()),
             OsStr::from_bytes(suffix.as_bytes()),
-        )?)?
+        )?
     } else {
-        FileState::temporary(directory.map(|id| ctx.str_value(id)).transpose()?)?
+        crate::objects::tempdirs::anonymous_file(
+            directory.map(|id| ctx.str_value(id)).transpose()?,
+        )?
     };
-    let name = ctx.int(i64::from(file.fileno()?));
-    let owner =
-        crate::Shared::try_new(RefCell::new(file)).map_err(|_| crate::Error::allocation())?;
-    let buffer = ctx.alloc(Value::BufferedRandom(owner.clone(), name));
-    if !text {
+    let name = ctx.int(i64::from(file.as_raw_fd()));
+    let buffer = if raw_mode == "wb" {
+        ctx.temporary_writer(file, name)?
+    } else {
+        let owner = crate::Shared::try_new(RefCell::new(FileState::buffered_random(file)?))
+            .map_err(|_| crate::Error::allocation())?;
+        ctx.alloc(Value::BufferedRandom(owner, name))
+    };
+    if binary {
         return Ok(buffer);
     }
     let wrapper = ctx.builtins["_io.TextIOWrapper"];
-    let result = ctx.call(wrapper, vec![buffer], options).and_then(|stream| {
-        ctx.set_attr(stream, "mode", mode.unwrap())?;
-        Ok(stream)
-    });
+    let result = ctx
+        .call(
+            wrapper,
+            vec![
+                buffer,
+                encoding.unwrap_or(NONE),
+                errors.unwrap_or(NONE),
+                newline.unwrap_or(NONE),
+            ],
+            Vec::new(),
+        )
+        .and_then(|stream| {
+            ctx.set_attr(stream, "mode", ctx.scalar_value(mode.unwrap()))?;
+            Ok(stream)
+        });
     if result.is_err() {
-        let _ = owner.borrow_mut().close();
+        let _ = ctx
+            .lookup_attr(buffer, "close")
+            .and_then(|close| ctx.call(close, Vec::new(), Vec::new()));
     }
     result
 }
