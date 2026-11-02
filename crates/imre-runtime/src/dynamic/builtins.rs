@@ -1567,7 +1567,36 @@ pub(super) fn call(
         "input" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
-            Ok(ctx.text(crate::sys::read_input_line()?))
+            crate::flush_stdout().map_err(crate::objects::errno_error)?;
+            let sys = match ctx.threads.system_module {
+                Some(sys) => sys,
+                None => ctx.module("sys")?,
+            };
+            let stdin = match ctx.lookup_attr(sys, "stdin") {
+                Ok(NONE) => return Err(Error::new("RuntimeError", "lost sys.stdin")),
+                Err(error) if ctx.is_attribute_error(&error) => {
+                    return Err(Error::new("RuntimeError", "lost sys.stdin"));
+                }
+                result => result?,
+            };
+            let readline = ctx.lookup_attr(stdin, "readline")?;
+            let line = ctx.call(readline, Vec::new(), Vec::new())?;
+            let stripped = match ctx.heap.get(ctx.scalar_value(line)) {
+                Value::Bytes(b) if !b.is_empty() => {
+                    b.strip_suffix(b"\n").map(|s| Value::Bytes(s.to_vec()))
+                }
+                Value::Str(s) if !s.is_empty() => {
+                    s.strip_suffix('\n').map(|s| Value::Str(s.to_owned()))
+                }
+                Value::SurrogateStr(s) if !s.is_empty() => s
+                    .strip_suffix(&[u32::from('\n')])
+                    .map(|s| Value::SurrogateStr(s.to_vec())),
+                Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) => {
+                    return Err(Error::new("EOFError", "EOF when reading a line"));
+                }
+                _ => return Err(type_error("object.readline() returned non-string")),
+            };
+            Ok(stripped.map_or(line, |value| ctx.alloc(value)))
         }
         "print" => print::call(ctx, args, kwargs),
         "NoneType" | "NotImplementedType" | "ellipsis" => {

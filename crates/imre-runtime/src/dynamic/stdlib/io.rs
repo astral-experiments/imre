@@ -21,6 +21,35 @@ pub(in crate::dynamic) enum MemoryStream {
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
+/// Build the interpreter's shared text reader without taking ownership of fd 0.
+pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
+    let fd = ctx.int(0);
+    let mode = ctx.text("r");
+    let buffering = ctx.int(-1);
+    let encoding = ctx.text(crate::sys::standard_field(0, false).as_str());
+    let errors = ctx.text(crate::sys::standard_field(0, true).as_str());
+    let newline = ctx.text("\n");
+    let stream = match open(
+        ctx,
+        &[fd, mode, buffering, encoding, errors, newline, FALSE],
+        &[],
+    ) {
+        Err(error)
+            if matches!(error.os_args.as_deref(),
+                Some(super::super::os_error::Args::Native { source, .. }) if source.errno == i64::from(libc::EBADF)
+            ) =>
+        {
+            return Ok(NONE);
+        }
+        result => result?,
+    };
+    let buffer = ctx.lookup_attr(stream, "buffer")?;
+    let raw = ctx.lookup_attr(buffer, "raw")?;
+    let name = ctx.text("<stdin>");
+    ctx.set_attr(raw, "name", name)?;
+    Ok(stream)
+}
+
 /// Select the default text encoding from the interpreter's startup configuration.
 pub(super) fn text_encoding(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {

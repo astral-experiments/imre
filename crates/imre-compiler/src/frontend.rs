@@ -6277,6 +6277,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
                 }
+                Intrinsic::Stdin => return Err(self.object_runtime_export("sys.stdin", expression)),
                 Intrinsic::Stdout => return Ok(self.stdout_value()),
                 Intrinsic::OriginalStdout | Intrinsic::Stderr => {
                     return Ok(Expr {
