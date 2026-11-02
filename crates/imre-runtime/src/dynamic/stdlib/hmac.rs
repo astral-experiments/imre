@@ -52,6 +52,8 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
             let provider = HashState::provider(name)?;
             if let Some(class) = HashState::public_constructor(provider.name) {
                 ctx.builtin(class)
+            } else if provider.name == "md5" {
+                ctx.builtin("hashlib.md5")
             } else {
                 super::attribute(ctx, "hashlib", provider.name)?
             }

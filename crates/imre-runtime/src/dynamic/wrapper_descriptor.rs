@@ -530,6 +530,7 @@ pub(super) fn descriptor_get(
     };
     let slot = match ctx.heap.get(descriptor) {
         Value::ClassMethod { .. } if class == "classmethod" => None,
+        Value::HashMethod { .. } if class == "method_descriptor" => None,
         Value::Native(symbol)
             if let Some(slot) = BuiltinDescriptor::lookup(symbol)
                 && slot.class() == class =>
@@ -562,6 +563,12 @@ pub(super) fn descriptor_get(
         [receiver] | [receiver, _] => {
             if let Some(slot) = slot {
                 return slot.bind(ctx, descriptor, receiver);
+            }
+            if let Value::HashMethod { owner, .. } = *ctx.heap.get(descriptor) {
+                if receiver == NONE {
+                    return Ok(descriptor);
+                }
+                return ctx.bind_attribute(descriptor, receiver, owner);
             }
             let owner = match arguments.get(1) {
                 None | Some(&NONE) => ctx.exact_type(receiver)?,

@@ -2109,6 +2109,12 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
+            if let Some(name) = self.heap.get(base).hash_type() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("type '{name}' is not an acceptable base type"),
+                ));
+            }
             if let Value::Native(name) = self.heap.get(base)
                 && (super::stdlib::fixed_structseq::fixed_type(name).is_some()
                     || crate::objects::HashState::is_provider_class(name)
@@ -2265,6 +2271,7 @@ impl Context {
         }
         let class = self.alloc(Value::Class {
             io_kind: None,
+            hash_type: None,
             metaclass: None,
             namedtuple_fields,
             name,
