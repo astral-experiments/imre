@@ -123,6 +123,7 @@ impl Context {
         let Value::Generator {
             running,
             offset,
+            scope,
             owner,
             frame,
             ..
@@ -136,6 +137,7 @@ impl Context {
             *offset = Some(1);
         } else {
             *offset = None;
+            *scope = NONE;
             *frame = None;
             *owner = FrameOwner::Module(NONE);
         }
