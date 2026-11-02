@@ -2673,14 +2673,17 @@ impl Context {
                 }
             }
             Value::Native(ref builtin)
-                if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>
+                if matches!(
+                    builtin.as_str(),
+                    "binascii.Error" | "binascii.Incomplete" | "zlib.error"
+                ) =>
             {
-                let short = builtin.rsplit('.').next().unwrap();
+                let (module, short) = builtin.split_once('.').unwrap();
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(short.to_owned())),
-                    "__module__" => return Ok(self.text("binascii")),
+                    "__module__" => return Ok(self.text(module.to_owned())),
                     "__base__" | "__bases__" => {
-                        let base = self.builtin(if short == "Error" {
+                        let base = self.builtin(if builtin == "binascii.Error" {
                             "ValueError"
                         } else {
                             "Exception"

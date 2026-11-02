@@ -25,6 +25,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     use crate::objects::exceptions::Kind;
     match name {
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+        "zlib.error" => Some(Kind::ZlibError),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),
@@ -135,7 +136,8 @@ pub(super) fn exception_new_owner(name: &str) -> &str {
         | "ModuleNotFoundError"
         | "StopIteration"
         | "StopAsyncIteration"
-        | "binascii.Incomplete" => "Exception",
+        | "binascii.Incomplete"
+        | "zlib.error" => "Exception",
         "binascii.Error" => "ValueError",
         name if exception_subclass(name, "OSError") == Some(true) => "OSError",
         _ => name,
@@ -929,7 +931,9 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    if let Some((owner, method)) = name.split_once('.') {
+    if let Some((owner, method)) = name.split_once('.')
+        && !is_exception(name)
+    {
         return match owner {
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;

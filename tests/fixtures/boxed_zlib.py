@@ -1,5 +1,5 @@
 import zlib
-from zlib import adler32, crc32
+from zlib import adler32, crc32, error as ZlibError
 
 
 class Seed:
@@ -15,6 +15,22 @@ class Seed:
 
 
 def current():
+    assert ZlibError is zlib.error
+    assert ZlibError.__module__ == "zlib"
+    assert ZlibError.__name__ == ZlibError.__qualname__ == "error"
+    assert ZlibError.__base__ is Exception and ZlibError.__bases__ == (Exception,)
+    assert issubclass(ZlibError, Exception) and not issubclass(ZlibError, OSError)
+    failure = ZlibError("invalid stream")
+    assert isinstance(failure, zlib.error) and isinstance(failure, Exception)
+    assert not isinstance(ValueError("unrelated"), zlib.error)
+    try:
+        raise failure
+    except OSError:
+        raise AssertionError("zlib.error matched OSError")
+    except zlib.error as caught:
+        assert caught is failure and type(caught) is ZlibError
+        assert str(caught) == "invalid stream" and caught.args == ("invalid stream",)
+
     print(adler32 is zlib.adler32, type(adler32) is type(len), adler32.__self__ is zlib)
     print(adler32.__module__, adler32.__name__, adler32.__qualname__)
     print(adler32("résumé.csv".encode()) & 0xFFFFFFFF)
