@@ -2032,6 +2032,12 @@ impl Context {
             self.bind(scope, "RLock", rlock);
         }
         match name {
+            "inspect" => {
+                for &(name, flag) in imre_ast::code_flags::INSPECT_FLAGS {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, name, value);
+                }
+            }
             "abc" => {
                 let meta = self.abc_meta();
                 self.bind(scope, "ABCMeta", meta);

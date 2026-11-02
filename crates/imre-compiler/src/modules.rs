@@ -909,6 +909,13 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Inspect
+            && let Some(&(_, flag)) = imre_ast::code_flags::INSPECT_FLAGS
+                .iter()
+                .find(|&&(attr, _)| attr == name)
+        {
+            return Some(Binding::Intrinsic(Intrinsic::IntConstant(i64::from(flag))));
+        }
         if self == Self::AnnotationLib && name == "Format" {
             return Some(Binding::IntrinsicModule(Self::AnnotationFormat));
         }
