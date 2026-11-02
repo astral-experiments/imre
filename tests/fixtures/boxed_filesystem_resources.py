@@ -1,6 +1,6 @@
 from io import BytesIO
 from importlib import resources
-from importlib.resources.abc import ResourceReader, TraversableResources
+from importlib.resources.abc import ResourceReader, Traversable, TraversableResources, TraversalError
 import data
 
 
@@ -36,6 +36,15 @@ class LegacyReader:
 
 
 root = resources.files(data)
+assert isinstance(root, Traversable)
+assert not isinstance(object(), Traversable)
+assert Traversable.joinpath(root, 'nested/message.txt').read_bytes() == b'hello\n'
+try:
+    Traversable.joinpath(root, 'absent')
+except TraversalError:
+    pass
+else:
+    raise AssertionError('default Traversable.joinpath found a missing child')
 assert root.is_dir()
 assert 'nested' in [child.name for child in root.iterdir()]
 target = root.joinpath('nested', 'message.txt')
