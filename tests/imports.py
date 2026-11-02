@@ -151,6 +151,24 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "optional_platform_import": {
+        "main.py": "import configure\nfrom adapter import present, absent\nprint(present, absent)\n",
+        "configure.py": "import sys\nsys.platform = 'test-platform'\nprint('configure')\n",
+        "adapter.py": (
+            "import sys\n"
+            "if sys.platform in {'test-platform'}:\n"
+            "    from provider import value as present\n"
+            "else:\n"
+            "    present = None\n"
+            "if sys.platform == 'missing-platform':\n"
+            "    from unavailable import value as absent\n"
+            "else:\n"
+            "    absent = None\n"
+            "import after\n"
+        ),
+        "provider.py": "print('provider')\nvalue = 42\n",
+        "after.py": "print('after')\n",
+    },
     "wildcard_native_namespaces": {
         "main.py": "import paths\nimport prepare\nimport codes\nimport computed\n",
         "paths.py": (
