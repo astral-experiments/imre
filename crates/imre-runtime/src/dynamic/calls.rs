@@ -3278,7 +3278,8 @@ impl Context {
                 return Ok(self.builtin("set.copy"));
             }
             Value::Native(ref class)
-                if class == "set" && matches!(name, "discard" | "difference_update" | "update") =>
+                if class == "set"
+                    && matches!(name, "discard" | "remove" | "difference_update" | "update") =>
             {
                 return Ok(self.builtin(&format!("set.{name}")));
             }
