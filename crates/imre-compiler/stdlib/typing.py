@@ -6,7 +6,8 @@ import sys as _sys
 import typing as _typing
 from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
-from collections import Counter as _Counter, defaultdict as _defaultdict
+from collections import ChainMap as _ChainMap, Counter as _Counter, OrderedDict as _OrderedDict
+from collections import defaultdict as _defaultdict, deque as _deque
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
@@ -1862,8 +1863,11 @@ Type.__doc__ = \
 
     At this point the type checker knows that joe has type BasicUser.
     """
+Deque = _SpecialGenericAlias(_deque, 1, name="Deque")
 Counter = _SpecialGenericAlias(_Counter, 1)
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+OrderedDict = _SpecialGenericAlias(_OrderedDict, 2)
+ChainMap = _SpecialGenericAlias(_ChainMap, 2)
 Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
