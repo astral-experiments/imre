@@ -6,6 +6,7 @@ from importlib import import_module
 from types import ModuleType
 
 
+_builtins = {name for name in dir(builtins) if not name.startswith('_')}
 DEFAULT = object()
 
 
@@ -48,7 +49,7 @@ class _patch:
         except (AttributeError, KeyError):
             original = getattr(target, name, DEFAULT)
             local = False
-        if isinstance(target, ModuleType) and not name.startswith('_') and hasattr(builtins, name):
+        if isinstance(target, ModuleType) and name in _builtins:
             self.create = True
         if original is DEFAULT and not self.create:
             raise AttributeError(f"{target} does not have the attribute {name!r}")
@@ -67,7 +68,7 @@ class _patch:
             else:
                 delattr(self.target, self.attribute)
                 # Deleting function metadata can reset the slot to a readable default.
-                if self.original is not DEFAULT and (
+                if not self.create and (
                     not hasattr(self.target, self.attribute)
                     or self.attribute in ('__doc__', '__module__', '__defaults__',
                                           '__annotations__', '__kwdefaults__')
