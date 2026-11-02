@@ -625,6 +625,16 @@ pub(crate) fn compile(
             }
         }
     }
+    // Cold imports can use the canonical threading factory when its Python dependencies
+    // are already registered. Check before adding the minimal collections fallback below.
+    let threading = ["_weakrefset", "collections", "warnings"]
+        .into_iter()
+        .all(|required| {
+            sources
+                .iter()
+                .any(|(name, path, _)| name == required && path.starts_with(bundled_root))
+        })
+        .then_some("threading");
     // Native modules can construct named tuples even without a source-level collections import.
     if !seen.contains("collections") {
         sources.push((
@@ -639,7 +649,7 @@ pub(crate) fn compile(
         Path::new(bundled_root).join("io.py"),
         include_str!("../../stdlib/io.py").into(),
     ));
-    // These bundled initializers depend only on native modules and may be selected by name at runtime.
+    // The fixed list has only native dependencies and may be selected by name at runtime.
     for name in [
         "__future__",
         "__hello__",
@@ -658,7 +668,10 @@ pub(crate) fn compile(
         "string",
         "string.templatelib",
         "zipimport",
-    ] {
+    ]
+    .into_iter()
+    .chain(threading)
+    {
         if !seen.contains(name)
             && let Some((file, source)) = import_module::boxed_source(name)
         {
