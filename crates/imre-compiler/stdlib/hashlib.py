@@ -44,3 +44,28 @@ def __get_builtin_constructor(name):
         return constructor
 
     raise ValueError('unsupported hash type ' + name)
+
+
+__block_openssl_constructor = {'blake2b', 'blake2s'}
+
+
+def __hash_new(name, *args, **kwargs):
+    """new(name, data=b'') - Return a new hashing object using the named algorithm;
+    optionally initialized with data (which must be a bytes-like object).
+    """
+    if name in __block_openssl_constructor:
+        return __get_builtin_constructor(name)(*args, **kwargs)
+    return _native_new(name, *args, **kwargs)
+
+
+new = __hash_new
+del __hash_new
+
+
+# Like CPython, bind the named constructors at module initialization. new()
+# still consults the live constructor cache on each BLAKE2 request.
+try:
+    blake2b = __get_builtin_constructor('blake2b')
+    blake2s = __get_builtin_constructor('blake2s')
+except ValueError:
+    pass

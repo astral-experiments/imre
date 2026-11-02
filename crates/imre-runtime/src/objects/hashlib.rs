@@ -167,14 +167,14 @@ impl State {
 
     pub(crate) fn public_constructor(algorithm: &str) -> Option<&'static str> {
         match algorithm {
-            "blake2b" => Some("hashlib.blake2b"),
-            "blake2s" => Some("hashlib.blake2s"),
+            "blake2b" => Some("_blake2.blake2b"),
+            "blake2s" => Some("_blake2.blake2s"),
             _ => None,
         }
     }
 
     pub(crate) fn provider_class(class: &str) -> Option<&'static str> {
-        Self::public_constructor(class.strip_prefix("hashlib.")?)
+        Self::public_constructor(class.strip_prefix("_blake2.")?)
     }
 
     pub(crate) fn is_provider_class(class: &str) -> bool {
@@ -183,10 +183,10 @@ impl State {
 
     pub(crate) fn class_constant(class: &str, attr: &str) -> Option<usize> {
         match (class, attr) {
-            ("hashlib.blake2b", "SALT_SIZE" | "PERSON_SIZE") => Some(16),
-            ("hashlib.blake2s", "SALT_SIZE" | "PERSON_SIZE") => Some(8),
-            ("hashlib.blake2b", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(64),
-            ("hashlib.blake2s", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(32),
+            ("_blake2.blake2b", "SALT_SIZE" | "PERSON_SIZE") => Some(16),
+            ("_blake2.blake2s", "SALT_SIZE" | "PERSON_SIZE") => Some(8),
+            ("_blake2.blake2b", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(64),
+            ("_blake2.blake2s", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(32),
             _ => None,
         }
     }
