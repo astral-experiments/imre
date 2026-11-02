@@ -18,8 +18,8 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "symlink", "unlink",
-                "utime",
+                "access", "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat",
+                "symlink", "unlink", "utime",
             ][..],
         ),
         (
@@ -29,13 +29,14 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_follow_symlinks",
             &[
+                "access",
                 #[cfg(target_os = "macos")]
                 "chmod",
                 "stat",
                 "utime",
             ][..],
         ),
-        ("supports_effective_ids", &[][..]),
+        ("supports_effective_ids", &["access"][..]),
     ] {
         let set = ctx.alloc(Value::Set {
             entries: Default::default(),
@@ -329,7 +330,8 @@ mod utime;
 pub(super) fn is_descriptor_function(name: &str) -> bool {
     matches!(
         name,
-        "open"
+        "access"
+            | "open"
             | "readlink"
             | "scandir"
             | "remove"
@@ -469,6 +471,49 @@ fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     Ok(ctx.text_codepoints(codec.decode_filesystem(&target)?))
 }
 
+/// Test filesystem access using the credentials and link policy requested by the caller.
+fn access(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["path", "mode", "dir_fd", "effective_ids", "follow_symlinks"];
+    if args.len() > 2 && args.len() + kwargs.len() <= names.len() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "access() takes exactly 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    let [Some(path), Some(mode), dir_fd, effective, follow] =
+        builtins::bind_builtin_arguments("access", args, kwargs, names, 2)?
+    else {
+        unreachable!("access requires path and mode")
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        "access: path should be string, bytes or os.PathLike",
+    )?;
+    let path = c_path(ctx, path, "access: embedded null character in path")?;
+    let mode = c_int(ctx, mode)?;
+    let dir_fd = directory_fd(ctx, dir_fd)?;
+    let effective = effective
+        .map(|v| ctx.truth(v))
+        .transpose()?
+        .unwrap_or(false);
+    let follow = follow.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
+    let flags = (if effective { libc::AT_EACCESS } else { 0 })
+        | (if follow { 0 } else { libc::AT_SYMLINK_NOFOLLOW });
+    // SAFETY: path is NUL-terminated and remains live through the synchronous check.
+    let status = unsafe {
+        if dir_fd == libc::AT_FDCWD && flags == 0 {
+            libc::access(path.as_ptr(), mode)
+        } else {
+            libc::faccessat(dir_fd, path.as_ptr(), mode, flags)
+        }
+    };
+    Ok(builtins::boolean(status == 0))
+}
+
 /// Create a directory relative to dir_fd using the caller's mode and process umask.
 fn mkdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let names = ["path", "mode", "dir_fd"];
@@ -548,6 +593,9 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "access" {
+        return access(ctx, args, kwargs);
+    }
     if name == "symlink" {
         return symlink::call(ctx, args, kwargs);
     }
