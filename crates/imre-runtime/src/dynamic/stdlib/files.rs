@@ -737,9 +737,7 @@ pub(super) fn text_method(
             Ok(ctx.int(count as i64))
         }
         "fileno" => Ok(ctx.int(i64::from(file.fileno()?))),
-        "isatty" => Ok(crate::dynamic::builtins::boolean(crate::objects::os::isatty(
-            file.fileno()?,
-        ))),
+        "isatty" => Ok(crate::dynamic::builtins::boolean(file.isatty()?)),
         "flush" => {
             file.flush()?;
             Ok(NONE)
