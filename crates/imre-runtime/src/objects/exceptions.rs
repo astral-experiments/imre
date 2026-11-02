@@ -554,6 +554,10 @@ impl Error {
         )
     }
 
+    pub(super) fn is_os_error(&self) -> bool {
+        self.kind.matches(Kind::OSError)
+    }
+
     pub(super) fn is_kind(&self, kind: Kind) -> bool {
         self.kind == kind
     }
