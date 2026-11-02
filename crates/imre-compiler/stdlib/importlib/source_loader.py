@@ -1,6 +1,7 @@
 """Load Python modules from registered code or filesystem source."""
 
 import sys
+import _frozen_importlib as _bootstrap
 
 from _imre_importlib import (
     cache_name as _cache_name,
@@ -111,8 +112,7 @@ class SourceFileLoader:
             name = self.name
         elif self.name != name:
             raise ImportError(f"loader for {self.name} cannot handle {name}", name=name)
-        from importlib._legacy_source_loader import load
-        return load(self, name, *args, **kwargs)
+        return _bootstrap._load_module_shim(self, name, *args, **kwargs)
 
     def get_filename(self, fullname=None):
         if fullname is not None and fullname != self.name:

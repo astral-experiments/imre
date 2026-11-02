@@ -1,9 +1,7 @@
 """Legacy direct loading with a SourceFileLoader, including replacement modules."""
 
 import sys
-import _frozen_importlib_external as _bootstrap_external
-from _frozen_importlib import ModuleSpec
-from _imre_importlib import warn_legacy_load
+from _imre_importlib import warn_legacy_load as _warn_legacy_load
 from os import altsep, sep
 
 
@@ -16,10 +14,12 @@ def _loader_spec(name, loader):
     file_location = not origin and hasattr(loader, "get_filename")
     if file_location:
         origin = "<unknown>"
-        try:
-            origin = loader.get_filename(name)
-        except ImportError:
-            pass
+        # spec_from_file_location probes again after spec_from_loader's dispatch.
+        if hasattr(loader, "get_filename"):
+            try:
+                origin = loader.get_filename(name)
+            except ImportError:
+                pass
 
     spec = ModuleSpec(name, loader, origin=origin)
     spec.has_location = bool(file_location)
@@ -45,8 +45,8 @@ def _move_to_end(spec):
     return module
 
 
-def load(loader, fullname):
-    warn_legacy_load()
+def _load_module_shim(loader, fullname):
+    _warn_legacy_load()
     spec = _loader_spec(fullname, loader)
     if fullname in sys.modules:
         module = sys.modules[fullname]
@@ -64,7 +64,11 @@ def load(loader, fullname):
     try:
         sys.modules[spec.name] = module
         try:
-            spec.loader.exec_module(module)
+            if spec.loader is None:
+                if spec.submodule_search_locations is None:
+                    raise ImportError("missing loader", name=spec.name)
+            else:
+                spec.loader.exec_module(module)
         except:
             try:
                 del sys.modules[spec.name]
