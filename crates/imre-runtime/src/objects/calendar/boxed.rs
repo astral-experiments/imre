@@ -117,13 +117,32 @@ impl Calendar {
         make_delta(mask, words).map(Self)
     }
 
-    pub(crate) fn shift_duration(&self, other: &Self, subtract: bool) -> Result<Self, Error> {
-        shift_delta(
-            self.delta_microseconds(),
-            other.delta_microseconds(),
-            subtract,
-        )
-        .map(Self)
+    /// Shift the receiver by a duration using the typed calendar's range and fold rules.
+    pub(crate) fn shift(&self, duration: &Self, subtract: bool) -> Result<Self, Error> {
+        shift(&self.0, duration.delta_microseconds(), subtract).map(Self)
+    }
+
+    /// Subtract two datetimes backed by naive or fixed-offset wall times.
+    pub(crate) fn datetime_difference(&self, other: &Self) -> Result<Self, Error> {
+        let parts = |dt: &Self| {
+            with(&dt.0, |v| match v {
+                Value::Date { local, zone, .. } => (*local, zone.as_ref().map(|z| offset(z))),
+                _ => unreachable!(),
+            })
+        };
+        let (a, az) = parts(self);
+        let (b, bz) = parts(other);
+        let difference = match (az, bz) {
+            (None, None) => a - b,
+            (Some(x), Some(y)) => (a - x) - (b - y),
+            _ => {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    "can't subtract offset-naive and offset-aware datetimes",
+                ));
+            }
+        };
+        try_owner(Value::Delta(difference)).map(Self)
     }
 
     pub(crate) fn negate_delta(&self) -> Result<Self, Error> {

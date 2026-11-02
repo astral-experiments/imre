@@ -70,6 +70,10 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             "datetime.datetime",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
             &[
+                "__add__",
+                "__radd__",
+                "__sub__",
+                "__rsub__",
                 "__reduce__",
                 "__reduce_ex__",
                 "__repr__",
@@ -397,6 +401,77 @@ fn nearest_quotient(ctx: &Context, numerator: Id, denominator: Id) -> Result<cra
     )))
 }
 
+fn datetime_arithmetic(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{name}' of 'datetime.datetime' object needs an argument"),
+        ));
+    };
+    let scalar = ctx.scalar_value(receiver);
+    let (value, tzinfo) = match ctx.heap.get(scalar) {
+        Value::Calendar { value, tzinfo, .. } if value.class() == "datetime" => {
+            (value.clone(), *tzinfo)
+        }
+        _ => {
+            let kind = match ctx.heap.get(receiver) {
+                Value::Calendar { value, .. } => format!("datetime.{}", value.class()),
+                _ => ctx.type_name(receiver).to_owned(),
+            };
+            return Err(Error::new(
+                "TypeError",
+                format!("descriptor '{name}' requires a 'datetime.datetime' object but received a '{kind}'"),
+            ));
+        }
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("wrapper {name}() takes no keyword arguments"),
+        ));
+    }
+    let &[other] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("expected 1 argument, got {}", args.len()),
+        ));
+    };
+    if matches!(name, "__sub__" | "__rsub__")
+        && let Some(other) = calendar(ctx, other, "datetime")
+    {
+        let result = if name == "__sub__" {
+            value.datetime_difference(&other)?
+        } else {
+            other.datetime_difference(&value)?
+        };
+        return Ok(store(ctx, result, NONE));
+    }
+    let Some(delta) = calendar(ctx, other, "timedelta") else {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    };
+    if name == "__rsub__" {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    }
+    let shifted = value.shift(&delta, name == "__sub__")?;
+    if receiver == scalar {
+        return Ok(store(ctx, shifted, tzinfo));
+    }
+    // CPython calls the subclass's constructor with all seven fields and the original tzinfo.
+    let class = ctx.exact_type(receiver)?;
+    let fields = shifted.fields();
+    let mut args: Vec<_> = fields[..7]
+        .iter()
+        .map(|&part| ctx.int(part as i64))
+        .collect();
+    args.push(tzinfo);
+    ctx.call(class, args, Vec::new())
+}
+
 fn delta_arithmetic(
     ctx: &mut Context,
     method: &str,
@@ -454,9 +529,9 @@ fn delta_arithmetic(
             return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
         };
         let result = match name {
-            "__sub__" => duration.shift_duration(&other, true),
-            "__rsub__" => other.shift_duration(&duration, true),
-            _ => duration.shift_duration(&other, false),
+            "__sub__" => duration.shift(&other, true),
+            "__rsub__" => other.shift(&duration, true),
+            _ => duration.shift(&other, false),
         }?;
         return Ok(store(ctx, result, NONE));
     }
@@ -629,6 +704,9 @@ pub(super) fn call(
                 "NotImplementedError",
                 format!("a tzinfo subclass must implement {name}()"),
             ))
+        }
+        "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
+            datetime_arithmetic(ctx, &method["datetime.".len()..], args, kwargs)
         }
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
