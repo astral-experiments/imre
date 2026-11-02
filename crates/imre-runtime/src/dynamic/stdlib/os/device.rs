@@ -1,7 +1,9 @@
-//! Linux device-number conversions used by os.major, os.minor and os.makedev.
+//! Linux device numbers and filesystem node creation.
 use num_traits::{Signed, ToPrimitive};
 
-use super::{Context, Error, Id, Result, stat};
+use super::{
+    Context, Error, Id, NONE, Result, builtins, c_int, c_path, directory_fd, posixpath, stat,
+};
 
 // glibc defines NODEV as (dev_t)-1. musl has no NODEV sentinel.
 const HAS_NODEV: bool = cfg!(target_env = "gnu");
@@ -84,4 +86,39 @@ pub(in crate::dynamic) fn call(
     } else {
         i64::from(part)
     }))
+}
+
+/// Create a filesystem node relative to the borrowed directory descriptor.
+pub(super) fn mknod(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["path", "mode", "device", "dir_fd"];
+    let [Some(path), mode, device, dir_fd] = (if args.len() > 3 {
+        builtins::bind_method_arguments("mknod", args, kwargs, names, 3)?
+    } else {
+        builtins::bind_builtin_arguments("mknod", args, kwargs, names, 1)?
+    }) else {
+        unreachable!("mknod requires a path")
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        "mknod: path should be string, bytes or os.PathLike",
+    )?;
+    let path = c_path(ctx, path, "mknod: embedded null character in path")?;
+    let mode = mode.map(|v| c_int(ctx, v)).transpose()?.unwrap_or(0o600) as libc::mode_t;
+    let device = device
+        .map(|v| device_number(ctx, v))
+        .transpose()?
+        .unwrap_or(0);
+    let dir_fd = directory_fd(ctx, dir_fd)?;
+    loop {
+        // SAFETY: path stays NUL-terminated for the call. The kernel validates the fd and mode.
+        if unsafe { libc::mknodat(dir_fd, path.as_ptr(), mode, device) } == 0 {
+            return Ok(NONE);
+        }
+        let err = std::io::Error::last_os_error();
+        if err.kind() != std::io::ErrorKind::Interrupted {
+            return Err(super::super::os_error(err));
+        }
+        ctx.dispatch_signals()?;
+    }
 }
