@@ -1,4 +1,4 @@
-from importlib.util import cache_from_source, module_from_spec, spec_from_file_location, spec_from_loader
+from importlib.util import cache_from_source, module_from_spec, resolve_name, spec_from_file_location, spec_from_loader
 import os
 import sys
 
@@ -13,6 +13,9 @@ class Loader:
     def create_module(self, spec):
         return None
 
+
+assert resolve_name('..util', 'importlib.metadata') == 'importlib.util'
+assert resolve_name('..', 'importlib.metadata') == 'importlib'
 
 loader = Loader()
 tag = sys.implementation.cache_tag

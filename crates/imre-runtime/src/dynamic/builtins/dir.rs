@@ -74,7 +74,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         Value::GenericAlias(alias) if alias.kind == AliasKind::Concatenate => {
             let origin = alias.origin;
             names.extend(alias.metadata().map(|(name, _)| name.to_owned()));
-            names.extend(["_inst", "_name", "copy_with", "__mro_entries__"].map(str::to_owned));
+            names.extend(
+                ["_inst", "_name", "copy_with", "__iter__", "__mro_entries__"].map(str::to_owned),
+            );
             let origin_names = call(ctx, &[origin], &[])?;
             ctx.heap.keep(origin_names);
             let marker = ctx.text("__");
@@ -106,7 +108,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         }
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
+        | Value::Coroutine { .. }
         | Value::Repeat(_)
+        | Value::DequeIterator { .. }
         | Value::Union(_)
         | Value::Dict(_)
         | Value::Tuple(_)
@@ -296,9 +300,13 @@ fn merge_tuple_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
 /// Collect a native typing alias's implemented attributes and its origin's non-dunder names.
 pub(in crate::dynamic) fn typing_alias_dir(ctx: &mut Context, alias: &Alias) -> Result<Id> {
     let fields = alias.instance_fields().map(|(name, _)| name);
-    let fields = fields
-        .into_iter()
-        .chain(["__class__", "__dir__", "__mro_entries__", "copy_with"]);
+    let fields = fields.into_iter().chain([
+        "__class__",
+        "__dir__",
+        "__iter__",
+        "__mro_entries__",
+        "copy_with",
+    ]);
     let origin_names = ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
         call(ctx, &[alias.origin], &[])
     })?;
@@ -356,6 +364,7 @@ fn merge_literal_names(ctx: &mut Context, alias: &Alias, origin_names: Id) -> Re
         "__format__",
         "__getstate__",
         "__init_subclass__",
+        "__iter__",
         "__mro_entries__",
     ]);
     merge_origin_names(ctx, fields, origin_names)
@@ -507,13 +516,6 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     .is_none_or(|entries| !entries.is_empty())
             {
                 names.insert("__annotations__".to_owned());
-            }
-            if scope
-                .class_namespace
-                .as_ref()
-                .is_some_and(|ns| ns.annotation_sites.is_some())
-            {
-                names.insert("__annotate_func__".to_owned());
             }
             if let Some(slots) = ctx.namespace_binding(ctx.scope_data(scope_id), "__slots__") {
                 match ctx.heap.get(slots) {

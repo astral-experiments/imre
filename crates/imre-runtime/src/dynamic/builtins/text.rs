@@ -14,7 +14,9 @@ use super::super::operators::append_rendered_text;
 use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
-use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
+use crate::objects::{
+    Case, python_whitespace, split_parts, translate, visit_line_fields as split_lines,
+};
 
 mod bytes_fields;
 mod maketrans;
@@ -63,7 +65,15 @@ pub(super) fn construct(
                     "int() base must be >= 2 and <= 36, or 0",
                 ));
             }
-            let number = match value.map(|id| ctx.heap.get(id)) {
+            let storage = if let Some(value) = value.filter(|_| base.is_none()) {
+                if let Some(integer) = ctx.numeric_int(value)? {
+                    return Ok(integer);
+                }
+                Some(ctx.scalar_value(value))
+            } else {
+                value
+            };
+            let number = match storage.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
                 Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
                 Some(Value::Bytes(b) | Value::ByteArray(b)) => {
@@ -74,8 +84,12 @@ pub(super) fn construct(
                         "int() can't convert non-string with explicit base",
                     ));
                 }
-                Some(Value::Float(f)) => crate::Int::new(crate::floats::float_to_integer(*f)?),
-                _ => ctx.as_int(value.unwrap())?,
+                _ => {
+                    return Err(type_error(format!(
+                        "int() argument must be a string, a bytes-like object or a real number, not '{}'",
+                        ctx.type_name(value.unwrap())
+                    )));
+                }
             };
             Ok(ctx.alloc(Value::Int(number)))
         }
@@ -219,6 +233,46 @@ pub(super) fn construct(
     }
 }
 
+pub(super) fn bytes_hex(
+    ctx: &mut Context,
+    owner: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (receiver, rest) = method_receiver_args(ctx, owner, "hex", args, &[])?;
+    let [sep, group] = bind_method_arguments("hex", rest, kwargs, ["sep", "bytes_per_sep"], 2)?;
+    let group = match group {
+        Some(id) => ctx.index_integer(id)?.big().to_i32().ok_or_else(|| {
+            Error::new("OverflowError", "Python int too large to convert to C int")
+        })?,
+        None => 1,
+    };
+    let separator = if let Some(sep) = sep {
+        let len = ctx.with_buffer_export(receiver, |ctx| super::call(ctx, "len", &[sep], &[]))?;
+        if ctx.as_integer(len)? != 1 {
+            return Err(Error::new("ValueError", "sep must be length 1."));
+        }
+        let byte = match ctx.heap.get(ctx.scalar_value(sep)) {
+            // A str subclass may override __len__. CPython still requires one-byte storage.
+            Value::Str(text) if text.chars().all(|ch| u32::from(ch) <= 0xff) => {
+                Some(text.as_bytes().first().copied().unwrap_or(0))
+            }
+            Value::Str(_) | Value::SurrogateStr(_) => None,
+            Value::Bytes(bytes) => Some(bytes.first().copied().unwrap_or(0)),
+            _ => return Err(type_error("sep must be str or bytes.")),
+        };
+        Some(
+            byte.filter(u8::is_ascii)
+                .ok_or_else(|| Error::new("ValueError", "sep must be ASCII."))?,
+        )
+    } else {
+        None
+    };
+    let bytes = ctx.bytes_like(receiver)?;
+    let output = crate::objects::hex_with_separator(bytes, separator, group)?;
+    Ok(ctx.text(output.into_string()))
+}
+
 /// Decode one contiguous ASCII buffer, accepting whitespace only between complete pairs.
 pub(super) fn fromhex(
     ctx: &mut Context,
@@ -359,6 +413,37 @@ pub(super) fn bytearray_method(
         return Ok(NONE);
     }
     let argument = one_positional_arg(name, args, kwargs)?;
+    if method == "resize" {
+        let size = crate::signed_index(&ctx.index_integer(argument)?).ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+        let size = usize::try_from(size).map_err(|_| {
+            Error::new(
+                "ValueError",
+                format!("Can only resize to positive sizes, got {size}"),
+            )
+        })?;
+        // __index__ may have resized the receiver or changed its active exports.
+        let storage = ctx.scalar_value(receiver);
+        let current = ctx.bytes_like(storage)?.len();
+        if size != current {
+            ctx.check_bytearray_resize(storage)?;
+            // CPython also needs room for the trailing NUL.
+            if size == isize::MAX as usize {
+                return Err(Error::new("MemoryError", ""));
+            }
+            let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            data.try_reserve_exact(size.saturating_sub(current))
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            data.resize(size, 0);
+        }
+        return Ok(NONE);
+    }
     let byte;
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];
@@ -1055,6 +1140,46 @@ fn percent_layout(
     Ok((width, precision))
 }
 
+/// Convert a Unicode `%c` argument without invoking string-subclass overrides.
+fn percent_char(ctx: &mut Context, arg: Id) -> Result<Id> {
+    if let Some(storage) = ctx.string_storage(arg) {
+        let len = match ctx.heap.get(storage) {
+            Value::Str(s) => s.chars().count(),
+            Value::SurrogateStr(s) => s.len(),
+            _ => unreachable!("string storage"),
+        };
+        return if len == 1 {
+            Ok(storage)
+        } else {
+            Err(type_error(format!(
+                "%c requires an int or a unicode character, not a string of length {len}"
+            )))
+        };
+    }
+    match ctx.index_integer(arg) {
+        Ok(n) => {
+            let point = n
+                .to_i64()
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|&p| p <= 0x10ffff)
+                .ok_or_else(|| Error::new("OverflowError", "%c arg not in range(0x110000)"))?;
+            Ok(ctx.text_codepoints(vec![point]))
+        }
+        Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+            let name = if let Some(class) = ctx.heap.get(arg).instance_class() {
+                let name = super::super::stdlib::qualified_type(ctx, class)?;
+                ctx.str_value(name)?
+            } else {
+                ctx.type_name(arg)
+            };
+            Err(type_error(format!(
+                "%c requires an int or a unicode character, not {name}"
+            )))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Old-style interpolation accepts a single operand, a positional tuple or a mapping.
 pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Result<Id> {
     let parsed = format
@@ -1133,10 +1258,21 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     continue;
                 }
                 let rendered: Cow<'_, str> = match spec.format_char {
-                    's' => {
-                        let text = super::call(ctx, "str", &[arg], &[])?;
+                    's' | 'c' => {
+                        let text = if spec.format_char == 'c' {
+                            percent_char(ctx, arg)?
+                        } else {
+                            super::call(ctx, "str", &[arg], &[])?
+                        };
                         if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(text)) {
-                            let (width, precision) = layout.unwrap_or_default();
+                            let (mut width, mut precision) = layout.unwrap_or_default();
+                            if spec.format_char == 'c' {
+                                precision = None;
+                                // A negated minimum Py_ssize_t gives no padding in CPython.
+                                if width == isize::MIN {
+                                    width = 0;
+                                }
+                            }
                             let field =
                                 &points[..precision.unwrap_or(points.len()).min(points.len())];
                             let padding = width.unsigned_abs().saturating_sub(field.len());
@@ -1167,15 +1303,6 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     }
                     'r' => ctx.checked_format(arg, true)?.into(),
                     'a' => ascii(&ctx.checked_format(arg, true)?).into(),
-                    'c' => match ctx.heap.get(arg) {
-                        Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
-                        _ => u32::try_from(ctx.as_integer(arg)?)
-                            .ok()
-                            .and_then(char::from_u32)
-                            .ok_or_else(|| Error::new("OverflowError", "%c arg not in range"))?
-                            .to_string()
-                            .into(),
-                    },
                     _ => {
                         return Err(Error::new(
                             "ValueError",
@@ -1548,9 +1675,67 @@ fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usiz
     Ok(ctx.text_codepoints(result))
 }
 
-/// Justify a Unicode string using Python code point widths, including lone surrogates.
+/// Left-justify a binary sequence after converting the width, which may mutate either argument.
+fn binary_ljust(
+    ctx: &mut Context,
+    owner: &str,
+    receiver: Id,
+    width: usize,
+    fill: Option<Id>,
+) -> Result<Id> {
+    let fill = if let Some(id) = fill {
+        let storage = ctx.scalar_value(id);
+        match ctx.heap.get(storage) {
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => match bytes.as_slice() {
+                [byte] => *byte,
+                _ => {
+                    return Err(type_error(format!(
+                        "ljust(): argument 2 must be a byte string of length 1, not a {} object of length {}",
+                        ctx.type_name(storage),
+                        bytes.len()
+                    )));
+                }
+            },
+            _ => {
+                let kind = if id == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(id)
+                };
+                return Err(type_error(format!(
+                    "ljust() argument 2 must be a byte string of length 1, not {kind:.50}"
+                )));
+            }
+        }
+    } else {
+        b' '
+    };
+    if owner == "bytes" && width > crate::MAX_BYTES_LEN {
+        return Err(Error::new("OverflowError", "byte string is too large"));
+    }
+    let storage = ctx.scalar_value(receiver);
+    let source = ctx.bytes_like(storage)?;
+    if owner == "bytes" && receiver == storage && width <= source.len() {
+        return Ok(receiver);
+    }
+    let len = source.len().max(width);
+    let mut padded = Vec::new();
+    padded
+        .try_reserve_exact(len)
+        .map_err(|_| crate::Error::allocation())?;
+    padded.extend_from_slice(source);
+    padded.resize(len, fill);
+    Ok(ctx.alloc(if owner == "bytes" {
+        Value::Bytes(padded)
+    } else {
+        Value::ByteArray(padded)
+    }))
+}
+
+/// Justify binary data by byte count or Unicode text by code point count.
 fn justify(
     ctx: &mut Context,
+    owner: &str,
     receiver: Id,
     name: &str,
     args: &[Id],
@@ -1558,7 +1743,7 @@ fn justify(
 ) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error(format!(
-            "str.{name}() takes no keyword arguments"
+            "{owner}.{name}() takes no keyword arguments"
         )));
     }
     let Some((&width, extra)) = args.split_first() else {
@@ -1573,6 +1758,9 @@ fn justify(
         )));
     }
     let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
+    if owner != "str" {
+        return binary_ljust(ctx, owner, receiver, width, extra.first().copied());
+    }
     let fill = if let Some(&id) = extra.first() {
         match ctx.heap.get(ctx.scalar_value(id)) {
             Value::Str(s) => s
@@ -1693,24 +1881,24 @@ pub(super) fn method(
         let format = ctx.str_value(format)?.to_owned();
         return percent(ctx, &format, value);
     }
-    let (&receiver, args) = args.split_first().ok_or_else(|| {
-        if name == "__new__" {
-            type_error("str.__new__(): not enough arguments")
-        } else if matches!(owner, "str" | "bytes" | "bytearray") {
-            type_error(format!("unbound method {owner}.{name}() needs an argument"))
-        } else {
-            type_error("missing string receiver")
-        }
-    })?;
-    if name == "__new__" {
-        return ctx.new_immutable_scalar(owner, receiver, args, kwargs);
-    }
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(type_error(format!(
+            "unbound method {owner}.{name}() needs an argument"
+        )));
+    };
     let original_receiver = receiver;
     let receiver = if owner == "bytes"
         || (owner == "bytearray"
             && matches!(
                 name,
-                "endswith" | "lstrip" | "rstrip" | "split" | "splitlines" | "startswith" | "strip"
+                "endswith"
+                    | "ljust"
+                    | "lstrip"
+                    | "rstrip"
+                    | "split"
+                    | "splitlines"
+                    | "startswith"
+                    | "strip"
             )) {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
@@ -1740,8 +1928,11 @@ pub(super) fn method(
             encode_text_object(ctx, receiver, encoding, errors)
         };
     }
-    if owner == "str" && matches!(name, "center" | "ljust" | "rjust") {
-        return justify(ctx, receiver, name, args, kwargs);
+    if matches!(
+        (owner, name),
+        ("str", "center" | "ljust" | "rjust") | ("bytes" | "bytearray", "ljust")
+    ) {
+        return justify(ctx, owner, original_receiver, name, args, kwargs);
     }
     if name == "zfill" {
         let width = one_positional_arg("str.zfill", args, kwargs)?;
@@ -2064,14 +2255,20 @@ pub(super) fn method(
         "isascii" => Some(str::is_ascii),
         "isalpha" => Some(crate::objects::python_isalpha),
         "isdigit" => Some(crate::objects::python_isdigit),
+        "isidentifier" => Some(crate::objects::python_isidentifier),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
         "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
     };
-    let mapping = matches!(name, "title" | "swapcase");
-    if predicate.is_some() || mapping {
+    let mapping = match name {
+        "lower" if owner == "str" => Some(Case::Lower),
+        "title" => Some(Case::Title),
+        "swapcase" => Some(Case::Swap),
+        _ => None,
+    };
+    if predicate.is_some() || mapping.is_some() {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "str.{name}() takes no keyword arguments"
@@ -2084,21 +2281,20 @@ pub(super) fn method(
             )));
         }
     }
-    if mapping {
-        let title = name == "title";
+    if let Some(case) = mapping {
         let storage = ctx.string_storage(receiver).unwrap();
         let mapped = match ctx.heap.get(storage) {
             Value::Str(text) if text.is_empty() => return ctx.heap.string_literal(""),
-            Value::Str(text) => Value::Str(crate::objects::case_map(text, title)?),
+            Value::Str(text) => Value::Str(crate::objects::case_map(text, case)?),
             Value::SurrogateStr(points) => {
-                Value::SurrogateStr(crate::objects::case_map_points(points, title)?)
+                Value::SurrogateStr(crate::objects::case_map_points(points, case)?)
             }
             _ => unreachable!(),
         };
         return ctx.heap.fresh_string(mapped);
     }
     if let Some(predicate) = predicate {
-        if matches!(name, "isascii" | "isalpha" | "isdigit")
+        if matches!(name, "isascii" | "isalpha" | "isdigit" | "isidentifier")
             && matches!(
                 ctx.heap.get(ctx.scalar_value(receiver)),
                 Value::SurrogateStr(_)
@@ -2407,12 +2603,11 @@ pub(super) fn method(
             split_lines(&source, keep, |field| values.push(ctx.text(field)));
             Ok(ctx.alloc(Value::List(values)))
         }
-        "capitalize" | "lower" | "upper" => {
+        "capitalize" | "upper" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
             Ok(ctx.text(match name {
                 "capitalize" => crate::objects::capitalize(&source)?.into_string(),
-                "lower" => source.to_lowercase(),
                 _ => source.to_uppercase(),
             }))
         }

@@ -67,15 +67,6 @@ def _namespace_spec(name, locations, module, source_globals):
     return spec
 
 
-def _resolve_relative(name, package):
-    rest = name.lstrip(".")
-    level = len(name) - len(rest)
-    bits = package.rsplit(".", level - 1)
-    if len(bits) < level:
-        raise ImportError("attempted relative import beyond top-level package")
-    return bits[0] + "." + rest if rest else bits[0]
-
-
 def import_module(name, package=None):
     """Import a module by absolute name or relative to package."""
     level = 0

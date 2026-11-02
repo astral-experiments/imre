@@ -1,0 +1,30 @@
+125 test.test_re.ReTests.test_possible_set_operations, occurrence 1
+CPython 5607950ef232dad16d75c0cf53101d9649d89115, Lib/test/test_re.py SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Original definition lines 1279-1351, bytes [68195,71707), SHA-256 9e543996d14d3e8327ba9f01d4ff8d325290a1b4d440817dc3bb05098ae29627.
+Indented suite bytes [68239,71707), SHA-256 ab9b63e208f54b070a7caae1597ddbda898c01c1a789bccb429ffb786f4b607a.
+Source behavior change #4373 at 2e6a1702f9a695ef5213ea2bdf2431ebd6cc4c1d. Selected public replay at 35e6ae8adbacac137fbf202ddebcf416c37b9dd1.
+Archive imre-re125-public-35e6-delta.tgz, SHA-256 879bcda5a6403f02869f2d095aa17a1a3084617ee0ace6fff0a6fc2161a38eba.
+
+stock at 5607950ef232dad16d75c0cf53101d9649d89115. Parent passed, zero subtests. Enclosing process exit 0.
+Ran 7 tests in 0.087s
+OK
+raw/stock/run.stdout, SHA-256 1bf28705a597097a55169d2fb6f14eed048ff8a20d960cdecf5b87881ae43c6b. Each event gives its raw line and half-open byte span.
+23 [1060,1127)	EVENT	START	'test.test_re.ReTests.test_possible_set_operations'	''
+24 [1127,1191)	EVENT	OK	'test.test_re.ReTests.test_possible_set_operations'	''
+25 [1191,1257)	EVENT	STOP	'test.test_re.ReTests.test_possible_set_operations'	''
+
+O0 at 35e6ae8adbacac137fbf202ddebcf416c37b9dd1. Parent passed, zero subtests. Enclosing process exit 1.
+Ran 7 tests in 77.870s
+FAILED (failures=1, errors=1)
+raw/O0/run.stdout, SHA-256 378a4ca1430804fc6861f9e85220f9daa9e8f1a83bb0c58f203ae2fde0552df6. Each event gives its raw line and half-open byte span.
+23 [1097,1164)	EVENT	START	'test.test_re.ReTests.test_possible_set_operations'	''
+24 [1164,1228)	EVENT	OK	'test.test_re.ReTests.test_possible_set_operations'	''
+25 [1228,1294)	EVENT	STOP	'test.test_re.ReTests.test_possible_set_operations'	''
+
+O3 at 35e6ae8adbacac137fbf202ddebcf416c37b9dd1. Parent passed, zero subtests. Enclosing process exit 1.
+Ran 7 tests in 40.389s
+FAILED (failures=1, errors=1)
+raw/O3/run.stdout, SHA-256 378a4ca1430804fc6861f9e85220f9daa9e8f1a83bb0c58f203ae2fde0552df6. Each event gives its raw line and half-open byte span.
+23 [1097,1164)	EVENT	START	'test.test_re.ReTests.test_possible_set_operations'	''
+24 [1164,1228)	EVENT	OK	'test.test_re.ReTests.test_possible_set_operations'	''
+25 [1228,1294)	EVENT	STOP	'test.test_re.ReTests.test_possible_set_operations'	''

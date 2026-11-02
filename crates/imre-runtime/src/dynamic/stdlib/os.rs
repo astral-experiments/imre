@@ -1,6 +1,14 @@
 #[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod device;
+#[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
+#[cfg(target_os = "linux")]
+mod vectored;
 pub(in crate::dynamic) mod scandir;
+#[cfg(target_os = "linux")]
+mod spawn_child;
+#[cfg(target_os = "linux")]
+mod spawn_plain;
 pub(in crate::dynamic) mod stat;
 #[cfg(target_os = "linux")]
 pub(super) mod statvfs;
@@ -22,8 +30,23 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
-                "rename", "rmdir", "stat", "symlink", "unlink", "utime",
+                "access",
+                "chmod",
+                "chown",
+                "link",
+                "lstat",
+                "mkdir",
+                "mkfifo",
+                #[cfg(target_os = "linux")]
+                "mknod",
+                "open",
+                "readlink",
+                "rename",
+                "rmdir",
+                "stat",
+                "symlink",
+                "unlink",
+                "utime",
             ][..],
         ),
         (
@@ -31,6 +54,7 @@ pub(in crate::dynamic) fn install_capabilities(
             &[
                 "chdir",
                 "chmod",
+                "chown",
                 "listdir",
                 "scandir",
                 "stat",
@@ -46,6 +70,7 @@ pub(in crate::dynamic) fn install_capabilities(
                 "access",
                 #[cfg(target_os = "macos")]
                 "chmod",
+                "chown",
                 "link",
                 "stat",
                 "utime",
@@ -95,9 +120,38 @@ pub(super) fn getcwd(ctx: &mut Context, as_bytes: bool) -> Result<Id> {
     Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?))
 }
 
-fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
+pub(super) fn fs_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     let path = posixpath::fspath(ctx, value)?;
     c_path(ctx, path, "embedded null byte")
+}
+
+/// Convert argv slots in order, allowing each path conversion to mutate the list.
+#[cfg(unix)]
+pub(super) fn fs_arguments(ctx: &mut Context, argv: Id, count: usize) -> Result<Vec<CString>> {
+    let mut arguments = Vec::new();
+    arguments
+        .try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        // A path conversion may mutate argv. Fetch and root just the current item.
+        let mark = ctx.heap.temporary_mark();
+        let index = ctx.int(i as i64);
+        let argument = ctx.get_item(argv, index).and_then(|item| {
+            ctx.heap.keep(item);
+            fs_argument(ctx, item)
+        });
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        if let Err(error) = &argument {
+            for root in error.roots() {
+                ctx.heap.keep(root);
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+        arguments.push(argument?);
+    }
+    Ok(arguments)
 }
 
 /// Encode a filesystem spelling without imposing a C string's NUL restriction.
@@ -139,6 +193,77 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     let fd = rustix::fs::memfd_create(name.as_c_str(), MemfdFlags::from_bits_retain(flags))
         .map_err(|e| super::os_error(e.into()))?;
     Ok(ctx.int(i64::from(fd.into_raw_fd())))
+}
+
+pub(super) fn is_process_function(name: &str) -> bool {
+    cfg!(unix) && matches!(name, "execv" | "WIFSTOPPED")
+}
+
+/// Spawn directly for plain arguments, or let the child run the captured Python callable.
+#[cfg(target_os = "linux")]
+pub(super) fn spawn_exec(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(path), Some(argv), Some(exec)] =
+        builtins::bind_builtin_arguments("_spawn_exec", args, kwargs, ["path", "args", "exec"], 3)?
+    else {
+        unreachable!("all three arguments are required")
+    };
+    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "can't fork at interpreter shutdown",
+        ));
+    }
+    super::audit::event(ctx, "os.fork", &[])?;
+    let pid = match spawn_plain::try_spawn(ctx, path, argv, exec)? {
+        Some(pid) => pid,
+        None => spawn_child::fork_for_child_callbacks(ctx)?,
+    };
+    Ok(ctx.int(i64::from(pid)))
+}
+
+/// Resolve arguments before auditing, then replace this process using the captured bytes.
+#[cfg(unix)]
+fn execv(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+    let &[path, argv] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("execv expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        "execv: path should be string, bytes or os.PathLike",
+    )?;
+    ctx.heap.keep(path);
+    let executable = c_path(ctx, path, "execv: embedded null character in path")?;
+    if !ctx.builtin_slot_accepts(argv, "list") && !ctx.builtin_slot_accepts(argv, "tuple") {
+        return Err(Error::new(
+            "TypeError",
+            "execv() arg 2 must be a tuple or list",
+        ));
+    }
+    let mark = ctx.heap.temporary_mark();
+    let count = match ctx.instance_len(argv) {
+        Ok(Some(count)) => count,
+        Ok(None) => ctx.sequence_at(argv, 0).map_or(0, |(length, _)| length),
+        // CPython replaces a failed length check with the empty-argv error.
+        Err(_) => 0,
+    };
+    ctx.discard_truth(mark);
+    if count == 0 {
+        return Err(Error::new("ValueError", "execv() arg 2 must not be empty"));
+    }
+    let arguments = fs_arguments(ctx, argv, count)?;
+    if arguments[0].as_bytes().is_empty() {
+        return Err(Error::new(
+            "ValueError",
+            "execv() arg 2 first element cannot be empty",
+        ));
+    }
+    let arguments = crate::objects::CStrings::new(arguments)?;
+    super::audit::event(ctx, "os.exec", &[path, argv, NONE])?;
+    Err(arguments.execv(&executable).into())
 }
 
 /// Read cryptographically secure bytes from the operating system.
@@ -349,9 +474,9 @@ pub(super) fn change_environment(
     // posix.putenv can run before os is imported. Preserve the initial dictionary first.
     let posix = ctx.module("posix")?;
     ctx.lookup_attr(posix, "environ")?;
-    let key = environment_argument(ctx, args[0])?;
+    let key = fs_argument(ctx, args[0])?;
     let value = if set {
-        Some(environment_argument(ctx, args[1])?)
+        Some(fs_argument(ctx, args[1])?)
     } else {
         None
     };
@@ -360,6 +485,9 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
+mod chown;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) use chown::owner_id;
 mod links;
 mod mkfifo;
 #[cfg(target_os = "linux")]
@@ -369,13 +497,18 @@ pub(in crate::dynamic) mod sysconf;
 mod truncate;
 mod unlink;
 mod utime;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if matches!(name, "getpgid" | "setpgid") {
+        return cfg!(unix);
+    }
     if name == "_exit" {
         return cfg!(unix);
     }
-    if name == "pread" {
+    if matches!(name, "device_encoding" | "fchdir" | "pread" | "pwrite" | "readinto") {
         return cfg!(unix);
     }
     matches!(
@@ -395,6 +528,9 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkfifo"
             | "chmod"
             | "fchmod"
+            | "chown"
+            | "fchown"
+            | "lchown"
             | "chdir"
             | "umask"
             | "utime"
@@ -405,6 +541,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "truncate"
             | "ftruncate"
             | "pipe"
+            | "openpty"
             | "read"
             | "write"
             | "close"
@@ -416,10 +553,53 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "link"
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux") && matches!(name, "posix_fallocate" | "sendfile"))
+        || (cfg!(target_os = "linux")
+            && matches!(
+                name,
+                "copy_file_range"
+                    | "get_terminal_size"
+                    | "preadv"
+                    | "pwritev"
+                    | "readv"
+                    | "writev"
+                    | "splice"
+                    | "lockf"
+                    | "mknod"
+                    | "posix_fadvise"
+                    | "posix_fallocate"
+                    | "sendfile"
+            ))
+}
+
+/// Retry a POSIX call that returns its error number directly instead of setting errno.
+#[cfg(target_os = "linux")]
+fn posix_file_call(ctx: &mut Context, mut call: impl FnMut() -> i32) -> Result<Id> {
+    loop {
+        match call() {
+            0 => return Ok(NONE),
+            libc::EINTR => ctx.dispatch_signals()?,
+            code => return Err(super::os_error(std::io::Error::from_raw_os_error(code))),
+        }
+    }
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
+#[cfg(target_os = "linux")]
+fn unsigned(ctx: &mut Context, id: Id, max: u64, kind: &str) -> Result<u64> {
+    use num_traits::{Signed, ToPrimitive};
+    let integer = ctx.index_integer(id)?;
+    let n = integer.big();
+    if n.is_negative() {
+        return Err(Error::new("ValueError", "Cannot convert negative int"));
+    }
+    n.to_u64().filter(|&n| n <= max).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            format!("Python int too large for C unsigned {kind}"),
+        )
+    })
+}
+
 pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
@@ -427,7 +607,38 @@ pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
 }
 
-fn ssize_t(ctx: &mut Context, value: Id) -> Result<isize> {
+fn readinto(ctx: &mut Context, fd: i32, dst: Id) -> Result<Id> {
+    let span = match ctx.writable_byte_span(dst) {
+        Ok(span) => span,
+        Err(error) if matches!(error.kind.as_ref(), "BufferError" | "ValueError") => None,
+        Err(error) => return Err(error),
+    };
+    let Some((storage, range)) = span else {
+        let kind = if dst == NONE {
+            "None"
+        } else {
+            ctx.type_name(dst)
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("readinto() argument 2 must be read-write bytes-like object, not {kind}"),
+        ));
+    };
+    // Keep the view and its storage exported while an interrupted read runs a handler.
+    ctx.with_buffer_export(dst, |ctx| {
+        ctx.with_buffer_export(storage, |ctx| {
+            loop {
+                let bytes = ctx.writable_storage_bytes(storage)?;
+                if let Some(count) = native::try_readinto(fd, &mut bytes[range.clone()])? {
+                    return Ok(ctx.int(count as i64));
+                }
+                ctx.dispatch_signals()?;
+            }
+        })
+    })
+}
+
+pub(super) fn ssize_t(ctx: &mut Context, value: Id) -> Result<isize> {
     crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
         Error::new(
             "OverflowError",
@@ -440,6 +651,28 @@ fn file_offset(ctx: &mut Context, value: Id) -> Result<i64> {
     ctx.index_integer(value)?
         .to_i64()
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C long"))
+}
+
+/// Hold the buffer export over offset conversion and interrupted write retries.
+fn write_fd(ctx: &mut Context, fd: i32, data: Id, offset: Option<Id>) -> Result<Id> {
+    ctx.with_buffer_export(data, |ctx| {
+        let offset = if let Some(offset) = offset {
+            // PyBUF_SIMPLE acquisition precedes the offset's __index__ call.
+            ctx.check_buffer_exporter(data)?;
+            ctx.native_buffer_bytes(data)?;
+            Some(file_offset(ctx, offset)?)
+        } else {
+            None
+        };
+        loop {
+            // Conversion or signal handlers can change bytes without resizing.
+            let bytes = ctx.native_buffer_bytes(data)?;
+            if let Some(count) = native::try_write(fd, bytes, offset)? {
+                return Ok(ctx.int(count as i64));
+            }
+            ctx.dispatch_signals()?;
+        }
+    })
 }
 
 enum PathArg {
@@ -455,22 +688,33 @@ fn path_or_fd(
     allow_fd: bool,
     warn_bool_fd: fn(&mut Context, Id) -> Result<()>,
 ) -> Result<(PathArg, Id)> {
+    let kinds = if allow_fd {
+        "string, bytes, os.PathLike or integer"
+    } else {
+        "string, bytes or os.PathLike"
+    };
+    convert_path(ctx, name, path, kinds, allow_fd.then_some(warn_bool_fd))
+}
+
+// An optional descriptor converter keeps __index__ errors distinct from path-type diagnostics.
+fn convert_path(
+    ctx: &mut Context,
+    name: &str,
+    path: Id,
+    kinds: &str,
+    fd_warning: Option<fn(&mut Context, Id) -> Result<()>>,
+) -> Result<(PathArg, Id)> {
     let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(path)),
         Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
     );
-    if allow_fd
+    if let Some(warn_bool_fd) = fd_warning
         && !spelling
         && let Some(index) = ctx.index_value(path)?
     {
         warn_bool_fd(ctx, path)?;
         return Ok((PathArg::Fd(native::directory_fd_number(&index)?), path));
     }
-    let kinds = if allow_fd {
-        "string, bytes, os.PathLike or integer"
-    } else {
-        "string, bytes or os.PathLike"
-    };
     let filename = posixpath::path_arg(ctx, path, &format!("{name}: path should be {kinds}"))?;
     let pathname = c_path(
         ctx,
@@ -723,6 +967,16 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "device_encoding" {
+        let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
+            unreachable!("device_encoding requires a descriptor");
+        };
+        return Ok(match native::device_encoding(c_int(ctx, fd)?) {
+            None => NONE,
+            Some(std::borrow::Cow::Borrowed(name)) => ctx.heap.code_name(name),
+            Some(std::borrow::Cow::Owned(name)) => ctx.text(name),
+        });
+    }
     if name == "access" {
         return access(ctx, args, kwargs);
     }
@@ -731,6 +985,9 @@ pub(super) fn descriptor(
     }
     if name == "symlink" {
         return links::symlink(ctx, args, kwargs);
+    }
+    if matches!(name, "chown" | "fchown" | "lchown") {
+        return chown::call(ctx, name, args, kwargs);
     }
     if name == "link" {
         return links::link(ctx, args, kwargs);
@@ -744,6 +1001,26 @@ pub(super) fn descriptor(
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
     }
+    if name == "fchdir" {
+        let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
+            unreachable!("fchdir requires a descriptor");
+        };
+        stat::warn_bool_fd(ctx, fd)?;
+        let fd = super::select::fd(ctx, fd)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        super::audit::event(ctx, "os.chdir", &[audit_fd])?;
+        loop {
+            // SAFETY: fchdir borrows the descriptor and checks it in the kernel.
+            if unsafe { libc::fchdir(fd) } == 0 {
+                return Ok(NONE);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(super::os_error(error));
+            }
+            ctx.dispatch_signals()?;
+        }
+    }
     if name == "chdir" {
         return chdir(ctx, args, kwargs);
     }
@@ -755,6 +1032,10 @@ pub(super) fn descriptor(
     }
     if name == "fchmod" {
         return chmod::fchmod(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "mknod" {
+        return device::mknod(ctx, args, kwargs);
     }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);
@@ -769,8 +1050,89 @@ pub(super) fn descriptor(
         let previous = unsafe { libc::umask(mask as libc::mode_t) };
         return Ok(ctx.int(i64::from(previous)));
     }
+    #[cfg(unix)]
+    if name == "getpgid" {
+        let [Some(pid)] = builtins::bind_builtin_arguments(name, args, kwargs, ["pid"], 1)? else {
+            unreachable!("pid is required")
+        };
+        let group = native::getpgid(c_int(ctx, pid)?)?;
+        return Ok(ctx.int(i64::from(group)));
+    }
+    #[cfg(unix)]
+    if name == "setpgid" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "posix.setpgid() takes no keyword arguments",
+            ));
+        }
+        let [pid, group] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("setpgid expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        native::setpgid(c_int(ctx, *pid)?, c_int(ctx, *group)?)?;
+        return Ok(NONE);
+    }
     if name == "open" {
         return open(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if matches!(name, "copy_file_range" | "splice") {
+        let [
+            Some(src),
+            Some(dst),
+            Some(count),
+            offset_src,
+            offset_dst,
+            flags,
+        ] = (if name == "splice" {
+            builtins::bind_builtin_arguments(
+                name,
+                args,
+                kwargs,
+                ["src", "dst", "count", "offset_src", "offset_dst", "flags"],
+                3,
+            )?
+        } else {
+            let [src, dst, count, offset_src, offset_dst] = builtins::bind_builtin_arguments(
+                name,
+                args,
+                kwargs,
+                ["src", "dst", "count", "offset_src", "offset_dst"],
+                3,
+            )?;
+            [src, dst, count, offset_src, offset_dst, None]
+        })
+        else {
+            unreachable!("both descriptors and a count are required")
+        };
+        let src = c_int(ctx, src)?;
+        let dst = c_int(ctx, dst)?;
+        let count = ssize_t(ctx, count)?;
+        // Argument Clinic converts flags before splice checks count or converts offsets.
+        let operation = if name == "splice" {
+            let flags = flags
+                .map(|id| unsigned(ctx, id, u64::from(u32::MAX), "int"))
+                .transpose()?
+                .unwrap_or(0);
+            native::RangeTransfer::Splice(flags as u32)
+        } else {
+            native::RangeTransfer::CopyFileRange
+        };
+        let count = usize::try_from(count)
+            .map_err(|_| Error::new("ValueError", "negative value for 'count' not allowed"))?;
+        let mut offset = |value| match value {
+            None | Some(NONE) => Ok(None),
+            Some(value) => file_offset(ctx, value).map(Some),
+        };
+        let offset_src = offset(offset_src)?;
+        let offset_dst = offset(offset_dst)?;
+        let copied = operation.run(src, dst, count, offset_src, offset_dst, || {
+            ctx.dispatch_signals()
+        })?;
+        return Ok(ctx.int(copied as i64));
     }
     #[cfg(target_os = "linux")]
     if name == "sendfile" {
@@ -835,12 +1197,15 @@ pub(super) fn descriptor(
         unsafe { libc::_exit(status) }
     }
     #[cfg(unix)]
-    if name == "waitstatus_to_exitcode" {
+    if matches!(name, "WIFSTOPPED" | "waitstatus_to_exitcode") {
         let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
         else {
             unreachable!("status is required")
         };
         let status = c_int(ctx, status)?;
+        if name == "WIFSTOPPED" {
+            return Ok(builtins::boolean(libc::WIFSTOPPED(status)));
+        }
         let code = if libc::WIFEXITED(status) {
             libc::WEXITSTATUS(status)
         } else if libc::WIFSIGNALED(status) {
@@ -868,6 +1233,70 @@ pub(super) fn descriptor(
         ));
     }
     #[cfg(target_os = "linux")]
+    if name == "get_terminal_size" {
+        let fd = match args {
+            [] => libc::STDOUT_FILENO,
+            [fd] => c_int(ctx, *fd)?,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "get_terminal_size expected at most 1 argument, got {}",
+                        args.len()
+                    ),
+                ));
+            }
+        };
+        let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+        // SAFETY: TIOCGWINSZ writes a winsize on success. The kernel validates the borrowed fd.
+        if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, size.as_mut_ptr()) } < 0 {
+            return Err(super::os_error(std::io::Error::last_os_error()));
+        }
+        // SAFETY: the successful ioctl initialized size.
+        let size = unsafe { size.assume_init() };
+        let columns = ctx.int(i64::from(size.ws_col));
+        let lines = ctx.int(i64::from(size.ws_row));
+        return Ok(super::fixed_structseq::record(
+            ctx,
+            super::fixed_structseq::TERMINAL_SIZE,
+            vec![columns, lines],
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "ptsname" {
+        let [fd] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.ptsname() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        stat::warn_bool_fd(ctx, *fd)?;
+        let fd = super::select::fd(ctx, *fd)?;
+        let bytes = native::ptsname(fd).map_err(super::os_error)?;
+        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        return Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix_fadvise" {
+        let [fd, offset, length, advice] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix_fadvise expected 4 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let length = file_offset(ctx, *length)?;
+        let advice = c_int(ctx, *advice)?;
+        // SAFETY: posix_fadvise borrows the fd and takes the range and advice by value.
+        return posix_file_call(ctx, || unsafe {
+            libc::posix_fadvise(fd, offset, length, advice)
+        });
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix_fallocate" {
         let [fd, offset, length] = args else {
             return Err(Error::new(
@@ -878,24 +1307,24 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         let offset = file_offset(ctx, *offset)?;
         let length = file_offset(ctx, *length)?;
-        loop {
-            // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
-            match unsafe { libc::posix_fallocate(fd, offset, length) } {
-                0 => return Ok(NONE),
-                libc::EINTR => ctx.dispatch_signals()?,
-                code => return Err(super::os_error(std::io::Error::from_raw_os_error(code))),
-            }
-        }
+        // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
+        return posix_file_call(ctx, || unsafe { libc::posix_fallocate(fd, offset, length) });
     }
-    if name == "getppid" {
+    #[cfg(unix)]
+    if matches!(name, "getpgrp" | "getppid") {
         if !args.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!("posix.getppid() takes no arguments ({} given)", args.len()),
+                format!("posix.{name}() takes no arguments ({} given)", args.len()),
             ));
         }
-        // SAFETY: getppid reads the calling process's parent PID and takes no arguments.
-        return Ok(ctx.int(i64::from(unsafe { libc::getppid() })));
+        // SAFETY: both calls read identifiers for the current process and take no pointers.
+        let id = if name == "getpgrp" {
+            unsafe { libc::getpgrp() }
+        } else {
+            unsafe { libc::getppid() }
+        };
+        return Ok(ctx.int(i64::from(id)));
     }
     if name == "kill" {
         let [pid, signal] = args else {
@@ -927,6 +1356,10 @@ pub(super) fn descriptor(
         let sid = native::getsid(c_int(ctx, *pid)?)?;
         return Ok(ctx.int(i64::from(sid)));
     }
+    #[cfg(unix)]
+    if name == "execv" {
+        return execv(ctx, args);
+    }
     if name == "waitpid" {
         let [pid, options] = args else {
             return Err(Error::new(
@@ -946,36 +1379,68 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
-    if name == "pipe" {
-        if !args.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                format!("posix.pipe() takes no arguments ({} given)", args.len()),
-            ));
-        }
+    if matches!(name, "openpty" | "pipe" | "pipe2") {
         let mut result = Vec::new();
         result
             .try_reserve_exact(2)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for fd in native::pipe(libc::O_CLOEXEC)? {
+        let fds = match (name, args) {
+            ("openpty", []) => native::openpty()?,
+            ("pipe", []) => native::pipe(libc::O_CLOEXEC)?,
+            ("pipe2", [flags]) => native::pipe(c_int(ctx, *flags)?)?,
+            _ => {
+                let arity = if name != "pipe2" {
+                    "no arguments"
+                } else {
+                    "exactly one argument"
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!("posix.{name}() takes {arity} ({} given)", args.len()),
+                ));
+            }
+        };
+        for fd in fds {
             result.push(ctx.int(i64::from(fd)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
-    if name == "pread" {
-        let [fd, length, offset] = args else {
+    #[cfg(target_os = "linux")]
+    if matches!(name, "preadv" | "pwritev") {
+        let [fd, buffers, offset, rest @ ..] = args else {
             return Err(Error::new(
                 "TypeError",
-                format!("pread expected 3 arguments, got {}", args.len()),
+                format!("{name} expected at least 3 arguments, got {}", args.len()),
+            ));
+        };
+        if rest.len() > 1 {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected at most 4 arguments, got {}", args.len()),
+            ));
+        }
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let flags = rest.first().map(|id| c_int(ctx, *id)).transpose()?.unwrap_or(0);
+        return vectored::transfer(ctx, fd, *buffers, name, Some((offset, flags)));
+    }
+    if matches!(name, "pread" | "pwrite") {
+        let [fd, data, offset] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected 3 arguments, got {}", args.len()),
             ));
         };
         let fd = c_int(ctx, *fd)?;
-        let length = ssize_t(ctx, *length)?;
+        if name == "pwrite" {
+            return write_fd(ctx, fd, *data, Some(*offset));
+        }
+        let length = ssize_t(ctx, *data)?;
         let offset = file_offset(ctx, *offset)?;
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    if matches!(name, "read" | "write") {
+    if matches!(name, "read" | "readinto" | "write") || (cfg!(target_os = "linux") && matches!(name, "readv" | "writev")) {
         let [fd, data] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -983,25 +1448,18 @@ pub(super) fn descriptor(
             ));
         };
         let fd = c_int(ctx, *fd)?;
+        #[cfg(target_os = "linux")]
+        if matches!(name, "readv" | "writev") {
+            return vectored::transfer(ctx, fd, *data, name, None);
+        }
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
             let bytes = native::read(fd, length, None, || ctx.dispatch_signals())?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
+        } else if name == "readinto" {
+            readinto(ctx, fd, *data)
         } else {
-            // Keep the exporter alive and its size fixed while a handler runs.
-            // Reborrow on retry so in-place changes made by the handler are visible.
-            ctx.with_buffer_export(*data, |ctx| {
-                loop {
-                    let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
-                        Value::Array(array) => array.as_bytes(),
-                        _ => ctx.bytes_like(*data)?,
-                    };
-                    if let Some(count) = native::try_write(fd, bytes)? {
-                        return Ok(ctx.int(count as i64));
-                    }
-                    ctx.dispatch_signals()?;
-                }
-            })
+            write_fd(ctx, fd, *data, None)
         };
     }
     if name == "closerange" {
@@ -1014,6 +1472,30 @@ pub(super) fn descriptor(
         let low = c_int(ctx, *low)?;
         let high = c_int(ctx, *high)?;
         native::close_range(low, high);
+        return Ok(NONE);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "lockf" {
+        let [fd, command, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("lockf expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let command = c_int(ctx, *command)?;
+        let length = file_offset(ctx, *length)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        let audit_command = ctx.int(i64::from(command));
+        let audit_length = ctx.int(length);
+        super::audit::event(ctx, "os.lockf", &[audit_fd, audit_command, audit_length])?;
+        if let Err(error) = native::lockf(fd, command, length) {
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                // A raising signal handler takes precedence over EINTR. Do not retry the lock.
+                ctx.dispatch_signals()?;
+            }
+            return Err(super::os_error(error));
+        }
         return Ok(NONE);
     }
     if name == "ftruncate" {

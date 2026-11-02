@@ -4,6 +4,7 @@ use super::calls::parameter;
 use super::*;
 use crate::ir::PathOperation;
 
+mod glob;
 mod samefile;
 mod segments;
 mod stat;
@@ -378,9 +379,9 @@ impl Checker<'_> {
                 }
                 self.graph
                     .checked_missing_argument(self.module, call.range());
-                return Ok(self.bad_relative_argument(
-                    values,
+                return Ok(calls::type_error(
                     result,
+                    values,
                     format!("PurePath.{name}() missing 1 required positional argument: 'other'"),
                 ));
             }
@@ -392,39 +393,7 @@ impl Checker<'_> {
                     Some(Expr::boolean(false)),
                 ));
             }
-            let arguments =
-                self.arguments_with(call, &params, Some(receiver), |checker, i, arg| {
-                    if i != 0 {
-                        return checker.expr_expected(arg, Type::Bool);
-                    }
-                    let value = checker.expr(arg)?;
-                    if value.ty.is_path()
-                        || matches!(
-                            value.ty,
-                            Type::Bytes | Type::None | Type::Int | Type::Float | Type::Bool
-                        )
-                    {
-                        return Ok(value);
-                    }
-                    let text = checker.path_text(value, arg)?;
-                    Ok(if let Type::PurePath(flavor) = ty {
-                        let base = operation(PathOperation::PureNew(flavor), ty, vec![]);
-                        operation(PathOperation::Join, ty, vec![base, text])
-                    } else {
-                        operation(PathOperation::New, Type::Path, vec![text])
-                    })
-                })?;
-            let other = arguments.values[arguments.order[1]].ty;
-            if !other.is_path() {
-                let kind = if other == Type::None {
-                    "NoneType".to_owned()
-                } else {
-                    self.type_name(other)
-                };
-                return Ok(self.bad_relative_argument(arguments.values, result, format!(
-                    "argument should be a str or an os.PathLike object where __fspath__ returns a str, not '{kind}'")));
-            }
-            return Ok(self.ordered_path_operation(op, result, arguments));
+            return self.path_method_with_operand(call, receiver, &params, op, result);
         }
         if matches!(name, "match" | "full_match") {
             let full = name == "full_match";
@@ -442,24 +411,13 @@ impl Checker<'_> {
                     Some(default),
                 ),
             ];
-            let arguments =
-                self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
-                    if index == 0 {
-                        let pattern = checker.expr(value)?;
-                        if pattern.ty.is_path() {
-                            Ok(pattern)
-                        } else {
-                            checker.path_text(pattern, value)
-                        }
-                    } else {
-                        checker.expr_expected(value, optional_bool)
-                    }
-                })?;
-            return Ok(self.ordered_path_operation(
+            return self.path_method_with_operand(
+                call,
+                receiver,
+                &params,
                 PathOperation::Match { full },
                 Type::Bool,
-                arguments,
-            ));
+            );
         }
         if matches!(name, "joinpath" | "with_segments") {
             return self.path_segments(call, receiver.ty, Some((receiver, name == "joinpath")));
@@ -700,15 +658,9 @@ impl Checker<'_> {
                 }
             })?;
         if let PathOperation::Link(link) = kind {
-            let mut scope = calls::ArgumentScope::default();
             // The Python method receives every expression before os.link/os.symlink
             // asks for a filename or the truth of target_is_directory.
-            let values: Vec<_> = arguments
-                .values
-                .into_iter()
-                .map(|v| scope.hold(self, v))
-                .collect();
-            let mut args: Vec<_> = arguments.order.iter().map(|&i| values[i].clone()).collect();
+            let (mut scope, mut args) = self.held_path_arguments(arguments);
             let symlink = matches!(link, ir::PathLink::Symlink);
             let operation_name = if symlink { "symlink" } else { "link" };
             let source = self.syscall_fspath(args[1].clone(), &call.func, operation_name, "src")?;
@@ -855,10 +807,19 @@ impl Checker<'_> {
         Ok(self.ordered_path_operation(PathOperation::TemporaryFile, Type::BinaryIO, args))
     }
 
-    /// A temporary-directory manager exists only at this immediate `with`
-    /// boundary. Its owned name is retained privately for finally cleanup.
+    /// Lower the keyword-only path fast path. The bundled class owns argument
+    /// binding and cleanup policy for the full constructor.
     pub(super) fn temporary_directory(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        calls::reject_unpacking(call, self.source)?;
+        if !call.arguments.args.is_empty()
+            || call.arguments.keywords.iter().any(|keyword| {
+                matches!(
+                    keyword.arg.as_deref(),
+                    None | Some("ignore_cleanup_errors" | "delete")
+                )
+            })
+        {
+            return Err(self.scoped_builtin_error("tempfile.TemporaryDirectory", call));
+        }
         let directory = self.types.optional(Type::Str);
         let mut params = vec![
             parameter("dir", directory, Some(Expr::absent(directory))),
@@ -892,36 +853,113 @@ impl Checker<'_> {
         Ok(self.ordered_path_operation(PathOperation::TemporaryDirectory, Type::Str, arguments))
     }
 
-    fn bad_relative_argument(&mut self, values: Vec<Expr>, ty: Type, message: String) -> Expr {
-        // Python evaluates the receiver and all arguments before it checks the
-        // signature or attempts to construct a path from the 'other' value.
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        for value in values {
-            let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
+    fn path_method_with_operand(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        params: &[calls::Parameter],
+        op: PathOperation,
+        result: Type,
+    ) -> Result<Expr, String> {
+        let arguments =
+            self.arguments_with(call, params, Some(receiver), |checker, index, value| {
+                if index == 0 {
+                    checker.expr(value)
+                } else {
+                    checker.expr_expected(value, params[index].ty)
+                }
+            })?;
+        // pathlib evaluates every argument before inspecting the operand's path protocol.
+        let (scope, args) = self.held_path_arguments(arguments);
+        let at = call
+            .arguments
+            .find_argument_value(&params[0].name, 0)
+            .unwrap();
+        Ok(scope.finish(self.path_operand_operation(op, result, &args, args[1].clone(), at)?))
+    }
+
+    fn path_operand_operation(
+        &mut self,
+        op: PathOperation,
+        result: Type,
+        args: &[Expr],
+        other: Expr,
+        at: &ast::Expr,
+    ) -> Result<Expr, String> {
+        if let Some(selected) = self.map_path_protocol_arms(&other, at, |checker, arm| {
+            checker.path_operand_operation(op, result, args, arm, at)
+        })? {
+            return Ok(selected);
         }
-        body.push(Statement::Raise(Some(Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("TypeError").unwrap(),
-                message: Some(Box::new(unpacking::string(&message))),
-            },
-        })));
-        let unreachable = if ty == Type::Bool {
-            Expr::boolean(false)
+        let mut args = args.to_vec();
+        args[1] = if other.ty.is_path() {
+            other
         } else {
-            self.local(clear[0])
+            if let Type::Class(id) = other.ty
+                && self.classes.concrete_layouts(id).into_iter().any(|layout| {
+                    let class = &self.classes.declarations.definitions[layout];
+                    self.classes.methods[layout].contains_key("__getattr__")
+                        || self.classes.methods[layout].contains_key("__getattribute__")
+                        || class
+                            .fields
+                            .iter()
+                            .any(|field| field.name == "with_segments")
+                        || std::iter::once(&layout).chain(&class.bases).any(|&base| {
+                            inspect::class_has_name(
+                                &self.classes.declarations.definitions[base],
+                                "with_segments",
+                            )
+                        })
+                })
+            {
+                // pathlib keeps objects with with_segments as-is, even if they also define __fspath__.
+                return Err(error(
+                    self.source,
+                    at,
+                    "a custom path with with_segments requires boxed execution",
+                ));
+            }
+            let ty = args[0].ty;
+            let text = match other.ty {
+                Type::Class(_)
+                | Type::Str
+                | Type::StrLiteral(_)
+                | Type::Bytes
+                | Type::None
+                | Type::Int
+                | Type::Float
+                | Type::Bool => self.constructor_part(other, at, ty)?,
+                _ => self.path_text(other, at)?,
+            };
+            if matches!(op, PathOperation::Match { .. }) {
+                // The text matcher parses a spelling in the receiver's flavour.
+                text
+            } else if let Type::PurePath(flavor) = ty {
+                let base = operation(PathOperation::PureNew(flavor), ty, vec![]);
+                operation(PathOperation::Join, ty, vec![base, text])
+            } else {
+                operation(PathOperation::New, Type::Path, vec![text])
+            }
         };
-        Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(unreachable),
-                clear,
-            },
-        }
+        Ok(operation(op, result, args))
+    }
+
+    fn held_path_arguments(
+        &mut self,
+        arguments: ir::CallArgs,
+    ) -> (calls::ArgumentScope, Vec<Expr>) {
+        let mut scope = calls::ArgumentScope::default();
+        let values: Vec<_> = arguments
+            .values
+            .into_iter()
+            .map(|v| scope.hold(self, v))
+            .collect();
+        let args = arguments
+            .order
+            .into_iter()
+            .map(|i| values[i].clone())
+            .collect();
+        (scope, args)
     }
 
     fn ordered_path_operation(
@@ -930,26 +968,8 @@ impl Checker<'_> {
         returns: Type,
         arguments: ir::CallArgs,
     ) -> Expr {
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        for value in arguments.values {
-            let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
-        }
-        let args: Vec<_> = arguments
-            .order
-            .iter()
-            .map(|&index| self.local(clear[index]))
-            .collect();
-        Expr {
-            ty: returns,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(operation(kind, returns, args)),
-                clear,
-            },
-        }
+        let (scope, args) = self.held_path_arguments(arguments);
+        scope.finish(operation(kind, returns, args))
     }
 
     /// Construct the iterator at the call site. Globs bind and validate their pattern
@@ -1001,17 +1021,13 @@ impl Checker<'_> {
         ];
         let args = self.arguments_with(call, &params, Some(receiver), |checker, i, value| {
             if i == 0 {
-                checker.path_argument(value)
+                checker.expr(value)
             } else {
                 checker.expr_expected(value, params[i].ty)
             }
         })?;
-        Ok(self.ordered_path_operation(
-            PathOperation::Glob {
-                recursive: name == "rglob",
-            },
-            self.types.cursor(Type::Path),
-            args,
-        ))
+        let (scope, args) = self.held_path_arguments(args);
+        let pattern = call.arguments.find_argument_value("pattern", 0).unwrap();
+        Ok(scope.finish(self.glob_pattern(&args, args[1].clone(), name == "rglob", pattern)?))
     }
 }

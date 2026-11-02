@@ -1,5 +1,6 @@
 import subprocess as _subprocess
 from subprocess import *
+from subprocess import _args_from_interpreter_flags, _optim_args_from_interpreter_flags
 
 
 class ShellPath:
@@ -7,7 +8,14 @@ class ShellPath:
         raise AssertionError("shell should reject the path before calling __fspath__")
 
 
+def interpreter_flags():
+    assert "_args_from_interpreter_flags" not in _subprocess.__all__
+    assert "_optim_args_from_interpreter_flags" not in _subprocess.__all__
+    print(_optim_args_from_interpreter_flags(), _args_from_interpreter_flags())
+
+
 def current():
+    interpreter_flags()
     print(_subprocess.__all__)
     for name in _subprocess.__all__:
         assert globals()[name] is getattr(_subprocess, name)

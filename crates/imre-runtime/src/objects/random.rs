@@ -143,8 +143,17 @@ pub(crate) fn random_below(stop: &BigUint) -> Result<BigUint> {
     shared().below(stop)
 }
 
+static STATE: OnceLock<Mutex<Generator>> = OnceLock::new();
+
+/// Reseed the module generator in a fork child if it was used in the parent.
+#[cfg(target_os = "linux")]
+pub(crate) fn reseed_after_fork() {
+    if STATE.get().is_some() {
+        imre_random_seed_none();
+    }
+}
+
 fn shared() -> MutexGuard<'static, Generator> {
-    static STATE: OnceLock<Mutex<Generator>> = OnceLock::new();
     STATE
         .get_or_init(|| Mutex::new(Generator::from_entropy()))
         .lock()

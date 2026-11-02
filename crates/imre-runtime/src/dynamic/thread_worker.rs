@@ -163,6 +163,24 @@ impl Context {
             self.workers.reporting = Some((scope, self.scope_name(scope, "excepthook")));
         }
     }
+
+    /// A surviving main thread keeps its pthread identity, but receives a new Linux TID.
+    #[cfg(target_os = "linux")]
+    pub(super) fn refresh_main_thread_after_fork(&mut self) {
+        if let Some((_, main)) = self.workers.main {
+            let tid = self.int(crate::objects::locks::native_thread_id() as i64);
+            if let Err(error) = self.set_attr(main, "_native_id", tid) {
+                super::unraisable::report(
+                    self,
+                    error,
+                    false,
+                    None,
+                    "Exception ignored updating the main thread after fork",
+                );
+            }
+        }
+    }
+
     /// The worker owns no parent-heap pointers. Complete the default Thread.run
     /// cleanup on the interpreter thread, also for a finished but unjoined worker.
     pub(super) fn reap_thread_operands(&mut self) {
@@ -245,12 +263,6 @@ impl Registry {
 }
 
 impl Registry {
-    /// Only workers present before ordinary exit callbacks participate in interpreter shutdown.
-    pub(super) fn join_before_exit_callbacks(&mut self) {
-        self.joined_at_shutdown = true;
-        self.join_non_daemon();
-    }
-
     fn join_non_daemon(&self) {
         for worker in &self.entries {
             if !worker.daemon {
@@ -286,6 +298,54 @@ struct Started {
     active: Arc<AtomicBool>,
     ident: usize,
     native_id: Option<u64>,
+}
+
+/// Match the interpreter's lookup of an already imported threading module at exit.
+pub(super) fn shutdown(ctx: &mut Context) {
+    // An exception in the Python handler can deliberately prevent a non-daemon join.
+    // Do not repeat that join in Drop or include workers started later by ordinary atexit.
+    ctx.workers.joined_at_shutdown = true;
+    let mark = ctx.heap.temporary_mark();
+    let result = (|| -> Result<()> {
+        let key = ctx.text("threading");
+        if let Some(module) = ctx.registered_module(key)? {
+            ctx.heap.keep(module);
+            if module != NONE {
+                if ctx.module_initializing(module)? {
+                    let wait = ctx.lookup_attr(ctx.bootstrap_module, "_lock_unlock_module")?;
+                    ctx.call(wait, vec![key], Vec::new())?;
+                }
+                // Fetching the spec or waiting for the import can replace the original entry.
+                if ctx.registered_module(key)? != Some(module) {
+                    return Ok(());
+                }
+            }
+            let shutdown = ctx.lookup_attr(module, "_shutdown")?;
+            ctx.call(shutdown, Vec::new(), Vec::new())?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        super::unraisable::report(
+            ctx,
+            error,
+            false,
+            None,
+            "Exception ignored on threading shutdown",
+        );
+    }
+    ctx.heap.release_temporaries_since(mark);
+}
+
+/// Reject new work before binding or moving its Python callback operands.
+pub(super) fn check_start(ctx: &Context) -> Result<()> {
+    if ctx.finalizing.load(Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "can't create new thread at interpreter shutdown",
+        ));
+    }
+    Ok(())
 }
 
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
@@ -426,7 +486,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     {
         let (symbol, storage) = match ctx.heap.get(callable) {
             Value::Native(symbol) => (symbol.as_str(), receiver),
-            Value::HashMethod {
+            Value::HeapTypeMethod {
                 owner,
                 name: "update",
             } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {
@@ -498,13 +558,20 @@ pub(super) fn call(
     }
     ctx.reap_thread_operands();
     match (name, args) {
-        ("start", &[owner, daemon]) => {
+        ("start", &[owner, daemon] | &[owner, daemon, _]) => {
             // The independent worker cannot publish CPython's actual Python bootstrap
             // callable and handle to an audit hook. Reject before consuming the handle.
             if !ctx.audit_hooks.is_empty() {
                 return Err(Error::new(
                     "NotImplementedError",
                     "audited joinable thread startup requires the boxed Python bootstrap",
+                ));
+            }
+            check_start(ctx)?;
+            if args.get(2).is_some_and(|&has_context| has_context != super::FALSE) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "native workers cannot enter a Python context",
                 ));
             }
             let [target, pos, kw] = ctx.thread_operands(owner)?;
@@ -556,11 +623,27 @@ pub(super) fn call(
             });
             Ok(ctx.alloc(Value::Tuple(vec![handle, ident, tid])))
         }
+        ("shutdown", &[]) => {
+            ctx.workers.join_non_daemon();
+            ctx.reap_thread_operands();
+            Ok(NONE)
+        }
         ("join", &[handle, limit]) => {
             let limit = timeout(ctx, limit)?;
             let Value::ThreadHandle(worker) = ctx.heap.get(handle) else {
                 return Err(Error::new("TypeError", "expected a thread handle"));
             };
+            if ctx.finalizing.load(Ordering::Acquire)
+                && ctx
+                    .workers
+                    .live()
+                    .any(|entry| Rc::ptr_eq(&entry.handle, worker))
+            {
+                return Err(Error::new(
+                    "PythonFinalizationError",
+                    "cannot join thread at interpreter shutdown",
+                ));
+            }
             worker.join(limit)?;
             ctx.reap_thread_operands();
             Ok(NONE)

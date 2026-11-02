@@ -3,6 +3,7 @@
 use std::io::Write;
 
 use super::{Error, Result};
+use crate::dynamic::builtins;
 
 pub(super) fn int(out: &mut Vec<u8>, protocol: u8, number: &crate::Int) -> Result<()> {
     let small = number.to_i64().and_then(|n| i32::try_from(n).ok());
@@ -225,9 +226,17 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             "map" => ("itertools", "imap"),
             "filter" => ("itertools", "ifilter"),
             "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "iter"
-            | "list" | "object" | "set" | "slice" | "tuple" | "type" | "Ellipsis"
+            | "list" | "object" | "set" | "slice" | "super" | "tuple" | "type" | "Ellipsis"
             | "NotImplemented" => ("__builtin__", name),
+            _ if builtins::is_builtin_function(name) => ("__builtin__", name),
             _ => return Err(unsupported()),
+        });
+    }
+    if module == "itertools" {
+        return Ok(match name {
+            "filterfalse" => (module, "ifilterfalse"),
+            "zip_longest" => (module, "izip_longest"),
+            _ => (module, name),
         });
     }
     if module == "collections" {
@@ -237,6 +246,9 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             "UserString" => ("UserString", "UserString"),
             _ => (module, name),
         });
+    }
+    if module == "collections.abc" {
+        return Ok(("_abcoll", name));
     }
     if module == "copyreg" {
         return Ok(("copy_reg", name));
@@ -251,7 +263,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "_pickle",
         "_socket",
         "_thread",
-        "collections.abc",
         "configparser",
         "dbm",
         "dbm.bsd",
@@ -265,7 +276,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "http.cookiejar",
         "http.cookies",
         "http.server",
-        "itertools",
         "multiprocessing.connection",
         "multiprocessing.context",
         "multiprocessing.popen_fork",

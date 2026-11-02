@@ -14,6 +14,7 @@ impl Context {
     /// The bootstrap modules are initialized before user code can replace any import registry.
     pub(super) fn install_import_registry(&mut self) -> Result<()> {
         let core = self.module("_frozen_importlib")?;
+        self.bootstrap_module = core;
         let external = self.module("_frozen_importlib_external")?;
         let native = self.lookup_attr(core, "_NativeImporter")?;
         let bundled = self.lookup_attr(core, "_BundledImporter")?;
@@ -83,7 +84,7 @@ impl Context {
         {
             return Ok(vec![path.parent().unwrap().to_owned()]);
         }
-        if matches!(name, "email" | "importlib" | "json" | "urllib") {
+        if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
             return Ok(vec![PathBuf::from(format!("<imre stdlib>/{name}"))]);
         }
         Ok(Vec::new())

@@ -7,7 +7,7 @@ pub mod exceptions;
 pub mod startup;
 pub mod strings;
 mod type_aliases;
-pub use type_aliases::type_alias_error;
+pub use type_aliases::{generic_class_arguments_error, type_alias_error};
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -17,6 +17,40 @@ use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use ruff_text_size::{Ranged, TextSize};
+
+/// Wildcard imports can only publish names in a module body, including its conditional suites.
+pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<ruff_text_size::TextRange> {
+    #[derive(Default)]
+    struct Scopes {
+        nested: bool,
+        invalid: Option<ruff_text_size::TextRange>,
+    }
+    impl<'a> ast::visitor::Visitor<'a> for Scopes {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if self.invalid.is_some() {
+                return;
+            }
+            if self.nested
+                && let ast::Stmt::ImportFrom(import) = stmt
+                && let Some(alias) = import.names.iter().find(|alias| alias.name.as_str() == "*")
+            {
+                self.invalid = Some(alias.range());
+                return;
+            }
+            let outer = self.nested;
+            self.nested |= matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_));
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                ast::visitor::walk_stmt(self, stmt)
+            });
+            self.nested = outer;
+        }
+        fn visit_expr(&mut self, _: &'a ast::Expr) {}
+    }
+    let mut scopes = Scopes::default();
+    use ast::visitor::Visitor;
+    scopes.visit_body(body);
+    scopes.invalid
+}
 
 /// A display of literal values is held by the code's constant table in CPython.
 pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
@@ -33,6 +67,7 @@ pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
 }
 
 pub mod annotations;
+pub mod async_generators;
 pub mod class_attributes;
 pub mod class_cell;
 pub mod code_flags;
@@ -85,6 +120,20 @@ pub fn direct_method<'a>(
             spellings.and_then(|names| names.original.get(&name.start())).unwrap_or(&name.id).as_str()
         )))
     .then_some(field)
+}
+
+/// Python locates attribute loads and optimized method calls at the attribute name.
+pub fn expression_position(
+    expr: &ast::Expr,
+    imports: &BTreeSet<String>,
+    spellings: Option<&Names>,
+) -> TextSize {
+    match expr {
+        ast::Expr::Attribute(field) => field.attr.start(),
+        ast::Expr::Call(call) => direct_method(call, imports, spellings)
+            .map_or_else(|| expr.start(), |field| field.attr.start()),
+        _ => expr.start(),
+    }
 }
 
 /// Check explicit keyword names before lowering can mangle class-private names.

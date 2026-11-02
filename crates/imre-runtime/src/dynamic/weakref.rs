@@ -34,6 +34,10 @@ pub(super) struct Reference {
 }
 
 impl Value {
+    pub(super) fn is_weak_proxy(&self) -> bool {
+        matches!(self, Self::Weak(wr) if wr.kind != Kind::Reference)
+    }
+
     fn is_weakrefable_native_base(&self) -> bool {
         matches!(self, Self::Native(name)
             if matches!(name.as_str(), "set" | "frozenset" | super::deque::CLASS))
@@ -131,6 +135,20 @@ impl Context {
         Ok(obj)
     }
 
+    /// Hold the referent through a proxy operation that can run Python.
+    pub(super) fn with_weak_target<T>(
+        &mut self,
+        target: Id,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        self.heap.reserve_temporaries(1)?;
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(target);
+        let result = operation(self);
+        self.heap.release_weak_target(mark, target);
+        result
+    }
+
     pub(super) fn class_instances_support_weakref(&self, class: Id) -> bool {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return false;
@@ -214,11 +232,13 @@ impl Context {
             Value::Raised(error) => error
                 .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
-            Value::ParamSpec(_)
+            Value::GenericAlias(_)
+            | Value::ParamSpec(_)
             | Value::TypeVar(_)
             | Value::TypeVarTuple { .. }
             | Value::Class { .. }
             | Value::Function { .. }
+            | Value::Generator { .. }
             | Value::Module { .. }
             | Value::Method { .. }
             | Value::Code(_)
@@ -538,13 +558,15 @@ pub(super) fn call(
                     ),
                 ));
             };
-            let entries = ctx.dict_entries(dict).expect("dict storage");
-            if let Some(&(_, value)) = entries.iter().find(|(stored, _)| ctx.equal(*stored, *key)) {
+            if let Some(index) = ctx.find_dictionary_key(dict, *key, None)?.1 {
+                let value = ctx.dict_entries(dict).expect("dict storage")[index].1;
                 let Some(reference) = ctx.heap.get(value).weak_reference() else {
                     return Err(error("not a weakref"));
                 };
                 if reference.target.is_none() {
-                    ctx.delete_item(dict, *key)?;
+                    // A second key lookup could call Python and replace the dead reference.
+                    super::builtins::remove_table_entry(ctx, dict, index)?;
+                    ctx.finalize_removed_dict_value(value);
                 }
             }
             Ok(NONE)

@@ -262,7 +262,7 @@ impl Context {
             origin: None,
             initializing: false,
             constructor: Some(class),
-            locale_error: None,
+            module_state: None,
         })
     }
 

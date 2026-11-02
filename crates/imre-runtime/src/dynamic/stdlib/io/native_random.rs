@@ -8,6 +8,7 @@ use crate::dynamic::stdlib::{builtins, tempfile};
 const OWNER: &str = "BufferedRandom";
 pub(super) const METHODS: &[&str] = &[
     "__init__",
+    "__getstate__",
     "raw",
     "name",
     "mode",
@@ -48,6 +49,9 @@ pub(super) fn call(
             ));
         }
         return descriptor_buffer::initialize(ctx, receiver, args, kwargs, OWNER);
+    }
+    if name == "__getstate__" {
+        return native_reader::call(ctx, OWNER, receiver, name, args, kwargs);
     }
     if buffered_reader::has_state(ctx, receiver) {
         if name == "write" {
@@ -111,9 +115,7 @@ pub(super) fn call(
             }
             _ => {}
         }
-        let mut operands = vec![receiver];
-        operands.extend_from_slice(args);
-        return tempfile::method(ctx, name, &operands, kwargs);
+        return tempfile::method(ctx, receiver, name, args, kwargs);
     }
     match name {
         "peek" | "read" | "read1" | "readinto" | "readline" => {

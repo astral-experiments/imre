@@ -1,7 +1,32 @@
 import re
+import sys
+from re._constants import MAXGROUPS
 
 
 def current():
+    assert sys.modules["re._constants"] is re._constants
+    assert re._constants.PatternError is re.error is re.PatternError
+    # Zero and over-limit numeric conditions fail when read, before later syntax.
+    for pattern, message, pos in (
+        (r'(abc\1)', 'cannot refer to an open group', 4),
+        (r'µ(?P<g>x(?P=g))', 'cannot refer to an open group', 12),
+        (b'\xff(a\\1)', 'cannot refer to an open group', 3),
+        (f'(?P<a>)(?({MAXGROUPS}))', f'invalid group reference {MAXGROUPS}', 10),
+        ('(?(2)x)(?(1073741824)a)[', 'invalid group reference 1073741824', 10),
+        (b'\xff(?(000)y)', 'bad group number', 4),
+        ('a*+(?(0)x)', 'bad group number', 6),
+        ('(a)(?(2)x|y)(?(3)i|j)', 'invalid group reference 2', 6),
+        ('µ(?(3)x)(a)', 'invalid group reference 3', 4),
+        ('µ(?(01073741823)y)', 'invalid group reference 1073741823', 4),
+    ):
+        try:
+            re.compile(pattern)
+        except re.PatternError as exc:
+            assert (exc.msg, exc.pos, exc.pattern) == (message, pos, pattern)
+        else:
+            raise AssertionError(pattern)
+    assert re.fullmatch('(?(02)y|n)(a)(b)', 'nab')
+    assert not re.fullmatch('(?(02)y|n)(a)(b)', 'yab')
     # A successful atomic choice cannot be retried to satisfy its suffix.
     for expr, text, expected in (
         (r"(a|ab)c", "abc", ("ab",)), (r"(?>(a|ab))c", "abc", None),

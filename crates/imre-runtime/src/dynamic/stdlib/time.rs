@@ -194,11 +194,7 @@ pub(super) fn call(
                 } else {
                     ctx.type_name(*name)
                 };
-                // PyArg formats at most 50 bytes of tp_name, then decodes the full diagnostic.
-                let mut message = b"get_clock_info() argument 1 must be str, not ".to_vec();
-                message.extend_from_slice(&kind.as_bytes()[..kind.len().min(50)]);
-                let text = crate::objects::Codec::Utf8 { signature: false }
-                    .decode(&message, None)
+                let text = string_argument_message("get_clock_info", 1, kind)
                     .map_err(|error| ctx.decode_error(error))?;
                 return Err(Error::new("TypeError", text));
             };

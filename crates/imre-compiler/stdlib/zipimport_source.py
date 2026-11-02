@@ -31,6 +31,12 @@ class zipimporter(_ZipResourceLoader):
     def is_package(self, fullname):
         return self._source_member(fullname).endswith('/__init__.py')
 
+    def get_resource_reader(self, fullname):
+        """Return the resource reader for a module in this ZIP archive."""
+        from importlib.readers import ZipReader
+
+        return ZipReader(self, fullname)
+
     def get_source(self, fullname):
         return self.get_data(self._source_member(fullname)).decode('utf-8')
 

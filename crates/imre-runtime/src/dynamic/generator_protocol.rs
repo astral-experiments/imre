@@ -21,7 +21,7 @@ impl Context {
         awaitable: Id,
         context_method: Option<&str>,
     ) -> Result<Id> {
-        if let Value::Coroutine(frame) = *self.heap.get(awaitable) {
+        if let Value::Coroutine { frame, .. } = *self.heap.get(awaitable) {
             if matches!(self.heap.get(frame), Value::Generator { running: false, offset: Some(ip), .. } if *ip != 0)
             {
                 return Err(Error::new(
@@ -45,7 +45,9 @@ impl Context {
             return Err(Error::new("TypeError", message));
         };
         let iter = self.call(method, Vec::new(), Vec::new())?;
-        if matches!(self.heap.get(iter), Value::Coroutine(_)) || self.is_generator_coroutine(iter) {
+        if matches!(self.heap.get(iter), Value::Coroutine { .. })
+            || self.is_generator_coroutine(iter)
+        {
             return Err(Error::new("TypeError", "__await__() returned a coroutine"));
         }
         if !self.is_native_iterator(iter) && self.slot(iter, "__next__").is_none() {
@@ -62,7 +64,7 @@ impl Context {
 
     fn is_generator_coroutine(&self, id: Id) -> bool {
         matches!(self.heap.get(id), Value::Generator { code, .. }
-            if self.code_object(*code).flags.is_some_and(|flags| flags & imre_ast::code_flags::ITERABLE_COROUTINE != 0))
+            if self.code_object(*code).flags & imre_ast::code_flags::ITERABLE_COROUTINE != 0)
     }
 
     pub(super) fn call_coroutine_method(
@@ -73,7 +75,7 @@ impl Context {
     ) -> Result<Id> {
         let receiver = args[0];
         let coroutine = match (owner, self.heap.get(receiver)) {
-            ("coroutine", Value::Coroutine(_)) => receiver,
+            ("coroutine", Value::Coroutine { .. }) => receiver,
             ("coroutine_wrapper", Value::CoroutineWrapper(coroutine)) => *coroutine,
             _ => {
                 return Err(Error::new(
@@ -85,7 +87,7 @@ impl Context {
                 ));
             }
         };
-        let Value::Coroutine(frame) = *self.heap.get(coroutine) else {
+        let Value::Coroutine { frame, .. } = *self.heap.get(coroutine) else {
             unreachable!("coroutine receiver")
         };
         match method {
