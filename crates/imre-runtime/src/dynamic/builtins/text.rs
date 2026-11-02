@@ -1216,6 +1216,74 @@ fn split_string(
     Ok(ctx.alloc(Value::List(values)))
 }
 
+/// Materialize the iterable before inspecting its buffers, as PySequence_Fast does for bytes.join.
+fn bytes_join(ctx: &mut Context, receiver: Id, iterable: Id) -> Result<Id> {
+    let sequence = if matches!(ctx.heap.get(iterable), Value::List(_) | Value::Tuple(_)) {
+        iterable
+    } else {
+        let iter = ctx.iterator(iterable).map_err(|error| {
+            let ty = ctx.builtin("TypeError");
+            if ctx.raised_error_matches(&error, ty) {
+                type_error("can only join an iterable")
+            } else {
+                error
+            }
+        })?;
+        ctx.heap.keep(iter);
+        let sequence = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.keep(sequence);
+        list_extend(ctx, sequence, iter)?;
+        sequence
+    };
+    let (Value::List(items) | Value::Tuple(items)) = ctx.heap.get(sequence) else {
+        unreachable!()
+    };
+    if let [item] = items.as_slice()
+        && matches!(ctx.heap.get(*item), Value::Bytes(_))
+    {
+        return Ok(*item);
+    }
+    let separator = ctx.bytes_like(receiver)?;
+    let too_long = || Error::new("OverflowError", "join() result is too long");
+    let mut size = separator
+        .len()
+        .checked_mul(items.len().saturating_sub(1))
+        .ok_or_else(too_long)?;
+    let mut buffers = Vec::new();
+    buffers
+        .try_reserve_exact(items.len())
+        .map_err(|_| crate::Error::memory_error())?;
+    for (i, &item) in items.iter().enumerate() {
+        ctx.check_buffer_exporter(item)?;
+        let buffer = match ctx.heap.get(ctx.scalar_value(item)) {
+            Value::Array(array) => array.as_bytes(),
+            _ => ctx.bytes_like(item).map_err(|_| {
+                let name = ctx.type_name(item);
+                type_error(format!(
+                    "sequence item {i}: expected a bytes-like object, {} found",
+                    &name[..name.floor_char_boundary(80)]
+                ))
+            })?,
+        };
+        size = size.checked_add(buffer.len()).ok_or_else(too_long)?;
+        buffers.push(buffer);
+    }
+    if size > isize::MAX as usize {
+        return Err(too_long());
+    }
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(size)
+        .map_err(|_| crate::Error::memory_error())?;
+    for (i, buffer) in buffers.into_iter().enumerate() {
+        if i != 0 {
+            result.extend_from_slice(separator);
+        }
+        result.extend_from_slice(buffer);
+    }
+    Ok(ctx.alloc(Value::Bytes(result)))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -1636,6 +1704,13 @@ pub(super) fn method(
         return Ok(ctx.text(text.into_string()));
     }
     if name == "join" {
+        if owner == "bytes" {
+            return bytes_join(
+                ctx,
+                receiver,
+                one_positional_arg("bytes.join", args, kwargs)?,
+            );
+        }
         positional(name, kwargs)?;
         arity(name, args, 1, 1)?;
         let collected;
