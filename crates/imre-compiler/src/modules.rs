@@ -1430,6 +1430,7 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
                 "has_ipv6" => "_socket.has_ipv6",
+                "SocketType" => "_socket.SocketType",
                 "AF_INET" => "_socket.AF_INET",
                 "AF_INET6" => "_socket.AF_INET6",
                 "AF_UNSPEC" => "_socket.AF_UNSPEC",
@@ -1456,6 +1457,7 @@ impl IntrinsicModule {
                 "error" => "_socket.error",
                 _ => return None,
             }),
+            (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
             }
