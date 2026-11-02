@@ -99,8 +99,7 @@ impl IteratorSlice<'_> {
 
 struct ExposedClassBody {
     mapping: Id,
-    class_cell: Option<Id>,
-    dict_cell: Option<Id>,
+    annotation_cell: Option<Id>,
 }
 
 pub(crate) struct Context {
@@ -1536,35 +1535,13 @@ impl Context {
         cell
     }
 
-    /// Retrieve a cell that type creation consumes without publishing it as a class member.
-    fn namespace_cell(&mut self, mapping: Id, name: &str) -> Result<Option<Id>> {
-        let cell = self.dict_named_item(mapping, name);
-        if let Some(cell) = cell {
-            if !matches!(self.heap.get(cell), Value::Cell(_)) {
-                let ty = self.exact_type(cell)?;
-                let ty = self.repr(ty);
-                return Err(Error::new(
-                    "TypeError",
-                    format!("{name} must be a nonlocal cell, not {ty}"),
-                ));
-            }
-            self.heap.keep(cell);
-        }
-        Ok(cell)
-    }
-
     /// Copy the bindings from an exposed class-body namespace before creating the type.
     fn finish_class_namespace(&mut self, scope: Id) -> Result<Option<ExposedClassBody>> {
         let frame = self.scope_data(scope);
         let Some(body) = frame.namespace else {
             return Ok(None);
         };
-        if let Some(cell) = frame.class_namespace.as_ref().and_then(|ns| ns.annotation_dict_cell) {
-            let key = self.text("__classdictcell__");
-            self.put_item(body, key, cell)?;
-        }
-        let class_cell = self.namespace_cell(body, "__classcell__")?;
-        let dict_cell = self.namespace_cell(body, "__classdictcell__")?;
+        let annotation_cell = frame.class_namespace.as_ref().and_then(|ns| ns.annotation_dict_cell);
         let names: indexmap::IndexMap<String, Id> = self
             .dict_entries(body)
             .expect("class body dictionary")
@@ -1572,7 +1549,7 @@ impl Context {
             .filter_map(|&(key, value)| {
                 self.str_value(key)
                     .ok()
-                    .filter(|&name| !matches!(name, "__classcell__" | "__classdictcell__"))
+                    .filter(|&name| annotation_cell.is_none() || name != "__classdictcell__")
                     .map(|name| (name.to_owned(), value))
             })
             .collect();
@@ -1584,7 +1561,11 @@ impl Context {
         frame.namespace = None;
         frame.class_namespace.as_mut().unwrap().dictionary = None;
         self.heap.keep(body);
-        Ok(Some(ExposedClassBody {mapping: body, class_cell, dict_cell}))
+        if let Some(cell) = annotation_cell {
+            let key = self.text("__classdictcell__");
+            self.put_item(body, key, cell)?;
+        }
+        Ok(Some(ExposedClassBody { mapping: body, annotation_cell }))
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.

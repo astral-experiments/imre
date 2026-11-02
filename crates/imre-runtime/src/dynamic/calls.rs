@@ -6004,9 +6004,6 @@ impl Context {
                 .or_insert(NONE);
         }
         if let Some(body) = exposed_body {
-            if let Some(cell) = body.class_cell {
-                self.heap.replace_cell(cell, Some(class));
-            }
             // type.__new__ replaces the body namespace with the finished type's dictionary.
             let dict = self.class_namespace_dict(scope, false);
             let extras = self
@@ -6016,7 +6013,7 @@ impl Context {
                 .copied()
                 .filter(|&(key, _)| self.string_storage(key).is_none())
                 .collect::<Vec<_>>();
-            if let Some(cell) = body.dict_cell {
+            if let Some(cell) = body.annotation_cell {
                 self.heap.replace_cell(cell, Some(dict));
             }
             if !extras.is_empty() {
