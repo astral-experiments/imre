@@ -78,11 +78,11 @@ def getTestCaseNames(self, testCaseClass):
         patterns = self.testNamePatterns
         if patterns is None or any(fnmatch.fnmatchcase(fullname, pattern) for pattern in patterns):
             names.append(name)
-    # dir() already provided the default lexical order. A custom comparison
-    # requires the boxed cmp_to_key protocol, including its error behavior.
+    # dir() already supplies the default lexical order.
     comparison = self.sortTestMethodsUsing
     if comparison and comparison is not _boxedThreeWayCompare:
-        raise NotImplementedError("native boxed TestLoader requires the default ordering or None")
+        from functools import cmp_to_key
+        names.sort(key=cmp_to_key(comparison))
     return names
 
 
