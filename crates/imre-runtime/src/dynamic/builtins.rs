@@ -551,7 +551,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::Slice(_) if super::slice::METHODS.contains(&attr) => "slice",
         Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. }
-            if super::namedtuple::GETTER_METHODS.contains(&attr) =>
+            if super::namedtuple::MEMBER_SLOTS.contains(&attr) || attr == "__reduce__" =>
         {
             "member_descriptor"
         }
