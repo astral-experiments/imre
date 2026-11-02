@@ -3161,6 +3161,10 @@ else:
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_pass_fds.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-B", "-c", "from subprocess import Popen; "
+                    "p = Popen(['/bin/true']); p.wait(); print(repr(p))")
+            plugin.write_bytes((fixtures / "boxed_subprocess_repr.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_returncode.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_lifetime.py").read_bytes())

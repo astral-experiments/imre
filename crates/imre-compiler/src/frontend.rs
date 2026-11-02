@@ -11108,6 +11108,13 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
+        if cfg!(unix)
+            && let [value] = args.as_slice()
+            && matches!(value.ty, Type::Popen(..) | Type::ActivePopen)
+            && self.unshadowed_builtin(&call.func, "repr")
+        {
+            return Err(self.scoped_builtin_error("subprocess.Popen repr", call));
+        }
         if name.id == "repr"
             && args.len() == 1
             && matches!(
