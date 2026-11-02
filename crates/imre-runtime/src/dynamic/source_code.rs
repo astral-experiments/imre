@@ -3088,8 +3088,8 @@ impl Context {
                     self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
                     if name == "*" {
-                        let custom_hook = importer != self.builtin("__import__");
-                        self.import_star(scope, m, custom_hook)?;
+                        let fromlist_handled = *level > 0 || importer != self.builtin("__import__");
+                        self.import_star(scope, m, fromlist_handled)?;
                         continue;
                     }
                     let name = self.text(name);

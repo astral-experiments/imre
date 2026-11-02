@@ -1324,6 +1324,19 @@ print(found.value)
 """,
         )
 
+        compare(
+            "-B", "-c",
+            """import sys
+from importlib import import_module
+import_members = import_module("import_members")
+import_members.__all__ = ["found"]
+assert "import_members.found" not in sys.modules
+namespace = {"__package__": "import_members"}
+exec("from . import *", namespace)
+assert namespace["found"] is import_members.found is sys.modules["import_members.found"]
+""",
+        )
+
         opcode = run(imre, "-B", "-c", 'op = __import__("".join(("_", "opcode")))\n'
                      'print(op.ENABLE_SPECIALIZATION, op.ENABLE_SPECIALIZATION_FT)')
         assert (opcode.returncode, opcode.stdout, opcode.stderr) == (0, b"0 0\n", b""), opcode
