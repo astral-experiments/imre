@@ -157,8 +157,10 @@ impl Context {
             }
             "type_alias" => Ok(self.alloc(Value::TypeAlias {
                 name: a,
-                evaluator: b,
-                cached: None,
+                definition: typing::AliasDefinition::Lazy {
+                    evaluator: b,
+                    cached: None,
+                },
             })),
             "template_interpolation" => {
                 let (Value::List(meta) | Value::Tuple(meta)) = self.heap.get(c) else {

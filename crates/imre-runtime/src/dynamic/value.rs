@@ -915,11 +915,9 @@ pub(super) enum Value {
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
     ConstEvaluator(Id),
-    /// A statement-defined alias retains its evaluator even after caching a successful value.
     TypeAlias {
         name: Id,
-        evaluator: Id,
-        cached: Option<Id>,
+        definition: super::typing::AliasDefinition,
     },
     TypeVar(super::typing::TypeVariable),
     TypeVarTuple {
@@ -1547,13 +1545,17 @@ impl Value {
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
             Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
-            Self::TypeAlias {
-                name,
-                evaluator,
-                cached,
-            } => {
-                visit.extend([*name, *evaluator]);
-                visit.extend(*cached);
+            Self::TypeAlias { name, definition } => {
+                visit.push(*name);
+                match *definition {
+                    super::typing::AliasDefinition::Lazy { evaluator, cached } => {
+                        visit.push(evaluator);
+                        visit.extend(cached);
+                    }
+                    super::typing::AliasDefinition::Eager { value, module } => {
+                        visit.extend([value, module]);
+                    }
+                }
             }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
