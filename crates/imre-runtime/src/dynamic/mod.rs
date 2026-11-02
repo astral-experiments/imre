@@ -2083,6 +2083,10 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
+            "math" if source.is_none() => {
+                let pi = self.alloc(Value::Float(std::f64::consts::PI));
+                self.bind(scope, "pi", pi);
+            }
             "errno" => stdlib::install_errno(self, scope)?,
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "socket" if source.is_none() => stdlib::import_socket_constants(self, scope)?,

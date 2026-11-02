@@ -57,6 +57,15 @@ class FloatOverride(float):
 
 
 def current():
+    pi = math.pi
+    assert pi == 3.141592653589793 and vars(math)["pi"] is pi
+    math.pi = None
+    assert math.pi is None
+    del math.pi
+    assert not hasattr(math, "pi")
+    math.pi = pi
+    assert math.pi is pi
+
     assert math.modf(FloatOnly()) == (-0.25, -1.0)
     assert modf(IndexOnly()) == (0.0, 5.0)
     assert modf(FloatOverride(-1.5)) == (-0.5, -1.0)
