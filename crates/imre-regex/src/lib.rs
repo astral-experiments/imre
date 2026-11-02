@@ -802,11 +802,16 @@ fn tokenize(
     // of the forward-assertion fallback so a stalled iteration cannot change a capture.
     let byte_lookahead =
         alphabet == Alphabet::Bytes && has_lookaround && !has_lookbehind && !nullable_repeat;
+    // A conditional reads capture participation even without a backreference.
+    // A stalled optional iteration can change which capture is set.
+    let standalone_condition = highest_condition != 0 && !has_lookaround && !nullable_repeat;
     match grammar {
         Grammar::Lookahead if !has_lookaround => {
             return Err("expected a Python lookahead assertion".into());
         }
-        Grammar::Backtracking if !has_reference && !text_assertions && !byte_lookahead => {
+        Grammar::Backtracking
+            if !has_reference && !text_assertions && !byte_lookahead && !standalone_condition =>
+        {
             return Err("pattern does not require backtracking".into());
         }
         // Keep previously supported case-sensitive text assertions on their existing matcher.
