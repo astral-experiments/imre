@@ -8,6 +8,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 
@@ -1401,6 +1402,14 @@ def main():
             missing = run(exe, "-I", "empty_entry")
             message = f"can't find '__main__' module in '{root / 'empty_entry'}'"
             assert missing.returncode == 1 and missing.stderr.decode().rstrip().endswith(message)
+
+        archive = root / "application"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as app:
+            for prefix in ("", "sub/"):
+                app.writestr(prefix + "__main__.py", (entry / "__main__.py").read_text())
+                app.writestr(prefix + "sibling.py", f"marker = {prefix!r}\n")
+        compare("application", "tail")
+        compare("-I", "./application/sub", "-h")
 
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")

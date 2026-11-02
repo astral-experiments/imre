@@ -122,7 +122,7 @@ impl BuildOptions {
                 flags,
                 executable,
             } => {
-                if path.is_dir() {
+                if path.is_dir() || imre_compiler::is_zip_path(&path) {
                     options.compile.module_entry = Some("__main__".into());
                     options.compile.path_entry = true;
                 }
