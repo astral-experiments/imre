@@ -1108,7 +1108,10 @@ pub(crate) fn lower_with_caller_cache(
     }
     Ok((
         ir::Module {
-            command_flags: graph.command_startup.as_ref().map(|(flags, _)| flags.clone()),
+            command_flags: graph
+                .command_startup
+                .as_ref()
+                .map(|(flags, _)| flags.clone()),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
