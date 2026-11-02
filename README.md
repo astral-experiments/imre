@@ -125,7 +125,7 @@ branches. Skipped tests count toward the suite size only.
 | `json` | 118 | 216 | 112 passed together before timeout, plus six earlier selected passes |
 | `logging` | 30 | 272 | 30 source-isolated methods run together with their fixtures |
 | `os` | 38 | 579 | 25 intact genericpath cases and 13 selected OS cases whose module teardown errored |
-| `pathlib` | 225 | 1,369 | 220 in the intact development run and five more in a 139-case selection |
+| `pathlib` | 233 | 1,369 | Both intact runs finished all 1,369 cases, with 724 errors and 412 skips |
 | `re` | 120 | 165 | 120 passed in an intact development run, 69 on a smaller set of changes |
 | `shutil` | 34 | 223 | Selected cases |
 | `socket` | 48 | 746 | Four passed in the latest intact run and 44 on earlier builds |
@@ -136,7 +136,7 @@ branches. Skipped tests count toward the suite size only.
 | `typing` | 107 | 712 | Selected tests across development builds |
 | `unittest` | 160 | 1,090 | Intact package runner discovered 244 cases and started 213 |
 | `urllib` | 84 | 178 | Selected cases |
-| **Total** | **4,226** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **4,234** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
