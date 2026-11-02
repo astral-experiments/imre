@@ -89,6 +89,11 @@ def loads(s, *, cls=None, object_hook=None, parse_float=None,
 # Encoder entry points from CPython 3.14.5 Lib/json/__init__.py.
 from .encoder import JSONEncoder
 
+__all__ = [
+    'dump', 'dumps', 'load', 'loads',
+    'JSONDecoder', 'JSONDecodeError', 'JSONEncoder',
+]
+
 _default_encoder = JSONEncoder(
     skipkeys=False,
     ensure_ascii=True,
