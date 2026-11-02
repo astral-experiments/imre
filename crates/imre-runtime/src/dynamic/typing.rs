@@ -826,6 +826,15 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__module__" => var.module,
             "__bound__" => var.bound,
             "__constraints__" => var.constraints,
+            "__default__" => no_default(ctx),
+            "has_default" => {
+                let callable = ctx.builtin("typing.TypeVar.has_default");
+                ctx.alloc(Value::Method {
+                    callable,
+                    receiver: value,
+                    explicit: false,
+                })
+            }
             "__infer_variance__" => {
                 if var.infer_variance {
                     TRUE
@@ -904,7 +913,42 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     Some(Ok(attr))
 }
 
-fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+/// Create fresh compiler-declared type variables in a lexical scope shared by the class body and methods.
+pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> Result<Id> {
+    let enclosing = ctx.scope_data(outer);
+    let parent = if enclosing.class_body.is_some() {
+        enclosing.parent.unwrap_or(outer)
+    } else {
+        outer
+    };
+    let module = enclosing.module.clone();
+    let scope = ctx.scope(&module, Some(parent));
+    let typing = ctx.text("typing");
+    let mut params = Vec::new();
+    for (binding, name) in ctx
+        .dict_entries(names)
+        .expect("declared class type parameters")
+        .to_vec()
+    {
+        let param = typevar(ctx, &[name], &[("infer_variance".to_owned(), TRUE)], typing)?;
+        let binding = ctx.str_value(binding)?.to_owned();
+        ctx.bind(scope, &binding, param);
+        params.push(param);
+    }
+    let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    frame.closure.declared.extend(frame.names.keys().cloned());
+    frame.closure.declared_complete = true;
+    let declared = ctx.alloc(Value::Tuple(params.clone()));
+    ctx.bind(scope, ".type_params", declared);
+    let generic = named_class(ctx, "typing", "Generic");
+    let base = alias(ctx, AliasKind::Generic, generic, params)?;
+    ctx.bind(scope, ".generic_base", base);
+    Ok(scope)
+}
+
+fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)], module: Id) -> Result<Id> {
     let mut name = args.first().copied();
     let mut bound = NONE;
     let mut covariant = false;
@@ -965,7 +1009,6 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
             "Constraints cannot be combined with bound=...",
         ));
     }
-    let module = ctx.heap.caller_module();
     let constraints = ctx.alloc(Value::Tuple(constraints.to_vec()));
     Ok(ctx.alloc(Value::TypeVar(TypeVariable {
         name,
@@ -1060,7 +1103,8 @@ pub(super) fn call(
         }));
     }
     if operation == "TypeVar" {
-        return typevar(ctx, args, kwargs);
+        let module = ctx.heap.caller_module();
+        return typevar(ctx, args, kwargs, module);
     }
     if operation == "cast" {
         let [typ, value] = super::builtins::bind("cast()", args, kwargs, ["typ", "val"])?;
@@ -1113,6 +1157,13 @@ pub(super) fn call(
         ("NoDefault.__reduce__", [value]) if matches!(ctx.heap.get(*value), Value::NoDefault) => {
             Ok(ctx.text("NoDefault"))
         }
+        ("TypeVar.has_default", [var]) if matches!(ctx.heap.get(*var), Value::TypeVar(_)) => {
+            Ok(FALSE)
+        }
+        ("TypeVar.has_default", _) => Err(Error::new(
+            "TypeError",
+            "TypeVar.has_default() takes no arguments",
+        )),
         ("TypeVarTuple.has_default", [pack])
             if let Value::TypeVarTuple { default, .. } = ctx.heap.get(*pack) =>
         {

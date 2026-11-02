@@ -1,4 +1,5 @@
 mod class_metadata;
+pub(super) mod type_parameters;
 mod worker;
 
 use ruff_python_ast as ast;
@@ -34,6 +35,14 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
                 self.incomplete = true;
+                for decorator in &f.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                for param in f.parameters.iter_non_variadic_params() {
+                    if let Some(default) = &param.default {
+                        self.visit_expr(default);
+                    }
+                }
                 if !f.decorator_list.is_empty()
                     || f.parameters
                         .posonlyargs
@@ -48,7 +57,13 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::ClassDef(c) => {
                 self.locals.insert(c.name.to_string());
                 self.incomplete = true;
-                self.locals_incomplete = true;
+                for decorator in &c.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(args) = &c.arguments {
+                    self.visit_arguments(args);
+                }
+                self.locals_incomplete |= c.type_params.is_some();
             }
             ast::Stmt::Global(g) => {
                 self.globals.extend(g.names.iter().map(ToString::to_string));
@@ -316,6 +331,28 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
+                    let outer = self.scope.clone();
+                    let mut outer_class_locals = None;
+                    let parameter_scope = v.type_params.as_deref().map(|params| {
+                        let names = self.op("dict", &[]);
+                        for param in params {
+                            let ast::TypeParam::TypeVar(typevar) = param else {
+                                self.unsupported("variadic class type parameters");
+                                continue;
+                            };
+                            if typevar.bound.is_some() || typevar.default.is_some() {
+                                self.unsupported("class type parameter bounds and defaults");
+                            }
+                            let binding = self.code_name(typevar.name.as_str());
+                            let name =
+                                self.code_name(self.source.private_names.definition(&typevar.name));
+                            self.op("put", &[&names, &binding, &name]);
+                        }
+                        let scope = self.op("class_parameter_scope", &[&outer, &names]);
+                        self.scope = self.op("class_base_scope", &[&scope, &outer]);
+                        outer_class_locals = self.class_locals.take();
+                        scope
+                    });
                     let bases = self.op("list", &[]);
                     let kwargs = if let Some(args) = v.arguments.as_deref() {
                         if args
@@ -330,6 +367,11 @@ impl Function<'_, '_> {
                     } else {
                         "0".into()
                     };
+                    if let Some(scope) = parameter_scope.as_ref() {
+                        self.scope = scope.clone();
+                        let generic = self.lookup(".generic_base");
+                        self.op("append", &[&bases, &generic]);
+                    }
                     let init = self.define(
                         v.start(),
                         self.source.private_names.definition(&v.name),
@@ -337,6 +379,10 @@ impl Function<'_, '_> {
                         None,
                         Body::Namespace(&v.body),
                     );
+                    if parameter_scope.is_some() {
+                        self.scope = outer;
+                        self.class_locals = outer_class_locals;
+                    }
                     let operation = if v.type_params.is_some() {
                         "parameterized_class"
                     } else {

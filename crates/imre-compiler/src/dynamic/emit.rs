@@ -72,6 +72,15 @@ pub(crate) fn emit(
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
+        if source.contains("nonlocal") {
+            statements::type_parameters::check_nonlocals(source, &body)
+                .map_err(|error| format!("{}:{error}", path.display()))?;
+        }
+        if let Some(param) = &private_names.duplicate_type_parameter {
+            let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
+            let error = crate::frontend::error(source, param, &reason);
+            return Err(format!("{}:{error}", path.display()));
+        }
         let location = SourceMap {
             unit,
             has_templates,
