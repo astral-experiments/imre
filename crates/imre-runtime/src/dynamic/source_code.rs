@@ -2317,7 +2317,8 @@ impl Context {
             return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        let mut program = Program::new(Rc::from("<string>"), "<module>", source.contains(":="));
+        // Forward references use the caller's lookup namespace without compiling assignment targets.
+        let mut program = Program::new(Rc::from("<string>"), "<module>", false);
         program.template_expressions = Rc::new(imre_ast::strings::template_expressions(
             source,
             parsed.tokens(),
@@ -3846,7 +3847,7 @@ impl Context {
                 self.check_source_local(code, scope, name)?;
                 self.lookup(scope, name)
             }
-            Expr::Named(named) => {
+            Expr::Named(named) if code.has_named_bindings => {
                 let Expr::Name(name) = named.target.as_ref() else {
                     return Err(unsupported("assignment expression target"));
                 };
