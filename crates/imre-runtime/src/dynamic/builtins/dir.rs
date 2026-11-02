@@ -37,6 +37,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut names = BTreeSet::new();
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
+        Value::GenericAlias(alias) if alias.is_builtin_alias() => {
+            return generic_alias_names(ctx, alias.origin);
+        }
         Value::GenericAlias(alias) if matches!(alias.kind, AliasKind::Literal(_)) => {
             return literal_names(ctx, alias.clone());
         }
@@ -137,6 +140,34 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         ctx.put_item(dictionary, key, NONE)?;
     }
     Ok(dictionary)
+}
+
+/// PEP 585 aliases add their local attributes to the origin's directory.
+fn generic_alias_names(ctx: &mut Context, origin: Id) -> Result<Id> {
+    let dir = ctx.builtin("dir");
+    let names = ctx.call(dir, vec![origin], Vec::new())?;
+    ctx.heap.keep(names);
+    for field in [
+        "__class__",
+        "__origin__",
+        "__args__",
+        "__unpacked__",
+        "__parameters__",
+        "__typing_unpacked_tuple_args__",
+        "__mro_entries__",
+        "__reduce_ex__",
+        "__reduce__",
+    ] {
+        let field = ctx.heap.code_name(field);
+        if !ctx.contains(field, names)? {
+            let Value::List(items) = ctx.heap.get_mut(names) else {
+                unreachable!("dir() returns a list")
+            };
+            items.try_reserve(1).map_err(|_| crate::Error::memory_error())?;
+            items.push(field);
+        }
+    }
+    Ok(names)
 }
 
 /// Literal delegates non-dunder names to its origin, including custom Python directory hooks.
