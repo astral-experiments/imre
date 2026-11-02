@@ -1329,6 +1329,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             })
         }
         Value::Native(class) if class == "typing._ConcatenateGenericAlias" => match name {
+            "__reduce__" => {
+                let base = ctx.builtin("typing._GenericAlias");
+                return Some(ctx.lookup_attr(base, name));
+            }
             "__base__" => ctx.builtin("typing._GenericAlias"),
             "__bases__" => {
                 let parent = ctx.builtin("typing._GenericAlias");
@@ -1383,10 +1387,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         }
         Value::GenericAlias(alias)
             if name == "__reduce__"
-                && matches!(
-                    alias.kind,
-                    AliasKind::Generic | AliasKind::Callable | AliasKind::AbcCallable
-                ) =>
+                && (alias.kind.is_typing_alias() || alias.kind == AliasKind::AbcCallable) =>
         {
             let class = ctx.builtin(alias.kind.class());
             return Some(
