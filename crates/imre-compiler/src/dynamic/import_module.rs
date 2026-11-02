@@ -334,6 +334,12 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 let imports = section("def _gcd_import(", "def _builtin_from_name(")
                     .replace("_warnings.warn(", "_warning_module().warn(");
                 let find = section("def _find_spec(", "def _sanity_check(")
+                    .replace("for finder in meta_path:", "for index, finder in enumerate(meta_path):")
+                    .replace("                spec = find_spec(name, path, target)", concat!(
+                        "                spec = find_spec(name, path, target)\n",
+                        "                if index + 1 < len(meta_path) and meta_path[index + 1] is _BundledImporter:\n",
+                        "                    spec = _prefer_bundled_spec(finder, spec, name, path, target)",
+                    ))
                     .replace("with _ImportLockContext():", "with _import_lock:")
                     .replace("_warnings.warn('sys.meta_path is empty', ImportWarning)",
                              "_import_warning('sys.meta_path is empty', 1254)");
