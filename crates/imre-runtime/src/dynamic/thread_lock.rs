@@ -6,10 +6,11 @@ use crate::objects::locks::{timeout_float, timeout_int};
 pub(super) const CLASS: &str = "_thread.lock";
 
 pub(super) fn is_method(name: &str) -> bool {
-    matches!(
-        name,
-        "acquire" | "release" | "locked" | "__enter__" | "__exit__"
-    )
+    (cfg!(unix) && name == "_at_fork_reinit")
+        || matches!(
+            name,
+            "acquire" | "release" | "locked" | "__enter__" | "__exit__"
+        )
 }
 
 pub(super) fn construct(
@@ -102,6 +103,14 @@ pub(super) fn method(
         ));
     }
     match name {
+        #[cfg(unix)]
+        "_at_fork_reinit" => {
+            let Value::PrimitiveLock(lock) = ctx.heap.get_mut(id) else {
+                unreachable!("lock receiver checked above");
+            };
+            crate::objects::locks::PrimitiveLock::at_fork_reinit(lock);
+            Ok(NONE)
+        }
         "locked" => Ok(boolean(lock.locked())),
         "release" | "__exit__" => {
             lock.release()?;
