@@ -328,10 +328,20 @@ except io.UnsupportedOperation:
     assert target.raw is old and old.getvalue() == b"abcdef"
 else:
     raise AssertionError("accepted non-seekable raw")
-replacement = io.BytesIO(b"new")
+
+
+class RevivesInSeekable(io.BytesIO):
+    def seekable(self):
+        target.__init__(inner, 4)
+        return True
+
+
+inner = io.BytesIO(b"inner")
+replacement = RevivesInSeekable(b"new")
 target.__init__(replacement, 2)
-assert target.read() == b"new"
+assert target.raw is replacement and target.read() == b"new"
 target.close()
-assert replacement.closed and not old.closed and not rejected.closed
+assert replacement.closed and not old.closed and not rejected.closed and not inner.closed
 old.close()
 rejected.close()
+inner.close()

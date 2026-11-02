@@ -91,25 +91,31 @@ pub(super) fn reinitialize_update(
     size: i64,
     capabilities: &[&str],
 ) -> Result<bool> {
-    let Ok(old) = Reader::get(ctx, receiver) else {
-        return Ok(false);
+    let (previous, locked) = match ctx.heap.get(receiver) {
+        Value::Instance {
+            memory_stream: Some(MemoryStream::Reader(old)),
+            ..
+        } if old.update.is_some() => (old.raw.get(), old.locked.get()),
+        Value::Instance {
+            memory_stream: Some(MemoryStream::UninitializedReader(Some(raw))),
+            ..
+        } => (Some(*raw), false),
+        _ => return Ok(false),
     };
-    if old.update.is_none()
-        || old
-            .raw
-            .get()
-            .is_some_and(|id| super::file_io::state(ctx, id).is_some())
+    if previous.is_some_and(|id| super::file_io::state(ctx, id).is_some())
         || super::file_io::state(ctx, raw).is_some()
     {
         return Ok(false);
     }
-    if old.locked.get() {
+    // A raw I/O callback may currently hold a view into the live buffer. Keep
+    // that operation and its ownership intact instead of replacing its state.
+    if locked {
         return Err(Error::new(
             "RuntimeError",
             "reentrant call inside buffered reader",
         ));
     }
-    start_init(ctx, receiver, old.raw.get())?;
+    start_init(ctx, receiver, previous)?;
     super::descriptor_buffer::check_capabilities(ctx, raw, capabilities)?;
     if let Ok(nested) = Reader::get(ctx, receiver) {
         if nested
