@@ -635,6 +635,8 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     config: *const c_char,
 ) -> *mut Context {
     crate::initialize_io();
+    #[cfg(unix)]
+    crate::signals::initialize_interrupt();
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
@@ -731,6 +733,7 @@ pub(super) fn new_context<S: Into<String>>(
         finder_external: NONE,
         classes: HashMap::new(),
         enum_scopes: HashMap::new(),
+        signal_handlers: Vec::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
@@ -791,6 +794,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             let fd = ctx.int(i64::from(libc::STDERR_FILENO));
             ctx.call(enable, vec![fd], Vec::new())?;
         }
+        // CPython snapshots dispositions after enabling a startup fault handler.
+        #[cfg(unix)]
+        ctx.initialize_signal_handlers();
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
@@ -804,6 +810,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             Ok(main)
         }
     });
+    #[cfg(unix)]
+    let interrupted = result
+        .as_ref()
+        .is_err_and(|e| ctx.is_builtin_error(e, "KeyboardInterrupt"));
     let status = match result {
         Ok(_) => 0,
         Err(error) if ctx.is_builtin_error(&error, "SystemExit") => {
@@ -848,6 +858,11 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             "NotImplementedError: BufferedWriter has unflushed bytes at shutdown; explicitly flush or close Python-backed writers"
         );
         return 1;
+    }
+    #[cfg(unix)]
+    if interrupted {
+        let _ = crate::flush_stdout();
+        return crate::signals::exit_interrupt();
     }
     status
 }
@@ -1510,6 +1525,11 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
         },
         caught,
     );
+    #[cfg(unix)]
+    if let Err(mut error) = ctx.dispatch_signals() {
+        ctx.record_exception_frame(&mut error, None);
+        ctx.pending = Some(error);
+    }
 }
 
 impl Context {
@@ -1536,6 +1556,7 @@ impl Context {
             self.classes
                 .values()
                 .chain(self.enum_scopes.values())
+                .chain(self.signal_handlers.iter())
                 .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())

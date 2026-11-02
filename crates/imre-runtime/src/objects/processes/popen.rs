@@ -685,7 +685,7 @@ pub unsafe extern "C" fn imre_child_wait(
     // language object is touched only on an actual timeout, after releasing the lock.
     unsafe {
         let timeout = Deadline::from_word(kind, word);
-        match (*control).wait(timeout.as_ref()) {
+        match (*control).wait_with(timeout.as_ref(), crate::objects::stdlib::check_interrupt) {
             Ok(Some(code)) => code.into_word(),
             Ok(None) => {
                 let cmd = with_process(owner, |p| p.args.clone());
