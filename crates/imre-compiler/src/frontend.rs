@@ -2649,6 +2649,9 @@ impl<'a> Checker<'a> {
         {
             return Err(self.object_builtin_error("binary readinto", attribute));
         }
+        if receiver.ty == Type::BytesIO && attribute.attr.as_str() == "getbuffer" {
+            return Err(self.object_builtin_error("BytesIO.getbuffer", attribute));
+        }
         if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
             return Err(self.object_builtin_error("binary writelines", attribute));
         }
