@@ -1,6 +1,6 @@
 from inspect import getattr_static
 from types import MappingProxyType
-from typing import TypeVar, Unpack
+from typing import Generic, TypeVar, Unpack
 
 
 def current():
@@ -91,3 +91,18 @@ def current():
         assert parameter.has_default() is (default is not NoDefault)
         assert parameter.evaluate_default(Format.VALUE) is default
     assert variable.evaluate_default(Format.VALUE) is NoDefault
+
+    required = TypeVar("U")
+    defaulted = TypeVar("D", default=None)
+
+    class Tail(Generic[variable, required, defaulted]): pass
+
+    assert Tail[str, bool].__args__ == (str, bool, None)
+    assert Tail[str, bool, None].__args__ == (str, bool, type(None))
+    assert Tail[str, bool, int].__args__ == (str, bool, int)
+    try:
+        Tail[str]
+    except TypeError as exc:
+        assert str(exc).endswith("actual 1, expected at least 2")
+    else:
+        raise AssertionError("accepted a missing required type argument")

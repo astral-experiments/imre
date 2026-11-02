@@ -2150,23 +2150,34 @@ def _variadic_class_getitem_uncached(cls, args, constructor):
         args = (args,)
     args = tuple(_type_convert(arg) for arg in args)
     parameters = cls.__parameters__
-    for index, param in enumerate(parameters):
+    for param in parameters:
         prepare = getattr(param, "__typing_prepare_subst__", None)
         if prepare is not None:
             args = prepare(cls, args)
         elif isinstance(param, _typing.TypeVarTuple):
             args = _prepare_typevartuple(param, cls, args)
-        elif isinstance(param, _typing.TypeVar) and index >= len(args):
-            if index == len(args) and param.has_default():
-                args += (param.__default__,)
+        elif isinstance(param, _typing.TypeVar):
+            # An earlier preparation hook may have changed the class parameters.
+            for index, current in enumerate(cls.__parameters__):
+                if current is param or current == param:
+                    break
             else:
-                raise TypeError(f"Too few arguments for {cls}; actual {len(args)}, expected at least {index + 1}")
+                raise ValueError("sequence.index(x): x not in sequence")
+            actual = len(args)
+            if index >= actual:
+                default = param.__default__ if index == actual else _typing.NoDefault
+                if default is _typing.NoDefault:
+                    raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {index + 1}")
+                args = args + (default,)
 
-    actual, expected = len(args), len(parameters)
+    expected = len(cls.__parameters__)
+    if not expected:
+        raise TypeError(f"{cls} is not a generic class")
+    actual = len(args)
     if actual > expected:
         raise TypeError(f"Too many arguments for {cls}; actual {actual}, expected {expected}")
-    if actual < expected and not parameters[actual].has_default():
-        required = expected - sum(p.has_default() for p in parameters)
+    if actual < expected and not cls.__parameters__[actual].has_default():
+        required = expected - sum(p.has_default() for p in cls.__parameters__)
         raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {required}")
     flattened = tuple(item for param, arg in zip(parameters, args)
                       for item in (arg if isinstance(param, _typing.TypeVarTuple) else (arg,)))
@@ -2180,7 +2191,8 @@ def _variadic_class_getitem(cls, args, constructor):
     try:
         return _cached_variadic_class_getitem(cls, args, constructor)
     except TypeError:
-        return _variadic_class_getitem_uncached(cls, args, constructor)
+        pass
+    return _variadic_class_getitem_uncached(cls, args, constructor)
 
 
 def _specialize_generic_alias_uncached(alias, args):

@@ -809,8 +809,10 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             } else {
                 let params = ctx.lookup_attr(target, "__parameters__")?;
                 let parameters = ctx.items(params)?;
-                if parameters.iter().any(|&id| {
-                    matches!(ctx.heap.get(id), Value::ParamSpec(_) | Value::TypeVarTuple { .. })
+                if parameters.iter().any(|&id| match ctx.heap.get(id) {
+                    Value::ParamSpec(_) | Value::TypeVarTuple { .. } => true,
+                    Value::TypeVar(var) => !matches!(ctx.heap.get(var.default), Value::NoDefault),
+                    _ => false,
                 }) {
                     let constructor = ctx.builtin("typing._GenericAlias");
                     return typing_alias_helper(
