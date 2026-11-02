@@ -651,7 +651,9 @@ impl Function<'_, '_> {
                 }
                 let kind = match &body {
                     Body::GeneratorFunction((_, true)) => COROUTINE,
-                    Body::GeneratorFunction((_, false)) | Body::Generator(..) => GENERATOR,
+                    Body::GeneratorFunction((_, false))
+                    | Body::Generator(..)
+                    | Body::YieldingLambda(_) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
                         if is_generator(&f.body) {
@@ -739,7 +741,7 @@ impl Function<'_, '_> {
                 &self.source.private_names
             ));
         }
-        if (params.is_some() || matches!(body, Body::Expression(_))) && uses_class_cell(&body) {
+        if (params.is_some() || matches!(body, Body::YieldingLambda(_))) && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
         let generator = match &body {
@@ -758,7 +760,7 @@ impl Function<'_, '_> {
                 let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
                 Some((first, text))
             }
-            Body::Expression(expr) if imre_ast::code_flags::yields_in_expression(expr) => {
+            Body::YieldingLambda(expr) => {
                 let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
                 Some((expr.start(), format!("def _():\n return ({text})")))
             }
@@ -789,7 +791,9 @@ impl Function<'_, '_> {
                 // Methods and nested classes can still capture the enclosing frame.
                 closure_names.incomplete = true;
             }
-            Body::Expression(expr) | Body::TypeAlias(expr) => closure_names.visit_expr(expr),
+            Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
+                closure_names.visit_expr(expr)
+            }
             _ => closure_names.incomplete = true,
         }
         if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
@@ -1330,7 +1334,9 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     let mut captures = ClassCell(false);
     match body {
         Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => captures.visit_body(stmts),
-        Body::Expression(expr) | Body::TypeAlias(expr) => captures.visit_expr(expr),
+        Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
+            captures.visit_expr(expr)
+        }
         Body::Generator(generators, element) => {
             for (index, generator) in generators.iter().enumerate() {
                 if index != 0 {
