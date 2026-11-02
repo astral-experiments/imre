@@ -2990,6 +2990,8 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_pass_fds.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_lifetime.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_text.py").read_bytes())
