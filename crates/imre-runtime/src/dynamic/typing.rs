@@ -2318,8 +2318,8 @@ pub(super) fn call(
             Value::GenericAlias(alias) => {
                 let kind = if alias.is_builtin_alias() {
                     "builtin"
-                } else if alias.kind == AliasKind::Callable {
-                    "callable"
+                } else if alias.kind == AliasKind::Unpack {
+                    "unpack"
                 } else {
                     "typing"
                 };

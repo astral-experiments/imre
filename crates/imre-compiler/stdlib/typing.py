@@ -1907,7 +1907,7 @@ class _SpecialGenericAlias(_NotIterable):
             cls = _typing._GenericAlias
         else:
             cls = type(self)
-            if cls is _typing._UnpackGenericAlias:
+            if _typing_runtime._get_alias_kind(self) == "unpack":
                 return cls(self.__origin__, params)
         return cls(self.__origin__, params, name=self._name, inst=self._inst)
 
@@ -2384,10 +2384,7 @@ def _resolve_forward_type(value, globals, locals, type_params, owner, format, gu
     copy_with = getattr(value, "copy_with", None)
     if copy_with is not None:
         return copy_with(resolved)
-    # Native callable, literal and unpack aliases currently lack an instance copy_with.
-    if kind == "callable":
-        return type(value)(value.__origin__, resolved,
-                           name=getattr(value, "_name", None), inst=getattr(value, "_inst", True))
+    # The native literal alias lacks an instance copy_with.
     return type(value)(value.__origin__, resolved)
 
 
