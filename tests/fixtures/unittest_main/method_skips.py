@@ -33,6 +33,9 @@ class Example(unittest.TestCase):
         with self.assertRaises(unittest.SkipTest) as caught:
             self.test_unavailable()
         self.assertEqual(str(caught.exception), "missing feature")
+        self.assertIn(container=str(caught.exception), member="feature")
+        with self.assertRaises(AssertionError):
+            self.assertIn("available", str(caught.exception))
 
 
 class Inherited(Example):
