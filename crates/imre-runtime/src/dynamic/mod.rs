@@ -1709,6 +1709,8 @@ impl Context {
                 let id = stdlib::datetime::store(self, value, NONE);
                 self.builtins.insert(format!("{name}.{field}"), id);
             }
+        } else if name == stdlib::datetime::TZINFO {
+            stdlib::datetime::install_members(self, name);
         }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
@@ -2302,6 +2304,20 @@ impl Context {
             "math" if source.is_none() => {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
+            }
+            "_datetime" => {
+                for name in ["date", "datetime", "time", "timedelta", "timezone"] {
+                    let class = self.builtin(&format!("datetime.{name}"));
+                    self.bind(scope, name, class);
+                }
+                let base = stdlib::datetime::tzinfo(self);
+                self.bind(scope, "tzinfo", base);
+                let utc = stdlib::datetime::utc(self);
+                self.bind(scope, "UTC", utc);
+                for (name, year) in [("MINYEAR", 1), ("MAXYEAR", 9999)] {
+                    let value = self.int(year);
+                    self.bind(scope, name, value);
+                }
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),

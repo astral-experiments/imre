@@ -49,6 +49,7 @@ impl Context {
                     }
                     "bool" => lineage.push(self.builtin("int")),
                     "datetime.datetime" => lineage.push(self.builtin("datetime.date")),
+                    "datetime.timezone" => lineage.push(stdlib::datetime::tzinfo(self)),
                     "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum" => {
                         let scalar = if name == "enum.StrEnum" { "str" } else { "int" };
                         lineage.push(self.builtin(scalar));
