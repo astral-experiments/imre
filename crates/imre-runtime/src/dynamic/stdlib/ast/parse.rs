@@ -526,6 +526,11 @@ impl Parser<'_> {
     }
 }
 
+pub(super) enum ParseMode {
+    Exec,
+    Eval,
+}
+
 pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [src, filename, mode] =
         builtins::bind("parse", args, kwargs, ["source", "filename", "mode"])?;
@@ -542,18 +547,30 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             .transpose()?
             .unwrap_or("<unknown>"),
     )?;
-    let mode = copy(
-        mode.map(|m| ctx.str_value(m))
-            .transpose()?
-            .unwrap_or("exec"),
-    )?;
+    let mode = match mode.map(|m| ctx.str_value(m)).transpose()?.unwrap_or("exec") {
+        "exec" => ParseMode::Exec,
+        "eval" => ParseMode::Eval,
+        _ => {
+            return Err(Error::new(
+                "ValueError",
+                "ast.parse supports exec or eval mode",
+            ));
+        }
+    };
     let text = if ctx.string_storage(source).is_some() {
         copy(ctx.str_value(source)?)?
     } else {
-        ctx.check_buffer_exporter(source)?;
-        let data = match ctx.buffer_storage(source)? {
-            Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
-            Value::Array(array) => array.as_bytes(),
+        // CPython reads bytes and bytearray subclasses without invoking their buffer slots.
+        if !matches!(
+            ctx.heap.get(ctx.scalar_value(source)),
+            Value::Bytes(_) | Value::ByteArray(_)
+        ) {
+            ctx.check_buffer_exporter(source)?;
+        }
+        let data = match ctx.buffer_storage(source) {
+            Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)) => bytes.as_slice(),
+            Ok(Value::Array(array)) => array.as_bytes(),
+            // Failed buffer acquisition, including a released view, is a source type error.
             _ => {
                 return Err(Error::new(
                     "TypeError",
@@ -568,14 +585,14 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             })?
             .into()
     };
-    parse_source(ctx, &text, &filename_text, &mode, false)
+    parse_source(ctx, &text, &filename_text, mode, false)
 }
 
 pub(super) fn parse_source(
     ctx: &mut Context,
     source: &str,
     filename: &str,
-    mode: &str,
+    mode: ParseMode,
     literal: bool,
 ) -> Result<Id> {
     // Python normalizes physical newlines before decoding literals and computing AST positions.
@@ -609,7 +626,7 @@ pub(super) fn parse_source(
     }
     let syntax = |err| Error::new("SyntaxError", format!("{filename}: {err}"));
     match mode {
-        "exec" => {
+        ParseMode::Exec => {
             let body = ruff_python_parser::parse_module(source).map_err(syntax)?;
             parser.prepare_strings(source, body.tokens(), body.syntax());
             parser.function_starts = body
@@ -627,7 +644,7 @@ pub(super) fn parse_source(
                 None,
             ))
         }
-        "eval" => {
+        ParseMode::Eval => {
             let expr = ruff_python_parser::parse_expression(source).map_err(|err| {
                 if literal {
                     let line = parser.location(err.location)[0];
@@ -640,10 +657,6 @@ pub(super) fn parse_source(
             let body = parser.expr(*expr.into_syntax().body)?;
             Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
         }
-        _ => Err(Error::new(
-            "ValueError",
-            "ast.parse supports exec or eval mode",
-        )),
     }
 }
 
@@ -665,7 +678,8 @@ mod stack_tests {
                 };
                 ctx.module("ast").unwrap();
                 let source = format!("{}z", "x if y else ".repeat(512));
-                super::parse_source(&mut ctx, &source, "nested.py", "eval", false).unwrap();
+                super::parse_source(&mut ctx, &source, "nested.py", super::ParseMode::Eval, false)
+                    .unwrap();
             })
             .unwrap()
             .join()

@@ -116,8 +116,18 @@ def check_template_nodes():
         assert type(field.format_spec) is ast.Constant and field.format_spec.value == "ax"
 
 
+class HookedBytes(bytes):
+    def __buffer__(self, flags):
+        raise AssertionError("unexpected buffer acquisition")
+
+
+class HookedByteArray(bytearray):
+    def __buffer__(self, flags):
+        raise AssertionError("unexpected buffer acquisition")
+
+
 def check_encoded_source():
-    for source in (bytes, bytearray, memoryview):
+    for source in (bytes, bytearray, memoryview, HookedBytes, HookedByteArray):
         data = source(b"# coding: latin-1\r\n'caf\xe9'")
         node = ast.parse(data, "encoded.py", mode="eval").body
         assert node.value == "café" and node.lineno == 2
@@ -128,6 +138,22 @@ def check_encoded_source():
         assert error.filename == "broken.py" and error.lineno == 0
     else:
         raise AssertionError("accepted an unknown source encoding")
+
+    try:
+        ast.parse(b"\xff", mode="unknown")
+    except ValueError as error:
+        assert "mode" in str(error)
+    else:
+        raise AssertionError("accepted an invalid parse mode")
+
+    released = memoryview(b"1")
+    released.release()
+    try:
+        ast.parse(released)
+    except TypeError as error:
+        assert str(error) == "compile() arg 1 must be a string, bytes or AST object"
+    else:
+        raise AssertionError("parsed a released view")
 
 
 def current():

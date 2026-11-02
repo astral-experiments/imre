@@ -324,7 +324,7 @@ pub(super) fn evaluate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
     })?;
     if let Value::Str(s) = ctx.heap.get(node) {
         let source = s.trim_start_matches([' ', '\t']).to_owned();
-        node = parse::parse_source(ctx, &source, "<unknown>", "eval", true)?;
+        node = parse::parse_source(ctx, &source, "<unknown>", parse::ParseMode::Eval, true)?;
     }
     if is(ctx, node, "ast.Expression") {
         node = ctx.lookup_attr(node, "body")?;
