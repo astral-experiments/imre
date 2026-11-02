@@ -116,6 +116,7 @@ class Popen:
         self._communication_started = False
         _cleanup()
         self.args = args
+        self.returncode = None
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
         self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
@@ -147,7 +148,7 @@ class Popen:
             return
         if self.returncode is None:
             _warn("subprocess %s is still running" % self.pid, ResourceWarning, source=self)
-        if _process.status(self._handle, True) is None and _active is not None:
+        if self._internal_poll() is None and _active is not None:
             _active.append(self)
 
     @property
@@ -162,12 +163,15 @@ class Popen:
     def pid(self):
         return _process.pid(self._handle)
 
-    @property
-    def returncode(self):
-        return _process.status(self._handle, False)
+    def _internal_poll(self):
+        if self.returncode is None:
+            status = _process.poll(self._handle)
+            if status is not None:
+                self.returncode = status
+        return self.returncode
 
     def poll(self):
-        return _process.status(self._handle, True)
+        return self._internal_poll()
 
     def wait(self, timeout=None):
         endtime = None if timeout is None else _time() + timeout
@@ -178,10 +182,13 @@ class Popen:
             raise
 
     def _wait(self, timeout):
-        result = _process.wait(self._handle, timeout)
-        if result is None:
-            raise TimeoutExpired(self.args, timeout)
-        return result
+        if self.returncode is None:
+            result = _process.wait(self._handle, timeout, self)
+            if result is not None:
+                self.returncode = result
+            elif self.returncode is None:
+                raise TimeoutExpired(self.args, timeout)
+        return self.returncode
 
     def _wait_after_keyboard_interrupt(self, endtime):
         # The child may also have received SIGINT. Share one brief wait with
@@ -357,7 +364,12 @@ class Popen:
         return stdout, stderr
 
     def send_signal(self, sig):
-        _process.signal(self._handle, sig)
+        self.poll()
+        if self.returncode is None:
+            try:
+                _process.signal(self._handle, sig)
+            except ProcessLookupError:
+                pass
 
     def terminate(self):
         self.send_signal(15)

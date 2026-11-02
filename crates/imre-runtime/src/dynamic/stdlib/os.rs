@@ -605,7 +605,7 @@ fn readinto(ctx: &mut Context, fd: i32, dst: Id) -> Result<Id> {
     })
 }
 
-fn ssize_t(ctx: &mut Context, value: Id) -> Result<isize> {
+pub(super) fn ssize_t(ctx: &mut Context, value: Id) -> Result<isize> {
     crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
         Error::new(
             "OverflowError",
