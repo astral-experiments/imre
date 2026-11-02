@@ -1,0 +1,1 @@
+from _codecs import _imre_native_search as search_function

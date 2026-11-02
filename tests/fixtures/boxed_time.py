@@ -4,10 +4,56 @@ import time
 
 def current():
     from select import select
-    from time import ctime, monotonic, perf_counter, time_ns
+    from time import ctime, monotonic, monotonic_ns, perf_counter, time_ns
 
+    from types import SimpleNamespace
+    for name in ("time", "monotonic", "perf_counter"):
+        info = time.get_clock_info(name)
+        assert type(info) is SimpleNamespace and isinstance(info.implementation, str)
+        assert info.monotonic is (name != "time") and info.adjustable is (name == "time")
+        assert 0 < info.resolution <= 1
+    assert time.get_clock_info("monotonic") == time.get_clock_info("perf_counter")
+    for name, expected in (("time_ns", ValueError), (b"time", TypeError)):
+        try:
+            time.get_clock_info(name)
+        except expected:
+            pass
+        else:
+            raise AssertionError("invalid clock name accepted")
+
+    prefix = "get_clock_info() argument 1 must be str, not "
+    for kind, expected in (("x" * 60, TypeError), ("界" * 17, UnicodeDecodeError)):
+        try:
+            time.get_clock_info(type(kind, (), {})())
+        except expected as exc:
+            if expected is TypeError:
+                assert str(exc) == prefix + kind[:50]
+            else:
+                assert exc.object == prefix.encode() + kind.encode()[:50]
+                assert exc.reason == "unexpected end of data"
+        else:
+            raise AssertionError("invalid clock type accepted")
+
+    before_ns = monotonic_ns()
     first = monotonic()
+    after_ns = monotonic_ns()
+    assert time.monotonic_ns is monotonic_ns and type(before_ns) is int
+    assert before_ns <= after_ns
+    assert before_ns / 1e9 - 1e-6 <= first <= after_ns / 1e9 + 1e-6
     assert type(first) is float and time.monotonic is monotonic
+    sleep = time.sleep
+    assert sleep(0) is None
+    before_sleep = monotonic()
+    assert sleep(0.01) is None
+    assert monotonic() - before_sleep >= 0.009
+    for arg, expected in ((-1, ValueError), (None, TypeError), (10**50, OverflowError)):
+        try:
+            sleep(arg)
+        except expected:
+            pass
+        else:
+            raise AssertionError("invalid sleep duration accepted")
+
     second = perf_counter()
     assert first <= second <= monotonic()
     select([], [], [], 0.02)
@@ -15,7 +61,7 @@ def current():
     ns = time_ns()
     assert time.time_ns is time_ns and type(ns) is int
     assert abs(ns / 1_000_000_000 - time.time()) < 60
-    for clock in (monotonic, perf_counter, time_ns):
+    for clock in (monotonic, monotonic_ns, perf_counter, time_ns):
         for args, kwargs in (((1,), {}), ((), {"x": 1})):
             try:
                 clock(*args, **kwargs)

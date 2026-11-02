@@ -1224,6 +1224,25 @@ impl Types {
         self.namedtuple_layout(origin, vec![field; URL_FIELDS.len()])
     }
 
+    pub(crate) fn is_url_split_result(&self, ty: Type) -> bool {
+        matches!(
+            self.tuple_origin(ty),
+            Some(SPLIT_RESULT | SPLIT_RESULT_BYTES)
+        )
+    }
+
+    /// Tuple layouts whose directories are provided by the native tuple namespace.
+    pub(crate) fn is_plain_or_declared_tuple(&self, ty: Type) -> bool {
+        match ty {
+            Type::VarTuple(_) => true,
+            Type::Tuple(id) => matches!(
+                self.0.borrow().shapes[id],
+                Shape::Tuple(_) | Shape::NamedTuple(TupleOrigin::Declaration(_), _)
+            ),
+            _ => false,
+        }
+    }
+
     pub(crate) fn tuple_origin(&self, ty: Type) -> Option<TupleOrigin> {
         let Type::Tuple(id) = ty else { return None };
         match self.0.borrow().shapes[id] {

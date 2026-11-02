@@ -146,3 +146,19 @@ def current():
     assert receivers[0]() is None and events == ["weak", "finalize"]
     saved.clear()
     events.clear()
+    # Nested fields keep a finalizer alive until its last strong path changes.
+    outer = Receiver()
+    outer.inner = Receiver()
+    outer.inner.owner = Owner()
+    alias = outer.inner
+    assert (setattr(outer, "inner", None), events.copy()) == (None, [])
+    del alias
+    assert events == ["finalize"]
+    saved.clear()
+    events.clear()
+    # Reusing the same field must not preserve the old reachability result.
+    outer.inner = Receiver()
+    outer.inner.owner = Owner()
+    assert (setattr(outer, "inner", None), events.copy()) == (None, ["finalize"])
+    saved.clear()
+    events.clear()

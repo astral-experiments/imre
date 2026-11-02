@@ -14,6 +14,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use super::builtins::boolean;
+use super::stdlib::hashlib::digest::SharedHash;
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::locks::{PrimitiveLock, thread_ident, timeout_float, timeout_int};
 
@@ -244,12 +245,6 @@ impl Registry {
 }
 
 impl Registry {
-    /// Only workers present before ordinary exit callbacks participate in interpreter shutdown.
-    pub(super) fn join_before_exit_callbacks(&mut self) {
-        self.joined_at_shutdown = true;
-        self.join_non_daemon();
-    }
-
     fn join_non_daemon(&self) {
         for worker in &self.entries {
             if !worker.daemon {
@@ -267,10 +262,17 @@ impl Drop for Registry {
     }
 }
 
-enum Operation {
+pub(super) enum Operation {
     Python(Box<Callback>),
     Empty,
-    Acquire(Arc<PrimitiveLock>),
+    UpdateHash {
+        hash: SharedHash,
+        data: Vec<u8>,
+    },
+    Acquire {
+        lock: Arc<PrimitiveLock>,
+        release: Option<Arc<PrimitiveLock>>,
+    },
 }
 
 struct Started {
@@ -280,20 +282,72 @@ struct Started {
     native_id: Option<u64>,
 }
 
+/// Match the interpreter's lookup of an already imported threading module at exit.
+pub(super) fn shutdown(ctx: &mut Context) {
+    // An exception in the Python handler can deliberately prevent a non-daemon join.
+    // Do not repeat that join in Drop or include workers started later by ordinary atexit.
+    ctx.workers.joined_at_shutdown = true;
+    let mark = ctx.heap.temporary_mark();
+    let result = (|| -> Result<()> {
+        let key = ctx.text("threading");
+        if let Some(module) = ctx.registered_module(key)? {
+            ctx.heap.keep(module);
+            if module != NONE {
+                if ctx.module_initializing(module)? {
+                    let wait = ctx.lookup_attr(ctx.bootstrap_module, "_lock_unlock_module")?;
+                    ctx.call(wait, vec![key], Vec::new())?;
+                }
+                // Fetching the spec or waiting for the import can replace the original entry.
+                if ctx.registered_module(key)? != Some(module) {
+                    return Ok(());
+                }
+            }
+            let shutdown = ctx.lookup_attr(module, "_shutdown")?;
+            ctx.call(shutdown, Vec::new(), Vec::new())?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        super::unraisable::report(
+            ctx,
+            error,
+            false,
+            None,
+            "Exception ignored on threading shutdown",
+        );
+    }
+    ctx.heap.release_temporaries_since(mark);
+}
+
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
 fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -> Result<Started> {
     let (ready, finished) = mpsc::sync_channel(0);
+    let (operand_bound, wait_for_operand) = match &operation {
+        Operation::Python(callback) if callback.awaits_receiver() => {
+            let (tx, rx) = mpsc::channel();
+            (Some(tx), Some(rx))
+        }
+        _ => (None, None),
+    };
     let count = Arc::clone(&ctx.threads.count);
     let active = Arc::new(AtomicBool::new(true));
     let worker_active = Arc::clone(&active);
+    let fault_workers =
+        matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
     let thread = thread::Builder::new()
         .spawn(move || {
             // A failed bootstrap publishes no identity and contributes nothing to the live count.
+            let mut prefix = None;
+            let mut update = None;
             let (python, acquire) = match operation {
                 Operation::Python(callback) => match callback.load() {
                     Ok((mut worker, function, arguments)) => {
+                        worker
+                            .heap
+                            .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                         worker.threads.count = Arc::clone(&count);
                         worker.threads.private_context = true;
+                        worker.threads.acquire_bound = operand_bound;
                         (Some((worker, function, arguments)), None)
                     }
                     Err(error) => {
@@ -302,9 +356,24 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                     }
                 },
                 Operation::Empty => (None, None),
-                Operation::Acquire(lock) => (None, Some(lock)),
+                Operation::UpdateHash { hash, data } => {
+                    update = Some((hash, data));
+                    (None, None)
+                }
+                Operation::Acquire { lock, release } => {
+                    prefix = release;
+                    (None, Some(lock))
+                }
             };
             let _running = Running::enter(count, worker_active);
+            // Consume the nonblocking prefix and bind the final receiver before the
+            // parent resumes and can rebind either closure cell.
+            if let Some(lock) = prefix
+                && let Err(error) = lock.release()
+            {
+                let _ = ready.send(Err(Error::from(error).to_string()));
+                return Ok(());
+            }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             let native_id = Some(crate::objects::locks::native_thread_id());
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -325,6 +394,10 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                     }
                 } else if let Some(lock) = acquire {
                     lock.acquire(true, None);
+                } else if let Some((hash, data)) = update {
+                    hash.lock()
+                        .update(&data)
+                        .map_err(|error| error.to_string())?;
                 }
             }
             Ok(())
@@ -341,6 +414,11 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
             return Err(Error::new("RuntimeError", reason));
         }
     };
+    if let Some(received) = wait_for_operand {
+        // The caller is the only Python evaluator that can change this cell. An
+        // early worker error also ends the wait and follows the usual reporting path.
+        let _ = received.recv();
+    }
     Ok(Started {
         handle: Rc::new(Handle {
             thread: RefCell::new(Some(thread)),
@@ -355,10 +433,10 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
 /// A low-level caller owns only the bootstrap roots after the native worker is detached.
 pub(super) fn start_detached(
     ctx: &Context,
-    callback: Callback,
+    callback: Operation,
     label: String,
 ) -> Result<(usize, Arc<AtomicBool>)> {
-    let worker = launch(ctx, Operation::Python(Box::new(callback)), Some(label))?;
+    let worker = launch(ctx, callback, Some(label))?;
     Ok((worker.ident, worker.active))
 }
 
@@ -369,21 +447,48 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         return Ok((Operation::Empty, vec![target, args, kwargs]));
     }
     if let Some((callback, roots)) = Callback::capture_for_thread(ctx, target, args, kwargs)? {
-        return Ok((Operation::Python(Box::new(callback)), roots));
+        return Ok((callback, roots));
     }
     if let Value::Method {
         callable, receiver, ..
     } = *ctx.heap.get(target)
-        && let Value::Native(symbol) = ctx.heap.get(callable)
-        && matches!(ctx.heap.get(args), Value::Tuple(items) | Value::List(items) if items.is_empty())
+        && let Value::Tuple(pos) | Value::List(pos) = ctx.heap.get(args)
         && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
-        && symbol == "_thread.lock.acquire"
-        && let Value::PrimitiveLock(lock) = ctx.heap.get(receiver)
     {
-        return Ok((
-            Operation::Acquire(Arc::clone(lock)),
-            vec![target, args, kwargs],
-        ));
+        let (symbol, storage) = match ctx.heap.get(callable) {
+            Value::Native(symbol) => (symbol.as_str(), receiver),
+            Value::HashMethod {
+                owner,
+                name: "update",
+            } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {
+                ("hash.update", ctx.scalar_value(receiver))
+            }
+            _ => ("", receiver),
+        };
+        let operation = match (ctx.heap.get(storage), pos.as_slice()) {
+            (Value::PrimitiveLock(lock), []) if symbol == "_thread.lock.acquire" => {
+                Some(Operation::Acquire {
+                    lock: Arc::clone(lock),
+                    release: None,
+                })
+            }
+            (value @ Value::Hash(hash), [id])
+                if super::builtins::method_name(value, "update").as_deref() == Some(symbol) =>
+            {
+                if let Value::Bytes(data) = ctx.heap.get(*id) {
+                    Some(Operation::UpdateHash {
+                        hash: hash.clone(),
+                        data: super::copy_ids(data)?,
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if let Some(operation) = operation {
+            return Ok((operation, vec![target, args, kwargs]));
+        }
     }
     Err(Error::new(
         "NotImplementedError",
@@ -481,6 +586,11 @@ pub(super) fn call(
                 ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
             });
             Ok(ctx.alloc(Value::Tuple(vec![handle, ident, tid])))
+        }
+        ("shutdown", &[]) => {
+            ctx.workers.join_non_daemon();
+            ctx.reap_thread_operands();
+            Ok(NONE)
         }
         ("join", &[handle, limit]) => {
             let limit = timeout(ctx, limit)?;

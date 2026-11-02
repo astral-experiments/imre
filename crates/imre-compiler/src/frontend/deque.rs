@@ -17,6 +17,32 @@ fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
 }
 
 impl Checker<'_> {
+    pub(super) fn boxed_deque_descriptor(&self, attr: &ast::ExprAttribute) -> bool {
+        matches!(
+            attr.attr.as_str(),
+            "__repr__" | "__mul__" | "__rmul__" | "__imul__"
+        ) && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
+    }
+
+    /// Check each supplied expression before handing the invocation to the native descriptor.
+    pub(super) fn boxed_deque_call(
+        &mut self,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        for arg in &call.arguments.args {
+            let value = match arg {
+                ast::Expr::Starred(starred) => starred.value.as_ref(),
+                other => other,
+            };
+            self.evaluated_argument(value)?;
+        }
+        for keyword in &call.arguments.keywords {
+            self.evaluated_argument(&keyword.value)?;
+        }
+        Err(self.scoped_builtin_error(&format!("collections.deque.{name}"), call))
+    }
+
     /// A saved method owns the receiver that was evaluated at attribute access.
     /// Its adapter has the same typed arguments as the corresponding direct call.
     pub(super) fn deque_attribute(
@@ -27,6 +53,11 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
         let (builtin, parameters, returns) = match name {
+            "__repr__" | "__mul__" | "__rmul__" | "__imul__" => {
+                return Err(
+                    self.scoped_builtin_error(&format!("collections.deque.{name}"), attribute)
+                );
+            }
             "maxlen" => {
                 return Ok(Expr {
                     ty: self.types.optional(Type::Int),
@@ -355,6 +386,9 @@ impl Checker<'_> {
         element: Type,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if matches!(name, "__repr__" | "__mul__" | "__rmul__" | "__imul__") {
+            return self.boxed_deque_call(name, call);
+        }
         if name == "__init__" {
             return self.deque_initialize(call, Some(element), Some(receiver));
         }

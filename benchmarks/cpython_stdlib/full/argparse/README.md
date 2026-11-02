@@ -29,6 +29,59 @@ parser operations, what ran on the host, and which IDs are still blocked.
 [Source-defined methods](METHODS.md) records the unchanged native bodies, host fixtures,
 per-ID blockers and the whole-module startup dependency.
 
+## First 14 tests with the metaclass patch
+
+Public revision `c6b39ff06f9dde32486e78588724099953cb9a00` stopped during
+import before unittest registered a test. With the local metaclass patch
+`473b3648bc741c5a9008646568783cd92c6e7167`, unittest registered all 1,893
+cases and passed the first 14 at O0 and O3. The full O0 registration order
+matched CPython. The 14 were two `StdStreamTest` cases and twelve generated
+`TestActionExtend` cases. These local runs add zero new originals to the
+campaign count.
+
+The second local build, `d0b71885cd262e4bdd80e8c13041ed62935bc0eb`, added
+the finalizer change from #3935 to the metaclass patch. Each level used a
+matched pair of runs with the same 14 successful callback sequences. Total
+process times in seconds include import, discovery and fixture execution.
+
+| Level | Metaclass wall | With #3935 wall | Metaclass CPU | With #3935 CPU |
+| --- | ---: | ---: | ---: | ---: |
+| O0 | 481.393 | 490.397 | 481.258 | 490.193 |
+| O3 | 485.649 | 401.492 | 485.564 | 401.459 |
+
+The [callback ledger](matched-first-14-linux.tsv) contains the emitted
+`startTest`, `addSuccess` and `stopTest` events, including their monotonic
+timestamps, for pinned CPython and all four native runs. Its SHA-256 is
+`cf3c0892b1b80fd14170dbe35e94968bdf874ac6ac180876683562bd4312c3b4`. The separately retained full archive is 1,461,106 bytes with SHA-256
+`b8497577bc64f2656fb9d94fddd70cae6633f7bdf50892468c23ad73fa4bdf66`.
+
+## FileType cases 279–281 on public main
+
+CPython 3.14.5 (`5607950ef232dad16d75c0cf53101d9649d89115`) and Imre
+(`98e78f93f40801e6f08a79f0783ad44c8b6d3933`) each ran the same three selected
+unittest methods on Linux. The methods check the error for passing the
+`FileType` class to `add_argument`, the error for an invalid file mode, and
+the arguments forwarded to a mocked `open`. Each native run used the intact
+CPython test module and `argparse` source with Imre's matching compiler and
+runtime. [Upstream methods](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_argparse.py#L2057-L2094)
+
+The ledger records each occurrence's `startTest`, `addSuccess` and `stopTest`
+with the Unix timestamp emitted by the result recorder. Each run completed
+module cleanup and left its working directory empty. [Callback ledger](filetype-callbacks-linux.tsv)
+
+| Run | Process exit | Raw stdout SHA-256 |
+| --- | ---: | --- |
+| CPython | 0 | `06674df1d5e742b6e252474ec59d8798c2e0006b9224d5d27d23a6e1da9aa45a` |
+| Imre O0 | 0 | `1977df59c4c21a2519738b7fdf6245af7ee8068fbcf4d43cf84c1507e245c1d6` |
+| Imre O3 | 0 | `3bad65a725e6ff1181e263565a91defa167e3121569d32820ad6c2932bdfb6b9` |
+
+SHA-256 digests of the inputs and callback ledger
+
+- `Lib/test/test_argparse.py` — `bd3892b42c83f276327c141a7d6b38ed08c07a56c6076e4d3aefeddf90515499`
+- `Lib/argparse.py` — `052271a2a1eb1b6b60116acb8f3505c98edd52dba062b0309926e63ac4544743`
+- Result recorder — `2185643dc756d7509ce073883f5b948d2a9145970c1c4417c9b3fe789338f275`
+- `filetype-callbacks-linux.tsv` — `6b5f3a34fa04ce1209fcb81b7a7301e751f828772c78769690a13a7fc1d4af62`
+
 ## Per-occurrence evidence
 
 [evidence-linux.json](evidence-linux.json) is the version 1 report for the same

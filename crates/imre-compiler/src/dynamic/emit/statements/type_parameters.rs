@@ -34,7 +34,7 @@ pub(in super::super) fn check_nonlocals(source: &str, body: &[ast::Stmt]) -> Res
                     if !self.bindings.is_empty() {
                         // CPython removes ordinary class-local bindings from its type-parameter
                         // set for nested scopes, but a class still doesn't bind a closure cell.
-                        let locals = super::class_locals(&class.body);
+                        let locals = super::class_locals(&class.body).locals;
                         self.bindings.retain(|name, binding| {
                             !matches!(binding, Binding::Parameter) || !locals.contains(name)
                         });

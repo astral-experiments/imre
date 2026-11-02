@@ -1,5 +1,5 @@
 from enum import StrEnum
-from os import fsdecode, fsencode, fspath
+from os import fsdecode, fsencode, fspath, getcwd, getcwdb
 from pathlib import Path
 
 
@@ -46,6 +46,8 @@ class EnumPath:
     def __fspath__(self) -> Name:
         return Name.upload
 
+
+assert fsdecode(getcwdb()) == getcwd()
 
 text = "café/🧪.txt"
 raw = b"caf\xc3\xa9/\xf0\x9f\xa7\xaa.txt"

@@ -28,43 +28,12 @@ pub(super) fn check_docs(
     body: &[ast::Stmt],
     replacements: &HashMap<TextRange, Vec<u32>>,
 ) -> Result<(), String> {
-    use ast::visitor::{Visitor, walk_stmt};
-    struct Docs<'a> {
-        replacements: &'a HashMap<TextRange, Vec<u32>>,
-        invalid: Option<TextRange>,
-    }
-    impl Docs<'_> {
-        fn check(&mut self, body: &[ast::Stmt]) {
-            if let Some(doc) = crate::frontend::docstring_literal(body) {
-                self.invalid = self.invalid.or_else(|| {
-                    doc.value
-                        .iter()
-                        .map(Ranged::range)
-                        .find(|r| self.replacements.contains_key(r))
-                });
-            }
-        }
-    }
-    impl<'a> Visitor<'a> for Docs<'_> {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            match stmt {
-                ast::Stmt::ClassDef(c) => self.check(&c.body),
-                ast::Stmt::FunctionDef(f) => self.check(&f.body),
-                _ => {}
-            }
-            if self.invalid.is_none() {
-                walk_stmt(self, stmt);
-            }
-        }
-        fn visit_expr(&mut self, _: &'a ast::Expr) {}
-    }
-    let mut docs = Docs {
-        replacements,
-        invalid: None,
-    };
-    docs.check(body);
-    docs.visit_body(body);
-    if let Some(range) = docs.invalid {
+    if let Some(range) = imre_ast::strings::find_docstring(body, true, |doc| {
+        doc.value
+            .iter()
+            .map(Ranged::range)
+            .find(|range| replacements.contains_key(range))
+    }) {
         return Err(crate::frontend::error(
             source,
             &range,

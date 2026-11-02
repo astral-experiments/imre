@@ -3,7 +3,7 @@
 use super::*;
 use crate::objects::records::descriptor;
 
-fn push(output: &mut Vec<RawFd>, number: &Int) -> Result<()> {
+pub(super) fn push(output: &mut Vec<RawFd>, number: &Int) -> Result<()> {
     let fd = number
         .as_small()
         .and_then(|n| i32::try_from(n).ok())

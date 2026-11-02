@@ -6,7 +6,6 @@ mod delivery;
 mod handler;
 mod hierarchy;
 mod levels;
-pub(crate) use levels::{level_name, named_level};
 pub(crate) use locks::HandlerLock;
 pub(super) mod locks;
 pub(super) mod manager;
@@ -51,35 +50,7 @@ impl Logger {
         crate::ObjectOwner::new(Object(StorageCell::new(Storage::Logger(self.clone()))))
     }
 
-    pub(crate) fn standalone(name: &str, level: Int) -> Rc<Self> {
-        Self::new(StrOwner::new(Str::from(name)), level, true)
-    }
-
-    pub(crate) fn registered(name: &str) -> Rc<Self> {
-        LOGGERS.with_borrow_mut(|logs| logs.entry(name).logger.clone())
-    }
-
-    pub(crate) fn parent(&self) -> Option<Rc<Self>> {
-        LOGGERS.with_borrow(|logs| logs.parent(self).map(|entry| entry.logger.clone()))
-    }
-
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub(crate) fn level(&self) -> Int {
-        self.level.borrow().clone()
-    }
-
-    pub(crate) fn effective_level(&self) -> Int {
-        LOGGERS.with_borrow(|logs| logs.effective(self))
-    }
-
-    pub(crate) fn set_level(&self, value: &Int) {
-        LOGGERS.with_borrow(|logs| logs.set_level(self, value));
-    }
-
-    pub(crate) fn enabled_at(&self, value: &Int) -> Result<bool> {
+    fn enabled_at(&self, value: &Int) -> Result<bool> {
         LOGGERS.with_borrow(|logs| {
             let key = IntKey(value.clone());
             if let Some(enabled) = self.enabled.get(&key) {
@@ -99,22 +70,6 @@ impl Logger {
             self.enabled.insert(key, enabled)?;
             Ok(enabled)
         })
-    }
-
-    pub(crate) fn propagate(&self) -> bool {
-        self.propagate.get()
-    }
-
-    pub(crate) fn set_propagate(&self, value: bool) {
-        self.propagate.set(value);
-    }
-
-    pub(crate) fn disabled(&self) -> bool {
-        self.disabled.get()
-    }
-
-    pub(crate) fn set_disabled(&self, value: bool) {
-        self.disabled.set(value);
     }
 }
 
@@ -228,22 +183,13 @@ impl Registry {
 thread_local! { static LOGGERS: RefCell<Registry> = RefCell::new(Registry::new()); }
 
 /// Format the time captured by a LogRecord.
-fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Duration) -> String {
-    let custom = format.filter(|value| !value.is_empty());
-    let pattern: Vec<u32> = custom
-        .unwrap_or("%Y-%m-%d %H:%M:%S")
-        .chars()
-        .map(u32::from)
-        .collect();
+fn format_timestamp(pattern: &str, local: &libc::tm) -> String {
+    let pattern = pattern.chars().map(u32::from).collect::<Vec<_>>();
     let points = crate::sys::with_process_locale(|| super::time::format_clock(&pattern, local));
-    let mut text: String = points
+    points
         .into_iter()
         .map(|point| char::from_u32(point).unwrap_or(char::REPLACEMENT_CHARACTER))
-        .collect();
-    if custom.is_none() {
-        text.push_str(&format!(",{:03}", now.subsec_millis()));
-    }
-    text
+        .collect()
 }
 
 unsafe fn state(handle: *const Object) -> Rc<Logger> {

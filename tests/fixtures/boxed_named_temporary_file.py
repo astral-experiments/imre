@@ -1,4 +1,7 @@
+import gc
+import io
 import os
+import warnings
 import tempfile
 from tempfile import NamedTemporaryFile
 
@@ -74,6 +77,13 @@ def current():
         raise AssertionError("missing parent")
     # Fail after exclusive creation, even when successful files would be retained.
     saved = []
+    opened = []
+    real_open = io.open
+
+    def recording_open(*args, **kwargs):
+        stream = real_open(*args, **kwargs)
+        opened.append(stream)
+        return stream
 
     def interrupt(stream, name, *policy):
         saved.append((stream, name))
@@ -81,6 +91,7 @@ def current():
 
     original = tempfile._TemporaryFileWrapper
     tempfile._TemporaryFileWrapper = interrupt
+    io.open = recording_open
     try:
         for delete in (False, True):
             try:
@@ -90,9 +101,45 @@ def current():
             else:
                 raise AssertionError("constructor error was lost")
             stream, name = saved[-1]
+            assert opened.pop() is stream
             assert stream.closed and not os.path.exists(name)
     finally:
+        io.open = real_open
         tempfile._TemporaryFileWrapper = original
+
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always", ResourceWarning)
+        tmp = NamedTemporaryFile(dir=".", delete_on_close=False)
+        path, raw, write = tmp.name, tmp.file, tmp.write
+        message = f"Implicitly cleaning up {tmp!r}"
+        del tmp
+        gc.collect()
+        assert not raw.closed and os.path.exists(path) and not seen
+        assert write(b"kept") == 4
+        del write
+        gc.collect()
+        assert raw.closed and not os.path.exists(path)
+        assert [(w.category, str(w.message)) for w in seen] == [(ResourceWarning, message)]
+
+        tmp = NamedTemporaryFile(dir=".", delete_on_close=False)
+        path = tmp.name
+        tmp.close()
+        assert os.path.exists(path)
+        del tmp
+        gc.collect()
+        assert not os.path.exists(path) and len(seen) == 1
+
+    f = NamedTemporaryFile(dir=".")
+    path = f.name
+    f.close()
+    assert not os.path.exists(path)
+    with open(path, "wb") as replacement:
+        replacement.write(b"replacement")
+    del f
+    gc.collect()
+    with open(path, "rb") as replacement:
+        assert replacement.read() == b"replacement"
+    os.unlink(path)
 
     # The comparison runner removes the replacement and both delete=False files.
     print("NamedTemporaryFile lifecycle checked")

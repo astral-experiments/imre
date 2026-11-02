@@ -66,6 +66,21 @@ def growth_allocation(name, bound):
 
 
 def current():
+    class SizedList(list):
+        def __len__(self):
+            return 17
+
+    class SizedTuple(tuple):
+        def __len__(self):
+            return 17
+
+    for owner, value in ((list, SizedList([1, 2])), (tuple, SizedTuple((1, 2)))):
+        slot = getattr(owner, "__len__")
+        assert type(slot).__name__ == "wrapper_descriptor" and slot.__objclass__ is owner
+        assert slot.__doc__ == "Return len(self)." and slot.__text_signature__ == "($self, /)"
+        assert len(value) == value.__len__() == 17
+        assert slot(value) == slot.__get__(value, type(value))() == 2
+
     class Source(list):
         def __iter__(self):
             return iter((9,))
@@ -90,12 +105,20 @@ def current():
     assert items == [1, 2, 1, 2, 9]
 
     class Values(list):
+        def __getitem__(self, key):
+            return "override"
+
         def append(self, item):
             return "override"
 
     values = Values()
     assert list.append(values, 3) is None
     assert values == [3] and values.append(4) == "override"
+    assert values[0] == "override" and list.__getitem__(values, -1) == 3
+    get = list.__getitem__.__get__(values, Values)
+    assert type(list.__getitem__).__name__ == "method_descriptor"
+    sliced = get(slice(None))
+    assert type(sliced) is list and sliced == [3]
     add = list.append.__get__(values, Values)
     take = list.pop.__get__(values, Values)
     assert add(7) is None and take() == 7

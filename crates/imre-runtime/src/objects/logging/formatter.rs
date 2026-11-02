@@ -1,7 +1,6 @@
 //! Percent, brace and template formatting over the actual fields of native log records.
 use crate::StrOwner;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use regex_automata::meta::Regex;
 use ruff_python_literal::format::{FormatParseError, FormatPart, FormatString, FromTemplate};
@@ -323,7 +322,7 @@ impl Formatter {
         }
         let custom = date.filter(|s| !s.is_empty());
         let pattern = custom.unwrap_or(self.default_time.as_str());
-        let timestamp = super::format_timestamp(Some(pattern), &clock, Duration::ZERO);
+        let timestamp = super::format_timestamp(pattern, &clock);
         let Some(msec) = self
             .default_msec
             .as_ref()

@@ -64,6 +64,10 @@ def main() -> None:
     print(f.formatTime(r))
     f.default_msec_format = "%s.%03d"
     print(f.formatTime(r))
+    f.default_time_format = ""
+    print(repr(f.formatTime(r)))
+    f.default_msec_format = None
+    print(repr(f.formatTime(r)))
     for seconds in [2**53 + 1, 2**63 - 1, -(2**63) - 1, 67767976233532800]:
         show_seconds(f, logging.makeLogRecord({"created": seconds}))
     for stamp in [float("nan"), float("inf"), float(2**57), -0.1]:

@@ -1,4 +1,7 @@
+from array import array
+import gc
 import io
+import os
 import sys
 from io import RawIOBase
 
@@ -168,6 +171,19 @@ def exercise(path):
         except ValueError:
             print(events)
 
+    text_path = path + ".text-input"
+    with open(text_path, "wb") as writer:
+        writer.write(b"A\xe9\r\nZ\n")
+    encoded_path = text_path.encode()
+    with open(encoded_path, "rt", encoding="latin-1") as reader:
+        assert reader.buffer.raw.closefd and reader.name == encoded_path
+        assert reader.fileno() == reader.buffer.raw.fileno()
+        assert reader.readline() == "A\xe9\n"
+        assert reader.read() == "Z\n"
+        assert reader.seek(0) == 0
+        assert reader.read() == "A\xe9\nZ\n"
+    assert reader.closed
+
     with open(path, "rb") as reader:
         reader.read(1)
         try:
@@ -186,6 +202,18 @@ def exercise(path):
         stream.seek(0)
         print(stream.readline(ReadSize(stream)), stream.tell())
     from io import UnsupportedOperation
+
+    buffered_path = path + ".buffered"
+    with open(buffered_path, "wb", 4) as writer:
+        writer.write(b"a")
+        writer.write(b"bcd")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b""
+        writer.write(b"e")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b"abcd"
+    with open(buffered_path, "rb") as reader:
+        assert reader.read() == b"abcde"
 
     target_path = path + ".output"
     with open(target_path, "wb") as output:
@@ -362,6 +390,58 @@ def exercise(path):
             reader.seek(ClosingOffset(reader))
         except ValueError as error:
             print(error.args, reader.closed)
+
+    def bad_lines():
+        yield b"prefix"
+        gc.collect()
+        yield None
+        raise AssertionError("read past the rejected item")
+
+    with open(path + ".writelines", "wb") as writer:
+        try:
+            writer.writelines(bad_lines())
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writelines accepted None")
+        assert writer.writelines([b"!"]) is None
+        for call, owner in ((lambda: writer.writelines(), "_IOBase"), (writer.writelines, "BufferedWriter")):
+            try:
+                call()
+            except TypeError as error:
+                assert str(error) == f"{owner}.writelines() takes exactly one argument (0 given)"
+            else:
+                raise AssertionError("writelines accepted zero arguments")
+    with open(path + ".writelines", "rb") as reader:
+        assert reader.read() == b"prefix!"
+
+    with open(path + ".array", "wb") as writer:
+        writer.write(b"abc")
+    target = array("i", b"x" * 8)
+    independent = array("i", target)
+    view = memoryview(target)
+    with open(path + ".array", "rb") as reader:
+        assert reader.readinto(target) == 3
+        assert bytes(view) == b"abcxxxxx"
+        reader.seek(1)
+        assert reader.readinto(view) == 2
+        assert reader.readinto(view) == 0
+    assert target.tobytes() == b"bccxxxxx"
+    view.release()
+    assert independent.tobytes() == b"xxxxxxxx"
+
+    read_fd, write_fd = os.pipe()
+    try:
+        os.set_blocking(read_fd, False)
+        with open(read_fd, "rb", closefd=False) as reader:
+            dest = bytearray(b"..")
+            assert reader.readinto(dest) is None
+            os.write(write_fd, b"Q")
+            assert reader.readinto(dest) == 1
+            assert bytes(dest) == b"Q."
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
 
     lines = path + ".lines"
     with open(lines, "w") as output:

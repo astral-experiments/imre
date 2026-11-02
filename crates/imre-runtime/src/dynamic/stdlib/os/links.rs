@@ -1,4 +1,6 @@
-use super::{Context, Id, NONE, Result, builtins, c_path, directory_fd, native, posixpath};
+use super::{
+    Context, Id, NONE, Result, audit_fd, builtins, c_path, directory_fd, native, posixpath,
+};
 use crate::dynamic::stdlib::audit;
 use std::ffi::CString;
 
@@ -19,10 +21,6 @@ fn path_argument(
         &format!("{name}: embedded null character in {argument}"),
     )?;
     Ok((path, spelling))
-}
-
-fn audit_fd(ctx: &mut Context, fd: i32) -> Id {
-    ctx.int(i64::from(if fd == libc::AT_FDCWD { -1 } else { fd }))
 }
 
 pub(super) fn symlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -74,6 +72,42 @@ pub(super) fn link(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
             src,
             Some(dst),
         )?);
+    }
+    Ok(NONE)
+}
+
+/// Move a directory entry atomically after auditing both paths and their directory descriptors.
+pub(super) fn rename(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let names = ["src", "dst", "src_dir_fd", "dst_dir_fd"];
+    let [Some(src), Some(dst), src_fd, dst_fd] =
+        super::bind_two_positional(name, args, kwargs, names)?
+    else {
+        unreachable!("rename and replace require src and dst")
+    };
+    let (src, source) = path_argument(ctx, name, src, "src")?;
+    let (dst, destination) = path_argument(ctx, name, dst, "dst")?;
+    let src_fd = directory_fd(ctx, src_fd)?;
+    let dst_fd = directory_fd(ctx, dst_fd)?;
+    let audit_src_fd = audit_fd(ctx, src_fd);
+    let audit_dst_fd = audit_fd(ctx, dst_fd);
+    audit::event(ctx, "os.rename", &[src, dst, audit_src_fd, audit_dst_fd])?;
+
+    // SAFETY: both C strings live through the syscall. The kernel validates the raw directory fds.
+    let result = unsafe {
+        if src_fd == libc::AT_FDCWD && dst_fd == libc::AT_FDCWD {
+            libc::rename(source.as_ptr(), destination.as_ptr())
+        } else {
+            libc::renameat(src_fd, source.as_ptr(), dst_fd, destination.as_ptr())
+        }
+    };
+    if result < 0 {
+        let error = crate::objects::errno_error(std::io::Error::last_os_error());
+        return Err(ctx.with_errno_filenames(error.into(), src, Some(dst))?);
     }
     Ok(NONE)
 }

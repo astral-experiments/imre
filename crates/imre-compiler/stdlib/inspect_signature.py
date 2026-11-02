@@ -1,16 +1,28 @@
 """Signature support for boxed Python functions. See CPython 3.14.5 Lib/inspect.py."""
 
 import enum
+import importlib.machinery
 import itertools
+import os
 import re
 import types
 from annotationlib import Format, ForwardRef
 from collections import OrderedDict
 from keyword import iskeyword
-from inspect import _signature_identifier, _signature_layout, _signature_mapping
+from inspect import _signature_identifier, _signature_layout, _signature_mapping, _static_member
 
 
 _sentinel = object()
+
+
+def getattr_static(obj, attr, default=_sentinel):
+    """Retrieve an attribute without invoking descriptors or attribute hooks."""
+    value = _static_member(obj, attr, _sentinel)
+    if value is not _sentinel:
+        return value
+    if default is not _sentinel:
+        return default
+    raise AttributeError(attr)
 
 
 class _ParameterKind(enum.IntEnum):

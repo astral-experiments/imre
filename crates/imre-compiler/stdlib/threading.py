@@ -13,7 +13,8 @@ except ImportError:
     from collections import deque as _deque
 
 
-__all__ = ["Thread", "Lock", "RLock", "Condition", "Event", "TIMEOUT_MAX", "local", "get_ident",
+__all__ = ["Thread", "Lock", "RLock", "Condition", "Event", "Semaphore", "BoundedSemaphore",
+           "Barrier", "BrokenBarrierError", "TIMEOUT_MAX", "local", "get_ident",
            "main_thread", "current_thread", "enumerate", "active_count"]
 try:
     from _thread import get_native_id
@@ -29,6 +30,8 @@ except AttributeError:
 del _thread
 _counter = count(1).__next__
 _dangling = WeakSet()
+_threading_atexits = []
+_SHUTTING_DOWN = False
 
 
 class Thread:
@@ -104,7 +107,8 @@ class Thread:
         status = "initial"
         if self._ident is not None:
             status = "started"
-            if self._handle is not None and not _imre_thread.alive(self._handle):
+            if ((self._handle is not None and not _imre_thread.alive(self._handle))
+                    or (self is _main_thread and self._stopped)):
                 status = "stopped"
         if self._daemonic:
             status += " daemon"
@@ -195,15 +199,34 @@ class Thread:
 class _MainThread(Thread):
     def __init__(self):
         Thread.__init__(self, name="MainThread", daemon=False)
+        self._stopped = False
         self._ident = get_ident()
         if _HAVE_THREAD_NATIVE_ID:
             self._native_id = get_native_id()
 
     def is_alive(self):
-        return True
+        return not self._stopped
 
 
 _main_thread = _MainThread()
+
+
+def _register_atexit(func, *args, **kwargs):
+    """Register a callback to run before non-daemon threads are joined."""
+    if _SHUTTING_DOWN:
+        raise RuntimeError("can't register atexit after shutdown")
+    _threading_atexits.append(lambda: func(*args, **kwargs))
+
+
+def _shutdown():
+    global _SHUTTING_DOWN
+    if _main_thread._stopped:
+        return
+    _SHUTTING_DOWN = True
+    for callback in reversed(_threading_atexits):
+        callback()
+    _main_thread._stopped = True
+    _imre_thread.shutdown()
 
 
 def main_thread():
@@ -661,3 +684,302 @@ class Event:
             if not signaled:
                 signaled = self._cond.wait(timeout)
             return signaled
+
+
+class Semaphore:
+    """This class implements semaphore objects.
+
+    Semaphores manage a counter representing the number of release() calls minus
+    the number of acquire() calls, plus an initial value. The acquire() method
+    blocks if necessary until it can return without making the counter
+    negative. If not given, value defaults to 1.
+
+    """
+
+    # After Tim Peters' semaphore class, but not quite the same (no maximum)
+
+    def __init__(self, value=1):
+        if value < 0:
+            raise ValueError("semaphore initial value must be >= 0")
+        self._cond = Condition(Lock())
+        self._value = value
+
+    def __repr__(self):
+        cls = self.__class__
+        return (f"<{cls.__module__}.{cls.__qualname__} at {id(self):#x}:"
+                f" value={self._value}>")
+
+    def acquire(self, blocking=True, timeout=None):
+        """Acquire a semaphore, decrementing the internal counter by one.
+
+        When invoked without arguments: if the internal counter is larger than
+        zero on entry, decrement it by one and return immediately. If it is zero
+        on entry, block, waiting until some other thread has called release() to
+        make it larger than zero. This is done with proper interlocking so that
+        if multiple acquire() calls are blocked, release() will wake exactly one
+        of them up. The implementation may pick one at random, so the order in
+        which blocked threads are awakened should not be relied on. There is no
+        return value in this case.
+
+        When invoked with blocking set to true, do the same thing as when called
+        without arguments, and return true.
+
+        When invoked with blocking set to false, do not block. If a call without
+        an argument would block, return false immediately; otherwise, do the
+        same thing as when called without arguments, and return true.
+
+        When invoked with a timeout other than None, it will block for at
+        most timeout seconds.  If acquire does not complete successfully in
+        that interval, return false.  Return true otherwise.
+
+        """
+        if not blocking and timeout is not None:
+            raise ValueError("can't specify timeout for non-blocking acquire")
+        rc = False
+        endtime = None
+        with self._cond:
+            while self._value == 0:
+                if not blocking:
+                    break
+                if timeout is not None:
+                    if endtime is None:
+                        endtime = _time() + timeout
+                    else:
+                        timeout = endtime - _time()
+                        if timeout <= 0:
+                            break
+                self._cond.wait(timeout)
+            else:
+                self._value -= 1
+                rc = True
+        return rc
+
+    __enter__ = acquire
+
+    def release(self, n=1):
+        """Release a semaphore, incrementing the internal counter by one or more.
+
+        When the counter is zero on entry and another thread is waiting for it
+        to become larger than zero again, wake up that thread.
+
+        """
+        if n < 1:
+            raise ValueError('n must be one or more')
+        with self._cond:
+            self._value += n
+            self._cond.notify(n)
+
+    def __exit__(self, t, v, tb):
+        self.release()
+
+
+class BoundedSemaphore(Semaphore):
+    """Implements a bounded semaphore.
+
+    A bounded semaphore checks to make sure its current value doesn't exceed its
+    initial value. If it does, ValueError is raised. In most situations
+    semaphores are used to guard resources with limited capacity.
+
+    If the semaphore is released too many times it's a sign of a bug. If not
+    given, value defaults to 1.
+
+    Like regular semaphores, bounded semaphores manage a counter representing
+    the number of release() calls minus the number of acquire() calls, plus an
+    initial value. The acquire() method blocks if necessary until it can return
+    without making the counter negative. If not given, value defaults to 1.
+
+    """
+
+    def __init__(self, value=1):
+        super().__init__(value)
+        self._initial_value = value
+
+    def __repr__(self):
+        cls = self.__class__
+        return (f"<{cls.__module__}.{cls.__qualname__} at {id(self):#x}:"
+                f" value={self._value}/{self._initial_value}>")
+
+    def release(self, n=1):
+        """Release a semaphore, incrementing the internal counter by one or more.
+
+        When the counter is zero on entry and another thread is waiting for it
+        to become larger than zero again, wake up that thread.
+
+        If the number of releases exceeds the number of acquires,
+        raise a ValueError.
+
+        """
+        if n < 1:
+            raise ValueError('n must be one or more')
+        with self._cond:
+            if self._value + n > self._initial_value:
+                raise ValueError("Semaphore released too many times")
+            self._value += n
+            self._cond.notify(n)
+
+
+class Barrier:
+    """Implements a Barrier.
+
+    Useful for synchronizing a fixed number of threads at known synchronization
+    points.  Threads block on 'wait()' and are simultaneously awoken once they
+    have all made that call.
+
+    """
+
+    def __init__(self, parties, action=None, timeout=None):
+        """Create a barrier, initialised to 'parties' threads.
+
+        'action' is a callable which, when supplied, will be called by one of
+        the threads after they have all entered the barrier and just prior to
+        releasing them all. If a 'timeout' is provided, it is used as the
+        default for all subsequent 'wait()' calls.
+
+        """
+        if parties < 1:
+            raise ValueError("parties must be >= 1")
+        self._cond = Condition(Lock())
+        self._action = action
+        self._timeout = timeout
+        self._parties = parties
+        self._state = 0  # 0 filling, 1 draining, -1 resetting, -2 broken
+        self._count = 0
+
+    def __repr__(self):
+        cls = self.__class__
+        if self.broken:
+            return f"<{cls.__module__}.{cls.__qualname__} at {id(self):#x}: broken>"
+        return (f"<{cls.__module__}.{cls.__qualname__} at {id(self):#x}:"
+                f" waiters={self.n_waiting}/{self.parties}>")
+
+    def wait(self, timeout=None):
+        """Wait for the barrier.
+
+        When the specified number of threads have started waiting, they are all
+        simultaneously awoken. If an 'action' was provided for the barrier, one
+        of the threads will have executed that callback prior to returning.
+        Returns an individual index number from 0 to 'parties-1'.
+
+        """
+        if timeout is None:
+            timeout = self._timeout
+        with self._cond:
+            self._enter() # Block while the barrier drains.
+            index = self._count
+            self._count += 1
+            try:
+                if index + 1 == self._parties:
+                    # We release the barrier
+                    self._release()
+                else:
+                    # We wait until someone releases us
+                    self._wait(timeout)
+                return index
+            finally:
+                self._count -= 1
+                # Wake up any threads waiting for barrier to drain.
+                self._exit()
+
+    # Block until the barrier is ready for us, or raise an exception
+    # if it is broken.
+    def _enter(self):
+        while self._state in (-1, 1):
+            # It is draining or resetting, wait until done
+            self._cond.wait()
+        #see if the barrier is in a broken state
+        if self._state < 0:
+            raise BrokenBarrierError
+        assert self._state == 0
+
+    # Optionally run the 'action' and release the threads waiting
+    # in the barrier.
+    def _release(self):
+        try:
+            if self._action:
+                self._action()
+            # enter draining state
+            self._state = 1
+            self._cond.notify_all()
+        except:
+            #an exception during the _action handler.  Break and reraise
+            self._break()
+            raise
+
+    # Wait in the barrier until we are released.  Raise an exception
+    # if the barrier is reset or broken.
+    def _wait(self, timeout):
+        if not self._cond.wait_for(lambda : self._state != 0, timeout):
+            #timed out.  Break the barrier
+            self._break()
+            raise BrokenBarrierError
+        if self._state < 0:
+            raise BrokenBarrierError
+        assert self._state == 1
+
+    # If we are the last thread to exit the barrier, signal any threads
+    # waiting for the barrier to drain.
+    def _exit(self):
+        if self._count == 0:
+            if self._state in (-1, 1):
+                #resetting or draining
+                self._state = 0
+                self._cond.notify_all()
+
+    def reset(self):
+        """Reset the barrier to the initial state.
+
+        Any threads currently waiting will get the BrokenBarrier exception
+        raised.
+
+        """
+        with self._cond:
+            if self._count > 0:
+                if self._state == 0:
+                    #reset the barrier, waking up threads
+                    self._state = -1
+                elif self._state == -2:
+                    #was broken, set it to reset state
+                    #which clears when the last thread exits
+                    self._state = -1
+            else:
+                self._state = 0
+            self._cond.notify_all()
+
+    def abort(self):
+        """Place the barrier into a 'broken' state.
+
+        Useful in case of error.  Any currently waiting threads and threads
+        attempting to 'wait()' will have BrokenBarrierError raised.
+
+        """
+        with self._cond:
+            self._break()
+
+    def _break(self):
+        # An internal error was detected.  The barrier is set to
+        # a broken state all parties awakened.
+        self._state = -2
+        self._cond.notify_all()
+
+    @property
+    def parties(self):
+        """Return the number of threads required to trip the barrier."""
+        return self._parties
+
+    @property
+    def n_waiting(self):
+        """Return the number of threads currently waiting at the barrier."""
+        # We don't need synchronization here since this is an ephemeral result
+        # anyway.  It returns the correct value in the steady state.
+        if self._state == 0:
+            return self._count
+        return 0
+
+    @property
+    def broken(self):
+        """Return True if the barrier is in a broken state."""
+        return self._state == -2
+
+
+class BrokenBarrierError(RuntimeError):
+    pass

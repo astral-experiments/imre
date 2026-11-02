@@ -1,0 +1,628 @@
+{
+  "id": "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input",
+  "ordinal": 121,
+  "discovered": 353,
+  "source": {
+    "cpython_version": "3.14.5",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "test_subprocess_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+    "method_sha256": "b58f1270ba6c4b63f32ac3a2dbc5648e181df85baf9153282e92f82b1f106aa6",
+    "imre_receipt_revision": "70c696217f386ef3e73840bf3d77c7413f54b417"
+  },
+  "historical": {
+    "classification": "blocked at O0 and O3",
+    "reason": "Unsupported: unsupported communication input representation",
+    "native_body_diagnostic": "case.py:11:14: Imre: unknown function or unsupported builtin arguments"
+  },
+  "role": {
+    "module_class_instance_hooks": "CPython",
+    "method_body": "Imre",
+    "assertions": "Imre",
+    "registered_cleanups": "native instance",
+    "communicate": "Imre",
+    "child": "Imre launcher and generated native executable"
+  },
+  "toolchain": {
+    "compiler_sha256": "91cd91ca85a513f73670c8bf6bd4233148007a3d1c27183624e53dec9e0f2783",
+    "runtime_sha256": "95d8587b7872243bf2d2caf1d15dd7565fb09f0326f9087eac8675e3d64968b9",
+    "generated_entry_sha256": "6a9385cdbe58bceebb73fa39d6bf0ef8ebf89a8aaefea7d0eb979d96a12e056e",
+    "registered_runner_sha256": "97c0a42cf254420b679758a7a318ba8d02fb6be8874b28761e9ebe5c66c9e6c2"
+  },
+  "configuration": {
+    "cpython_reference_driver_flags": [
+      "-B"
+    ],
+    "cpython_child_flags": [
+      "-c"
+    ],
+    "native_parent_flags": [
+      "--no-cache",
+      "--opt-level <0|3>",
+      "--runtime <pinned archive>",
+      "--clang <clang>",
+      "--runtime-imports"
+    ],
+    "native_child_argv": [
+      "imre",
+      "-c",
+      "import sys; sys.stdout.write(sys.stdin.read())"
+    ],
+    "native_child_encoded_flags": [
+      "--opt-level <0|3>",
+      "--runtime <pinned archive>",
+      "--clang <clang>"
+    ],
+    "wrong_child_source": "import sys; sys.stderr.write(sys.stdin.read())"
+  },
+  "stream_expectation": {
+    "input_hex": "48656c6c6f2c206d656d6f72797669657721",
+    "sha256": "fa50d01bb3bfb480748b8282e99c0b0d9d0b4020775249d9d8153c4e4456775e",
+    "stdout_bytes": 18,
+    "stderr_return": null,
+    "negative_stdout_bytes": 0,
+    "negative_output_fd": 2,
+    "negative_child_exit": 0,
+    "negative_parent_exit": 1
+  },
+  "cpython_reference": {
+    "positive": {
+      "api": {
+        "input": {
+          "type": "memoryview",
+          "hex": "48656c6c6f2c206d656d6f72797669657721",
+          "sha256": "fa50d01bb3bfb480748b8282e99c0b0d9d0b4020775249d9d8153c4e4456775e",
+          "nbytes": 18,
+          "format": "B",
+          "itemsize": 1,
+          "shape": [
+            18
+          ],
+          "readonly": true,
+          "c_contiguous": true
+        },
+        "stdout": {
+          "type": "bytes",
+          "hex": "48656c6c6f2c206d656d6f72797669657721",
+          "sha256": "fa50d01bb3bfb480748b8282e99c0b0d9d0b4020775249d9d8153c4e4456775e",
+          "nbytes": 18
+        },
+        "stderr": null,
+        "timeout": null,
+        "original_passed": true,
+        "fixture_registered_close": 2,
+        "fixture_invoked_close": 2
+      },
+      "wire": {
+        "actual_image_chain": [
+          {
+            "pid": 56355,
+            "ppid": 56353,
+            "image": "python3.14",
+            "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+          },
+          {
+            "pid": 56357,
+            "ppid": 56355,
+            "image": "python3.14",
+            "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "literal_sha256": "f9ddba7d1533d77f0f1d233e57c00099206e75b56b49bcc32b706010587ac09a"
+          }
+        ],
+        "completed_write_destination_fd": 1,
+        "kernel_write_entry_observed": true,
+        "libc_successful_payload_write_bytes": 18,
+        "pipe_io": {
+          "stdin": {
+            "pipe_dev_inode": [
+              12,
+              493820
+            ],
+            "observed_parent_bytes": 18,
+            "read_eof": true,
+            "parent_closed": true,
+            "leaf_state_at_exit_entry": "open until process exit"
+          },
+          "stdout": {
+            "pipe_dev_inode": [
+              12,
+              493821
+            ],
+            "observed_parent_bytes": 18,
+            "read_eof": true,
+            "parent_closed": true,
+            "leaf_state_at_exit_entry": "open until process exit"
+          }
+        },
+        "inherited_stderr": {
+          "kind": "regular",
+          "dev_inode": [
+            27,
+            1857604
+          ],
+          "token_occurrences_in_outer_capture": 0
+        },
+        "waits": [
+          {
+            "parent_pid": 56355,
+            "waited_pid": 56357,
+            "raw": 0,
+            "post_waitid": "ECHILD"
+          }
+        ],
+        "watchdog_root_raw": 0,
+        "watchdog_final": "ECHILD"
+      }
+    },
+    "wrong_fd": {
+      "api": {
+        "input": {
+          "type": "memoryview",
+          "hex": "48656c6c6f2c206d656d6f72797669657721",
+          "sha256": "fa50d01bb3bfb480748b8282e99c0b0d9d0b4020775249d9d8153c4e4456775e",
+          "nbytes": 18,
+          "format": "B",
+          "itemsize": 1,
+          "shape": [
+            18
+          ],
+          "readonly": true,
+          "c_contiguous": true
+        },
+        "stdout": {
+          "type": "bytes",
+          "hex": "",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "nbytes": 0
+        },
+        "stderr": null,
+        "timeout": null,
+        "original_passed": false,
+        "fixture_registered_close": 2,
+        "fixture_invoked_close": 2
+      },
+      "wire": {
+        "actual_image_chain": [
+          {
+            "pid": 56419,
+            "ppid": 56417,
+            "image": "python3.14",
+            "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+          },
+          {
+            "pid": 56431,
+            "ppid": 56419,
+            "image": "wrong-child",
+            "sha256": "7085594d68071a64a646d60a0e9a7fe8b9b574c23d794c6b6924cfaf7ff81bdd",
+            "literal_sha256": "f9ddba7d1533d77f0f1d233e57c00099206e75b56b49bcc32b706010587ac09a"
+          },
+          {
+            "pid": 56431,
+            "ppid": 56419,
+            "image": "python3.14",
+            "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "literal_sha256": "0b47b67ec63e3b6f5b9854cd04bd81632f03bda8829740448e49e8fefe85dfa1"
+          }
+        ],
+        "completed_write_destination_fd": 2,
+        "kernel_write_entry_observed": true,
+        "libc_successful_payload_write_bytes": 18,
+        "pipe_io": {
+          "stdin": {
+            "pipe_dev_inode": [
+              12,
+              492044
+            ],
+            "observed_parent_bytes": 18,
+            "read_eof": true,
+            "parent_closed": true,
+            "leaf_state_at_exit_entry": "open until process exit"
+          },
+          "stdout": {
+            "pipe_dev_inode": [
+              12,
+              492045
+            ],
+            "observed_parent_bytes": 0,
+            "read_eof": true,
+            "parent_closed": true,
+            "leaf_state_at_exit_entry": "open until process exit"
+          }
+        },
+        "inherited_stderr": {
+          "kind": "regular",
+          "dev_inode": [
+            27,
+            1857634
+          ],
+          "token_occurrences_in_outer_capture": 1
+        },
+        "waits": [
+          {
+            "parent_pid": 56419,
+            "waited_pid": 56431,
+            "raw": 0,
+            "post_waitid": "ECHILD"
+          }
+        ],
+        "watchdog_root_raw": 256,
+        "watchdog_final": "ECHILD"
+      }
+    }
+  },
+  "native_runs": {
+    "O0": {
+      "before_registered_selector_exit": 2,
+      "after_registered_selector_exit": 0,
+      "default_typed_compile_exit": 1,
+      "runtime_imports_compile_exit": 0,
+      "fixture": {
+        "positive": {
+          "compiled_parent_pid": 55169,
+          "compiled_parent_sha256": "4b1d194efea833258ff707a3b996a1f3962c57084720f59057eec9c65ffebee4",
+          "method_passed": true,
+          "parent_exit": 0,
+          "host_fixture_events": [
+            "setUpModule",
+            "BaseTestCase.setUp",
+            "BaseTestCase.tearDown",
+            "TestCase.doCleanups",
+            "TestCase.doCleanups"
+          ]
+        },
+        "wrong_fd": {
+          "compiled_parent_pid": 55831,
+          "compiled_parent_sha256": "4b1d194efea833258ff707a3b996a1f3962c57084720f59057eec9c65ffebee4",
+          "method_passed": false,
+          "parent_exit": 1,
+          "host_fixture_events": [
+            "setUpModule",
+            "BaseTestCase.setUp",
+            "BaseTestCase.tearDown",
+            "TestCase.doCleanups",
+            "TestCase.doCleanups"
+          ]
+        }
+      },
+      "wire": {
+        "positive": {
+          "actual_image_chain": [
+            {
+              "pid": 56230,
+              "ppid": 56229,
+              "image": "parent-boxed-O0",
+              "sha256": "4b1d194efea833258ff707a3b996a1f3962c57084720f59057eec9c65ffebee4"
+            },
+            {
+              "pid": 56285,
+              "ppid": 56230,
+              "image": "imre",
+              "sha256": "91cd91ca85a513f73670c8bf6bd4233148007a3d1c27183624e53dec9e0f2783",
+              "literal_sha256": "f9ddba7d1533d77f0f1d233e57c00099206e75b56b49bcc32b706010587ac09a"
+            },
+            {
+              "pid": 56352,
+              "ppid": 56285,
+              "image": ".imre-run-fd-4",
+              "sha256": "41cdf648bcd622fb41d160eb366d0d60cef2a5ddb4df6bc726c0ab139ad3a383"
+            }
+          ],
+          "completed_write_destination_fd": 1,
+          "kernel_write_entry_observed": true,
+          "libc_successful_payload_write_bytes": 0,
+          "pipe_io": {
+            "stdin": {
+              "pipe_dev_inode": [
+                12,
+                492680
+              ],
+              "observed_parent_bytes": 18,
+              "read_eof": true,
+              "parent_closed": true,
+              "leaf_state_at_exit_entry": "open until process exit"
+            },
+            "stdout": {
+              "pipe_dev_inode": [
+                12,
+                492681
+              ],
+              "observed_parent_bytes": 18,
+              "read_eof": true,
+              "parent_closed": true,
+              "leaf_state_at_exit_entry": "open until process exit"
+            }
+          },
+          "inherited_stderr": {
+            "kind": "regular",
+            "dev_inode": [
+              27,
+              1857587
+            ],
+            "token_occurrences_in_outer_capture": 0
+          },
+          "waits": [
+            {
+              "parent_pid": 56230,
+              "waited_pid": 56285,
+              "raw": 0,
+              "post_waitid": "ECHILD"
+            },
+            {
+              "parent_pid": 56285,
+              "waited_pid": 56352,
+              "raw": 0,
+              "post_waitid": "ECHILD"
+            }
+          ],
+          "watchdog_root_raw": 0,
+          "watchdog_final": "ECHILD"
+        },
+        "wrong_fd": {
+          "actual_image_chain": [
+            {
+              "pid": 56359,
+              "ppid": 56358,
+              "image": "parent-boxed-O0",
+              "sha256": "4b1d194efea833258ff707a3b996a1f3962c57084720f59057eec9c65ffebee4"
+            },
+            {
+              "pid": 56376,
+              "ppid": 56359,
+              "image": "wrong-child",
+              "sha256": "7085594d68071a64a646d60a0e9a7fe8b9b574c23d794c6b6924cfaf7ff81bdd",
+              "literal_sha256": "f9ddba7d1533d77f0f1d233e57c00099206e75b56b49bcc32b706010587ac09a"
+            },
+            {
+              "pid": 56376,
+              "ppid": 56359,
+              "image": "imre",
+              "sha256": "91cd91ca85a513f73670c8bf6bd4233148007a3d1c27183624e53dec9e0f2783",
+              "literal_sha256": "0b47b67ec63e3b6f5b9854cd04bd81632f03bda8829740448e49e8fefe85dfa1"
+            },
+            {
+              "pid": 56380,
+              "ppid": 56376,
+              "image": ".imre-run-fd-4",
+              "sha256": "91a18ce494a6c2d54109fae16e86c329cea227c9bf2a613897cabe58058545e0"
+            }
+          ],
+          "completed_write_destination_fd": 2,
+          "kernel_write_entry_observed": true,
+          "libc_successful_payload_write_bytes": 18,
+          "pipe_io": {
+            "stdin": {
+              "pipe_dev_inode": [
+                12,
+                492731
+              ],
+              "observed_parent_bytes": 18,
+              "read_eof": true,
+              "parent_closed": true,
+              "leaf_state_at_exit_entry": "open until process exit"
+            },
+            "stdout": {
+              "pipe_dev_inode": [
+                12,
+                492732
+              ],
+              "observed_parent_bytes": 0,
+              "read_eof": true,
+              "parent_closed": true,
+              "leaf_state_at_exit_entry": "open until process exit"
+            }
+          },
+          "inherited_stderr": {
+            "kind": "regular",
+            "dev_inode": [
+              27,
+              1857612
+            ],
+            "token_occurrences_in_outer_capture": 2
+          },
+          "waits": [
+            {
+              "parent_pid": 56359,
+              "waited_pid": 56376,
+              "raw": 0,
+              "post_waitid": "ECHILD"
+            },
+            {
+              "parent_pid": 56376,
+              "waited_pid": 56380,
+              "raw": 0,
+              "post_waitid": "ECHILD"
+            }
+          ],
+          "watchdog_root_raw": 256,
+          "watchdog_final": "ECHILD"
+        }
+      }
+    },
+    "O3": {
+      "before_registered_selector_exit": 2,
+      "after_registered_selector_exit": 0,
+      "default_typed_compile_exit": 1,
+      "runtime_imports_compile_exit": 0,
+      "fixture": {
+        "positive": {
+          "compiled_parent_pid": 55264,
+          "compiled_parent_sha256": "73f47c92e8a0d8c340e5810e8ae7d2fc6e0d294b6d19162a62cebdebc23789a8",
+          "method_passed": true,
+          "parent_exit": 0,
+          "host_fixture_events": [
+            "setUpModule",
+            "BaseTestCase.setUp",
+            "BaseTestCase.tearDown",
+            "TestCase.doCleanups",
+            "TestCase.doCleanups"
+          ]
+        },
+        "wrong_fd": {
+          "compiled_parent_pid": 56067,
+          "compiled_parent_sha256": "73f47c92e8a0d8c340e5810e8ae7d2fc6e0d294b6d19162a62cebdebc23789a8",
+          "method_passed": false,
+          "parent_exit": 1,
+          "host_fixture_events": [
+            "setUpModule",
+            "BaseTestCase.setUp",
+            "BaseTestCase.tearDown",
+            "TestCase.doCleanups",
+            "TestCase.doCleanups"
+          ]
+        }
+      },
+      "wire": {
+        "positive": {
+          "actual_image_chain": [
+            {
+              "pid": 56433,
+              "ppid": 56432,
+              "image": "parent-boxed-O3",
+              "sha256": "73f47c92e8a0d8c340e5810e8ae7d2fc6e0d294b6d19162a62cebdebc23789a8"
+            },
+            {
+              "pid": 56449,
+              "ppid": 56433,
+              "image": "imre",
+              "sha256": "91cd91ca85a513f73670c8bf6bd4233148007a3d1c27183624e53dec9e0f2783",
+              "literal_sha256": "f9ddba7d1533d77f0f1d233e57c00099206e75b56b49bcc32b706010587ac09a"
+            },
+            {
+              "pid": 56536,
+              "ppid": 56449,
+              "image": ".imre-run-fd-4",
+              "sha256": "3e5812f26eac5fe9fae69a43f11dba0ba335063772c2105d1820ef254a3f0615"
+            }
+          ],
+          "completed_write_destination_fd": 1,
+          "kernel_write_entry_observed": true,
+          "libc_successful_payload_write_bytes": 0,
+          "pipe_io": {
+            "stdin": {
+              "pipe_dev_inode": [
+                12,
+                488365
+              ],
+              "observed_parent_bytes": 18,
+              "read_eof": true,
+              "parent_closed": true,
+              "leaf_state_at_exit_entry": "open until process exit"
+            },
+            "stdout": {
+              "pipe_dev_inode": [
+                12,
+                488366
+              ],
+              "observed_parent_bytes": 18,
+              "read_eof": true,
+              "parent_closed": true,
+              "leaf_state_at_exit_entry": "open until process exit"
+            }
+          },
+          "inherited_stderr": {
+            "kind": "regular",
+            "dev_inode": [
+              27,
+              1857642
+            ],
+            "token_occurrences_in_outer_capture": 0
+          },
+          "waits": [
+            {
+              "parent_pid": 56433,
+              "waited_pid": 56449,
+              "raw": 0,
+              "post_waitid": "ECHILD"
+            },
+            {
+              "parent_pid": 56449,
+              "waited_pid": 56536,
+              "raw": 0,
+              "post_waitid": "ECHILD"
+            }
+          ],
+          "watchdog_root_raw": 0,
+          "watchdog_final": "ECHILD"
+        },
+        "wrong_fd": {
+          "actual_image_chain": [
+            {
+              "pid": 56539,
+              "ppid": 56538,
+              "image": "parent-boxed-O3",
+              "sha256": "73f47c92e8a0d8c340e5810e8ae7d2fc6e0d294b6d19162a62cebdebc23789a8"
+            },
+            {
+              "pid": 56540,
+              "ppid": 56539,
+              "image": "wrong-child",
+              "sha256": "7085594d68071a64a646d60a0e9a7fe8b9b574c23d794c6b6924cfaf7ff81bdd",
+              "literal_sha256": "f9ddba7d1533d77f0f1d233e57c00099206e75b56b49bcc32b706010587ac09a"
+            },
+            {
+              "pid": 56540,
+              "ppid": 56539,
+              "image": "imre",
+              "sha256": "91cd91ca85a513f73670c8bf6bd4233148007a3d1c27183624e53dec9e0f2783",
+              "literal_sha256": "0b47b67ec63e3b6f5b9854cd04bd81632f03bda8829740448e49e8fefe85dfa1"
+            },
+            {
+              "pid": 56614,
+              "ppid": 56540,
+              "image": ".imre-run-fd-4",
+              "sha256": "29ff34d2dd860d913799b620e56f59ca7f030606ee6e78d25281f5f9391a7b21"
+            }
+          ],
+          "completed_write_destination_fd": 2,
+          "kernel_write_entry_observed": true,
+          "libc_successful_payload_write_bytes": 18,
+          "pipe_io": {
+            "stdin": {
+              "pipe_dev_inode": [
+                12,
+                488448
+              ],
+              "observed_parent_bytes": 18,
+              "read_eof": true,
+              "parent_closed": true,
+              "leaf_state_at_exit_entry": "open until process exit"
+            },
+            "stdout": {
+              "pipe_dev_inode": [
+                12,
+                495617
+              ],
+              "observed_parent_bytes": 0,
+              "read_eof": true,
+              "parent_closed": true,
+              "leaf_state_at_exit_entry": "open until process exit"
+            }
+          },
+          "inherited_stderr": {
+            "kind": "regular",
+            "dev_inode": [
+              27,
+              1857651
+            ],
+            "token_occurrences_in_outer_capture": 2
+          },
+          "waits": [
+            {
+              "parent_pid": 56539,
+              "waited_pid": 56540,
+              "raw": 0,
+              "post_waitid": "ECHILD"
+            },
+            {
+              "parent_pid": 56540,
+              "waited_pid": 56614,
+              "raw": 0,
+              "post_waitid": "ECHILD"
+            }
+          ],
+          "watchdog_root_raw": 256,
+          "watchdog_final": "ECHILD"
+        }
+      }
+    }
+  }
+}

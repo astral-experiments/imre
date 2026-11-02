@@ -2,20 +2,25 @@
 use super::*;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 
-fn private_field(class: &str, name: &str) -> Option<String> {
+pub(crate) fn private_field(class: &str, name: &str) -> Option<String> {
     let owner = class.trim_start_matches('_');
     (name.starts_with("__") && !name.ends_with("__") && !owner.is_empty())
         .then(|| format!("_{owner}{name}"))
 }
 
 /// Resolve private attributes in the declaring method before subclasses inherit it.
-pub(super) fn mangle_fields(class: &str, method: &mut ast::StmtFunctionDef) {
-    struct PrivateFields<'a>(&'a str);
+pub(crate) fn mangle_fields(
+    class: &str,
+    method: &mut ast::StmtFunctionDef,
+    include: impl Fn(&str) -> bool,
+) {
+    struct PrivateFields<'a, F>(&'a str, F);
 
-    impl Transformer for PrivateFields<'_> {
+    impl<F: Fn(&str) -> bool> Transformer for PrivateFields<'_, F> {
         fn visit_expr(&self, expr: &mut ast::Expr) {
             if let ast::Expr::Attribute(attr) = expr
                 && let Some(name) = private_field(self.0, attr.attr.as_str())
+                && (self.1)(&name)
             {
                 attr.attr.id = name.into();
             }
@@ -29,7 +34,7 @@ pub(super) fn mangle_fields(class: &str, method: &mut ast::StmtFunctionDef) {
         }
     }
 
-    PrivateFields(class).visit_body(&mut method.body);
+    PrivateFields(class, include).visit_body(&mut method.body);
 }
 
 #[derive(Clone)]
