@@ -57,7 +57,7 @@ pub(super) fn call(
     };
     let capacity = span.len();
     // Keep the destination exported while looking up and calling the reader override.
-    let data = ctx.with_buffer_export(target, |ctx| {
+    let data = ctx.with_buffer_export(*buffer, |ctx| {
         let method = if name == "readinto1" { "read1" } else { "read" };
         let read = ctx.lookup_attr(receiver, method)?;
         let size = ctx.int(capacity as i64);
