@@ -175,8 +175,26 @@ def _callable(value):
 
 class Mock(_FixedMock):
     _mock_sealed = False
+    _mock_methods = None
+    _mock_strict = False
+    _mock_auto_magics = ()
 
-    def __init__(self, *, name=None, side_effect=None, return_value=_unset_return, **attrs):
+    def __new__(cls, spec=None, *, spec_set=None, **kwargs):
+        # Special methods are looked up on the type, independently of instance attributes.
+        owner = type(cls.__name__, (cls,), {})
+        instance = object.__new__(owner)
+        methods = spec_set if spec_set is not None else spec
+        for name in cls._mock_auto_magics:
+            if methods is None or type(methods) in (list, tuple) and name in methods:
+                setattr(owner, name, _MagicSlot(name, instance))
+        return instance
+
+    def __init__(self, spec=None, *, spec_set=None, name=None, side_effect=None, return_value=_unset_return, **attrs):
+        methods = spec_set if spec_set is not None else spec
+        if methods is not None and type(methods) not in (list, tuple):
+            raise NotImplementedError("mock specifications from objects are not supported")
+        object.__setattr__(self, "_mock_methods", methods)
+        object.__setattr__(self, "_mock_strict", spec_set is not None)
         super().__init__(name=name)
         self.mock_calls = _CallList()
         self.method_calls = _CallList()
@@ -184,7 +202,7 @@ class Mock(_FixedMock):
         if return_value is not _unset_return:
             self.return_value = return_value
         if attrs:
-            for key in ("spec", "spec_set", "wraps", "parent", "unsafe"):
+            for key in ("wraps", "parent", "unsafe"):
                 if key in attrs:
                     raise TypeError(f"Mock.__init__() got an unexpected keyword argument '{key}'")
             self.configure_mock(**attrs)
@@ -201,7 +219,7 @@ class Mock(_FixedMock):
         child._owner = self
         child._suffix = suffix
 
-    def _adopt(self, value, suffix):
+    def _adopt(self, value, suffix, *, magic=False):
         if not isinstance(value, Mock) or value._node._mock_name or hasattr(value._node, "_owner"):
             return False
         ancestor = self
@@ -212,7 +230,8 @@ class Mock(_FixedMock):
         self._attach(value._node, suffix)
         if suffix != "()":
             name = suffix[1:]
-            value._node._mock_name = name
+            if not magic:
+                value._node._mock_name = name
             if not hasattr(self._node, "_assigned_children"):
                 self._node._assigned_children = {}
             self._node._assigned_children[name] = value
@@ -227,19 +246,51 @@ class Mock(_FixedMock):
         return (node._mock_name or "mock") + suffix
 
     def __setattr__(self, name, value):
+        if name in _mock_magics:
+            if self._mock_methods is not None and name not in self._mock_methods:
+                raise AttributeError(f"Mock object has no attribute {name!r}")
+            if isinstance(value, Mock):
+                if self._adopt(value, "." + name, magic=True):
+                    value._node._magic = True
+                if not hasattr(self._node, "_assigned_children"):
+                    self._node._assigned_children = {}
+                self._node._assigned_children[name] = value
+                member = stored = value
+            else:
+                def member(instance, /, *args, **kwargs):
+                    return value(instance, *args, **kwargs)
+                def stored(*args, **kwargs):
+                    return value(self, *args, **kwargs)
+            setattr(type(self), name, member)
+            object.__setattr__(self, name, stored)
+            return
         if name in ("called", "call_count", "call_args", "call_args_list"):
             setattr(self._node, name, value)
             return
         if name not in ("_node", "_nodes", "_mock_sealed", "return_value", "side_effect", "mock_calls", "method_calls"):
+            if self._mock_strict and name not in self._mock_methods and name not in self.__dict__:
+                raise AttributeError(f"Mock object has no attribute {name!r}")
             adopted = self._adopt(value, "." + name)
             if self._mock_sealed and not adopted and not hasattr(self, name):
                 raise AttributeError("Cannot set " + self._mock_path() + "." + name)
         object.__setattr__(self, name, value)
 
+    def __delattr__(self, name):
+        if name in _mock_magics and name in type(self).__dict__:
+            delattr(type(self), name)
+            self._node._children.pop(name, None)
+            getattr(self._node, "_assigned_children", {}).pop(name, None)
+            if name in self.__dict__:
+                object.__delattr__(self, name)
+            return
+        object.__delattr__(self, name)
+
     def _at(self, index):
         node = self._nodes[index]
         if not hasattr(node, "_proxy"):
-            proxy = type(self)()
+            # Each instance has a private subclass for its own protocol slots.
+            factory = type(self).__mro__[1]
+            proxy = factory()
             proxy._node = node
             proxy._nodes = self._nodes
             node._proxy = proxy
@@ -248,11 +299,17 @@ class Mock(_FixedMock):
     def __getattr__(self, name):
         if name in ("called", "call_count", "call_args", "call_args_list", "_mock_name"):
             return getattr(self._node, name)
-        if name.startswith("_"):
+        methods = self._mock_methods
+        if methods is not None and name not in methods:
+            raise AttributeError(f"Mock object has no attribute {name!r}")
+        if name.startswith("_") and (methods is None or name in _mock_magics):
             raise AttributeError(name)
         if self._mock_sealed and name not in self._node._children:
-            _check_child_name(name)
+            if methods is None:
+                _check_child_name(name)
             raise AttributeError(self._mock_path() + "." + name)
+        if methods is not None:
+            return self._get_child(name)
         return self._child(name)
 
     @property
@@ -306,7 +363,7 @@ class Mock(_FixedMock):
                 path = name + separator + path
                 separator = "" if name == "()" else "."
             parent = current._owner
-            if suffix == "()":
+            if suffix == "()" or getattr(current, "_magic", False):
                 method_suffix = None
             if method_suffix is not None:
                 # Only real return-value edges stop method_calls propagation.
@@ -339,6 +396,11 @@ class Mock(_FixedMock):
                 continue
             visited.append(id(current))
             node = current._node
+            # A generated magic method retains its protocol return value on reset.
+            if clear_return and isinstance(current, MagicMock) and node._mock_name:
+                name = node._mock_name
+                if "__%s__" % name[2:-2] == name:
+                    clear_return = False
             node._reset_state(clear_return, clear_effect)
             current.mock_calls = _CallList()
             current.method_calls = _CallList()
@@ -396,8 +458,43 @@ class Mock(_FixedMock):
         raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found")
 
 
+# CPython's protocol names must not fall through to ordinary attribute children.
+_mock_magics = set("__%s__" % name for name in (
+    "abs add aenter aexit aiter and anext bool ceil complex contains delete delitem dir divmod "
+    "enter eq exit float floor floordiv format fspath ge get getformat getinitargs getitem "
+    "getnewargs getnewargs_ex getstate gt hash iadd iand ifloordiv ilshift imatmul imod imul "
+    "index int invert ior ipow irshift isub iter itruediv ixor le len lshift lt matmul missing "
+    "mod mul ne neg next or pos pow radd rand rdivmod reduce reduce_ex repr reversed rfloordiv "
+    "rlshift rmatmul rmod rmul ror round rpow rrshift rshift rsub rtruediv rxor set setitem "
+    "setstate sizeof str sub subclasses truediv trunc xor"
+).split())
+_file_magics = ("__enter__", "__exit__", "__iter__", "__next__")
+
+
+class _MagicSlot:
+    def __init__(self, name, parent):
+        self.name = name
+        self.parent = parent
+
+    def __get__(self, instance, owner):
+        if self.parent._mock_sealed and self.name not in self.parent._node._children:
+            raise AttributeError(self.parent._mock_path() + "." + self.name)
+        child = self.parent._get_child(self.name)
+        child._node._magic = True
+        setattr(self.parent, self.name, child)
+        if self.name == "__exit__":
+            child.return_value = False
+        elif self.name == "__iter__":
+            def iterate():
+                if child._node._result == -1:
+                    return iter(())
+                return iter(child.return_value)
+            child.side_effect = iterate
+        return child
+
+
 class MagicMock(Mock):
-    pass
+    _mock_auto_magics = _file_magics
 
 
 def seal(mock):
@@ -418,3 +515,102 @@ def seal(mock):
             value = getattr(current, name)
             if isinstance(value, Mock) and getattr(value._node, "_owner", None) is current:
                 pending.append(value)
+
+
+# CPython 3.14.5 Lib/unittest/mock.py
+file_spec = None
+open_spec = None
+
+
+def _to_stream(read_data):
+    import io
+    if isinstance(read_data, bytes):
+        return io.BytesIO(read_data)
+    else:
+        return io.StringIO(read_data)
+
+
+def mock_open(mock=None, read_data=''):
+    """
+    A helper function to create a mock to replace the use of `open`. It works
+    for `open` called directly or used as a context manager.
+
+    The `mock` argument is the mock object to configure. If `None` (the
+    default) then a `MagicMock` will be created for you, with the API limited
+    to methods or attributes available on standard file handles.
+
+    `read_data` is a string for the `read`, `readline` and `readlines` of the
+    file handle to return.  This is an empty string by default.
+    """
+    _read_data = _to_stream(read_data)
+    _state = [_read_data, None]
+
+    def _readlines_side_effect(*args, **kwargs):
+        if handle.readlines.return_value is not None:
+            return handle.readlines.return_value
+        return _state[0].readlines(*args, **kwargs)
+
+    def _read_side_effect(*args, **kwargs):
+        if handle.read.return_value is not None:
+            return handle.read.return_value
+        return _state[0].read(*args, **kwargs)
+
+    def _readline_side_effect(*args, **kwargs):
+        yield from _iter_side_effect()
+        while True:
+            yield _state[0].readline(*args, **kwargs)
+
+    def _iter_side_effect():
+        if handle.readline.return_value is not None:
+            while True:
+                yield handle.readline.return_value
+        for line in _state[0]:
+            yield line
+
+    def _next_side_effect():
+        if handle.readline.return_value is not None:
+            return handle.readline.return_value
+        return next(_state[0])
+
+    def _exit_side_effect(exctype, excinst, exctb):
+        handle.close()
+
+    global file_spec
+    if file_spec is None:
+        import _io
+        file_spec = list(set(dir(_io.TextIOWrapper)).union(set(dir(_io.BytesIO))))
+
+    global open_spec
+    if open_spec is None:
+        import _io
+        open_spec = list(set(dir(_io.open)))
+    if mock is None:
+        mock = MagicMock(name='open', spec=open_spec)
+
+    handle = MagicMock(spec=file_spec)
+    handle.__enter__.return_value = handle
+
+    handle.write.return_value = None
+    handle.read.return_value = None
+    handle.readline.return_value = None
+    handle.readlines.return_value = None
+
+    handle.read.side_effect = _read_side_effect
+    _state[1] = _readline_side_effect()
+    handle.readline.side_effect = _state[1]
+    handle.readlines.side_effect = _readlines_side_effect
+    handle.__iter__.side_effect = _iter_side_effect
+    handle.__next__.side_effect = _next_side_effect
+    handle.__exit__.side_effect = _exit_side_effect
+
+    def reset_data(*args, **kwargs):
+        _state[0] = _to_stream(read_data)
+        if handle.readline.side_effect == _state[1]:
+            # Only reset the side effect if the user hasn't overridden it.
+            _state[1] = _readline_side_effect()
+            handle.readline.side_effect = _state[1]
+        return DEFAULT
+
+    mock.side_effect = reset_data
+    mock.return_value = handle
+    return mock

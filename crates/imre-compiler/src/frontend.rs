@@ -9593,11 +9593,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(class) = self.class_reference(&call.func) {
             let result = self.construct(call, class);
-            if result.is_err()
-                && self.native_mock(class)
-                && call.arguments.args.is_empty()
-                && self.boxed_mock_keywords(call)?
-            {
+            if result.is_err() && self.native_mock(class) && self.boxed_mock_arguments(call)? {
                 return Err(self.object_runtime_export("configured unittest.mock.Mock", call));
             }
             return result;

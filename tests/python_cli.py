@@ -1182,7 +1182,7 @@ def main():
         }
         env["IMRE_CACHE_DIR"] = str(root / "cache")
 
-        def run(exe, *args, extra=None, stdin=None):
+        def run(exe, *args, extra=None, stdin=None, timeout=60):
             return subprocess.run(
                 [exe, *args],
                 cwd=root,
@@ -1190,7 +1190,7 @@ def main():
                 input=stdin,
                 capture_output=True,
                 check=False,
-                timeout=60,
+                timeout=timeout,
             )
 
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
@@ -1326,9 +1326,9 @@ def main():
             target["python_version"] + ".0",
         ]
 
-        def compare(*args, extra=None, status=0, native_args=None):
+        def compare(*args, extra=None, status=0, native_args=None, native_timeout=60):
             expected = run(sys.executable, *args, extra=extra)
-            actual = run(imre, *(args if native_args is None else native_args), extra=extra)
+            actual = run(imre, *(args if native_args is None else native_args), extra=extra, timeout=native_timeout)
             assert actual.returncode == expected.returncode == status, (
                 args,
                 actual.stderr,
@@ -2320,6 +2320,18 @@ def report(text):
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
         compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
+        mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
+        compare(
+            "-B", "-c", "from unittest.mock import Mock\nm = Mock(['close'])\nm.close()\nassert not hasattr(m, 'read')\n",
+            extra=mock_compile_flags, native_timeout=300,
+        )
+        open_fixture = fixtures / "boxed_unittest_mock_open.py"
+        for import_flags in ((), ("--runtime-imports",)):
+            compare(
+                "-IB", open_fixture, extra=mock_compile_flags,
+                native_args=("run", open_fixture, *import_flags, "--quiet"),
+                native_timeout=300,
+            )
         for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
