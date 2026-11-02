@@ -8460,84 +8460,17 @@ fn read_only_integer(expression: &Expr) -> bool {
 /// and expression scopes are each visited once, so nested scopes do not cause
 /// repeated recursive walks of their bodies.
 fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> bool {
-    fn expression_writes(expression: &Expr, written: &mut [bool]) {
-        match &expression.kind {
-            ExprKind::Scope { body, value, clear } => {
-                crate::list_specialization::mark_writes(body, written);
-                for &slot in clear {
-                    written[slot] = true;
-                }
-                crate::ir::walk_expressions(body, &mut |value| match &value.kind {
-                    ExprKind::Scope { body, clear, .. } => {
-                        crate::list_specialization::mark_writes(body, written);
-                        for &slot in clear {
-                            written[slot] = true;
-                        }
-                    }
-                    ExprKind::Bind(slot, _) => written[*slot] = true,
-                    _ => {}
-                });
-                expression_writes(value, written);
-            }
-            ExprKind::Bind(slot, value) => {
-                written[*slot] = true;
-                expression_writes(value, written);
-            }
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Callable {
-                receiver: Some(receiver),
-                ..
-            } => expression_writes(receiver, written),
-            ExprKind::Invoke { callable, args } => {
-                expression_writes(callable, written);
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression_writes(key, written);
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression_writes(left, written);
-                expression_writes(right, written);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression_writes(test, written);
-                expression_writes(yes, written);
-                expression_writes(no, written);
-            }
-            ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression_writes(value, written),
-            ExprKind::Exception {
-                message: Some(message),
-                ..
-            } => expression_writes(message, written),
-            _ => {}
-        }
-    }
     let mut written = vec![false; locals];
-    expression_writes(expression, &mut written);
+    crate::ir::walk_expression(expression, &mut |value| match &value.kind {
+        ExprKind::Scope { body, clear, .. } => {
+            crate::list_specialization::mark_writes(body, &mut written);
+            for &slot in clear {
+                written[slot] = true;
+            }
+        }
+        ExprKind::Bind(slot, _) => written[*slot] = true,
+        _ => {}
+    });
     !written[slot]
 }
 
