@@ -19,18 +19,29 @@ def _scanner_arguments(function, names, args, kwargs):
     return values
 
 
+def _readonly_scanner_option(index):
+    def refuse(*args):
+        raise AttributeError("readonly attribute")
+    return property(lambda scanner: scanner._options[index], refuse, refuse)
+
+
 class Scanner:
     """JSON scanner object"""
 
-    __slots__ = ("strict", "object_hook", "object_pairs_hook",
-                 "parse_float", "parse_int", "parse_constant", "_scan")
+    __slots__ = ("_options", "_scan")
+    strict = _readonly_scanner_option(0)
+    object_hook = _readonly_scanner_option(1)
+    object_pairs_hook = _readonly_scanner_option(2)
+    parse_float = _readonly_scanner_option(3)
+    parse_int = _readonly_scanner_option(4)
+    parse_constant = _readonly_scanner_option(5)
 
     def __new__(cls, /, *args, **kwargs):
         context, = _scanner_arguments("make_scanner", ("context",), args, kwargs)
         self = object.__new__(cls)
-        object.__setattr__(self, "strict", bool(context.strict))
-        for name in ("object_hook", "object_pairs_hook", "parse_float", "parse_int", "parse_constant"):
-            object.__setattr__(self, name, getattr(context, name))
+        options = (bool(context.strict), context.object_hook, context.object_pairs_hook,
+                   context.parse_float, context.parse_int, context.parse_constant)
+        object.__setattr__(self, "_options", options)
 
         # Capture the parsers after validating context, including when _json was
         # imported directly before json. The C scanner ignores the context's parsers.
@@ -45,14 +56,20 @@ class Scanner:
         object.__setattr__(self, "_scan", parser)
         return self
 
+    def __init__(self, /, *args, **kwargs):
+        # The native type only initializes state in __new__.
+        pass
+
     def __init_subclass__(cls, **kwargs):
         raise TypeError("type '_json.Scanner' is not an acceptable base type")
 
     def __setattr__(self, name, value):
-        raise AttributeError("readonly attribute")
+        self.__delattr__(name)
 
     def __delattr__(self, name):
-        raise AttributeError("readonly attribute")
+        if name in ("strict", "object_hook", "object_pairs_hook", "parse_float", "parse_int", "parse_constant"):
+            raise AttributeError("readonly attribute")
+        raise AttributeError(f"'_json.Scanner' object has no attribute '{name}' and no __dict__ for setting new attributes")
 
     def __call__(self, /, *args, **kwargs):
         from operator import index

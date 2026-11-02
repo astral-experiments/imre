@@ -36,7 +36,10 @@ def current():
     context.options["parse_int"] = int
     document = 'tag{"item":[31,4.50,NaN],"text":"x\ty"}rest'
     print(scan(string=document, idx=document.index("{")))
+    assert scan.__init__(object()) is None
     print(scan("v82!", 1))
+    fails(TypeError, type, "DerivedScanner", (make,), {})
+    fails(StopIteration, scan, '{"bad":[?]}', 0)
     fails(AttributeError, make, 5)
     fails(ValueError, json.JSONDecoder, strict=BadFlag())
     fails(ValueError, scan, "12", -1)
