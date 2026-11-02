@@ -152,6 +152,7 @@ impl Context {
                 };
                 self.template_interpolation(a, b, conversion, spec)
             }
+            "type_alias" => Ok(super::type_alias::declare(self, a, b)),
             "build_template" => {
                 let interpolations = self.items(b)?;
                 Ok(self.template_from_literal(a, interpolations))

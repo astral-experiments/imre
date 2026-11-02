@@ -2627,6 +2627,7 @@ impl Context {
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
             }
+            Value::TypeAlias(alias) => self.display(alias.name),
             Value::TypeVarTuple { name, .. } => self.display(*name),
             Value::NoDefault => "typing.NoDefault".to_owned(),
             Value::TypeVar(var) => {

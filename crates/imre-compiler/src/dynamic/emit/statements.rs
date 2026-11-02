@@ -107,6 +107,12 @@ impl<'a> Visitor<'a> for ClosureNames {
                     }
                 }
             }
+            ast::Stmt::TypeAlias(alias) if alias.type_params.is_none() => {
+                if let ast::Expr::Name(name) = &*alias.name {
+                    self.locals.insert(name.id.to_string());
+                }
+                self.visit_expr(&alias.value);
+            }
             ast::Stmt::Match(_) | ast::Stmt::TypeAlias(_) => {
                 self.incomplete = true;
                 self.locals_incomplete = true;
@@ -270,6 +276,10 @@ impl Function<'_, '_> {
                             }
                         }
                     }
+                }
+                ast::Stmt::TypeAlias(alias) if alias.type_params.is_none() => {
+                    let ast::Expr::Name(name) = &*alias.name else { unreachable!("alias identifier") };
+                    self.declare_alias(name, &alias.value);
                 }
                 ast::Stmt::AnnAssign(v) => {
                     if let Some(value) = &v.value {
@@ -829,9 +839,41 @@ impl Function<'_, '_> {
         function
     }
 
-    fn check_annotation_format(&mut self) {
+    fn declare_alias(&mut self, target: &ast::ExprName, expr: &ast::Expr) {
+        let identifier = ast::Identifier::new(target.id.clone(), target.range);
+        let name = self.source.private_names.definition(&identifier);
+        let class = self.class_locals.clone();
+        let reads = class_metadata::annotation_reads(&[("", expr)], class.as_ref(), false);
+        let sig = self.text(&json!({
+            "posonly": [".format"], "scope_reads": reads, "scope_complete": true,
+            "scope_locals_complete": true, "annotation_class": class.is_some(),
+            "code_flags": imre_ast::code_flags::OPTIMIZED | imre_ast::code_flags::NEWLOCALS,
+        }).to_string());
+        let code = self.output.definition(self.source, String::new(), Body::AliasValue(expr, class), expr.start());
+        let qualname = self.text(&format!("{}{name}", self.prefix));
+        let alias = self.code_name(name);
+        let defaults = self.op("dict", &[]);
+        let arg = self.text(".format");
+        let one = self.integer(1);
+        self.op("put", &[&defaults, &arg, &one]);
+        let evaluator = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {alias}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 true)", self.scope));
+        let value = self.op("type_alias", &[&alias, &evaluator]);
+        self.bind(target.id.as_str(), &value);
+    }
+
+    pub(super) fn alias_value(&mut self, expr: &ast::Expr, class: Option<ClassBindings>) {
+        self.check_annotation_format(".format");
+        self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+        self.annotation_lookup = true;
+        self.class_locals = class;
+        self.checkpoint(expr);
+        let value = self.expr(expr);
+        self.end(&format!("ret i64 {value}"));
+    }
+
+    fn check_annotation_format(&mut self, parameter: &str) {
         // CPython's compiled annotation callable accepts VALUE and VALUE_WITH_FAKE_GLOBALS.
-        let format = self.lookup("format");
+        let format = self.lookup(parameter);
         let two = self.integer(2);
         let unsupported = self.op(">", &[&format, &two]);
         let bad = self.name("b");
@@ -850,7 +892,7 @@ impl Function<'_, '_> {
         entries: &[(&str, &ast::Expr)],
         class: Option<ClassBindings>,
     ) {
-        self.check_annotation_format();
+        self.check_annotation_format("format");
         let values = self.op("dict", &[]);
         // The public format parameter is outside the annotation expressions' lexical scope.
         self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
@@ -1291,6 +1333,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
         | Body::Annotations(..)
         | Body::ClassAnnotations(..)
         | Body::AnnotationThunk(..)
+        | Body::AliasValue(..)
         | Body::AnnotationValue(_)
         | Body::Unsupported(..) => {}
     }

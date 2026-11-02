@@ -84,6 +84,14 @@ enum Instruction {
     },
     StringAnnotation(String, ast::Expr),
     ClassAnnotator(Rc<Program>),
+    TypeAlias {
+        binding: String,
+        evaluator: Rc<Program>,
+    },
+    AliasValue {
+        value: ast::Expr,
+        class: bool,
+    },
     ClassStart,
     ClassEnd,
     Yield(Option<ast::Expr>),
@@ -933,6 +941,7 @@ impl Program {
         for (_, op) in &mut self.instructions {
             match op {
                 Instruction::Eval(e)
+                | Instruction::AliasValue { value: e, .. }
                 | Instruction::Unless(e, _)
                 | Instruction::Iter(e)
                 | Instruction::ExceptMatch(e, _)
@@ -1014,7 +1023,10 @@ impl Program {
                 Instruction::StringAnnotation(name, expr) => {
                     strings.annotation(name, expr, true)?
                 }
-                Instruction::ClassAnnotator(provider) => {
+                Instruction::ClassAnnotator(provider)
+                | Instruction::TypeAlias {
+                    evaluator: provider, ..
+                } => {
                     nested_reads.extend(
                         strings
                             .annotation_code(provider, class_locals, line_at)?
@@ -1513,6 +1525,28 @@ impl Program {
                     match self.lower_suspension(*s.value, line, function)? {
                         Some(value) => Instruction::Assign(s.targets, value),
                         None => Instruction::BindSent(s.targets),
+                    }
+                }
+                Stmt::TypeAlias(s) if s.type_params.is_none() => {
+                    let name = s.name.as_name_expr().expect("type alias name");
+                    if let Some((_, message)) = imre_ast::type_alias::check_alias(&s) {
+                        return Err(Error::new("SyntaxError", message));
+                    }
+                    let identifier = ast::Identifier::new(name.id.clone(), name.range);
+                    let mut evaluator = self.definition_body(&identifier, &[], line, lines);
+                    let class = self.class_attributes.is_some();
+                    if class {
+                        evaluator.reads.insert("__classdict__".into());
+                    }
+                    evaluator.instructions.push((
+                        line,
+                        Instruction::AliasValue { value: *s.value, class },
+                    ));
+                    let binding = name.id.to_string();
+                    self.locals.insert(binding.clone());
+                    Instruction::TypeAlias {
+                        binding,
+                        evaluator: Rc::new(evaluator),
                     }
                 }
                 Stmt::AnnAssign(s) if function || (self.class_attributes.is_some() && s.simple) => {
@@ -3585,6 +3619,10 @@ impl Context {
                 let values = self.source_annotations(code, scope, entries, *class)?;
                 return Ok(Some(Step::Return(values)));
             }
+            Instruction::AliasValue { value, class } => {
+                let environment = self.evaluator_expression_scope(scope, ".format", *class)?;
+                return Ok(Some(Step::Return(self.source_expr(code, environment, value)?)));
+            }
             Instruction::ReturnSent => return Ok(Some(Step::Return(*sent))),
             Instruction::BindSent(targets) => {
                 for target in targets {
@@ -4011,8 +4049,21 @@ impl Context {
                 let annotations = self.lookup_class_local(scope, "__annotations__")?;
                 self.put_item(annotations, key, spelling)?;
             }
+            Instruction::TypeAlias { binding, evaluator } => {
+                let frame = self.scope_data(scope);
+                let defining_scope = if frame.exec_locals.is_some() && frame.class_body.is_none() {
+                    frame.parent.expect("exec locals have a global frame")
+                } else {
+                    scope
+                };
+                let function =
+                    self.source_evaluator(evaluator, owner, defining_scope, Some(*ip - 1))?;
+                let name = self.heap.code_name(&evaluator.name);
+                let alias = super::type_alias::declare(self, name, function);
+                self.bind_source_name(scope, binding, alias)?;
+            }
             Instruction::ClassAnnotator(provider) => {
-                let annotate = self.source_annotator(provider, owner, scope)?;
+                let annotate = self.source_evaluator(provider, owner, scope, None)?;
                 self.bind_source_name(scope, "__annotate_func__", annotate)?;
             }
             Instruction::ClassStart => {
@@ -4159,7 +4210,7 @@ impl Context {
         };
         let mut value = self.source_function(code, defining_scope, defaults);
         if let Some(provider) = &definition.annotate {
-            let annotate = self.source_annotator(provider, code, defining_scope)?;
+            let annotate = self.source_evaluator(provider, code, defining_scope, None)?;
             self.set_function_attr(value, "__annotate__", annotate)?;
         }
         if let Some((bases, keywords)) = bases {

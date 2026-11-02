@@ -43,6 +43,7 @@ mod thread_local;
 mod thread_lock;
 mod thread_rlock;
 mod thread_worker;
+mod type_alias;
 mod typing;
 mod union;
 mod unraisable;
@@ -538,7 +539,7 @@ impl Context {
                 let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
             }
-            Value::TypeVarTuple { .. } => {
+            Value::TypeVarTuple { .. } | Value::TypeAlias(_) => {
                 let unpacked = typing::unpack_parameter(self, id)?;
                 (self.alloc(Value::Tuple(vec![unpacked])), "tuple_iterator")
             }
@@ -1183,7 +1184,7 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
-        if matches!(self.heap.get(id), Value::TypeVarTuple { .. }) {
+        if matches!(self.heap.get(id), Value::TypeVarTuple { .. } | Value::TypeAlias(_)) {
             return Ok(vec![typing::unpack_parameter(self, id)?]);
         }
         if matches!(self.heap.get(id), Value::Generator { .. }) {

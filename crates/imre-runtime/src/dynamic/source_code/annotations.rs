@@ -217,23 +217,29 @@ impl Context {
         self.closure_environment(parent_scope, names, &cells)
     }
 
-    pub(super) fn source_annotator(
+    pub(super) fn source_evaluator(
         &mut self,
         program: &Rc<Program>,
         function_code: Id,
         scope: Id,
+        alias_site: Option<usize>,
     ) -> Result<Id> {
         let scope = self.source_annotation_scope(scope, program);
-        // Annotation code is constant for this definition, even across calls to its factory.
+        // Each alias has its own instruction site. The owning function or class has one annotator.
+        let site = alias_site.unwrap_or(usize::MAX);
         let code = if let Some((_, id)) = self
             .code_object(function_code)
             .nested
             .iter()
-            .find(|(site, _)| *site == usize::MAX)
+            .find(|(offset, _)| *offset == site)
         {
             *id
         } else {
-            let signature = self.text(r#"{"posonly":["format"]}"#);
+            let signature = self.text(if alias_site.is_some() {
+                r#"{"posonly":[".format"]}"#
+            } else {
+                r#"{"posonly":["format"]}"#
+            });
             let code = self.box_source_code(program.clone(), Some(signature));
             if let Some(names) =
                 self.enclosing_freevars(scope, program.reads.iter().map(String::as_str))
@@ -247,21 +253,28 @@ impl Context {
             let Value::Code(function) = self.heap.get_mut(function_code) else {
                 unreachable!()
             };
-            function.nested.push((usize::MAX, code));
+            function.nested.push((site, code));
             code
         };
-        let defaults = self.dict(Vec::new());
+        let defaults = if alias_site.is_some() {
+            let key = self.heap.code_name(".format");
+            let value = self.int(1);
+            self.dict(vec![(key, value)])
+        } else {
+            self.dict(Vec::new())
+        };
         Ok(self.source_function(code, scope, defaults))
     }
 
-    pub(super) fn source_annotations(
+    pub(super) fn evaluator_expression_scope(
         &mut self,
-        code: &Program,
         scope: Id,
-        entries: &[(String, ast::Expr)],
+        format_parameter: &str,
         class: bool,
     ) -> Result<Id> {
-        let format = self.scope_name(scope, "format").expect("annotation format");
+        let format = self
+            .scope_name(scope, format_parameter)
+            .expect("evaluator format");
         let two = self.int(2);
         let unsupported = self.op(">", format, two, NONE)?;
         if self.truth(unsupported)? {
@@ -280,6 +293,17 @@ impl Context {
             frame.globals = globals;
             environment = locals;
         }
+        Ok(environment)
+    }
+
+    pub(super) fn source_annotations(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        entries: &[(String, ast::Expr)],
+        class: bool,
+    ) -> Result<Id> {
+        let environment = self.evaluator_expression_scope(scope, "format", class)?;
         let annotations = self.dict(Vec::new());
         for (name, expr) in entries {
             let value = self.source_expr(code, environment, expr)?;

@@ -399,6 +399,12 @@ fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<I
 /// Apply the subscription protocol for a supported type. Ordinary instance indexing
 /// continues through the object runtime.
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
+    if let Value::TypeAlias(alias) = ctx.heap.get(target) {
+        if matches!(ctx.heap.get(ctx.scalar_value(alias.params)), Value::Tuple(items) if items.is_empty()) {
+            return Some(Err(Error::new("TypeError", "Only generic type aliases are subscriptable")));
+        }
+        return Some(Ok(builtin_alias(ctx, target, index)));
+    }
     if is_unpacked_pack(ctx, target) {
         return Some(Ok(index));
     }
@@ -795,6 +801,7 @@ pub(super) fn bind_generic_parameters(
 
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     let attr = match ctx.heap.get(value) {
+        Value::TypeAlias(alias) => return super::type_alias::attribute(ctx, value, *alias, name),
         Value::TypeVar(_)
         | Value::ParamSpec(_)
         | Value::ParamSpecMarker(_, _)
@@ -1317,6 +1324,11 @@ pub(super) fn call(
         }
         _ => {}
     }
+    if operation == "TypeAliasType" {
+        return super::type_alias::construct(ctx, args, kwargs);
+    }
+    if let ("TypeAliasType.__reduce__", [alias], []) = (operation, args, kwargs)
+        && let Value::TypeAlias(a) = ctx.heap.get(*alias) { return Ok(a.name); }
     if operation == "TypeVarTuple" {
         let [name, default] = super::builtins::bind_method_arguments(
             "typevartuple",
@@ -1851,6 +1863,7 @@ impl Context {
                             | "typing.ParamSpecArgs"
                             | "typing.ParamSpecKwargs"
                             | "constevaluator"
+                            | "typing.TypeAliasType"
                             | "typing.TypeVarTuple"
                             | "NoDefaultType"
                             | "datetime.timezone"
