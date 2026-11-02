@@ -310,6 +310,8 @@ pub enum EscapeError {
 #[derive(Default)]
 pub struct PatternEscapes {
     pub named_scalars: Vec<(usize, usize, char)>,
+    /// Opening parenthesis of the first group header rejected during the syntax walk.
+    pub rejected_header: Option<usize>,
     pub error: Option<(EscapeError, usize)>,
 }
 
@@ -632,9 +634,19 @@ fn tokenize(
         let previous_repeat = std::mem::take(&mut last_was_repeat);
         let atom_width = match c {
             '(' => {
+                let open = input.position - 1;
+                // A rejected opener may be a Python error or a matcher limitation.
+                // Keep its source position so the caller can inspect the actual header.
+                let reject_header = |visitor: Option<&mut WarningVisitor<'_>>, reason: String| {
+                    if let Some(escapes) = visitor.and_then(|v| v.escapes.as_mut()) {
+                        escapes.rejected_header = Some(open);
+                    }
+                    reason
+                };
                 let extension = input.next_if_eq(&'?').is_some();
                 if extension && input.next_if_eq(&'#').is_some() {
-                    skip_comment(&mut input)?;
+                    skip_comment(&mut input)
+                        .map_err(|error| reject_header(warnings.as_deref_mut(), error))?;
                     last_was_repeat = previous_repeat;
                     continue;
                 }
@@ -679,7 +691,10 @@ fn tokenize(
                     None
                 };
                 if behind && assertion.is_none() {
-                    return Err("expected Python lookbehind assertion".into());
+                    return Err(reject_header(
+                        warnings.as_deref_mut(),
+                        "expected Python lookbehind assertion".into(),
+                    ));
                 }
                 let atomic_assertion = assertion == Some('=');
                 let mut group = GroupState {
@@ -759,14 +774,19 @@ fn tokenize(
                             std::iter::from_fn(|| input.next_if(|c| "aiLmsux-".contains(*c)))
                                 .collect();
                         if input.next() != Some(':') {
-                            return Err("expected a scoped flag".into());
+                            return Err(reject_header(
+                                warnings.as_deref_mut(),
+                                "expected a scoped flag".into(),
+                            ));
                         }
                         verbose = (warnings.as_ref().unwrap().scoped_verbose)(
                             &spec,
                             alphabet == Alphabet::Bytes,
                             verbose,
                         )
-                        .ok_or("invalid scoped flags")?;
+                        .ok_or_else(|| {
+                            reject_header(warnings.as_deref_mut(), "invalid scoped flags".into())
+                        })?;
                         output.push_str("?:");
                     } else if matches!(input.peek(), Some('a' | 'u' | 'i' | 's' | 'x' | '-')) {
                         let enable = input.next_if_eq(&'-').is_none();
@@ -851,7 +871,10 @@ fn tokenize(
                         groups.push(Some(name));
                         group_widths.push(Width::UNKNOWN);
                     } else {
-                        return Err("unsupported regex group, assertion, or inline flag".into());
+                        return Err(reject_header(
+                            warnings.as_deref_mut(),
+                            "unsupported regex group, assertion, or inline flag".into(),
+                        ));
                     }
                 } else {
                     group.scope = Scope::Capture(groups.len());
