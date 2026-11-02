@@ -175,6 +175,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 // Native import warnings may be emitted while all imports are disabled.
                 // Dispatch their WarningMessage without priming the Python line cache.
                 UPSTREAM
+                    // A promoted warning owns its traceback. Letting its frame keep the
+                    // exception alive would also keep the warning's source until cyclic GC.
+                    .replace("            raise message", "            try:\n                raise message\n            finally:\n                del message")
                     .replace("def warn_explicit(", "_native_import_warning = object()\n\ndef warn_explicit(")
                     .replace("    import linecache\n    linecache.getlines(filename, module_globals)",
                              "    if module_globals is not _native_import_warning:\n        import linecache\n        linecache.getlines(filename, module_globals)")

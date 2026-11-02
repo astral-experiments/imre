@@ -13,7 +13,6 @@ pub(super) fn function(name: &str) -> bool {
             | "signal"
             | "communicate"
             | "close_wait"
-            | "finalize"
             | "cleanup"
     )
 }
@@ -380,7 +379,6 @@ pub(super) fn call(
     let child = child.clone();
     match (name, operands) {
         ("pid", []) => Ok(ctx.int(i64::from(child.pid()))),
-        ("finalize", []) => Ok(builtins::boolean(child.finalize())),
         ("pipe", &[index]) => {
             let index = ctx.as_integer(index)?;
             if !(0..3).contains(&index) {
