@@ -1797,6 +1797,8 @@ def report(text):
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
+        coroutine_fixture = fixtures / "boxed_prelinked_coroutine.py"
+        compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         for name in (
