@@ -29,6 +29,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         }
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
+        // Use CPython's decimal fallback for boxed imports. Typed serializers retain decimal.py.
+        "decimal" => Some(("decimal.py", include_str!("../../stdlib/decimal_boxed.py"))),
+        "_pydecimal" => Some(("_pydecimal.py", include_str!("../../stdlib/_pydecimal.py"))),
+        "numbers" => Some(("numbers.py", include_str!("../../stdlib/numbers.py"))),
         "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),
         "json" => Some((
             "json/__init__.py",
