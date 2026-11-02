@@ -1074,7 +1074,11 @@ pub(super) fn call(
             };
             truncate_fd(fd, size)?;
             raw.blksize.set(super::DEFAULT_BUFFER_SIZE);
-            Ok(ctx.int(size))
+            Ok(args
+                .first()
+                .copied()
+                .filter(|&id| id != NONE)
+                .unwrap_or_else(|| ctx.int(size)))
         });
     }
     raw.access(|fd| match name {
