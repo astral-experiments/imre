@@ -29,6 +29,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
         "socket.gaierror" => Some(Kind::GaiError),
         "socket.herror" => Some(Kind::HError),
+        "zlib.error" => Some(Kind::ZlibError),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),
@@ -176,7 +177,8 @@ pub(super) fn exception_new_owner(name: &str) -> &str {
         | "ModuleNotFoundError"
         | "StopIteration"
         | "StopAsyncIteration"
-        | "binascii.Incomplete" => "Exception",
+        | "binascii.Incomplete"
+        | "zlib.error" => "Exception",
         "binascii.Error" => "ValueError",
         name if exception_subclass(name, "OSError") == Some(true) => "OSError",
         _ => name,
@@ -1111,9 +1113,9 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    // A module-qualified OSError subclass uses the exception constructor below.
+    // Module-qualified exceptions use the exception constructor below.
     if let Some((owner, method)) = name.split_once('.')
-        && exception_subclass(name, "OSError") != Some(true)
+        && !is_exception(name)
     {
         return match owner {
             "coroutine" | "coroutine_wrapper" => {

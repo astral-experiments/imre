@@ -3045,7 +3045,11 @@ impl Context {
             Value::Native(ref builtin)
                 if matches!(
                     builtin.as_str(),
-                    "binascii.Error" | "binascii.Incomplete" | "socket.gaierror" | "socket.herror"
+                    "binascii.Error"
+                        | "binascii.Incomplete"
+                        | "socket.gaierror"
+                        | "socket.herror"
+                        | "zlib.error"
                 ) =>
             {
                 let (module, short) = builtin.split_once('.').unwrap();
