@@ -566,6 +566,11 @@ impl Context {
             || self.slot(descriptor, "__delete__").is_some()
     }
 
+    fn readable_data_descriptor(&self, member: Id) -> bool {
+        self.native_data_descriptor(member)
+            || (self.slot(member, "__get__").is_some() && self.data_descriptor(member))
+    }
+
     /// Bind a native class method to the class through which it was retrieved.
     fn bind_native_classmethod(&mut self, callable: Id, owner: Id) -> Id {
         self.alloc(Value::Method {
@@ -703,11 +708,7 @@ impl Context {
             return Ok(value);
         }
         match (member, field) {
-            (Some(member), _)
-                if self.data_descriptor(member)
-                    && (self.slot(member, "__get__").is_some()
-                        || self.native_data_descriptor(member)) =>
-            {
+            (Some(member), _) if self.readable_data_descriptor(member) => {
                 self.bind_attribute(member, object, class)
             }
             // Without a Python class member, object.__class__ is a data descriptor.
@@ -798,10 +799,9 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if matches!(
-                child.as_str(),
-                stdlib::hash_info::TYPE | stdlib::flags::TYPE
-            ) && parent == "tuple"
+            if (child == stdlib::flags::TYPE
+                || stdlib::fixed_structseq::fixed_type(child).is_some())
+                && parent == "tuple"
             {
                 return true;
             }
@@ -880,77 +880,20 @@ impl Context {
 
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
         Some(match self.heap.get(obj) {
-            Value::None
-            | Value::Ellipsis
-            | Value::NotImplemented
-            | Value::Bool(_)
-            | Value::Float(_)
-            | Value::Complex(_)
-            | Value::Int(_)
-            | Value::Str(_)
-            | Value::SurrogateStr(_)
-            | Value::Array(_)
-            | Value::Bytes(_)
-            | Value::List(_)
-            | Value::Dict(_)
-            | Value::Set { .. }
-            | Value::Range(_)
-            | Value::Scandir(_)
-            | Value::DirEntry(_)
-            | Value::RangeIterator(_)
-            | Value::Slice(_)
-            | Value::Enumerate { .. }
-            | Value::Iterator { .. }
-            | Value::Tuple(_)
-            | Value::DictIterator(_)
-            | Value::DictView { .. }
-            | Value::CallableIterator(_)
-            | Value::FormatIterator { .. }
-            | Value::File(_)
-            | Value::Class { .. }
-            | Value::Function { .. }
-            | Value::Traceback { .. }
-            | Value::PythonFrame { .. }
-            | Value::Code(_)
-            | Value::Cell(_)
-            | Value::Generator { .. }
-            | Value::Module { .. }
-            | Value::ThreadLocal(_)
-            | Value::Hash(_)
-            | Value::ThreadHandle(_)
-            | Value::PrimitiveLock(_) => self.type_name(obj),
-            Value::TextFile(_) => "_io.TextIOWrapper",
+            Value::Module { .. } => self.type_name(obj),
             Value::DefaultDict { .. } => "collections.defaultdict",
-            Value::ByteArray(_) => "bytearray",
-            Value::Map { .. } => "map",
-            Value::Filter { .. } => "filter",
-            Value::Weak(wr) => wr.kind.class(),
-            Value::Zip { .. } => "zip",
-            Value::ClassMethod(_) => "classmethod",
             Value::Cached { .. } => "functools._lru_cache_wrapper",
             Value::KeyWrapper { .. } => KEY_WRAPPER,
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
-            Value::SequenceIterator { .. } => "iterator",
-            Value::ReverseSequence { .. } => "reversed",
-            Value::Deque(_) => super::deque::CLASS,
-            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
-            Value::DequeIterator { .. } => super::deque::ITERATOR,
             Value::Repeat(_) => "itertools.repeat",
             Value::TupleGetter { .. } => super::namedtuple::GETTER,
-            Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) => "member_descriptor",
-            Value::ItemGetter(_) => "operator.itemgetter",
-            Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
-            Value::NoDefault => "NoDefaultType",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
             Value::Union(_) => "typing.Union",
-            Value::Property(_) => "property",
             Value::Super { .. } => "super",
-            Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
-            Value::MappingProxy(_) => "mappingproxy",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
@@ -1049,7 +992,7 @@ impl Context {
                     return None;
                 }
             }
-            _ => return None,
+            value => return value.intrinsic_type_name(),
         })
     }
 
@@ -1062,6 +1005,10 @@ impl Context {
                 Ok(self.builtins["_io.TextIOWrapper"])
             }
             Value::Instance { class, .. }
+            | Value::Class {
+                metaclass: Some(class),
+                ..
+            }
             | Value::Module {
                 constructor: Some(class),
                 ..
@@ -1070,7 +1017,8 @@ impl Context {
                 class:
                     Some(
                         class @ ("time.struct_time"
-                        | stdlib::hash_info::TYPE
+                        | stdlib::fixed_structseq::HASH_INFO
+                        | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
                         | stdlib::os::stat::CLASS),
                     ),
@@ -1234,7 +1182,8 @@ impl Context {
                     class:
                         Some(
                             class @ ("time.struct_time"
-                            | stdlib::hash_info::TYPE
+                            | stdlib::fixed_structseq::HASH_INFO
+                            | stdlib::fixed_structseq::TERMINAL_SIZE
                             | stdlib::flags::TYPE),
                         ),
                     ..
@@ -1399,6 +1348,10 @@ impl Context {
         }
         let class = match *self.heap.get(obj) {
             Value::Instance { class, .. }
+            | Value::Class {
+                metaclass: Some(class),
+                ..
+            }
             | Value::Module {
                 constructor: Some(class),
                 ..
@@ -1508,6 +1461,18 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        let metaclass_member = match *self.heap.get(obj) {
+            Value::Class {
+                metaclass: Some(meta),
+                ..
+            } => self.class_attr(meta, name).map(|member| (meta, member)),
+            _ => None,
+        };
+        if let Some((meta, member)) = metaclass_member
+            && self.readable_data_descriptor(member)
+        {
+            return self.bind_attribute(member, obj, meta);
+        }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
@@ -1682,7 +1647,14 @@ impl Context {
                 let owner = self.builtin("frame");
                 return self.bind_attribute(method, obj, owner);
             }
-            Value::PythonFrame { code, .. } if name == "f_code" => return Ok(code),
+            Value::PythonFrame { globals, .. } if name == "f_globals" => return Ok(globals),
+            Value::PythonFrame { code, .. } if name == "f_code" => {
+                if !self.audit_hooks.is_empty() {
+                    let attribute = self.text(name);
+                    super::stdlib::audit::event(self, "object.__getattr__", &[obj, attribute])?;
+                }
+                return Ok(code);
+            }
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
             }
@@ -2008,6 +1980,9 @@ impl Context {
                             "__module__" if module_bound => {
                                 method.rsplit_once('.').map(|(module, _)| module)
                             }
+                            "__text_signature__" if method == "sys._getframe" => {
+                                Some("($module, depth=0, /)")
+                            }
                             "__text_signature__" if method == "sys.audit" => {
                                 Some("($module, event, /, *args)")
                             }
@@ -2305,6 +2280,12 @@ impl Context {
                     }
                 }
             },
+            Value::File(ref handle)
+                if name == "name"
+                    && let Some(fd) = handle.socket_reader_name() =>
+            {
+                return Ok(self.int(i64::from(fd)));
+            }
             Value::File(ref handle) if name == "closed" => {
                 return Ok(if handle.closed() { TRUE } else { FALSE });
             }
@@ -2386,8 +2367,12 @@ impl Context {
                     return Ok(value);
                 }
             }
-            Value::Native(ref class) if class == stdlib::hash_info::TYPE => {
-                if let Some(value) = stdlib::hash_info::type_attribute(self, name, true) {
+            Value::Native(ref symbol)
+                if let Some(class) = stdlib::fixed_structseq::fixed_type(symbol) =>
+            {
+                if let Some(value) =
+                    stdlib::fixed_structseq::type_attribute(self, class, name, true)
+                {
                     return Ok(value);
                 }
             }
@@ -2413,6 +2398,17 @@ impl Context {
             {
                 let method = self.builtin("dict.fromkeys");
                 return Ok(self.bind_native_classmethod(method, obj));
+            }
+            Value::Native(ref class)
+                if class == "collections.defaultdict" && name == "__module__" =>
+            {
+                return Ok(self.text("collections"));
+            }
+            Value::Native(ref class)
+                if class == "collections.defaultdict"
+                    && matches!(name, "__name__" | "__qualname__") =>
+            {
+                return Ok(self.text("defaultdict"));
             }
             Value::Native(ref class)
                 if class == "collections.defaultdict"
@@ -2623,6 +2619,7 @@ impl Context {
                     && matches!(
                         name,
                         "__hash__"
+                            | "__repr__"
                             | "__getattribute__"
                             | "__setattr__"
                             | "__delattr__"
@@ -2753,6 +2750,9 @@ impl Context {
                 if name == "__new__" && self.has_base(obj, "float") {
                     return Ok(self.builtin("float.__new__"));
                 }
+                if let Some((meta, member)) = metaclass_member {
+                    return self.bind_attribute(member, obj, meta);
+                }
             }
             Value::NamedTuple {
                 class,
@@ -2775,7 +2775,10 @@ impl Context {
                     }
                 }
                 if let Some(
-                    owner @ ("time.struct_time" | stdlib::hash_info::TYPE | stdlib::flags::TYPE),
+                    owner @ ("time.struct_time"
+                    | stdlib::fixed_structseq::HASH_INFO
+                    | stdlib::fixed_structseq::TERMINAL_SIZE
+                    | stdlib::flags::TYPE),
                 ) = class
                     && name == "__class__"
                 {
@@ -2791,8 +2794,9 @@ impl Context {
                     && let Some(value) = stdlib::flags::type_attribute(self, name, false)
                 {
                     return Ok(value);
-                } else if class == Some(stdlib::hash_info::TYPE)
-                    && let Some(value) = stdlib::hash_info::type_attribute(self, name, false)
+                } else if let Some(owner) = class.and_then(stdlib::fixed_structseq::fixed_type)
+                    && let Some(value) =
+                        stdlib::fixed_structseq::type_attribute(self, owner, name, false)
                 {
                     return Ok(value);
                 }
@@ -3239,15 +3243,20 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
-        if matches!(
-            self.heap.get(obj),
-            Value::NamedTuple {
-                class: Some(stdlib::os::stat::CLASS),
-                ..
-            }
-        ) && let Some(member) = stdlib::os::stat::member(self, name)
+        if let Value::NamedTuple {
+            class: Some(owner), ..
+        } = *self.heap.get(obj)
         {
-            return Some(member);
+            let member = if owner == stdlib::os::stat::CLASS {
+                stdlib::os::stat::member(self, name)
+            } else if let Some(class) = stdlib::fixed_structseq::fixed_type(owner) {
+                stdlib::fixed_structseq::member(self, class, name)
+            } else {
+                None
+            };
+            if member.is_some() {
+                return member;
+            }
         }
         if matches!(
             self.heap.get(obj),
@@ -4030,6 +4039,7 @@ impl Context {
                 scope,
                 ancestors,
                 namedtuple_fields,
+                metaclass,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -4042,6 +4052,7 @@ impl Context {
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 copied_ancestors.extend_from_slice(ancestors);
                 Value::Class {
+                    metaclass: *metaclass,
                     name: copied_name,
                     scope: *scope,
                     ancestors: copied_ancestors,
@@ -4095,8 +4106,8 @@ impl Context {
                 "TypeError",
                 "cannot create 'sys.flags' instances",
             )),
-            Value::Native(name) if name == stdlib::hash_info::TYPE => {
-                stdlib::hash_info::construct(self, &args, &kwargs)
+            Value::Native(name) if let Some(class) = stdlib::fixed_structseq::fixed_type(&name) => {
+                stdlib::fixed_structseq::construct(self, class, &args, &kwargs)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
@@ -4384,6 +4395,9 @@ impl Context {
                 ancestors,
                 ..
             } => {
+                if let Some(call) = self.bound_slot(callable, "__call__")? {
+                    return self.call(call, args, kwargs);
+                }
                 let (mut args, mut kwargs) = (args, kwargs);
                 if let Some(&decimal) = self.classes.get("decimal.Decimal")
                     && (callable == decimal
@@ -4797,9 +4811,40 @@ impl Context {
         }
     }
 
-    pub(super) fn class(&mut self, name: Id, bases: Id, body: Id) -> Result<Id> {
+    pub(super) fn class(
+        &mut self,
+        name: Id,
+        bases: Id,
+        body: Id,
+        parameterized: bool,
+    ) -> Result<Id> {
         let name = self.str_value(name)?.to_owned();
-        let (original, bases) = super::typing::resolve_bases(self, bases)?;
+        let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
+        let mut typed_dict_meta = None;
+        if let Some(meta) = self.module_value("typing", "_TypedDictMeta")
+            && bases
+                .iter()
+                .any(|&base| self.heap.get(base).instance_class() == Some(meta))
+        {
+            let root = self.module_value("typing", "_TypedDict");
+            if bases.iter().any(|&base| {
+                self.heap.get(base).instance_class() != Some(meta)
+                    && self.classes.get("typing.Generic") != Some(&base)
+            }) {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot inherit from both a TypedDict type and a non-TypedDict base class",
+                ));
+            }
+            if parameterized || bases.len() != 1 || Some(bases[0]) != root {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "inherited and generic TypedDict declarations are unsupported",
+                ));
+            }
+            bases = vec![self.builtin("dict")];
+            typed_dict_meta = Some(meta);
+        }
         let Value::Function {
             scope: parent,
             code,
@@ -4882,6 +4927,10 @@ impl Context {
             self.bind_local(scope, "__init_subclass__", method);
         }
         let class = self.allocate_class(name.clone(), scope, bases)?;
+        let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
+            unreachable!()
+        };
+        *metaclass = typed_dict_meta;
         self.install_weakref_descriptor(class, scope);
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
@@ -4940,6 +4989,27 @@ impl Context {
                 .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, &name, scope)?;
+        if typed_dict_meta.is_some() {
+            // The class tracks unevaluated fields in its own namespace. Reading
+            // __annotations__ here would cache their values before user code can rebind names.
+            let fields = self
+                .own_class_attr(class, "__annotations__")
+                .ok_or_else(|| Error::new("TypeError", "missing TypedDict annotations"))?;
+            let thunks = self
+                .scope_data(scope)
+                .class_namespace
+                .as_ref()
+                .and_then(|ns| ns.annotation_thunks)
+                .unwrap_or(NONE);
+            let configure = self
+                .module_value("typing", "_configure_typeddict")
+                .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
+            self.call(
+                configure,
+                vec![class, fields, TRUE, TRUE, thunks],
+                Vec::new(),
+            )?;
+        }
         self.classes.insert(name, class);
         Ok(class)
     }

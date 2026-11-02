@@ -237,31 +237,80 @@ impl Context {
         }
     }
 
-    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
-        if let Some((mut loc, frame)) = self.heap.trace_location() {
-            if let Some(&[line, start, split, end]) = span {
-                loc.line = line;
-                loc.span = Some([start, split, end]);
-            }
-            let active = self.heap.active_exception();
-            if error.context == NONE
-                && active != NONE
-                && error
-                    .trace
-                    .as_ref()
-                    .is_none_or(|trace| trace.frames.is_empty() && trace.instance != Some(active))
-            {
-                error.context = active;
-            }
-            if let Some(trace) = error.try_tracing()
-                && trace.frames.try_reserve(1).is_ok()
-            {
-                trace.frames.push((loc, frame));
-                return;
-            }
-            let original = std::mem::replace(error, Error::new("MemoryError", ""));
-            error.context = self.raised_instance(original);
+    /// Return the same Python frame to introspection and traceback construction.
+    pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
+        let Some((index, _)) = self
+            .heap
+            .frames
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, frame)| frame.code != NONE)
+            .nth(depth)
+        else {
+            return Ok(None);
+        };
+        self.materialize_frame(index)
+    }
+
+    fn materialize_frame(&mut self, index: usize) -> Result<Option<(Location, Id)>> {
+        let frame = &self.heap.frames[index];
+        if frame.code == NONE {
+            return Ok(None);
         }
+        let Some(location) = frame.location.clone() else {
+            return Ok(None);
+        };
+        if let Some(object) = frame.object {
+            return Ok(Some((location, object)));
+        }
+        let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
+        let globals = self.module_globals(scope)?;
+        let object = self.alloc(Value::PythonFrame {
+            scope,
+            code,
+            globals,
+            lineno: location.line,
+        });
+        if let FrameOwner::Generator(id) = owner {
+            let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
+                unreachable!()
+            };
+            *frame = Some(object);
+        }
+        self.heap.frames[index].object = Some(object);
+        Ok(Some((location, object)))
+    }
+
+    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
+        let failure = match self.materialize_frame(self.heap.frames.len() - 1) {
+            Err(failure) => failure,
+            Ok(None) => return,
+            Ok(Some((mut loc, frame))) => {
+                if let Some(&[line, start, split, end]) = span {
+                    loc.line = line;
+                    loc.span = Some([start, split, end]);
+                }
+                let active = self.heap.active_exception();
+                if error.context == NONE
+                    && active != NONE
+                    && error.trace.as_ref().is_none_or(|trace| {
+                        trace.frames.is_empty() && trace.instance != Some(active)
+                    })
+                {
+                    error.context = active;
+                }
+                if let Some(trace) = error.try_tracing()
+                    && trace.frames.try_reserve(1).is_ok()
+                {
+                    trace.frames.push((loc, frame));
+                    return;
+                }
+                Error::new("MemoryError", "")
+            }
+        };
+        let original = std::mem::replace(error, failure);
+        error.context = self.raised_instance(original);
     }
 
     /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
@@ -350,107 +399,30 @@ impl Context {
 
     pub(super) fn type_name(&self, value: Id) -> &str {
         match self.heap.get(value) {
-            Value::None => "NoneType",
-            Value::Weak(wr) => wr.kind.class(),
-            Value::Ellipsis => "ellipsis",
-            Value::NotImplemented => "NotImplementedType",
-            Value::Bool(_) => "bool",
-            Value::Int(_) => "int",
-            Value::Float(_) => "float",
-            Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
-            Value::Str(_) | Value::SurrogateStr(_) => "str",
-            Value::Map { .. } => "map",
-            Value::Filter { .. } => "filter",
-            Value::Hash(state) => state.borrow().class_name(),
             Value::Poll(_) => "select.poll",
-            Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
-            Value::Array(_) => "array.array",
-            Value::Bytes(_) => "bytes",
-            Value::ByteArray(_) => "bytearray",
-            Value::File(file) => match file.as_ref() {
-                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
-            },
-            Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(_) => "_io.BufferedRandom",
-            Value::SequenceIterator { .. } => "iterator",
-            Value::ReverseSequence { .. } => "reversed",
-            Value::Deque(_) => super::deque::CLASS,
-            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
-            Value::DequeIterator { .. } => super::deque::ITERATOR,
-            Value::List(_) => "list",
-            Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
-            Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
-            Value::Slice(_) => "slice",
-            Value::Range(_) => "range",
-            Value::Scandir(_) => super::stdlib::os::scandir::ITER,
-            Value::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
-            Value::RangeIterator(iter) => iter.kind,
-            Value::Enumerate { .. } => "enumerate",
-            Value::Iterator { kind, .. } => kind,
-            Value::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
-                (Some(_), _, _) => "odict_iterator",
-                (_, false, DictViewKind::Keys) => "dict_keyiterator",
-                (_, false, DictViewKind::Values) => "dict_valueiterator",
-                (_, false, DictViewKind::Items) => "dict_itemiterator",
-                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
-                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
-                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
-            },
-            Value::Set { frozen: true, .. } => "frozenset",
-            Value::Set { frozen: false, .. } => "set",
-            Value::Dict(_) => "dict",
-            Value::MappingProxy(_) => "mappingproxy",
+            Value::NamedTuple { .. } => "tuple",
             Value::DefaultDict { .. } => "defaultdict",
-            Value::Function { .. } => "function",
             Value::TupleGetter { .. } => "_tuplegetter",
-            Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) => "member_descriptor",
-            Value::ItemGetter(_) => "operator.itemgetter",
-            Value::Code(_) => "code",
-            Value::Cell(_) => "cell",
-            Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
-            Value::NoDefault => "NoDefaultType",
             Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Union(_) => "Union",
-            Value::Class { .. } => "type",
-            Value::DictView { kind, ordered, .. } => match (kind, ordered) {
-                (DictViewKind::Keys, false) => "dict_keys",
-                (DictViewKind::Items, false) => "dict_items",
-                (DictViewKind::Values, false) => "dict_values",
-                (DictViewKind::Keys, true) => "odict_keys",
-                (DictViewKind::Items, true) => "odict_items",
-                (DictViewKind::Values, true) => "odict_values",
-            },
             Value::Method { .. } => "method",
-            Value::ClassMethod(_) => "classmethod",
-            Value::ThreadLocal(_) => super::thread_local::CLASS,
-            Value::ThreadHandle(_) => "_thread._ThreadHandle",
-            Value::PrimitiveLock(_) => super::thread_lock::CLASS,
-            Value::FormatIterator { kind, .. } => match kind {
-                FormatKind::Markup => "formatteriterator",
-                FormatKind::Field => "fieldnameiterator",
-            },
             Value::Cached { .. } => "_lru_cache_wrapper",
             Value::Partial { .. } => "partial",
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::KeyWrapper { .. } => "functools.KeyWrapper",
-            Value::StaticMethod { .. } => "staticmethod",
-            Value::Property(_) => "property",
-            Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::Raised(error) => &error.kind,
-            Value::Traceback { .. } => "traceback",
-            Value::PythonFrame { .. } => "frame",
             Value::Module {
                 constructor: None, ..
             } => "module",
@@ -467,7 +439,7 @@ impl Context {
                 Value::Class { .. } | Value::Native(_) => self.class_name(*class),
                 _ => "object",
             },
-            _ => "object",
+            value => value.intrinsic_type_name().unwrap_or("object"),
         }
     }
 
@@ -767,6 +739,7 @@ pub(super) enum Value {
     Code(CodeObject),
     Generator {
         owner: FrameOwner,
+        frame: Option<Id>,
         code: Id,
         scope: Id,
         iterators: Vec<Id>,
@@ -775,6 +748,7 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        metaclass: Option<Id>,
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
@@ -825,6 +799,7 @@ pub(super) enum Value {
     PythonFrame {
         scope: Id,
         code: Id,
+        globals: Id,
         lineno: u32,
     },
     Method {
@@ -963,9 +938,95 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    /// Returns the name used for both builtin class lookup and diagnostic messages.
+    pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
+        Some(match self {
+            Self::None => "NoneType",
+            Self::Weak(wr) => wr.kind.class(),
+            Self::Ellipsis => "ellipsis",
+            Self::NotImplemented => "NotImplementedType",
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::Complex(_) => "complex",
+            Self::Str(_) | Self::SurrogateStr(_) => "str",
+            Self::Map { .. } => "map",
+            Self::Filter { .. } => "filter",
+            Self::Hash(state) => state.borrow().class_name(),
+            Self::Zip { .. } => "zip",
+            Self::Array(_) => "array.array",
+            Self::Bytes(_) => "bytes",
+            Self::ByteArray(_) => "bytearray",
+            Self::File(file) => match file.as_ref() {
+                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+            },
+            Self::TextFile(_) => "_io.TextIOWrapper",
+            Self::SequenceIterator { .. } => "iterator",
+            Self::ReverseSequence { .. } => "reversed",
+            Self::Deque(_) => super::deque::CLASS,
+            Self::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
+            Self::DequeIterator { .. } => super::deque::ITERATOR,
+            Self::List(_) => "list",
+            Self::CallableIterator(_) => "callable_iterator",
+            Self::Tuple(_) => "tuple",
+            Self::Slice(_) => "slice",
+            Self::Range(_) => "range",
+            Self::Scandir(_) => super::stdlib::os::scandir::ITER,
+            Self::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
+            Self::RangeIterator(iter) => iter.kind,
+            Self::Enumerate { .. } => "enumerate",
+            Self::Iterator { kind, .. } => kind,
+            Self::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
+                (Some(_), _, _) => "odict_iterator",
+                (_, false, DictViewKind::Keys) => "dict_keyiterator",
+                (_, false, DictViewKind::Values) => "dict_valueiterator",
+                (_, false, DictViewKind::Items) => "dict_itemiterator",
+                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
+                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
+                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
+            },
+            Self::Set { frozen: true, .. } => "frozenset",
+            Self::Set { frozen: false, .. } => "set",
+            Self::Dict(_) => "dict",
+            Self::MappingProxy(_) => "mappingproxy",
+            Self::Function { .. } => "function",
+            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) => "member_descriptor",
+            Self::ItemGetter(_) => "operator.itemgetter",
+            Self::Code(_) => "code",
+            Self::Cell(_) => "cell",
+            Self::Generator { .. } => "generator",
+            Self::NoDefault => "NoDefaultType",
+            Self::Class { .. } => "type",
+            Self::DictView { kind, ordered, .. } => match (kind, ordered) {
+                (DictViewKind::Keys, false) => "dict_keys",
+                (DictViewKind::Items, false) => "dict_items",
+                (DictViewKind::Values, false) => "dict_values",
+                (DictViewKind::Keys, true) => "odict_keys",
+                (DictViewKind::Items, true) => "odict_items",
+                (DictViewKind::Values, true) => "odict_values",
+            },
+            Self::ClassMethod(_) => "classmethod",
+            Self::ThreadLocal(_) => super::thread_local::CLASS,
+            Self::ThreadHandle(_) => "_thread._ThreadHandle",
+            Self::PrimitiveLock(_) => super::thread_lock::CLASS,
+            Self::FormatIterator { kind, .. } => match kind {
+                FormatKind::Markup => "formatteriterator",
+                FormatKind::Field => "fieldnameiterator",
+            },
+            Self::StaticMethod { .. } => "staticmethod",
+            Self::Property(_) => "property",
+            Self::GetSetDescriptor { .. } | Self::WeakrefDescriptor(_) => "getset_descriptor",
+            Self::Traceback { .. } => "traceback",
+            Self::PythonFrame { .. } => "frame",
+            _ => return None,
+        })
+    }
+
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
@@ -1162,6 +1223,7 @@ impl Value {
             }
             Self::Generator {
                 owner,
+                frame,
                 code,
                 scope,
                 iterators,
@@ -1169,6 +1231,7 @@ impl Value {
                 ..
             } => {
                 visit.extend([*code, *scope, owner.root()]);
+                visit.extend(*frame);
                 visit.extend(iterators);
                 visit.extend(
                     protected
@@ -1177,8 +1240,12 @@ impl Value {
                 );
             }
             Self::Class {
-                scope, ancestors, ..
+                scope,
+                ancestors,
+                metaclass,
+                ..
             } => {
+                visit.extend(*metaclass);
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
@@ -1269,7 +1336,12 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
-            Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
+            Self::PythonFrame {
+                scope,
+                code,
+                globals,
+                ..
+            } => visit.extend([*scope, *code, *globals]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
@@ -1677,6 +1749,7 @@ struct InternedString {
 /// A Python call observes its mutable function, while bare code keeps its entry module.
 #[derive(Clone, Copy)]
 pub(super) enum FrameOwner {
+    Generator(Id),
     Function(Id),
     Module(Id),
 }
@@ -1684,7 +1757,7 @@ pub(super) enum FrameOwner {
 impl FrameOwner {
     fn root(self) -> Id {
         match self {
-            Self::Function(id) | Self::Module(id) => id,
+            Self::Function(id) | Self::Module(id) | Self::Generator(id) => id,
         }
     }
 }
@@ -2072,8 +2145,14 @@ impl Heap {
             .expect("live native handle")
     }
     pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
-        self.frames
-            .push(Frame::new(scope, code, owner, self.active_exception()));
+        let mut activation = Frame::new(scope, code, owner, self.active_exception());
+        if let FrameOwner::Generator(id) = owner {
+            let Value::Generator { frame, .. } = self.get(id) else {
+                unreachable!()
+            };
+            activation.object = *frame;
+        }
+        self.frames.push(activation);
     }
     /// Release the activation and report whether a returning function may have dropped a writer.
     pub fn leave(&mut self, value: Id, returning: bool) -> bool {
@@ -2242,22 +2321,6 @@ impl Heap {
         std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
     }
 
-    /// Materialize one frame per activation only when an exception unwinds it.
-    pub fn trace_location(&mut self) -> Option<(Location, Id)> {
-        let frame = self.frames.last()?;
-        let location = frame.location.clone()?;
-        if let Some(object) = frame.object {
-            return Some((location, object));
-        }
-        let object = self.alloc(Value::PythonFrame {
-            scope: frame.scope,
-            code: frame.code,
-            lineno: location.line,
-        });
-        self.frames.last_mut().unwrap().object = Some(object);
-        Some((location, object))
-    }
-
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
     pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
         let Value::PythonFrame { scope, .. } = *self.get(value) else {
@@ -2287,7 +2350,22 @@ impl Heap {
     }
 
     pub fn caller_module(&self) -> Id {
-        match self.frames.last().unwrap().owner {
+        self.caller_module_at(0).expect("current frame")
+    }
+
+    pub fn caller_module_at(&self, depth: usize) -> Option<Id> {
+        let mut owner = self.frames.iter().rev().nth(depth)?.owner;
+        if let FrameOwner::Generator(id) = owner {
+            let Value::Generator {
+                owner: function, ..
+            } = self.get(id)
+            else {
+                unreachable!()
+            };
+            owner = *function;
+        }
+        Some(match owner {
+            FrameOwner::Generator(_) => unreachable!("a generator belongs to a function or module"),
             FrameOwner::Module(module) => module,
             FrameOwner::Function(function) => {
                 let Value::Function { fields, .. } = self.get(function) else {
@@ -2295,7 +2373,7 @@ impl Heap {
                 };
                 fields.module
             }
-        }
+        })
     }
 
     pub fn current_scope(&self) -> Id {

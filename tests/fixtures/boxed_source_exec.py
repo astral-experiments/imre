@@ -233,10 +233,40 @@ def source_name_deletion():
     assert "name" not in namespace
 
 
+def relative_import_hooks():
+    import sys
+
+    calls = []
+    missing = ImportError("relative hook failed")
+
+    def importer(name, globals_, locals_, fromlist, level):
+        assert globals_ is namespace and locals_ is local
+        calls.append((name, fromlist, level))
+        if name == "missing":
+            raise missing
+        return sys
+
+    namespace = {"__builtins__": {"__import__": importer}}
+    local = {}
+    exec("from sys import argv as absolute\nfrom . import argv as sibling\nfrom ..helper import argv as parent",
+         namespace, local)
+    assert local["absolute"] is local["sibling"] is local["parent"] is sys.argv
+    try:
+        exec("from .missing import attr", namespace, local)
+    except ImportError as error:
+        assert error is missing
+    else:
+        raise AssertionError("relative import hook exception was lost")
+    assert calls == [("sys", ("argv",), 0), ("", ("argv",), 1),
+                     ("helper", ("argv",), 2), ("missing", ("attr",), 1)]
+
+
 def current():
+    relative_import_hooks()
     source_name_deletion()
     source_classes()
     source_test_cases()
+    source_nested_functions()
     syntax_members()
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}
@@ -360,6 +390,45 @@ def current():
             operation()
         except (ValueError, TypeError) as error:
             print(type(error).__name__, str(error))
+
+
+def source_nested_functions():
+    namespace = {"__name__": "closures", "left": "global"}
+    exec(compile("""def outer(first):
+    left = first
+    def mid():
+        def inner(arg=left):
+            return left, arg
+        return inner
+    def sibling():
+        return left
+    inner = mid()
+    left = first + 1
+    return inner, sibling
+
+def missing():
+    def read():
+        return left
+    return read
+    left = 1
+""", "closures.py", "exec"), namespace)
+    inner, sibling = namespace["outer"](7)
+    assert inner() == (8, 7)
+    assert sibling() == 8
+    assert inner.__closure__[0] is sibling.__closure__[0]
+    assert inner.__code__.co_freevars == ("left",)
+    assert inner.__qualname__ == "outer.<locals>.mid.<locals>.inner"
+    second = namespace["outer"](11)[0]
+    assert second.__code__ is inner.__code__
+    assert second.__closure__[0] is not inner.__closure__[0]
+    assert second() == (12, 11)
+    try:
+        namespace["missing"]()()
+    except NameError as error:
+        assert "free variable 'left'" in str(error)
+    else:
+        raise AssertionError("unbound closure read a global")
+
 
 
 if __name__ == "__main__":

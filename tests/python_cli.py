@@ -1064,6 +1064,7 @@ def main():
             "case.assertIsSubclass(bool, int)",
             "check = Case.assertNotIsSubclass\ncheck(case, int, str)",
             "case.assertIsInstance(1, int)",
+            "case.assertNotHasAttr(Case, 'absent')",
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
             "check = Case.assertNotIsInstance\ncheck(case, 1, str)",
@@ -1282,6 +1283,16 @@ print(found.value)
             (root / "linked-script.py").symlink_to("pkg/path0.py")
             compare("-B", "linked-script.py")
 
+            (root / "dangling-link").symlink_to("missing-target")
+            compare(
+                "-B", "-c",
+                "import os\n"
+                "from os.path import exists, getatime, getctime, getmtime, lexists\n"
+                "assert lexists(path=b'dangling-link') and not exists('dangling-link')\n"
+                "s = os.stat('.')\n"
+                "assert (getatime('.'), getctime('.'), getmtime('.')) == (s.st_atime, s.st_ctime, s.st_mtime)",
+            )
+
             byte_dir = root / os.fsdecode(b"dir-\xff")
             byte_dir.mkdir()
             (byte_dir / "main.py").write_text("import sys\nprint(sys.path[0])\n")
@@ -1488,6 +1499,7 @@ def report(text):
             assert (result.returncode, result.stdout) == (0, b"7\n"), result.stderr
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
@@ -1497,6 +1509,7 @@ def report(text):
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
+            "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",
             "boxed_sys_intern.py",
@@ -1537,6 +1550,7 @@ def report(text):
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
             "boxed_typing_assert_type.py",
+            "boxed_typing_typeddict.py",
             "boxed_typing_optional.py",
             "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
@@ -1560,6 +1574,7 @@ def report(text):
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_stat.py",
+            "boxed_os_terminal_size.py",
             "boxed_os_makedirs.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
@@ -1587,6 +1602,7 @@ def report(text):
             "boxed_unittest_membership.py",
             "boxed_unittest_instance.py",
             "boxed_unittest_subclass.py",
+            "boxed_unittest_not_has_attr.py",
             "boxed_unittest_not_equal.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_identity.py",
@@ -1617,6 +1633,7 @@ def report(text):
             "boxed_unittest_class_cleanup.py",
             "boxed_posixpath.py",
             "boxed_stat.py",
+            "boxed_signal.py",
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
             "boxed_enum_auto.py",
@@ -1676,6 +1693,7 @@ def report(text):
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
+            "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
             "boxed_string_new.py",
@@ -1683,7 +1701,7 @@ def report(text):
             "boxed_string_surrogates.py",
             "boxed_string_expandtabs.py",
         ):
-            if fixture == "boxed_stat.py" and sys.platform not in ("linux", "darwin"):
+            if fixture in ("boxed_stat.py", "boxed_signal.py") and sys.platform not in ("linux", "darwin"):
                 continue
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":

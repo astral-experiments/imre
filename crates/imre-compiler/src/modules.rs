@@ -61,6 +61,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
         "__hello__" => Some(("__hello__.py", include_str!("../stdlib/__hello__.py"))),
+        "ast" => Some(("ast.py", include_str!("../stdlib/ast.py"))),
         "stat" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             let modes = stat_mode_source()?;
@@ -89,6 +90,12 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/importlib/metadata_version.py"),
             ),
         )),
+        // CPython 3.14.5 Lib/queue.py with condition variables backed by native locks.
+        "_imre_queue_sync" => Some((
+            "_imre_queue_sync.py",
+            include_str!("../stdlib/_imre_queue_sync.py"),
+        )),
+        "queue" => Some(("queue.py", include_str!("../stdlib/queue.py"))),
         "csv" => Some((
             "csv.py",
             concat!(
@@ -191,6 +198,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "inspect" => Some(("inspect.py", include_str!("../stdlib/inspect.py"))),
         "itertools" => Some(("itertools.py", include_str!("../stdlib/itertools.py"))),
+        "signal" if cfg!(unix) => Some(("signal.py", include_str!("../stdlib/signal.py"))),
         "typing" => Some(("typing.py", include_str!("../stdlib/typing.py"))),
         "logging" => Some((
             "logging/__init__.py",
@@ -344,6 +352,7 @@ pub(crate) enum IntrinsicModule {
     Secrets,
     Sysconfig,
     Signal,
+    SignalNative,
     Opcode,
     Unidiff,
     Pathlib,
@@ -784,6 +793,7 @@ impl IntrinsicModule {
             "secrets" => Some(Self::Secrets),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
+            "_signal" if cfg!(unix) => Some(Self::SignalNative),
             "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
@@ -930,6 +940,9 @@ impl IntrinsicModule {
             }
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
+            (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
+            (Self::Ast, "NodeVisitor") => Intrinsic::ObjectRuntimeExport("ast.NodeVisitor"),
+            (Self::Ast, "NodeTransformer") => Intrinsic::ObjectRuntimeExport("ast.NodeTransformer"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
@@ -1011,6 +1024,9 @@ impl IntrinsicModule {
             // Execution requests the native loader. Binding the name alone stays on the typed path.
             (Self::Importlib, "import_module") => {
                 Intrinsic::RegisteredImport("importlib.import_module")
+            }
+            (Self::Importlib, "invalidate_caches") => {
+                Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
             }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMetadata, "entry_points") => {
@@ -1106,6 +1122,18 @@ impl IntrinsicModule {
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
             (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            (Self::SignalNative, "SIGINT") => Intrinsic::ObjectRuntimeExport("_signal.SIGINT"),
+            (Self::SignalNative, "SIGALRM") => Intrinsic::ObjectRuntimeExport("_signal.SIGALRM"),
+            (Self::SignalNative, "SIGTERM") => Intrinsic::ObjectRuntimeExport("_signal.SIGTERM"),
+            (Self::Signal | Self::SignalNative, "alarm") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("_signal.alarm")
+            }
+            (Self::Signal, "SIGALRM") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("signal.SIGALRM")
+            }
+            (Self::Signal, "Signals") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("signal.Signals")
+            }
             // Native executables have no adaptive bytecode interpreter.
             (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
                 Intrinsic::IntConstant(0)
@@ -1274,6 +1302,7 @@ impl IntrinsicModule {
             (Self::Typing, "VT") => Intrinsic::ObjectRuntimeExport("typing.VT"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
+            (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
             (Self::Typing, "MutableMapping") => {
                 Intrinsic::ObjectRuntimeExport("typing.MutableMapping")
             }
@@ -1282,6 +1311,8 @@ impl IntrinsicModule {
             }
             (Self::Typing, "List") => Intrinsic::ObjectRuntimeExport("typing.List"),
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
+            (Self::Typing, "TypedDict") => Intrinsic::ObjectRuntimeExport("typing.TypedDict"),
+            (Self::Typing, "is_typeddict") => Intrinsic::ObjectRuntimeExport("typing.is_typeddict"),
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
@@ -1368,6 +1399,10 @@ impl IntrinsicModule {
                 "AF_UNSPEC" => "_socket.AF_UNSPEC",
                 "AF_UNIX" => "_socket.AF_UNIX",
                 "SOCK_STREAM" => "_socket.SOCK_STREAM",
+                "SOCK_DGRAM" => "_socket.SOCK_DGRAM",
+                "SOCK_RAW" => "_socket.SOCK_RAW",
+                "SOCK_RDM" => "_socket.SOCK_RDM",
+                "SOCK_SEQPACKET" => "_socket.SOCK_SEQPACKET",
                 "SOL_SOCKET" => "_socket.SOL_SOCKET",
                 "IPPROTO_TCP" => "_socket.IPPROTO_TCP",
                 "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
@@ -1391,6 +1426,12 @@ impl IntrinsicModule {
             (Self::Socket, "IPV6_V6ONLY") => Intrinsic::ObjectRuntimeExport("socket.IPV6_V6ONLY"),
             (Self::Socket, "has_ipv6") => Intrinsic::ObjectRuntimeExport("socket.has_ipv6"),
             (Self::Socket, "AF_INET6") => Intrinsic::ObjectRuntimeExport("socket.AF_INET6"),
+            (Self::Socket, "SOCK_DGRAM") => Intrinsic::ObjectRuntimeExport("socket.SOCK_DGRAM"),
+            (Self::Socket, "SOCK_RAW") => Intrinsic::ObjectRuntimeExport("socket.SOCK_RAW"),
+            (Self::Socket, "SOCK_RDM") => Intrinsic::ObjectRuntimeExport("socket.SOCK_RDM"),
+            (Self::Socket, "SOCK_SEQPACKET") => {
+                Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
+            }
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
@@ -1623,6 +1664,18 @@ impl IntrinsicModule {
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }
+            (Self::GenericPath | Self::PosixPath, "getatime") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.getatime")
+            }
+            (Self::GenericPath | Self::PosixPath, "getctime") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.getctime")
+            }
+            (Self::GenericPath | Self::PosixPath, "getmtime") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.getmtime")
+            }
+            (Self::GenericPath | Self::PosixPath, "lexists") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.lexists")
+            }
             (Self::GenericPath | Self::PosixPath, "getsize") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.getsize")
             }
@@ -1660,6 +1713,15 @@ impl IntrinsicModule {
             (Self::EmailUtils, "formatdate") => Intrinsic::EmailFormatDate,
             (Self::UrllibParse, "urljoin") => Intrinsic::UrlJoin,
             (Self::UrllibParse, "parse_qsl") => Intrinsic::ParseQsl,
+            (Self::UrllibParse, "urldefrag") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.urldefrag")
+            }
+            (Self::UrllibParse, "DefragResult") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.DefragResult")
+            }
+            (Self::UrllibParse, "DefragResultBytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.DefragResultBytes")
+            }
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
             (Self::UrllibParse, "urlunsplit") => Intrinsic::UrlUnsplit,
             (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },

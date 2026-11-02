@@ -22,6 +22,7 @@ pub(super) struct Program {
     first_line: u32,
     generator: bool,
     locals: HashSet<String>,
+    reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
     instructions: Vec<(u32, Instruction)>,
@@ -37,7 +38,7 @@ enum Instruction {
         module: String,
         alias: Option<String>,
     },
-    From(String, Vec<(String, String)>),
+    From(String, u32, Vec<(String, String)>),
     Define(Definition),
     ClassStart,
     ClassEnd,
@@ -240,6 +241,7 @@ struct CompiledStrings<'a, 'ctx> {
     constants: &'ctx mut HashMap<ruff_text_size::TextRange, Id>,
     roots: Vec<Id>,
     pending: Vec<&'a ast::Expr>,
+    reads: &'ctx mut BTreeSet<String>,
     exhausted: bool,
 }
 
@@ -310,6 +312,9 @@ impl<'a> CompiledStrings<'a, '_> {
             match expr {
                 ast::Expr::Name(name) => {
                     class_cell |= matches!(name.id.as_str(), "super" | "__class__");
+                    if name.ctx == ast::ExprContext::Load {
+                        self.reads.insert(name.id.to_string());
+                    }
                     self.heap.code_name(name.id.as_str());
                 }
                 ast::Expr::Attribute(attr) => {
@@ -370,9 +375,11 @@ impl Program {
         &'a mut self,
         heap: &mut value::Heap,
         shared: &mut HashMap<&'a str, Id>,
-    ) -> Result<Id> {
+    ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
+        let mut nested_reads = BTreeSet::new();
         let mut strings = CompiledStrings {
+            reads: &mut self.reads,
             heap,
             shared,
             constants: &mut self.literals,
@@ -422,7 +429,7 @@ impl Program {
                         strings.heap.code_name(alias);
                     }
                 }
-                Instruction::From(module, bindings) => {
+                Instruction::From(module, _, bindings) => {
                     strings.heap.code_name(module);
                     for (name, alias) in bindings {
                         strings.heap.code_name(name);
@@ -433,7 +440,8 @@ impl Program {
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
-                    let roots = child.prepare_strings(strings.heap, strings.shared)?;
+                    let (roots, reads) = child.prepare_strings(strings.heap, strings.shared)?;
+                    nested_reads.extend(reads.iter().cloned());
                     if roots != NONE {
                         strings.keep(roots)?;
                     }
@@ -481,7 +489,15 @@ impl Program {
             }
         }
         (self.string_roots, self.class_cell) = strings.finish()?;
-        Ok(self.string_roots)
+        if self.class_attributes.is_some() {
+            // Methods skip the class namespace when resolving free variables.
+            self.reads.retain(|name| !self.locals.contains(name));
+            self.reads.extend(nested_reads);
+        } else {
+            self.reads.extend(nested_reads);
+            self.reads.retain(|name| !self.locals.contains(name));
+        }
+        Ok((self.string_roots, &self.reads))
     }
 
     fn new(filename: Rc<str>, name: &str) -> Self {
@@ -497,6 +513,7 @@ impl Program {
             first_line: 1,
             generator: false,
             locals: HashSet::new(),
+            reads: BTreeSet::new(),
             method_imports: Rc::default(),
             private_names: None,
             instructions: Vec::new(),
@@ -661,11 +678,8 @@ impl Program {
                     continue;
                 }
                 Stmt::Assert(s) => Instruction::Assert(s),
-                Stmt::ImportFrom(s) if s.level == 0 && !s.is_lazy => {
-                    let module = s
-                        .module
-                        .as_ref()
-                        .ok_or_else(|| unsupported("relative import"))?;
+                Stmt::ImportFrom(s) if !s.is_lazy => {
+                    let module = s.module.as_ref().map_or("", |module| module.as_str());
                     let mut names = vec![];
                     for alias in &s.names {
                         if alias.name.as_str() == "*" {
@@ -675,16 +689,23 @@ impl Program {
                         self.locals.insert(local.clone());
                         names.push((alias.name.to_string(), local));
                     }
-                    Instruction::From(module.to_string(), names)
+                    Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::FunctionDef(s) if !s.is_async && s.type_params.is_none() && !function => {
-                    if self.class_attributes.is_some()
+                Stmt::FunctionDef(s) if !s.is_async && s.type_params.is_none() => {
+                    if (function || self.class_attributes.is_some())
                         && (s.returns.is_some()
                             || s.parameters.iter().any(|p| p.annotation().is_some()))
                     {
-                        return Err(unsupported("annotated method definition"));
+                        return Err(unsupported(if function {
+                            "annotated nested function definition"
+                        } else {
+                            "annotated method definition"
+                        }));
                     }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    child
+                        .locals
+                        .extend(s.parameters.iter().map(|p| p.name().to_string()));
                     child.lower(s.body, lines, true, None)?;
                     self.locals.insert(s.name.to_string());
                     Instruction::Define(Definition {
@@ -1526,6 +1547,7 @@ impl Context {
         if generator {
             Ok(self.alloc(Value::Generator {
                 owner,
+                frame: None,
                 code,
                 scope,
                 iterators: Vec::new(),
@@ -1703,13 +1725,13 @@ impl Context {
             }
         }
         let Value::Generator {
-            owner,
             code,
             scope,
             iterators,
             protected,
             running,
             offset,
+            ..
         } = self.heap.get_mut(id)
         else {
             unreachable!()
@@ -1724,7 +1746,7 @@ impl Context {
             };
         };
         *running = true;
-        let (code, frame_scope, owner) = (*code, *scope, *owner);
+        let (code, frame_scope) = (*code, *scope);
         let mut active = std::mem::take(iterators);
         let mut blocks = std::mem::take(protected);
         self.heap.disarm_generator_finalizer(id);
@@ -1737,7 +1759,7 @@ impl Context {
                     && cursor.advanced.is_none()
                     && cursor.sent == NONE
                     && cursor.thrown.is_none();
-                self.run_source(code, frame_scope, owner, cursor)
+                self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             })
             .map_err(|error| self.generator_error(error));
         let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
@@ -1748,6 +1770,7 @@ impl Context {
             offset,
             scope,
             owner,
+            frame,
             iterators,
             protected,
             ..
@@ -1772,6 +1795,7 @@ impl Context {
             Err(error) => Err(error),
         };
         *scope = NONE;
+        *frame = None;
         *owner = FrameOwner::Module(NONE);
         self.heap.disarm_generator_finalizer(id);
         if self.heap.tracks_finalizers()
@@ -2070,6 +2094,7 @@ impl Context {
         scope: Id,
         module: &str,
         names: Option<&[(String, String)]>,
+        level: u32,
     ) -> Result<Id> {
         let mut root = scope;
         while let Some(parent) = self.scope_data(root).parent {
@@ -2096,7 +2121,7 @@ impl Context {
         } else {
             NONE
         };
-        let zero = self.int(0);
+        let level = self.int(i64::from(level));
         let locals = if self.code_object(owner).parameters == NONE {
             self.scope_data(scope).exec_locals.unwrap_or(globals)
         } else {
@@ -2104,7 +2129,7 @@ impl Context {
         };
         self.call(
             importer,
-            vec![modname, globals, locals, fromlist, zero],
+            vec![modname, globals, locals, fromlist, level],
             Vec::new(),
         )
     }
@@ -2354,7 +2379,7 @@ impl Context {
                 }));
             }
             Instruction::Import { module, alias } => {
-                let mut imported = self.import_source_module(owner, scope, module, None)?;
+                let mut imported = self.import_source_module(owner, scope, module, None, 0)?;
                 let mut parts = module.split('.');
                 let first = parts.next().expect("nonempty module name");
                 if alias.is_some() {
@@ -2365,8 +2390,8 @@ impl Context {
                 }
                 self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
             }
-            Instruction::From(module, names) => {
-                let m = self.import_source_module(owner, scope, module, Some(names))?;
+            Instruction::From(module, level, names) => {
+                let m = self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
                     let name = self.text(name);
                     let v = self.op("from", m, name, NONE)?;
@@ -2430,6 +2455,9 @@ impl Context {
                             }
                         }
                         sig["class_cell"] = serde_json::json!(child.class_cell);
+                        sig["scope_locals"] =
+                            serde_json::json!(child.locals.iter().collect::<BTreeSet<_>>());
+                        sig["scope_locals_complete"] = true.into();
                         sig
                     }
                 };
@@ -2443,7 +2471,23 @@ impl Context {
                     *existing
                 } else {
                     let parameters = self.text(sig.to_string());
+                    let freevars = if code.name != "<module>"
+                        && code.class_attributes.is_none()
+                        && child.class_attributes.is_none()
+                        && !child.class_cell
+                    {
+                        self.enclosing_freevars(scope, child.reads.iter().map(String::as_str))
+                    } else {
+                        None
+                    };
                     let id = self.box_source_code(child.clone(), Some(parameters));
+                    if let Some(names) = freevars {
+                        let Value::Code(nested) = self.heap.get_mut(id) else {
+                            unreachable!()
+                        };
+                        nested.freevars = names;
+                        nested.closure_supported = true;
+                    }
                     let Value::Code(parent) = self.heap.get_mut(owner) else {
                         unreachable!()
                     };
@@ -2459,7 +2503,7 @@ impl Context {
                 let mut value = self.source_function(code, defining_scope, defaults);
                 if let Some(bases) = bases {
                     let name = self.heap.code_name(&child.name);
-                    value = self.class(name, bases, value)?;
+                    value = self.class(name, bases, value, false)?;
                 }
                 for decorator in decorators.into_iter().rev() {
                     value = self.call(decorator, vec![value], Vec::new())?;

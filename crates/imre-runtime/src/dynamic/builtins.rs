@@ -14,8 +14,8 @@ mod print;
 mod text;
 mod translation;
 pub(super) use collections::{
-    clear_container, copy_dict, hashable, remove_dict_item, remove_dict_item_hashed, set_add,
-    set_member, sort_values, update as update_dict, update_set,
+    clear_container, copy_dict, hashable, list_extend, remove_dict_item, remove_dict_item_hashed,
+    set_add, set_member, sort_values, update as update_dict, update_set,
 };
 pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
@@ -235,10 +235,8 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
-        || matches!(
-            name,
-            super::stdlib::hash_info::TYPE | super::stdlib::flags::TYPE
-        )
+        || super::stdlib::fixed_structseq::fixed_type(name).is_some()
+        || name == super::stdlib::flags::TYPE
         || is_exception(name)
         || is_enum_base(name)
 }
@@ -370,6 +368,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "find",
     "format",
     "isalnum",
+    "isascii",
     "islower",
     "isspace",
     "isupper",
@@ -914,20 +913,26 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    if name == "object.__hash__" {
+    if matches!(name, "object.__hash__" | "object.__repr__") {
+        let method = name.trim_start_matches("object.");
         let Some((&receiver, rest)) = args.split_first() else {
-            return Err(type_error(
-                "descriptor '__hash__' of 'object' object needs an argument",
-            ));
+            return Err(type_error(format!(
+                "descriptor '{method}' of 'object' object needs an argument"
+            )));
         };
         if !kwargs.is_empty() {
-            return Err(type_error("wrapper __hash__() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "wrapper {method}() takes no keyword arguments"
+            )));
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__repr__" {
+            return ctx.object_repr(receiver);
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }

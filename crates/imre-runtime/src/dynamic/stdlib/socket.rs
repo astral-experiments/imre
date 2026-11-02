@@ -24,7 +24,14 @@ const CONSTANTS: &[(&str, i32)] = &[
 
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
 pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
-    for &(name, value) in CONSTANTS {
+    // socket.py imports these kinds once, so deleting its copy must not fall back to a native value.
+    let kinds = [
+        ("SOCK_DGRAM", libc::SOCK_DGRAM),
+        ("SOCK_RAW", libc::SOCK_RAW),
+        ("SOCK_RDM", libc::SOCK_RDM),
+        ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
+    ];
+    for (name, value) in CONSTANTS.iter().copied().chain(kinds) {
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
@@ -414,8 +421,8 @@ pub(super) fn call(
         )?,
         "accept" => {
             let (child, peer) = native::accept(&s)?;
-            let child = ctx.alloc(Value::Socket(child));
             let peer = pack_address(ctx, &peer)?;
+            let child = ctx.alloc(Value::Socket(child));
             return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
         }
         "getsockname" => return pack_address(ctx, &native::sockname(&s)?),

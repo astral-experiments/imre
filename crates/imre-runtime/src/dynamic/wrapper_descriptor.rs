@@ -67,9 +67,11 @@ impl BuiltinDescriptor {
             "object.__format__" => ("object", "__format__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
+            "str.isascii" => ("str", "isascii"),
             "str.islower" => ("str", "islower"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
+            "object.__repr__" => ("object", "__repr__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
@@ -93,7 +95,7 @@ impl BuiltinDescriptor {
         Some(Self {
             owner,
             name,
-            method: matches!(name, "__format__" | "islower"),
+            method: matches!(name, "__format__" | "isascii" | "islower"),
         })
     }
 
@@ -196,10 +198,13 @@ impl BuiltinDescriptor {
             }
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("isascii", "__doc__") => {
+                        "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
+                    }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
-                    ("islower", _) => "($self, /)",
+                    ("isascii" | "islower", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

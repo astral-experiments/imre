@@ -991,7 +991,7 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(receiver, value))
     }
 
-    /// Route inherited type assertions to the object runtime when a typed class lacks the member.
+    /// Route inherited boxed assertions to the object runtime when a typed class lacks the member.
     pub(super) fn missing_class_member(
         &self,
         class: usize,
@@ -1001,10 +1001,14 @@ impl Checker<'_> {
     ) -> String {
         if matches!(
             name,
-            "assertIsInstance" | "assertNotIsInstance" | "assertIsSubclass" | "assertNotIsSubclass"
+            "assertIsInstance"
+                | "assertNotIsInstance"
+                | "assertIsSubclass"
+                | "assertNotIsSubclass"
+                | "assertNotHasAttr"
         ) && self.unittest_case(class)
         {
-            return self.object_runtime_export("unittest type assertions", node);
+            return self.object_runtime_export(name, node);
         }
         error(self.source, node, diagnostic)
     }

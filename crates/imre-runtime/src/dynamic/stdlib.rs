@@ -17,11 +17,11 @@ mod csv;
 pub(super) mod datetime;
 mod email;
 mod files;
+pub(super) mod fixed_structseq;
 pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
-pub(super) mod hash_info;
 mod hashlib;
 mod hmac;
 mod inspect;
@@ -78,7 +78,7 @@ pub(super) fn is_module(name: &str) -> bool {
 /// These providers synthesize attributes on lookup. Their module dictionaries
 /// alone do not enumerate their exports.
 pub(super) fn has_lazy_attributes(name: &str) -> bool {
-    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
+    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport" | "_signal") {
         return true;
     }
     matches!(
@@ -363,6 +363,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return Ok(ctx.int(i64::from(value)));
     }
     let id = match (module, name) {
+        #[cfg(unix)]
+        ("_signal", "SIGINT") => ctx.int(i64::from(libc::SIGINT)),
+        #[cfg(unix)]
+        ("_signal", "SIGALRM") => ctx.int(i64::from(libc::SIGALRM)),
+        #[cfg(unix)]
+        ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
+        #[cfg(unix)]
+        ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -456,6 +464,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "typing",
             "TypeVar"
             | "TypeVarTuple"
+            | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_eval_type_expression"
             | "Any"
@@ -523,7 +532,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             full_version(ctx)?,
             compiler_version(ctx)
         )),
-        ("sys", "hash_info") => hash_info::current(ctx),
+        ("sys", "hash_info") => fixed_structseq::current_hash_info(ctx),
         ("sys", "version_info") => version_info(ctx, &full_version(ctx)?)?,
         ("sys", "implementation") => {
             let name = ctx.text("imre");
@@ -557,6 +566,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
+        ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -629,7 +639,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "realpath_parts" | "realpath_parent" | "realpath_kind" | "realpath_readlink"
             | "realpath_notdir" | "realpath_loop",
         )
-        | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
+        | ("_imre_zipimport", "exists" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -823,6 +833,28 @@ pub(super) fn call(
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
     }
+    #[cfg(unix)]
+    if name == "_signal.alarm" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_signal.alarm() takes no keyword arguments",
+            ));
+        }
+        let &[seconds] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "_signal.alarm() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let seconds = os::c_int(ctx, seconds)?;
+        // SAFETY: alarm takes a value only. POSIX interprets the C int as unsigned.
+        let remaining = unsafe { libc::alarm(seconds as libc::c_uint) };
+        return Ok(ctx.int(i64::from(remaining as libc::c_long)));
+    }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);
     }
@@ -945,6 +977,35 @@ pub(super) fn call(
         }
         builtins::update_dict(ctx, dict, args.get(1).copied(), kwargs)?;
         return Ok(if receiver.is_some() { NONE } else { dict });
+    }
+    if name == "sys._getframe" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "sys._getframe() takes no keyword arguments",
+            ));
+        }
+        let depth = match &args[1..] {
+            [] => 0,
+            [value] => ctx
+                .index_integer(*value)?
+                .to_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?,
+            extra => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("_getframe expected at most 1 argument, got {}", extra.len()),
+                ));
+            }
+        };
+        let (_, frame) = ctx
+            .active_frame(depth.max(0) as usize)?
+            .ok_or_else(|| Error::new("ValueError", "call stack is not deep enough"))?;
+        audit::event(ctx, "sys._getframe", &[frame])?;
+        return Ok(frame);
     }
     if name == "sys.audit" {
         return audit::emit(ctx, &args[1..], kwargs);

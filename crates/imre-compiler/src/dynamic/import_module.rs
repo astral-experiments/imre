@@ -37,6 +37,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "urllib.parse" => Some((
+            "urllib/parse.py",
+            include_str!("../../stdlib/urllib/parse.py"),
+        )),
         "annotationlib" => Some((
             "annotationlib.py",
             include_str!("../../stdlib/annotationlib.py"),

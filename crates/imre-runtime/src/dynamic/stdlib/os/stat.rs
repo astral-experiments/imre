@@ -326,32 +326,6 @@ pub(in crate::dynamic) fn member(ctx: &mut Context, name: &str) -> Option<Id> {
     Some(ctx.readonly_member(CLASS, field))
 }
 
-/// Enumerate struct sequence, tuple and object slots without invoking a descriptor.
-pub(in crate::dynamic) fn attribute_names() -> impl Iterator<Item = &'static str> {
-    crate::objects::OBJECT_METHODS
-        .iter()
-        .chain(&FIELDS)
-        .chain(EXTRA)
-        .copied()
-        .chain([
-            "__class__",
-            "__doc__",
-            "__module__",
-            "__match_args__",
-            "__replace__",
-            "n_fields",
-            "n_sequence_fields",
-            "n_unnamed_fields",
-            "__class_getitem__",
-            "__add__",
-            "count",
-            "__rmul__",
-            "__contains__",
-            "__mul__",
-            "__getitem__",
-            "__len__",
-            "__iter__",
-            "__getnewargs__",
-            "index",
-        ])
+pub(in crate::dynamic) fn field_names() -> impl Iterator<Item = &'static str> {
+    FIELDS.iter().chain(EXTRA).copied()
 }

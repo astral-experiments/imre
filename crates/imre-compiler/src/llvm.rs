@@ -7707,16 +7707,6 @@ impl Emitter<'_, '_> {
                     Type::Str | Type::StrLiteral(_) => {
                         self.void_call("imre_print_str", &[&args[0].value])
                     }
-                    Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => {
-                        let text = if matches!(args[0].value.ty, Type::Enum(_)) {
-                            self.call("imre_enum_string", Type::Str, &[&args[0].value])
-                        } else {
-                            self.enum_text(&args[0].value, false)
-                        };
-                        let text = self.owned(text);
-                        self.void_call("imre_print_str", &[&text]);
-                        self.release(&text);
-                    }
                     Type::Bytes => self.void_call("imre_print_bytes", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
@@ -7724,99 +7714,7 @@ impl Emitter<'_, '_> {
                         self.checked_line(format!("call void @imre_print_bool(i32 {byte})"));
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
-                    Type::ListInt
-                    | Type::ForwardRef(_)
-                    | Type::FunctionRef
-                    | Type::AnnotationValue(_)
-                    | Type::CmpKey(..)
-                    | Type::BuiltinClass
-                    | Type::Class(_)
-                    | Type::List(_)
-                    | Type::Dict(_)
-                    | Type::ChainMap(_)
-                    | Type::Set(_)
-                    | Type::Deque(_)
-                    | Type::FrozenStrings
-                    | Type::StringKeys
-                    | Type::Iterator
-                    | Type::Cursor(_)
-                    | Type::ByteOutput
-                    | Type::TupleBuffer
-                    | Type::Exception
-                    | Type::NamedException(_)
-                    | Type::ObjectValue
-                    | Type::ReadOnlyObjectMapping
-                    | Type::ImportException
-                    | Type::TimeoutExpired
-                    | Type::Path
-                    | Type::PurePath(_)
-                    | Type::TextIO
-                    | Type::StringIO
-                    | Type::HandlerLock
-                    | Type::EventLoop
-                    | Type::Coroutine(_)
-                    | Type::Task(_)
-                    | Type::TaskGroup
-                    | Type::Document(_)
-                    | Type::GeneratorContext
-                    | Type::DirectoryContext(_)
-                    | Type::Semaphore
-                    | Type::Popen(..)
-                    | Type::ActivePopen
-                    | Type::AsyncProcess(_)
-                    | Type::NativeModule
-                    | Type::ModuleNamespace
-                    | Type::LogFormatter
-                    | Type::LogRecord
-                    | Type::Logger
-                    | Type::LogManager
-                    | Type::TimedFileHandler
-                    | Type::CacheState(_)
-                    | Type::ProcessSelectorClass
-                    | Type::ClockTime
-                    | Type::Calendar(_)
-                    | Type::StrDescriptor(_)
-                    | Type::Placeholder(_)
-                    | Type::OverloadStub
-                    | Type::PlainObject
-                    | Type::SimpleNamespace(_)
-                    | Type::PathInfo
-                    | Type::CodecInfo
-                    | Type::Poll
-                    | Type::Socket
-                    | Type::CodecWriterClass
-                    | Type::CodecWriter
-                    | Type::TextOutput
-                    | Type::Hash
-                    | Type::JsonDecoder
-                    | Type::ZipFile
-                    | Type::ZipInfo
-                    | Type::Context
-                    | Type::ContextMissing
-                    | Type::WeakProxy(_)
-                    | Type::ContextVar(_)
-                    | Type::ContextToken(_)
-                    | Type::CsvReader
-                    | Type::Patch(_)
-                    | Type::RegexPattern
-                    | Type::JsonRoot
-                    | Type::JsonValue
-                    | Type::JsonObject
-                    | Type::RegexMatch
-                    | Type::SourceModule
-                    | Type::BytesIO
-                    | Type::BinaryIO
-                    | Type::ModuleSpec(_)
-                    | Type::SysImplementation
-                    | Type::CompletedProcess(..)
-                    | Type::Tuple(_)
-                    | Type::VarTuple(_)
-                    | Type::Optional(_)
-                    | Type::Callable(_)
-                    | Type::Union(_)
-                    | Type::StringIterable => {
-                        unreachable!("container printing is rejected")
-                    }
+                    _ => unreachable!("print expects a scalar operand"),
                 }
                 none()
             }
@@ -9704,6 +9602,7 @@ declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
 declare ptr @imre_sys_stdlib_module_names()
+declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()

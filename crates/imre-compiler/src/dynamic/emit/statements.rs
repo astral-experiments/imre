@@ -331,7 +331,12 @@ impl Function<'_, '_> {
                         Body::Namespace(&v.body),
                     );
                     let name = self.code_name(self.source.private_names.definition(&v.name));
-                    let class = self.op("class", &[&name, &bases, &init]);
+                    let operation = if v.type_params.is_some() {
+                        "parameterized_class"
+                    } else {
+                        "class"
+                    };
+                    let class = self.op(operation, &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
                 }
                 ast::Stmt::Return(v) => {
