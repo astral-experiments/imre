@@ -534,9 +534,14 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         Codec::CodePage(_) => codec.name(),
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
+    // Keep the pending constructor arguments across Python-visible module lookups.
+    ctx.heap.reserve_temporaries(5)?;
+    ctx.heap.keep(module);
     let codecs = ctx.lookup_attr(module, "codecs")?;
     let class = ctx.lookup_attr(codecs, "CodecInfo")?;
+    ctx.heap.keep(class);
     let writer = ctx.lookup_attr(module, "StreamWriter")?;
+    ctx.heap.keep(writer);
     let (encode, decode) = match codec {
         Codec::CodePage(_) => {
             // getregentry creates fresh bound Codec methods for each alias entry.
@@ -554,6 +559,8 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         }
         _ => native_functions(ctx, codec)?,
     };
+    ctx.heap.keep(encode);
+    ctx.heap.keep(decode);
     let name = ctx.text(codec.name());
     // getregentry resolves IncrementalDecoder as a global in its encoding module.
     let incremental = match *ctx.heap.get(module) {
