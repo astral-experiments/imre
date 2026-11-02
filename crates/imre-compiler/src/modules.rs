@@ -1373,6 +1373,9 @@ impl IntrinsicModule {
             (Self::ImportlibMachinery, "EXTENSION_SUFFIXES") => {
                 Intrinsic::ObjectRuntimeExport("importlib.machinery.EXTENSION_SUFFIXES")
             }
+            (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "NamespaceLoader") => {
+                Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.NamespaceLoader")
+            }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
             }
