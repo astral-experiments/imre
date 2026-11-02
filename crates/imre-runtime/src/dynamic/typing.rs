@@ -943,6 +943,21 @@ pub(super) fn bind_generic_parameters(
 pub(super) const VARIANCE_FIELDS: [&str; 3] =
     ["__covariant__", "__contravariant__", "__infer_variance__"];
 
+/// Publish the implemented TypeVar class members to passive lookup and to vars(TypeVar).
+pub(super) fn install_typevar_namespace(ctx: &mut Context, class: Id) {
+    let has_default = ctx.builtin("typing.TypeVar.has_default");
+    let mut entries = vec![(ctx.text("has_default"), has_default)];
+    for field in VARIANCE_FIELDS {
+        let member = ctx.readonly_member("typing.TypeVar", field);
+        entries.push((ctx.text(field), member));
+    }
+    let doc = ctx.text(include_str!("../../native/typing-TypeVar-doc.txt"));
+    entries.push((ctx.text("__doc__"), doc));
+    entries.push((ctx.text("__module__"), ctx.text("typing")));
+    let dictionary = ctx.dict(entries);
+    ctx.native_type_dicts.insert(class, dictionary);
+}
+
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     if matches!(ctx.heap.get(value), Value::Native(class) if class == "typing.TypeVar")
         && let Some(member) = ctx.own_class_attr(value, name)

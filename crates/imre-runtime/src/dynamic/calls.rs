@@ -314,11 +314,6 @@ impl Context {
             {
                 Some(NONE)
             }
-            Value::Native(kind)
-                if kind == "typing.TypeVar" && super::typing::VARIANCE_FIELDS.contains(&name) =>
-            {
-                self.builtins.get(&format!("{kind}.{name}")).copied()
-            }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
                 name if kind == "BaseException"
                     && let Some(symbol) = builtins::base_exception_method(name) =>
@@ -1851,6 +1846,11 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if name == "__dict__"
+            && let Some(&dictionary) = self.native_type_dicts.get(&obj)
+        {
+            return Ok(self.alloc(Value::MappingProxy(dictionary)));
+        }
         if name == "__new__" {
             let class = self.heap.get(obj).instance_class().unwrap_or(obj);
             if self.heap.get(class).hash_type().is_some() {
@@ -3062,10 +3062,6 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(class.trim_start_matches("itertools.").to_owned()));
-                    }
-                    "__dict__" => {
-                        let dictionary = self.native_type_dicts[&obj];
-                        return Ok(self.alloc(Value::MappingProxy(dictionary)));
                     }
                     "__text_signature__" => {
                         return Ok(if class == "itertools.count" {
