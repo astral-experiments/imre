@@ -30,6 +30,11 @@ class Program:
 def current():
     assert os.getsid is posix.getsid
     parent_sid = os.getsid(CurrentProcess())
+    assert os.getpgid is posix.getpgid and os.setpgid is posix.setpgid
+    group = os.getpgid(pid=CurrentProcess())
+    assert group == os.getpgid(os.getpid())
+    if os.getpid() != parent_sid:
+        assert os.setpgid(CurrentProcess(), group) is None
     assert parent_sid == os.getsid(os.getpid())
     for create, executable in ((False, None), (True, None), (False, "/bin/cat"), (True, "/bin/cat")):
         # An absolute executable override with close_fds=False is eligible for posix_spawn

@@ -117,6 +117,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
         "execv" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.execv"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
+        "getpgid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgid"),
+        "setpgid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.setpgid"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
         "waitpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.waitpid"),
         "waitstatus_to_exitcode" if cfg!(unix) => {

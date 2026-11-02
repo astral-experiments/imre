@@ -2529,6 +2529,20 @@ impl Context {
                     "__doc__" if symbol == "posix.abort" => {
                         return Ok(self.text("Abort the interpreter immediately.\n\nThis function 'dumps core' or otherwise fails in the hardest way possible\non the hosting operating system.  This function never returns."));
                     }
+                    "__doc__" if symbol == "posix.getpgid" => {
+                        return Ok(
+                            self.text("Call the system call getpgid(), and return the result.")
+                        );
+                    }
+                    "__text_signature__" if symbol == "posix.getpgid" => {
+                        return Ok(self.text("($module, /, pid)"));
+                    }
+                    "__doc__" if symbol == "posix.setpgid" => {
+                        return Ok(self.text("Call the system call setpgid(pid, pgrp)."));
+                    }
+                    "__text_signature__" if symbol == "posix.setpgid" => {
+                        return Ok(self.text("($module, pid, pgrp, /)"));
+                    }
                     "__doc__" if symbol == "posix.kill" => {
                         return Ok(self.text("Kill a process with a signal."));
                     }
