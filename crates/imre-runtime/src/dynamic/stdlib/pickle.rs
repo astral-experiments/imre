@@ -565,6 +565,11 @@ impl Pickler {
             ctx.call(reducer, vec![obj], Vec::new())?
         } else {
             match ctx.heap.get(obj) {
+                Value::Native(symbol)
+                    if super::super::builtins::native_method_owner(symbol).is_some() =>
+                {
+                    Self::call_reduce_hook(ctx, obj, self.protocol)?
+                }
                 Value::Class { .. } | Value::Native(_) => return self.save_global(ctx, obj, None),
                 Value::Ellipsis => return self.save_global(ctx, obj, Some("Ellipsis".into())),
                 Value::NotImplemented => {
