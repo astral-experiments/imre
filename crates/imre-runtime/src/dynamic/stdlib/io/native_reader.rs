@@ -58,44 +58,6 @@ fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> R
     Err(Error::new("TypeError", message))
 }
 
-fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
-    let name = match ctx.lookup_attr(receiver, "name") {
-        Ok(name) => Some(name),
-        Err(error)
-            if ctx.is_builtin_error(&error, "AttributeError")
-                || ctx.is_builtin_error(&error, "ValueError") =>
-        {
-            None
-        }
-        Err(error) => return Err(error),
-    };
-    let class = ctx.exact_type(receiver)?;
-    let class_name = if ctx.heap.get(class).io_kind() == Some("BufferedReader") {
-        "_io.BufferedReader"
-    } else {
-        ctx.class_name(class)
-    }
-    .to_owned();
-    let Some(name) = name else {
-        return Ok(ctx.text(format!("<{class_name}>")));
-    };
-    if ctx.repr_ancestors.contains(&receiver) {
-        return Err(Error::new(
-            "RuntimeError",
-            format!("reentrant call inside {class_name}.__repr__"),
-        ));
-    }
-    ctx.repr_ancestors
-        .try_reserve(1)
-        .map_err(|_| crate::Error::allocation())?;
-    ctx.repr_ancestors.push(receiver);
-    let repr = ctx.builtin("repr");
-    let shown = ctx.call(repr, vec![name], Vec::new());
-    ctx.repr_ancestors.pop();
-    let text = format!("<{class_name} name={}>", ctx.str_value(shown?)?);
-    Ok(ctx.text(text))
-}
-
 /// A missing or failing raw warning hook must not interrupt flush or close.
 pub(super) fn dealloc_warn(ctx: &mut Context, receiver: Id, source: Id) {
     let raw = if let Some(buffer) = backing(ctx, receiver)
@@ -150,7 +112,7 @@ pub(super) fn call(
     }
     validate(owner, name, args.len(), kwargs)?;
     if name == "__repr__" {
-        return repr(ctx, receiver);
+        return super::buffered_io::repr(ctx, receiver);
     }
     if name == "__getstate__" {
         let class = ctx.exact_type(receiver)?;

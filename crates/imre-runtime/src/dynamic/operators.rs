@@ -1312,12 +1312,12 @@ impl Context {
         let class = match self.heap.get(id) {
             Value::Instance { class, .. } => *class,
             Value::Raised(error) => error.class()?,
-            value
-                if name == "__repr__"
-                    && value.native_io_class_name() == Some("_io.BufferedReader") =>
-            {
-                *self.builtins.get("_io.BufferedReader")?
-            }
+            value if name == "__repr__" => match value.native_io_class_name()? {
+                class @ ("_io.BufferedReader" | "_io.BufferedWriter") => {
+                    *self.builtins.get(class)?
+                }
+                _ => return None,
+            },
             _ => return None,
         };
         self.class_attr(class, name).map(|slot| (class, slot))
