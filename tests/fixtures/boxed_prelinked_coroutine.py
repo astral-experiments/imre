@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import inspect
 
 
@@ -6,8 +8,12 @@ class Manager:
         self.events = []
 
     async def __aenter__(self) -> int:
+        def answer():
+            return 42
+
+        assert answer.__qualname__ == "Manager.__aenter__.<locals>.answer"
         self.events.append("enter")
-        return 42
+        return answer()
 
     async def __aexit__(self, etype, value, tb):
         assert etype is value is tb is None
@@ -15,8 +21,12 @@ class Manager:
 
 
 async def read_value(manager) -> int:
-    async with manager as value:
+    def identity(value: Missing):
         return value
+
+    assert identity.__annotations__ == {"value": "Missing"}
+    async with manager as value:
+        return identity(value)
 
 
 manager = Manager()
