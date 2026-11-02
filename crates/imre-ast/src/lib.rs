@@ -39,7 +39,9 @@ pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<ruff_text_size::TextR
             }
             let outer = self.nested;
             self.nested |= matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_));
-            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || ast::visitor::walk_stmt(self, stmt));
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                ast::visitor::walk_stmt(self, stmt)
+            });
             self.nested = outer;
         }
         fn visit_expr(&mut self, _: &'a ast::Expr) {}

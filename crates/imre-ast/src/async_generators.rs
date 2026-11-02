@@ -36,7 +36,9 @@ impl Check {
     }
 
     fn record(&mut self, range: TextRange, message: &'static str) {
-        if self.error.is_none_or(|(previous, _)| range.start() < previous.start())
+        if self
+            .error
+            .is_none_or(|(previous, _)| range.start() < previous.start())
         {
             self.error = Some((range, message));
         }
@@ -84,7 +86,9 @@ impl<'a> Visitor<'a> for Check {
                 {
                     body.valued_return.get_or_insert(r.range());
                 }
-                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || visitor::walk_stmt(self, stmt));
+                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                    visitor::walk_stmt(self, stmt)
+                });
             }
         }
     }
@@ -116,7 +120,9 @@ impl<'a> Visitor<'a> for Check {
             Expr::ListComp(c) => self.outer_iterable(&c.generators),
             Expr::SetComp(c) => self.outer_iterable(&c.generators),
             Expr::DictComp(c) => self.outer_iterable(&c.generators),
-            _ => stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || visitor::walk_expr(self, expr)),
+            _ => stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                visitor::walk_expr(self, expr)
+            }),
         }
     }
 }

@@ -2656,7 +2656,10 @@ impl Context {
             ast::Mod::Module(module) => {
                 let error = imre_ast::async_generators::syntax_error(module);
                 if error.is_some() && imre_ast::misplaced_star_import(&module.body).is_some() {
-                    return Err(Error::new("SyntaxError", "import * only allowed at module level"));
+                    return Err(Error::new(
+                        "SyntaxError",
+                        "import * only allowed at module level",
+                    ));
                 }
                 error
             }
@@ -2667,7 +2670,10 @@ impl Context {
             .or_else(|| {
                 let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
                 let name = keyword.arg.as_ref().unwrap();
-                Some((keyword.range(), format!("keyword argument repeated: {name}")))
+                Some((
+                    keyword.range(),
+                    format!("keyword argument repeated: {name}"),
+                ))
             });
         if let Some((range, message)) = invalid {
             let position = |offset: usize| {

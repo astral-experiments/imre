@@ -314,8 +314,7 @@ impl Session {
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
-        check_scope_syntax(source, parsed.syntax())
-            .map_err(|error| format!("{path}:{error}"))?;
+        check_scope_syntax(source, parsed.syntax()).map_err(|error| format!("{path}:{error}"))?;
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         // The parser has already checked Python indentation; file inputs additionally
         // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.
@@ -1311,7 +1310,10 @@ impl<'a> Visitor<'a> for LoopTransfers {
 }
 
 /// Check code-scope restrictions shared by typed and object compilation.
-pub(crate) fn check_scope_syntax(source: &str, module: &ruff_python_ast::ModModule) -> Result<(), String> {
+pub(crate) fn check_scope_syntax(
+    source: &str,
+    module: &ruff_python_ast::ModModule,
+) -> Result<(), String> {
     if let Some(range) = imre_ast::misplaced_star_import(&module.body) {
         return Err(crate::frontend::error(
             source,
