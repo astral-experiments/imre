@@ -227,7 +227,7 @@ impl Context {
                 }
                 // Resolve inherited object methods at their real position, after any Python mixin.
                 if let Value::Native(kind) = self.heap.get(class)
-                    && !matches!(name, "__init_subclass__" | "__reduce_ex__")
+                    && !matches!(name, "__init_subclass__" | "__getstate__" | "__reduce_ex__")
                     && !(exception_method && builtins::is_exception(kind))
                 {
                     match self.lookup_attr(class, name) {

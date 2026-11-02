@@ -25,6 +25,7 @@ mod namedtuple;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
+mod object_state;
 mod operators;
 mod os_error;
 mod property;
@@ -1713,6 +1714,7 @@ impl Context {
                 "__hash__",
                 "__format__",
                 "__init_subclass__",
+                "__getstate__",
                 "__reduce__",
                 "__reduce_ex__",
             ],
