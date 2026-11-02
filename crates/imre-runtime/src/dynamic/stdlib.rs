@@ -511,6 +511,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
+        ("sys", "warnoptions") => {
+            let options: Vec<String> = serde_json::from_value(ctx.config["warnoptions"].clone())
+                .expect("startup warning options");
+            let items = options.into_iter().map(|option| ctx.text(option)).collect();
+            ctx.alloc(Value::List(items))
+        }
         ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
         (
             "binascii",

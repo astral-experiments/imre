@@ -1204,6 +1204,7 @@ impl IntrinsicModule {
             (Self::Subprocess, "getstatusoutput") => Intrinsic::ShellOutput { status: true },
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
+            (Self::Sys, "warnoptions") => Intrinsic::ObjectRuntimeExport("sys.warnoptions"),
             (Self::Sys, "hash_info") => Intrinsic::ObjectRuntimeExport("sys.hash_info"),
             (Self::Sys, "stdout") => Intrinsic::Stdout,
             (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
@@ -2382,7 +2383,7 @@ impl SourceGraph {
             reachable_only,
             options.entry_profile.as_deref(),
         )?;
-        graph.command_startup = Some((command.flags, command.executable.clone()));
+        graph.command_startup = Some((command.flags.clone(), command.executable.clone()));
         graph.virtual_command = true;
         Ok(graph)
     }
@@ -2390,7 +2391,7 @@ impl SourceGraph {
     /// A directly invoked file is __main__; its enclosing package is not imported.
     pub(crate) fn script(
         path: &Path,
-        flags: crate::CommandFlags,
+        flags: &crate::CommandFlags,
         executable: &str,
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
@@ -2415,7 +2416,7 @@ impl SourceGraph {
         let id = loader.add(entry.clone(), entry, "__main__".into(), false, &source)?;
         loader.scan(id)?;
         let mut graph = loader.finish(id, filename, reachable, options.entry_profile.as_deref())?;
-        graph.command_startup = Some((flags, executable.to_owned()));
+        graph.command_startup = Some((flags.clone(), executable.to_owned()));
         Ok(graph)
     }
 

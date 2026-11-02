@@ -562,6 +562,19 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
             .as_bool()
             .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
     );
+    let options: Vec<String> =
+        serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
+    config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
+    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    config["utf8_mode"] = crate::sys::imre_sys_utf8_mode().into();
+    config["warn_default_encoding"] = config["warn_default_encoding"]
+        .as_bool()
+        .unwrap_or_else(|| {
+            !ignore_environment
+                && std::env::var_os("PYTHONWARNDEFAULTENCODING")
+                    .is_some_and(|value| !value.is_empty())
+        })
+        .into();
     if !ignore_environment {
         config["pycache_prefix"] = std::env::var("PYTHONPYCACHEPREFIX")
             .ok()
@@ -570,7 +583,13 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     }
     crate::python_hash::initialize(ignore_environment);
     crate::integer_text::imre_integer_digits_init(u32::from(ignore_environment));
-    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    if let Some(options) = config["warnoptions"].as_array() {
+        for option in options.iter().filter_map(|value| value.as_str()) {
+            if let Err(reason) = crate::objects::warnings::startup_filter(option) {
+                eprintln!("Invalid -W option ignored: {reason}");
+            }
+        }
+    }
     // SAFETY: main supplies argc pointers to NUL-terminated strings that remain
     // valid while the constructor consumes this iterator.
     let args = unsafe { slice::from_raw_parts(argv, argc as usize) }

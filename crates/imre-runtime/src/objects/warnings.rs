@@ -190,18 +190,96 @@ pub unsafe extern "C" fn imre_warning_filter(
                 message: Pattern::compile(message, message_re, true)?,
                 module: Pattern::compile(module, module_re, false)?,
             };
-            let mut filters = FILTERS.lock().unwrap_or_else(|poison| poison.into_inner());
-            if append == 0 {
-                filters.rules.retain(|old| !old.same(&rule));
-                filters.rules.insert(0, rule);
-            } else if !filters.rules.iter().any(|old| old.same(&rule)) {
-                filters.rules.push(rule);
-            }
-            filters.displayed.clear();
+            insert_rule(rule, append != 0);
             Ok(())
         })(),
         (),
     );
+}
+
+fn insert_rule(rule: Rule, append: bool) {
+    let mut filters = FILTERS.lock().unwrap_or_else(|poison| poison.into_inner());
+    if !append {
+        filters.rules.retain(|old| !old.same(&rule));
+        filters.rules.insert(0, rule);
+    } else if !filters.rules.iter().any(|old| old.same(&rule)) {
+        filters.rules.push(rule);
+    }
+    filters.displayed.clear();
+}
+
+// Numeric identities are shared with the compiler's typed warning filters.
+const CATEGORIES: &[&str] = &[
+    "Warning",
+    "ResourceWarning",
+    "RuntimeWarning",
+    "UserWarning",
+    "DeprecationWarning",
+    "PendingDeprecationWarning",
+    "SyntaxWarning",
+    "FutureWarning",
+    "ImportWarning",
+    "UnicodeWarning",
+    "BytesWarning",
+    "EncodingWarning",
+];
+
+pub(crate) fn category_number(name: &str) -> Option<u32> {
+    CATEGORIES
+        .iter()
+        .position(|&kind| kind == name)
+        .map(|n| n as u32)
+}
+
+/// Install a -W option. Messages and module names here are literal.
+pub(crate) fn startup_filter(option: &str) -> Result<(), String> {
+    let repr = |s: &str| exceptions::string_repr(s).as_str().to_owned();
+    let mut fields = option.split(':').map(str::trim);
+    let [action, message, category, module, line] =
+        std::array::from_fn(|_| fields.next().unwrap_or(""));
+    if fields.next().is_some() {
+        return Err(format!("too many fields (max 5): {}", repr(option)));
+    }
+    let action = [
+        "default", "always", "all", "ignore", "module", "once", "error",
+    ]
+    .into_iter()
+    .find(|name| name.starts_with(action))
+    .ok_or_else(|| format!("invalid action: {}", repr(action)))?;
+    let category = if category.is_empty() {
+        0
+    } else {
+        category_number(category.strip_prefix("builtins.").unwrap_or(category))
+            .ok_or_else(|| format!("unknown warning category: {}", repr(category)))?
+    };
+    let lineno = if line.is_empty() {
+        BigInt::ZERO
+    } else {
+        line.parse::<BigInt>()
+            .ok()
+            .filter(|n| !n.is_negative())
+            .ok_or_else(|| format!("invalid lineno {}", repr(line)))?
+    };
+    let message = Pattern::compile(message, &regex_syntax::escape(message), true)
+        .map_err(|_| "warning filter pattern exceeds native regex limits".to_owned())?;
+    let module = Pattern::compile(
+        module,
+        &format!(r"{}\z", regex_syntax::escape(module)),
+        false,
+    )
+    .map_err(|_| "warning filter pattern exceeds native regex limits".to_owned())?;
+    insert_rule(
+        Rule {
+            name: action.into(),
+            action: Action::parse(action).unwrap(),
+            category,
+            message,
+            module,
+            lineno,
+        },
+        false,
+    );
+    Ok(())
 }
 
 thread_local! {
