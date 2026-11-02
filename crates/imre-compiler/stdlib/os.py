@@ -353,17 +353,21 @@ def removedirs(name):
         head, tail = path.split(head)
 
 
+_fs_encoding = sys.getfilesystemencoding()
+_fs_errors = sys.getfilesystemencodeerrors()
+
+
 def fsencode(filename):
     filename = fspath(filename)
     if isinstance(filename, str):
-        return filename.encode("utf-8", "surrogateescape")
+        return filename.encode(_fs_encoding, _fs_errors)
     return filename
 
 
 def fsdecode(filename):
     filename = fspath(filename)
     if isinstance(filename, bytes):
-        return filename.decode("utf-8", "surrogateescape")
+        return filename.decode(_fs_encoding, _fs_errors)
     return filename
 
 
@@ -424,7 +428,7 @@ class PathLike(abc.ABC):
     __class_getitem__ = classmethod(GenericAlias)
 
 
-_env_encoding = sys.getfilesystemencoding()
+_env_encoding = _fs_encoding
 
 
 def _encode_env(value):
