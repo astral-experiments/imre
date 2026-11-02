@@ -1309,6 +1309,12 @@ def main():
         )
         compare("-Bm", "module_pkg.child", "-m", "tail")
         compare("-B", "-mmodule_pkg", "tail")
+
+        json_input = root / "input.json"
+        json_input.write_text('{"items": [1, 2]}')
+        for module in ("json", "json.tool"):
+            compare("-B", "-m", module, "--compact", json_input)
+
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")
         (root / "preferred").mkdir()
