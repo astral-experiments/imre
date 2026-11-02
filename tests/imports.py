@@ -285,6 +285,38 @@ REJECTED = {
         "main.py": "from helper import selected\n",
         "helper.py": "if True:\n    selected: int\nelse:\n    selected = 1\n",
     }, 'no static binding "selected"'),
+    "namedtuple_descriptor_preserves_typed_call": ({
+        "main.py": (
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x y')\n"
+            "field = Point.x\n"
+            "def typed(n: int) -> int: return n + 1\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "namedtuple_descriptor_shadowed_by_parameter": ({
+        "main.py": (
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x y')\n"
+            "def read(Point: int) -> int: return Point.x\n"
+            "print(read(5))\n"
+        ),
+    }, "rebinding a builtin, definition, or imported module"),
+    "namedtuple_descriptor_shadowed_by_comprehension_target": ({
+        "main.py": (
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x')\n"
+            "print([1 for _ in [0] if Point.x for Point in [3]])\n"
+        ),
+    }, "comprehension local may be uninitialized on this path"),
+    "namedtuple_module_shadowed_by_parameter": ({
+        "points.py": "from collections import namedtuple\nPoint = namedtuple('Point', 'x y')\n",
+        "main.py": (
+            "import points\n"
+            "def read(points: int) -> int: return points.Point.x\n"
+            "print(read(5))\n"
+        ),
+    }, "rebinding a builtin, definition, or imported module"),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_resource_function": ({
