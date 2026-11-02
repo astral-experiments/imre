@@ -73,10 +73,13 @@ fn find_global_module(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<S
             ctx.heap.keep(key);
             (key, ctx.get_item(modules, key)?)
         } else {
-            let Some(&(key, module)) = ctx.dict_entries(modules).unwrap().get(index) else {
+            let Value::Dict(entries) = ctx.heap.get(modules) else {
+                unreachable!()
+            };
+            let Some((position, key, module)) = entries.at(index) else {
                 break;
             };
-            index += 1;
+            index = position + 1;
             (key, module)
         };
         if module == NONE || ctx.str_value(key).is_ok_and(|name| name == "__main__") {
