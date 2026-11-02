@@ -2126,6 +2126,19 @@ pub(super) fn call(
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
         }
+        ("_get_alias_kind", [value]) => Ok(match ctx.heap.get(*value) {
+            Value::GenericAlias(alias) => {
+                let kind = if alias.is_builtin_alias() {
+                    "builtin"
+                } else if alias.kind == AliasKind::Callable {
+                    "callable"
+                } else {
+                    "typing"
+                };
+                ctx.text(kind)
+            }
+            _ => NONE,
+        }),
         ("get_origin" | "get_args", [v])
             if matches!(ctx.heap.get(*v), Value::Instance { .. })
                 && ctx

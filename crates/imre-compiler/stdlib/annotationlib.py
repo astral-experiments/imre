@@ -13,7 +13,7 @@ class Format(enum.IntEnum):
 
 
 def _make_forward_ref(arg, module=None, owner=None, *, is_argument=True, is_class=False):
-    from typing import _validate_forward_ref
+    from _typing import _validate_forward_ref
     # typing._make_forward_ref eagerly checks the syntax, without resolving names.
     source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
     try:
@@ -133,16 +133,16 @@ class ForwardRef:
         if self.__extra_names__:
             locals.update(self.__extra_names__)
 
-        import typing
+        from _typing import _eval_type_expression, _validate_forward_ref
         arg = self.__forward_arg__
         source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
         try:
-            return typing._eval_type_expression(source, globals, locals)
+            return _eval_type_expression(source, globals, locals)
         except SyntaxError:
             # Parsing fails before CPython enters its symbolic fallback. An
             # exception from the expression itself, however, still permits it.
             try:
-                typing._validate_forward_ref(source)
+                _validate_forward_ref(source)
             except SyntaxError:
                 raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
             if format == Format.VALUE:
@@ -159,12 +159,13 @@ class ForwardRef:
         # scoped forward references, preserving already-known parts of the result.
         import builtins
         names = {**vars(builtins), **globals, **locals}
-        symbolic = typing._typeddict_names(
+        from typing import _typeddict_names
+        symbolic = _typeddict_names(
             globals, cells if isinstance(cells, dict) else None,
             owner, names, self.__forward_is_class__,
         )
         try:
-            result = typing._eval_type_expression(source, globals, symbolic)
+            result = _eval_type_expression(source, globals, symbolic)
         except Exception:
             return self
         symbolic.finish()

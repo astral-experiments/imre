@@ -19,7 +19,9 @@ def current():
         pass
 
     raw = Raw()
+    namespace = set(vars(typing))
     assert evaluate_forward_ref(module.ForwardRef("raw"), globals={"raw": raw}) is raw
+    assert set(vars(typing)) == namespace
     ns = {"Alias": bytes, "Annotated": typing.Annotated, "Literal": typing.Literal}
     assert evaluate_forward_ref(module.ForwardRef("list['Alias']"), globals=ns) == list[bytes]
     assert evaluate_forward_ref(module.ForwardRef("Literal['Alias']"), globals=ns) == typing.Literal["Alias"]

@@ -2255,10 +2255,6 @@ def evaluate_forward_ref(
     )
 
 
-# The native collections.abc alias represents a GenericAlias subclass separately.
-_abc_callable_alias_type = type(_ABCCallable[..., object])
-
-
 def _resolve_forward_type(value, globals, locals, type_params, owner, format, guard, parent=None):
     from types import GenericAlias
 
@@ -2266,12 +2262,11 @@ def _resolve_forward_type(value, globals, locals, type_params, owner, format, gu
         return evaluate_forward_ref(value, globals=globals, locals=locals, type_params=type_params,
                                     owner=owner, format=format, _recursive_guard=guard)
 
-    builtin_aliases = (GenericAlias, _abc_callable_alias_type)
-    if not (isinstance(value, builtin_aliases)
-            or isinstance(value, (_typing._GenericAlias, _typing._CallableGenericAlias,
-                                  _typing._LiteralGenericAlias, _AnnotatedAlias, _typing.Union))):
+    # Query the native alias representation without publishing private classes in typing.
+    kind = _typing_runtime._get_alias_kind(value)
+    if kind is None and not isinstance(value, (_AnnotatedAlias, Union)):
         return value
-    if isinstance(value, builtin_aliases):
+    if kind == "builtin":
         args = tuple(
             _make_forward_ref(arg, module=getattr(parent, "__forward_module__", None),
                               owner=getattr(parent, "__owner__", None))
@@ -2284,12 +2279,13 @@ def _resolve_forward_type(value, globals, locals, type_params, owner, format, gu
             value = value.__origin__[args]
         if unpacked:
             value = Unpack[value]
+        kind = _typing_runtime._get_alias_kind(value)
 
     resolved = tuple(_resolve_forward_type(arg, globals, locals, type_params, owner, format,
                                            guard) for arg in value.__args__)
     if resolved == value.__args__:
         return value
-    if isinstance(value, builtin_aliases):
+    if kind == "builtin":
         return GenericAlias(value.__origin__, resolved)
     if isinstance(value, _typing.Union):
         union = resolved[0]
@@ -2300,7 +2296,7 @@ def _resolve_forward_type(value, globals, locals, type_params, owner, format, gu
     if copy_with is not None:
         return copy_with(resolved)
     # Native callable, literal and unpack aliases currently lack an instance copy_with.
-    if type(value) is _typing._CallableGenericAlias:
+    if kind == "callable":
         return type(value)(value.__origin__, resolved,
                            name=getattr(value, "_name", None), inst=getattr(value, "_inst", True))
     return type(value)(value.__origin__, resolved)
