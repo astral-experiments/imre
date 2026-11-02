@@ -360,7 +360,9 @@ impl BuiltinDescriptor {
             }
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
-            deque::ITERATOR | deque::REVERSE_ITERATOR => ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner),
+            deque::ITERATOR | deque::REVERSE_ITERATOR => {
+                ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner)
+            }
             deque::CLASS => matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             _ => ctx.builtin_slot_accepts(receiver, self.owner),
@@ -626,7 +628,16 @@ pub(super) fn descriptor_get(
     };
     let slot = match ctx.heap.get(descriptor) {
         Value::ClassMethod { .. } if class == "classmethod" => None,
-        Value::HashMethod { .. } if class == "method_descriptor" => None,
+        Value::HeapTypeMethod { name, .. }
+            if class
+                == if *name == "__repr__" {
+                    "wrapper_descriptor"
+                } else {
+                    "method_descriptor"
+                } =>
+        {
+            None
+        }
         Value::Native(symbol)
             if let Some(slot) = BuiltinDescriptor::lookup(symbol)
                 && slot.class() == class =>
@@ -660,7 +671,7 @@ pub(super) fn descriptor_get(
             if let Some(slot) = slot {
                 return slot.bind(ctx, descriptor, receiver);
             }
-            if let Value::HashMethod { owner, .. } = *ctx.heap.get(descriptor) {
+            if let Value::HeapTypeMethod { owner, .. } = *ctx.heap.get(descriptor) {
                 if receiver == NONE {
                     return Ok(descriptor);
                 }

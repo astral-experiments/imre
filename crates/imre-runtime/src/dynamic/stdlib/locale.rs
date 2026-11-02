@@ -13,10 +13,10 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Res
     let base = ctx.builtin("Exception");
     let class = ctx.allocate_class("Error".into(), fields, vec![base])?;
     ctx.install_weakref_descriptor(class, fields);
-    let Value::Module { locale_error, .. } = ctx.heap.get_mut(module) else {
+    let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
         unreachable!()
     };
-    *locale_error = Some(class);
+    *module_state = Some(class);
     ctx.bind(scope, "Error", class);
 
     let callable = ctx.builtin("_locale.setlocale");
@@ -80,7 +80,7 @@ pub(super) fn setlocale(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             .map_err(|error| ctx.decode_error(error));
     }
     let Value::Module {
-        locale_error: Some(class),
+        module_state: Some(class),
         ..
     } = *ctx.heap.get(module)
     else {

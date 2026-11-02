@@ -34,6 +34,12 @@ impl CalendarNumber {
     }
 }
 
+/// Ordinal of the Monday in the ISO week containing January 4.
+fn iso_week_one(year: i32) -> i32 {
+    let jan4 = days_before_year(year) + 4;
+    jan4 - (jan4 - 1) % 7
+}
+
 impl Calendar {
     pub(crate) fn component(n: &Int) -> Result<i32, Error> {
         c_component(n.0)
@@ -366,13 +372,8 @@ impl Calendar {
 
     pub(crate) fn iso_week_ordinal(year: i32, week: i32, day: i32) -> Result<i32, Error> {
         check(year, "year", 1, 9999)?;
-        // ISO week one contains January 4. Ordinal 1 is a Monday.
-        let week_one = |year| {
-            let jan4 = days_before_year(year) + 4;
-            jan4 - (jan4 - 1) % 7
-        };
-        let first = week_one(year);
-        if !(1..=(week_one(year + 1) - first) / 7).contains(&week) {
+        let first = iso_week_one(year);
+        if !(1..=(iso_week_one(year + 1) - first) / 7).contains(&week) {
             return Err(Error::new(
                 Kind::ValueError,
                 format!("Invalid week: {week}"),
@@ -401,19 +402,15 @@ impl Calendar {
 
     /// Convert an ISO week date, including a final week that extends into year 10000.
     pub(crate) fn iso_week_date(year: i32, week: i32, weekday: i32) -> Option<[i32; 3]> {
-        if !(1..=9999).contains(&year) || !(1..=53).contains(&week) || !(1..=7).contains(&weekday)
-        {
-            return None;
-        }
-        let week_one = |y| {
-            let jan_four = days_before_year(y) + 4;
-            jan_four - (jan_four - 1) % 7
-        };
-        let monday = week_one(year) + (week - 1) * 7;
-        if monday >= week_one(year + 1) {
-            return None;
-        }
-        Self::ordinal_fields(monday + weekday - 1).ok()
+        Self::ordinal_fields(Self::iso_week_ordinal(year, week, weekday).ok()?).ok()
+    }
+
+    /// The ISO year is the Gregorian year of the Thursday in the same week.
+    pub(crate) fn iso_week_fields(&self) -> [i32; 3] {
+        let ordinal = self.ordinal() as i32;
+        let weekday = (ordinal - 1) % 7;
+        let (year, _, _) = ymd(i128::from(ordinal + 3 - weekday));
+        [year, (ordinal - iso_week_one(year)) / 7 + 1, weekday + 1]
     }
 
     /// Normalize ISO 24:00 before the receiving class validates the civil fields.

@@ -666,6 +666,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
+    /// The defining extension module of a heap type created with module state.
+    pub defining_module: Option<Id>,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
@@ -877,8 +879,8 @@ pub(super) enum Value {
         scope: Id,
         origin: Option<Id>,
         initializing: bool,
-        // Exception class retained by this generation of the _locale module.
-        locale_error: Option<Id>,
+        // Private state retained by this generation of a native module.
+        module_state: Option<Id>,
         // Imported modules are resolved separately from independently constructed ones.
         constructor: Option<Id>,
     },
@@ -908,8 +910,8 @@ pub(super) enum Value {
     Class {
         /// Private layout tag for native I/O class generations.
         io_kind: Option<super::stdlib::io::NativeClass>,
-        /// Qualified name of a non-instantiable digest implementation type.
-        hash_type: Option<&'static str>,
+        /// Qualified name identifying a native heap type and its module generation.
+        heap_type: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1083,7 +1085,7 @@ pub(super) enum Value {
         random: Id,
         unsupported: Id,
     },
-    HashMethod {
+    HeapTypeMethod {
         owner: Id,
         name: &'static str,
     },
@@ -1177,7 +1179,10 @@ impl Value {
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
-            Self::HashMethod { .. } => "method_descriptor",
+            Self::HeapTypeMethod {
+                name: "__repr__", ..
+            } => "wrapper_descriptor",
+            Self::HeapTypeMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
@@ -1256,8 +1261,13 @@ impl Value {
     }
 
     pub(super) fn hash_type(&self) -> Option<&'static str> {
+        self.heap_type()
+            .filter(|name| *name == super::stdlib::hashlib::md5::CLASS)
+    }
+
+    pub(super) fn heap_type(&self) -> Option<&'static str> {
         match self {
-            Self::Class { hash_type, .. } => *hash_type,
+            Self::Class { heap_type, .. } => *heap_type,
             _ => None,
         }
     }
@@ -1452,6 +1462,7 @@ impl Value {
                         }
                     }
                     visit.extend(class.dictionary);
+                    visit.extend(class.defining_module);
                 }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
@@ -1470,11 +1481,11 @@ impl Value {
                 scope,
                 origin,
                 constructor,
-                locale_error,
+                module_state,
                 ..
             } => {
                 visit.push(*scope);
-                visit.extend(locale_error);
+                visit.extend(module_state);
                 visit.extend(origin);
                 visit.extend(constructor);
             }
@@ -1565,9 +1576,13 @@ impl Value {
                     }
                 }
             }
-            Self::TypeVar(var) => {
-                visit.extend([var.name, var.module, var.bound, var.constraints, var.default])
-            }
+            Self::TypeVar(var) => visit.extend([
+                var.name,
+                var.module,
+                var.bound,
+                var.constraints,
+                var.default,
+            ]),
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
                 visit.extend(alias.name);
@@ -1703,7 +1718,7 @@ impl Value {
             Self::IoMethod {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
-            Self::HashMethod { owner, .. } => visit.push(*owner),
+            Self::HeapTypeMethod { owner, .. } => visit.push(*owner),
             Self::RegexScanner {
                 pattern,
                 subject,
@@ -4081,7 +4096,7 @@ mod tests {
             scope: owner,
             origin: None,
             initializing: false,
-            locale_error: None,
+            module_state: None,
             constructor: None,
         });
         let modules = heap.alloc(Value::Dict(vec![(NONE, module)].into()));

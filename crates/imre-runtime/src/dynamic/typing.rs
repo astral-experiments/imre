@@ -322,9 +322,10 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
             | Value::Union(super::union::Union { parameters, .. }) => {
                 // Like _Py_make_parameters, ignore non-tuple metadata supplied by Python.
                 match ctx.heap.get(ctx.scalar_value(*parameters)) {
-                    Value::Tuple(members) | Value::NamedTuple { values: members, .. } => {
-                        members.as_slice()
-                    }
+                    Value::Tuple(members)
+                    | Value::NamedTuple {
+                        values: members, ..
+                    } => members.as_slice(),
                     _ => continue,
                 }
             }
@@ -380,9 +381,10 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
     let (index, make_alias, arguments) = match kind {
         AliasKind::Generic => (0, ctx.builtin("typing._GenericAlias"), vec![origin, args]),
         AliasKind::Callable => {
-            let make_alias = ctx.typing.callable_factory.ok_or_else(|| {
-                Error::new("RuntimeError", "typing.Callable is not initialized")
-            })?;
+            let make_alias = ctx
+                .typing
+                .callable_factory
+                .ok_or_else(|| Error::new("RuntimeError", "typing.Callable is not initialized"))?;
             let constructor = ctx.builtin("typing._CallableGenericAlias");
             (1, make_alias, vec![constructor, origin, args])
         }
@@ -2891,7 +2893,7 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
-            if let Some(name) = self.heap.get(base).hash_type() {
+            if let Some(name) = self.heap.get(base).heap_type() {
                 return Err(Error::new(
                     "TypeError",
                     format!("type '{name}' is not an acceptable base type"),
@@ -3053,7 +3055,7 @@ impl Context {
         }
         let class = self.alloc(Value::Class {
             io_kind: None,
-            hash_type: None,
+            heap_type: None,
             metaclass: None,
             namedtuple_fields,
             name,
