@@ -245,6 +245,14 @@ impl Checker<'_> {
         for (index, statement) in stmts.iter().enumerate() {
             let name = match statement {
                 ast::Stmt::ClassDef(class) if include_classes => class.name.as_str(),
+                ast::Stmt::FunctionDef(function) if function.type_params.is_some() => {
+                    self.graph.needs_object_runtime.set(true);
+                    return Err(error(
+                        self.source,
+                        function,
+                        "function type parameters require the object runtime",
+                    ));
+                }
                 ast::Stmt::FunctionDef(function) => function.name.as_str(),
                 _ => continue,
             };

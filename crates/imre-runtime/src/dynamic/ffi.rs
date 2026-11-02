@@ -377,7 +377,9 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_parameter_scope" | "function_parameter_scope" => {
+                super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
+            }
             "class_annotation_environment" => self.class_annotation_environment(a, b),
             "class_annotation_locals" => {
                 let parent = self.scope_data(a).parent.expect("annotation globals");
@@ -388,6 +390,7 @@ impl Context {
                 frame.exec_locals = Some(b);
                 Ok(local)
             }
+            "generic_function_scope" => self.generic_function_scope(a, b, c),
             "class_base_scope" => {
                 if self.scope_data(b).class_body.is_none() {
                     return Ok(a);
@@ -1093,6 +1096,82 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
 }
 
 impl Context {
+    /// Return the shared cell for a lexically declared binding, promoting a local on demand.
+    fn capture_cell(&mut self, scope: Id, name: &str) -> Option<Id> {
+        let frame = self.scope_data(scope);
+        if let Some(&cell) = frame.closure.cells.get(name) {
+            return Some(cell);
+        }
+        if frame.class_body.is_none() && frame.closure.declared.contains(name) {
+            let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                unreachable!()
+            };
+            let value = frame.names.shift_remove(name);
+            let cell = self.alloc(Value::Cell(value));
+            self.heap.keep(cell);
+            let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                unreachable!()
+            };
+            frame.closure.cells.insert(name.to_owned(), cell);
+            return Some(cell);
+        }
+        None
+    }
+
+    /// Select the enclosing __class__ binding for a generic function or method.
+    fn enclosing_class_cell(&mut self, mut scope: Id) -> Option<Id> {
+        loop {
+            if let Some(cell) = self.capture_cell(scope, "__class__") {
+                return Some(cell);
+            }
+            let frame = self.scope_data(scope);
+            if frame.globals.contains("__class__") {
+                return None;
+            }
+            if let Some(cell) = frame.class_cell {
+                return Some(cell);
+            }
+            scope = frame.parent?;
+        }
+    }
+
+    fn generic_function_scope(&mut self, lexical: Id, outer: Id, flags: Id) -> Result<Id> {
+        let method = self.scope_data(outer).class_body.is_some();
+        let class_cell = if flags & 1 == 0 {
+            None
+        } else if let Some(cell) = self.capture_cell(lexical, "__class__") {
+            Some(cell)
+        } else {
+            self.enclosing_class_cell(outer)
+        };
+        let Value::Scope(frame) = self.heap.get_mut(lexical) else {
+            unreachable!()
+        };
+        if let Some(cell) = class_cell {
+            // The implicit super() read and an explicit __class__ name share this cell.
+            frame.closure.cells.insert("__class__".to_owned(), cell);
+            frame.class_cell = Some(cell);
+        }
+        if !method {
+            return Ok(lexical);
+        }
+        // The method body closes over the parameters. Its provider also sees the real
+        // class dictionary, which must keep tracking changes after class construction.
+        let dict_cell = (flags & 2 != 0).then(|| self.class_annotation_dict_cell(outer));
+        let module = self.scope_data(outer).module.clone();
+        let scope = self.scope(&module, Some(lexical));
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.class_cell = class_cell;
+        frame
+            .class_namespace
+            .get_or_insert_with(Default::default)
+            .annotation_dict_cell = dict_cell;
+        frame.closure.declared_complete = true;
+        Ok(scope)
+    }
+
     /// Resolve a code object's lexical reads against its enclosing function scopes.
     pub(super) fn enclosing_freevars<'a>(
         &self,
@@ -1130,6 +1209,23 @@ impl Context {
         }
     }
 
+    /// Return whether the scalar ABI spelling resolves to a lexical type parameter.
+    fn scalar_is_type_parameter(&self, mut scope: Id, name: &str) -> bool {
+        loop {
+            let frame = self.scope_data(scope);
+            if let Some(value) = self.scope_name(scope, name) {
+                return matches!(self.heap.get(value), Value::TypeVar(var) if var.declared);
+            }
+            if frame.globals.contains(name) || frame.closure.declared.contains(name) {
+                return false;
+            }
+            let Some(parent) = frame.parent else {
+                return false;
+            };
+            scope = parent;
+        }
+    }
+
     pub(super) fn prelinked_code(
         &mut self,
         entry: Code,
@@ -1142,11 +1238,37 @@ impl Context {
         let filename = self.text(location.file);
         let (qualname, doc) = metadata_pair;
         let module_definition = self.scope_data(scope).parent.is_none();
-        let metadata: serde_json::Value = self
+        let mut metadata: serde_json::Value = self
             .str_value(parameters)
             .ok()
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
+        // Code reconstructed with different globals still has its compiled calling convention.
+        let mut changed = false;
+        if let Some(types) = metadata
+            .get_mut("types")
+            .and_then(|value| value.as_object_mut())
+        {
+            let old_len = types.len();
+            types.retain(|_, value| {
+                !value
+                    .as_str()
+                    .is_some_and(|name| self.scalar_is_type_parameter(scope, name))
+            });
+            changed = types.len() != old_len;
+        }
+        if metadata["return_type"]
+            .as_str()
+            .is_some_and(|name| self.scalar_is_type_parameter(scope, name))
+        {
+            metadata["return_type"] = serde_json::Value::Null;
+            changed = true;
+        }
+        let parameters = if changed {
+            self.text(&metadata.to_string())
+        } else {
+            parameters
+        };
         let annotation_class = metadata["annotation_class"] == true;
         let mut read_class = false;
         let reads = metadata["scope_reads"]
@@ -1167,20 +1289,28 @@ impl Context {
         } else {
             scope
         };
+        let parameterized = metadata["type_parameter_scope"] == true;
+        let class_free = parameterized
+            && metadata["class_cell"] == true
+            && self.scope_data(scope).class_cell.is_some();
         let freevars = (metadata["scope_complete"].as_bool() == Some(true)
-            && metadata["class_cell"].as_bool() != Some(true))
-        .then(|| self.enclosing_freevars(lexical, reads))
-        .flatten()
-        .map(|mut freevars| {
-            if annotation_class {
-                freevars.push("__classdict__".to_owned());
-                if read_class {
+            && (metadata["class_cell"].as_bool() != Some(true) || parameterized))
+            .then(|| self.enclosing_freevars(lexical, reads))
+            .flatten()
+            .map(|mut freevars| {
+                if class_free && !freevars.iter().any(|name| name == "__class__") {
                     freevars.push("__class__".to_owned());
+                    freevars.sort();
                 }
-                freevars.sort();
-            }
-            freevars
-        });
+                if annotation_class {
+                    freevars.push("__classdict__".to_owned());
+                    if read_class {
+                        freevars.push("__class__".to_owned());
+                    }
+                    freevars.sort();
+                }
+                freevars
+            });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
         self.alloc(Value::Code(value::CodeObject {
@@ -1291,25 +1421,11 @@ impl Context {
             }
             let mut cursor = scope;
             loop {
+                if let Some(cell) = self.capture_cell(cursor, name) {
+                    cells.push(cell);
+                    break;
+                }
                 let frame = self.scope_data(cursor);
-                if let Some(&cell) = frame.closure.cells.get(name) {
-                    cells.push(cell);
-                    break;
-                }
-                if frame.class_body.is_none() && frame.closure.declared.contains(name) {
-                    let Value::Scope(frame) = self.heap.get_mut(cursor) else {
-                        unreachable!()
-                    };
-                    let value = frame.names.shift_remove(name);
-                    let cell = self.alloc(Value::Cell(value));
-                    self.heap.keep(cell);
-                    let Value::Scope(frame) = self.heap.get_mut(cursor) else {
-                        unreachable!()
-                    };
-                    frame.closure.cells.insert(name.clone(), cell);
-                    cells.push(cell);
-                    break;
-                }
                 cursor = frame.parent.expect("free variable has enclosing scope");
             }
         }
