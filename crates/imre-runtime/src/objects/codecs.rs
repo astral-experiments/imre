@@ -350,6 +350,29 @@ impl FixedUnicode {
         }
     }
 
+    pub(crate) fn width(self) -> usize {
+        match self {
+            Self::Utf16(_) => 2,
+            Self::Utf32Le | Self::Utf32Be => 4,
+        }
+    }
+
+    pub(crate) fn byte_order(self) -> i32 {
+        match self {
+            Self::Utf16(Utf16Order::Little) | Self::Utf32Le => -1,
+            Self::Utf16(Utf16Order::Big) | Self::Utf32Be => 1,
+        }
+    }
+
+    pub(crate) fn with_order(self, order: i32) -> Self {
+        let order = Utf16Order::from_sign(order);
+        match self {
+            Self::Utf16(_) => Self::Utf16(order),
+            _ if matches!(order, Utf16Order::Little) => Self::Utf32Le,
+            _ => Self::Utf32Be,
+        }
+    }
+
     pub(crate) fn codec_name(self, signature: bool) -> &'static str {
         if !signature {
             return self.name();
