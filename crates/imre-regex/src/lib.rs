@@ -855,6 +855,100 @@ pub fn starts_counted_repeat(mut input: Input<'_>) -> bool {
     }
 }
 
+/// Find a quantified anchor or repeated quantifier in a pattern accepted by the raw backend.
+/// Offsets are byte indices into the Python spelling, before escape or alphabet translation.
+pub fn repeat_diagnostic(source: &str, verbose: bool) -> Option<(&'static str, usize)> {
+    use regex_syntax::ast::{Ast, parse::ParserBuilder};
+    use std::borrow::Cow;
+
+    let layout = verbose
+        || source.match_indices("(?").any(|(i, _)| {
+            source[i + 2..]
+                .bytes()
+                .take_while(|b| b"aiLmsux-".contains(b))
+                .any(|b| b == b'x')
+        });
+    if !layout
+        && !source
+            .as_bytes()
+            .windows(2)
+            .any(|p| b"*+?}^$AbBZz".contains(&p[0]) && b"*+?{".contains(&p[1]))
+    {
+        return None;
+    }
+    // Rust and Python can disagree about which characters are tokens in these verbose
+    // patterns. Leave those to the Python tokenizer rather than reject a literal or comment.
+    if layout
+        && (source.contains('[')
+            || source.contains("\\\n")
+            || source.chars().any(|c| !c.is_ascii() && c.is_whitespace()))
+    {
+        return None;
+    }
+    let spelling = if source.contains(r"\Z") {
+        Cow::Owned(source.replace(r"\Z", r"\z"))
+    } else {
+        Cow::Borrowed(source)
+    };
+    let ast = ParserBuilder::new()
+        .ignore_whitespace(verbose)
+        .empty_min_range(true)
+        .build()
+        .parse(&spelling)
+        .ok()?;
+    let mut first = None;
+    let mut pending = vec![&ast];
+    while let Some(node) = pending.pop() {
+        match node {
+            Ast::Repetition(outer) => {
+                // Parentheses make a new operand. Only adjacent repetitions share this span.
+                let mut inner = outer.as_ref();
+                while let Ast::Repetition(child) = inner.ast.as_ref() {
+                    inner = child;
+                }
+                pending.push(&inner.ast);
+                let start = inner.op.span.start.offset;
+                let end = outer.op.span.end.offset;
+                let mut chars = source[start..end].chars().peekable();
+                if chars.next() == Some('{') {
+                    if !starts_counted_repeat(chars.clone()) {
+                        continue;
+                    }
+                    chars.by_ref().find(|&c| c == '}');
+                }
+                // The backend also calls escaped angles and \b{start} assertions.
+                // Those spellings contain repeatable literals in Python.
+                let anchor = matches!(inner.ast.as_ref(), Ast::Assertion(a) if matches!(
+                    &source[a.span.start.offset..a.span.end.offset],
+                    "^" | "$" | r"\A" | r"\Z" | r"\z" | r"\b" | r"\B"));
+                let error = if anchor {
+                    ("nothing to repeat", start)
+                } else {
+                    // Python permits exactly one adjacent lazy or possessive modifier.
+                    chars.next_if(|c| matches!(c, '?' | '+'));
+                    match next_token(&mut chars, layout) {
+                        Ok(Some('*' | '+' | '?')) => {}
+                        Ok(Some('{')) if starts_counted_repeat(chars.clone()) => {}
+                        _ => continue,
+                    }
+                    (
+                        "multiple repeat",
+                        end - chars.map(char::len_utf8).sum::<usize>() - 1,
+                    )
+                };
+                if first.is_none_or(|(_, pos)| error.1 < pos) {
+                    first = Some(error);
+                }
+            }
+            Ast::Group(g) => pending.push(&g.ast),
+            Ast::Concat(c) => pending.extend(c.asts.iter().rev()),
+            Ast::Alternation(a) => pending.extend(a.asts.iter().rev()),
+            _ => {}
+        }
+    }
+    first
+}
+
 fn count(input: &mut Input<'_>, output: &mut String) -> Result<Option<u32>, String> {
     let digits: String = std::iter::from_fn(|| input.next_if(char::is_ascii_digit)).collect();
     if digits.is_empty() {
