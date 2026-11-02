@@ -6303,6 +6303,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::UrlSplit => {
+                    return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
+                }
                 Intrinsic::Chdir => {
                     return Err(self.scoped_builtin_error("posix.chdir", expression));
                 }
@@ -10833,6 +10836,12 @@ impl<'a> Checker<'a> {
                     && self.unshadowed_builtin(&call.func, "type") =>
             {
                 (Builtin::HashType, Type::BuiltinClass)
+            }
+            "id" if args.len() == 1
+                && self.types.is_url_split_result(args[0].ty)
+                && self.unshadowed_builtin(&call.func, "id") =>
+            {
+                return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", call));
             }
             "id" if args.len() == 1
                 && args[0].ty == Type::Hash

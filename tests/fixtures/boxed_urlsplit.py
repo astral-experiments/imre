@@ -4,6 +4,18 @@ from urllib.parse import SplitResult, SplitResultBytes, unquote, unquote_plus, u
 
 
 def current():
+    urlsplit.cache_clear()
+    result = urlsplit("https://example.org/a")
+    assert urlsplit("https://example.org/a") is result
+    urlsplit("https://example.org/a", "", True)
+    urlsplit("https://example.org/a", "", 1)
+    assert tuple(urlsplit.cache_info()) == (1, 3, 128, 3)
+    assert urlsplit.__wrapped__("https://example.org/a") is not result
+    assert repr(urlsplit) == f"<functools._lru_cache_wrapper object at {id(urlsplit):#x}>"
+    assert repr(parse.urlparse) == f"<function urlparse at {id(parse.urlparse):#x}>"
+    urlsplit.cache_clear()
+    assert urlsplit("https://example.org/a") is not result
+
     values = ["first", "old"]
     def change_next(value, safe, encoding=None, errors=None):
         if value == "first":

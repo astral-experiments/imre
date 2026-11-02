@@ -768,7 +768,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("pickle", "dumps")
         | (
             "urllib.parse",
-            "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
+            "unquote" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
             | "quote_plus" | "quote_from_bytes" | "urlencode",
         )
         | ("hashlib", "file_digest")
