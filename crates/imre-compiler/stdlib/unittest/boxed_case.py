@@ -1,6 +1,7 @@
 import contextlib
-from collections import ChainMap
+import time
 import warnings
+from collections import ChainMap
 from unittest import SkipTest, TestCase, _enterCleanupContext
 
 _module_cleanups = []
@@ -159,6 +160,20 @@ class _TestPartExecutor(contextlib.ContextDecorator):
             return typ is not None
         finally:
             outcome.success = outcome.success and self.old_success
+
+
+# From CPython 3.14.5 Lib/unittest/case.py. See ../docstrings/LICENSE.
+def _addDuration(self, result, elapsed):
+    try:
+        addDuration = result.addDuration
+    except AttributeError:
+        warnings.warn("TestResult has no addDuration method",
+                      RuntimeWarning)
+    else:
+        addDuration(self, elapsed)
+
+
+TestCase._addDuration = _addDuration
 
 
 def _addSkip(result, test_case, reason):
