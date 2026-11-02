@@ -36,6 +36,43 @@ def assert_never(arg, /):
     raise AssertionError(f"Expected code to be unreachable, but got: {value}")
 
 
+# Runtime decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def final(f):
+    """Decorator to indicate final methods and final classes.
+
+    Use this decorator to indicate to type checkers that the decorated
+    method cannot be overridden, and decorated class cannot be subclassed.
+
+    For example::
+
+        class Base:
+            @final
+            def done(self) -> None:
+                ...
+        class Sub(Base):
+            def done(self) -> None:  # Error reported by type checker
+                ...
+
+        @final
+        class Leaf:
+            ...
+        class Other(Leaf):  # Error reported by type checker
+            ...
+
+    There is no runtime checking of these properties. The decorator
+    attempts to set the ``__final__`` attribute to ``True`` on the decorated
+    object to allow runtime introspection.
+    """
+    try:
+        f.__final__ = True
+    except (AttributeError, TypeError):
+        # Skip the attribute silently if it is not writable.
+        # AttributeError happens if the object has __slots__ or a
+        # read-only property, TypeError if it's a builtin class.
+        pass
+    return f
+
+
 # Optional and the special form protocol from CPython 3.14.5 Lib/typing.py.
 # See stdlib/docstrings/LICENSE. Union and the type parameters are native exports.
 class _Final:
