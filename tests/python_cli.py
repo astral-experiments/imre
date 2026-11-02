@@ -1126,6 +1126,17 @@ def main():
 
         check_command_stdin(imre, run)
 
+        # The binary buffer must work from an ordinary -c command on its own.
+        for stream in ("stdout", "stderr"):
+            command = (
+                f"import sys; output = sys.{stream}; buf = output.buffer;"
+                "buf.write(b'\\xff\\r\\n'); buf.flush()"
+            )
+            actual = run(imre, "-c", command)
+            expected = run(sys.executable, "-c", command)
+            assert actual.returncode == expected.returncode == 0, actual.stderr
+            assert (actual.stdout, actual.stderr) == (expected.stdout, expected.stderr)
+
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
         expected = run(sys.executable, "-B", streams)

@@ -8071,6 +8071,11 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(value);
                 }
+                if attribute.attr.as_str() == "buffer"
+                    && self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::TextIO
+                {
+                    return Err(self.scoped_builtin_error("text stream buffer", attribute));
+                }
                 if matches!(attribute.attr.as_str(), "encoding" | "errors")
                     && matches!(
                         self.types.payload(receiver.ty).unwrap_or(receiver.ty),
