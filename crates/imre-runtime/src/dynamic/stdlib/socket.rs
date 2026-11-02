@@ -49,6 +49,8 @@ const RESOLVER_NAMES: &[&str] = &[
     "gethostbyname",
     "gethostbyaddr",
     "getnameinfo",
+    "getservbyname",
+    "getservbyport",
     "if_nameindex",
     "if_nametoindex",
     "if_indextoname",
@@ -566,6 +568,90 @@ pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)
     Ok(ctx.alloc(Value::List(result)))
 }
 
+/// Parse a PyArg "s" argument as strict UTF-8 without calling str subclass methods.
+fn service_text(
+    ctx: &mut Context,
+    name: &str,
+    index: usize,
+    value: Id,
+) -> Result<std::ffi::CString> {
+    let storage = ctx.string_storage(value).ok_or_else(|| {
+        let ty = if value == NONE {
+            "None"
+        } else {
+            ctx.type_name(value)
+        };
+        Error::new(
+            "TypeError",
+            format!("{name}() argument {index} must be str, not {ty}"),
+        )
+    })?;
+    let text = match ctx.heap.get(storage) {
+        Value::Str(text) => std::ffi::CString::new(text.as_bytes()),
+        _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
+    };
+    text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+fn lookup_service(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    if !(1..=2).contains(&args.len()) {
+        let bound = if args.is_empty() {
+            "at least 1 argument"
+        } else {
+            "at most 2 arguments"
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes {bound} ({} given)", args.len()),
+        ));
+    }
+    enum Query {
+        Name(std::ffi::CString),
+        Port(i32),
+    }
+    let query = if name == "getservbyname" {
+        Query::Name(service_text(ctx, name, 1, args[0])?)
+    } else {
+        Query::Port(ctx.index_c_int(args[0])?)
+    };
+    // Parse the optional protocol before checking the converted port's 16-bit range.
+    let proto = args
+        .get(1)
+        .map(|&v| service_text(ctx, name, 2, v))
+        .transpose()?;
+    let audit_proto = proto
+        .as_ref()
+        .map_or(NONE, |s| ctx.text(s.to_str().expect("parsed UTF-8")));
+    match query {
+        Query::Name(service) => {
+            let audit_name = ctx.text(service.to_str().expect("parsed UTF-8"));
+            super::audit::event(ctx, "socket.getservbyname", &[audit_name, audit_proto])?;
+            Ok(ctx.int(i64::from(native::service_by_name(
+                &service,
+                proto.as_deref(),
+            )?)))
+        }
+        Query::Port(port) => {
+            let port = u16::try_from(port)
+                .map_err(|_| Error::new("OverflowError", "getservbyport: port must be 0-65535."))?;
+            let audit_port = ctx.int(i64::from(port));
+            super::audit::event(ctx, "socket.getservbyport", &[audit_port, audit_proto])?;
+            Ok(ctx.text(native::service_by_port(port, proto.as_deref())?))
+        }
+    }
+}
+
 fn getnameinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(Error::new(
@@ -700,6 +786,7 @@ pub(super) fn call(
         }
         "getaddrinfo" => return public_getaddrinfo(ctx, args, kwargs),
         "getnameinfo" => return getnameinfo(ctx, args, kwargs),
+        "getservbyname" | "getservbyport" => return lookup_service(ctx, name, args, kwargs),
         "gethostname" => {
             check_args(name, args, kwargs, 0, &[])?;
             super::audit::event(ctx, "socket.gethostname", args)?;
