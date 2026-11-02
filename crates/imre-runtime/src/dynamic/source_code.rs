@@ -2652,11 +2652,30 @@ impl Context {
         }
         let spellings = string_replacements(source, parsed.tokens());
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
-            let message = format!(
-                "keyword argument repeated: {}",
-                keyword.arg.as_ref().unwrap()
-            );
+        let async_error = match parsed.syntax() {
+            ast::Mod::Module(module) => {
+                let error = imre_ast::async_generators::syntax_error(module);
+                if error.is_some() && imre_ast::misplaced_star_import(&module.body).is_some() {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        "import * only allowed at module level",
+                    ));
+                }
+                error
+            }
+            _ => None,
+        };
+        let invalid = async_error
+            .map(|(range, msg)| (range, msg.to_owned()))
+            .or_else(|| {
+                let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
+                let name = keyword.arg.as_ref().unwrap();
+                Some((
+                    keyword.range(),
+                    format!("keyword argument repeated: {name}"),
+                ))
+            });
+        if let Some((range, message)) = invalid {
             let position = |offset: usize| {
                 let mut line = 1;
                 let mut line_start = 0;
@@ -2668,8 +2687,8 @@ impl Context {
                 }
                 (line, offset - line_start + 1)
             };
-            let (line, column) = position(keyword.start().to_usize());
-            let (end_line, end_column) = position(keyword.end().to_usize());
+            let (line, column) = position(range.start().to_usize());
+            let (end_line, end_column) = position(range.end().to_usize());
             let msg = self.text(&message);
             let details = vec![
                 filename_id,
