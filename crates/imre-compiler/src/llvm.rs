@@ -9201,16 +9201,9 @@ define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline 
   ret i64 %selected
 }
 
-; Reassociation is exact only if the integral term, count and every partial
-; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
-define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
-entry:
-  %single = icmp eq i64 %count, 1
-  br i1 %single, label %one, label %bounds
-one:
-  %single_sum = fadd double %sum, %term
-  ret double %single_sum
-bounds:
+; Bound the absolute value of every partial sum for an integral projection.
+; The strict comparison also rejects a rounded-up or rounded-down boundary.
+define internal i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count) alwaysinline nounwind {
   %n = uitofp i64 %count to double
   %ni = icmp ule i64 %count, 9007199254740992
   %t = call double @llvm.trunc.f64(double %term)
@@ -9225,8 +9218,23 @@ bounds:
   %integral = and i1 %ti, %si
   %fits = and i1 %ni, %bounded
   %exact = and i1 %integral, %fits
+  ret i1 %exact
+}
+
+; Reassociation is exact only if the integral term, count and every partial
+; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
+define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
+entry:
+  %single = icmp eq i64 %count, 1
+  br i1 %single, label %one, label %bounds
+one:
+  %single_sum = fadd double %sum, %term
+  ret double %single_sum
+bounds:
+  %exact = call i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count)
   br i1 %exact, label %bulk, label %ordered
 bulk:
+  %n = uitofp i64 %count to double
   %product = fmul double %term, %n
   %result = fadd double %sum, %product
   ret double %result
