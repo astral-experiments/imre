@@ -706,6 +706,30 @@ Tuple.__doc__ = \
     """
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
+Type = _SpecialGenericAlias(type, 1, name="Type", inst=False)
+Type.__doc__ = \
+    """Deprecated alias to builtins.type.
+
+    builtins.type or typing.Type can be used to annotate class objects.
+    For example, suppose we have the following classes::
+
+        class User: ...  # Abstract base for User classes
+        class BasicUser(User): ...
+        class ProUser(User): ...
+        class TeamUser(User): ...
+
+    And a function that takes a class argument that's a subclass of
+    User and returns an instance of the corresponding class::
+
+        def new_user[U](user_class: Type[U]) -> U:
+            user = user_class()
+            # (Here we could write the user object to a database)
+            return user
+
+        joe = new_user(BasicUser)
+
+    At this point the type checker knows that joe has type BasicUser.
+    """
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 

@@ -6252,6 +6252,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
+                Intrinsic::CachedProperty => {
+                    return Err(self.object_runtime_export("functools.cached_property", expression));
+                }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
@@ -6414,6 +6417,9 @@ impl<'a> Checker<'a> {
                 (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
             }
             ast::Expr::FString(value) => return self.fstring(value),
+            ast::Expr::TString(_) => {
+                return Err(self.object_builtin_error("template literal", expression));
+            }
             ast::Expr::Lambda(lambda) => return self.lambda_value(lambda, None, None),
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
@@ -8889,6 +8895,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
+                return Err(self.object_runtime_export("functools.cached_property", call));
             }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));

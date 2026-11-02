@@ -345,13 +345,15 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
-pub(super) const BYTEARRAY_METHODS: &[&str] =
-    &["__repr__", "append", "clear", "copy", "extend", "reverse"];
+pub(super) const BYTEARRAY_METHODS: &[&str] = &[
+    "__repr__", "append", "clear", "copy", "endswith", "extend", "reverse",
+];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
     "__repr__",
     "decode",
+    "endswith",
     "rfind",
     "rsplit",
     "rstrip",
@@ -589,11 +591,17 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "file"
         }
         Value::RegexPattern(_)
-            if matches!(attr, "findall" | "match" | "fullmatch" | "search" | "split") =>
+            if matches!(
+                attr,
+                "findall" | "match" | "fullmatch" | "search" | "split" | "scanner"
+            ) =>
         {
             "pattern"
         }
-        Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
+        Value::RegexScanner { .. } if matches!(attr, "match" | "search") => "scanner",
+        Value::RegexMatch(_) if matches!(attr, "group" | "groups" | "start" | "end" | "span") => {
+            "match"
+        }
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
         Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
@@ -1029,7 +1037,9 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
+            "bytearray" if matches!(method, "decode" | "endswith") => {
+                text::method(ctx, owner, method, args, kwargs)
+            }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
                 text::bytearray_method(ctx, name, method, args, kwargs)

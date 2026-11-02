@@ -52,37 +52,59 @@ enum LlvmType {
     Ptr,
 }
 
+/// Runtime descriptor tags for concrete words. Nullable is ORed with the payload tag.
+#[repr(u32)]
+enum WordKind {
+    None = 0,
+    Bool = 1,
+    Int = 2,
+    Str = 3,
+    IntList = 4,
+    Object = 5,
+    Record = 6,
+    Float = 7,
+    Bytes = 8,
+    Union = 9,
+    Enum = 10,
+    BuiltinClass = 11,
+    ForwardRef = 12,
+    AnnotationValue = 13,
+    Function = 14,
+    Nullable = 256,
+}
+
 impl Type {
-    fn llvm_type(self) -> LlvmType {
+    /// Classifies the type once for LLVM values, retain/release calls, and field descriptors.
+    fn word_kind(self) -> WordKind {
         match self {
-            Self::Int
-            | Self::IntEnum(_)
-            | Self::StrEnum(_)
-            | Self::Enum(_)
-            | Self::Optional(_)
-            | Self::Union(_)
-            | Self::StringIterable => LlvmType::I64,
-            Self::Float => LlvmType::Double,
-            Self::Bool => LlvmType::I1,
-            Self::Str
-            | Self::ForwardRef(_)
-            | Self::AnnotationValue(_)
+            Self::None => WordKind::None,
+            Self::Bool => WordKind::Bool,
+            Self::Int => WordKind::Int,
+            Self::Float => WordKind::Float,
+            Self::Str | Self::StrLiteral(_) => WordKind::Str,
+            Self::BuiltinClass => WordKind::BuiltinClass,
+            Self::ForwardRef(_) => WordKind::ForwardRef,
+            Self::FunctionRef => WordKind::Function,
+            Self::AnnotationValue(_) => WordKind::AnnotationValue,
+            Self::IntEnum(_) | Self::StrEnum(_) | Self::Enum(_) => WordKind::Enum,
+            Self::Bytes => WordKind::Bytes,
+            Self::Union(_) | Self::StringIterable => WordKind::Union,
+            Self::ListInt => WordKind::IntList,
+            Self::Class(_)
+            | Self::VarTuple(_)
+            | Self::Tuple(_)
             | Self::CmpKey(..)
-            | Self::BuiltinClass
-            | Self::StrLiteral(_)
-            | Self::Bytes
-            | Self::ListInt
-            | Self::Class(_)
             | Self::Callable(_)
-            | Self::List(_)
+            | Self::ModuleSpec(_)
+            | Self::SysImplementation
+            | Self::CompletedProcess(..) => WordKind::Record,
+            Self::List(_)
             | Self::Dict(_)
             | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::FrozenStrings
             | Self::StringKeys
-            | Self::NativeModule
-            | Self::ModuleNamespace
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -95,9 +117,9 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
-            | Self::ModuleSpec(_)
-            | Self::SysImplementation
-            | Self::CompletedProcess(..)
+            | Self::TextIO
+            | Self::StringIO
+            | Self::HandlerLock
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -109,9 +131,8 @@ impl Type {
             | Self::Popen(..)
             | Self::ActivePopen
             | Self::AsyncProcess(_)
-            | Self::TextIO
-            | Self::StringIO
-            | Self::HandlerLock
+            | Self::NativeModule
+            | Self::ModuleNamespace
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -120,12 +141,11 @@ impl Type {
             | Self::CacheState(_)
             | Self::ProcessSelectorClass
             | Self::ClockTime
-            | Self::FunctionRef
-            | Self::OverloadStub
             | Self::Calendar(_)
-            | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::Placeholder(_)
+            | Self::OverloadStub
+            | Self::PlainObject
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
@@ -152,10 +172,26 @@ impl Type {
             | Self::RegexMatch
             | Self::SourceModule
             | Self::BytesIO
-            | Self::BinaryIO
-            | Self::VarTuple(_)
-            | Self::Tuple(_) => LlvmType::Ptr,
-            Self::None => LlvmType::I8,
+            | Self::BinaryIO => WordKind::Object,
+            Self::Optional(_) => WordKind::Nullable,
+        }
+    }
+
+    fn llvm_type(self) -> LlvmType {
+        match self.word_kind() {
+            WordKind::None => LlvmType::I8,
+            WordKind::Bool => LlvmType::I1,
+            WordKind::Float => LlvmType::Double,
+            WordKind::Int | WordKind::Enum | WordKind::Nullable | WordKind::Union => LlvmType::I64,
+            WordKind::Str
+            | WordKind::IntList
+            | WordKind::Object
+            | WordKind::Record
+            | WordKind::Bytes
+            | WordKind::BuiltinClass
+            | WordKind::ForwardRef
+            | WordKind::AnnotationValue
+            | WordKind::Function => LlvmType::Ptr,
         }
     }
 
@@ -766,111 +802,25 @@ impl Emitter<'_, '_> {
             return;
         }
         let ty = self.module.types.payload(value.ty).unwrap_or(value.ty);
-        if ty == Type::Float {
-            if value.ty != Type::Float {
-                self.void_call(&format!("imre_float_box_{operation}"), &[value]);
+        let family = match ty.word_kind() {
+            WordKind::Float => {
+                if value.ty != ty {
+                    self.void_call(&format!("imre_float_box_{operation}"), &[value]);
+                }
+                return;
             }
-            return;
-        }
-        let family = match ty {
-            Type::Int => "int",
-            Type::Union(_) | Type::StringIterable => "union",
-            Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
-            Type::Bytes => "bytes",
-            Type::ListInt => "list",
-            Type::Class(_)
-            | Type::Tuple(_)
-            | Type::Callable(_)
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::VarTuple(_)
-            | Type::ModuleSpec(_)
-            | Type::CmpKey(..)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..) => "record",
-            Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO => "object",
-            Type::Float
-            | Type::Bool
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::None => return,
-            Type::Optional(_) => unreachable!("optional types are flattened"),
+            WordKind::Int => "int",
+            WordKind::Union => "union",
+            WordKind::Str | WordKind::BuiltinClass => "str",
+            WordKind::Bytes => "bytes",
+            WordKind::IntList => "list",
+            WordKind::Record
+            | WordKind::ForwardRef
+            | WordKind::Function
+            | WordKind::AnnotationValue => "record",
+            WordKind::Object => "object",
+            WordKind::None | WordKind::Bool | WordKind::Enum => return,
+            WordKind::Nullable => unreachable!("optional types are flattened"),
         };
         let name = if value.ty == Type::Int {
             format!("{operation}_int_nonzero")
@@ -8469,108 +8419,14 @@ fn iterable_mode(ty: Type) -> u32 {
     }
 }
 
-/// Must match the descriptor kinds in the runtime. Nullable words preserve the
-/// payload's ownership operation, with bit 8 allowing the absent zero value.
+/// Nullable words carry their payload's kind. Bare callbacks use the function descriptor.
 fn representation_kind(ty: Type, types: &Types) -> u32 {
     match ty {
-        Type::None => 0,
-        Type::Bool => 1,
-        Type::Int => 2,
-        Type::Float => 7,
-        Type::Str | Type::StrLiteral(_) => 3,
-        Type::BuiltinClass => 11,
-        Type::ForwardRef(_) => 12,
-        Type::FunctionRef => 14,
-        Type::AnnotationValue(_) => 13,
-        Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => 10,
-        Type::Bytes => 8,
-        Type::Union(_) | Type::StringIterable => 9,
-        Type::ListInt => 4,
-        Type::Callable(_) if types.is_plain_callback(ty) => 14,
-        Type::Class(_)
-        | Type::VarTuple(_)
-        | Type::Tuple(_)
-        | Type::CmpKey(..)
-        | Type::Callable(_)
-        | Type::ModuleSpec(_)
-        | Type::SysImplementation
-        | Type::CompletedProcess(..) => 6,
-        Type::List(_)
-        | Type::Dict(_)
-        | Type::ChainMap(_)
-        | Type::Set(_)
-        | Type::Deque(_)
-        | Type::FrozenStrings
-        | Type::StringKeys
-        | Type::Iterator
-        | Type::Cursor(_)
-        | Type::ByteOutput
-        | Type::TupleBuffer
-        | Type::Exception
-        | Type::NamedException(_)
-        | Type::ObjectValue
-        | Type::ReadOnlyObjectMapping
-        | Type::ImportException
-        | Type::TimeoutExpired
-        | Type::Path
-        | Type::PurePath(_)
-        | Type::TextIO
-        | Type::StringIO
-        | Type::HandlerLock
-        | Type::EventLoop
-        | Type::Coroutine(_)
-        | Type::Task(_)
-        | Type::TaskGroup
-        | Type::Document(_)
-        | Type::GeneratorContext
-        | Type::DirectoryContext(_)
-        | Type::Semaphore
-        | Type::Popen(..)
-        | Type::ActivePopen
-        | Type::AsyncProcess(_)
-        | Type::NativeModule
-        | Type::ModuleNamespace
-        | Type::LogFormatter
-        | Type::LogRecord
-        | Type::Logger
-        | Type::LogManager
-        | Type::TimedFileHandler
-        | Type::CacheState(_)
-        | Type::ProcessSelectorClass
-        | Type::ClockTime
-        | Type::Calendar(_)
-        | Type::StrDescriptor(_)
-        | Type::Placeholder(_)
-        | Type::OverloadStub
-        | Type::PlainObject
-        | Type::SimpleNamespace(_)
-        | Type::PathInfo
-        | Type::CodecInfo
-        | Type::Poll
-        | Type::Socket
-        | Type::CodecWriterClass
-        | Type::CodecWriter
-        | Type::TextOutput
-        | Type::Hash
-        | Type::JsonDecoder
-        | Type::ZipFile
-        | Type::ZipInfo
-        | Type::Context
-        | Type::ContextMissing
-        | Type::WeakProxy(_)
-        | Type::ContextVar(_)
-        | Type::ContextToken(_)
-        | Type::CsvReader
-        | Type::Patch(_)
-        | Type::RegexPattern
-        | Type::JsonRoot
-        | Type::JsonValue
-        | Type::JsonObject
-        | Type::RegexMatch
-        | Type::SourceModule
-        | Type::BytesIO
-        | Type::BinaryIO => 5,
-        Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
+        Type::Optional(_) => {
+            WordKind::Nullable as u32 | representation_kind(types.payload(ty).unwrap(), types)
+        }
+        Type::Callable(_) if types.is_plain_callback(ty) => WordKind::Function as u32,
+        _ => ty.word_kind() as u32,
     }
 }
 

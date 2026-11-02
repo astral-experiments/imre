@@ -64,6 +64,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
+        "_tokenize" => Some(("_tokenize.py", include_str!("../stdlib/_tokenize.py"))),
         "__hello__" => Some(("__hello__.py", include_str!("../stdlib/__hello__.py"))),
         "ast" => Some(("ast.py", include_str!("../stdlib/ast.py"))),
         "stat" => {
@@ -237,6 +238,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "string/__init__.py",
             include_str!("../stdlib/string/cpython.py"),
         )),
+        "string.templatelib" => Some((
+            "string/templatelib.py",
+            include_str!("../stdlib/string/templatelib.py"),
+        )),
         "http" => Some((
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),
@@ -313,6 +318,7 @@ pub(crate) enum IntrinsicModule {
     ImportlibMachinery,
     ImportlibBootstrapExternal,
     ImportlibMetadata,
+    ImportlibResources,
     ImportlibUtil,
     Array,
     Imp,
@@ -834,6 +840,7 @@ impl IntrinsicModule {
                 Some(Self::ImportlibBootstrapExternal)
             }
             "importlib.metadata" => Some(Self::ImportlibMetadata),
+            "importlib.resources" => Some(Self::ImportlibResources),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
             "_collections" => Some(Self::CollectionsNative),
@@ -1035,6 +1042,12 @@ impl IntrinsicModule {
             }
             (Self::Importlib, "invalidate_caches") => {
                 Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
+            }
+            (Self::ImportlibResources, "files") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.files")
+            }
+            (Self::ImportlibResources, "read_text") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.read_text")
             }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMetadata, "entry_points") => {
@@ -1331,6 +1344,7 @@ impl IntrinsicModule {
             (Self::Typing, "T") => Intrinsic::ObjectRuntimeExport("typing.T"),
             (Self::Typing, "KT") => Intrinsic::ObjectRuntimeExport("typing.KT"),
             (Self::Typing, "VT") => Intrinsic::ObjectRuntimeExport("typing.VT"),
+            (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
@@ -1447,6 +1461,7 @@ impl IntrinsicModule {
                 "SOCK_SEQPACKET" => "_socket.SOCK_SEQPACKET",
                 "SOL_SOCKET" => "_socket.SOL_SOCKET",
                 "IPPROTO_TCP" => "_socket.IPPROTO_TCP",
+                "IPPROTO_UDP" => "_socket.IPPROTO_UDP",
                 "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
                 "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
                 "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
@@ -1464,6 +1479,7 @@ impl IntrinsicModule {
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
             }
+            (Self::Socket, "IPPROTO_UDP") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_UDP"),
             (Self::Socket, "IPPROTO_IPV6") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_IPV6"),
             (Self::Socket, "IPV6_V6ONLY") => Intrinsic::ObjectRuntimeExport("socket.IPV6_V6ONLY"),
             (Self::Socket, "has_ipv6") => Intrinsic::ObjectRuntimeExport("socket.has_ipv6"),
@@ -1563,6 +1579,7 @@ impl IntrinsicModule {
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "match") => Intrinsic::RegexMatchStart,
+            (Self::Re, "Scanner") => Intrinsic::ObjectRuntimeExport("re.Scanner"),
             (Self::Re, "sub") => Intrinsic::RegexSub,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
@@ -2730,6 +2747,7 @@ fn importlib_child(name: &str) -> Option<IntrinsicModule> {
         "machinery" => Some(IntrinsicModule::ImportlibMachinery),
         "_bootstrap_external" => Some(IntrinsicModule::ImportlibBootstrapExternal),
         "metadata" => Some(IntrinsicModule::ImportlibMetadata),
+        "resources" => Some(IntrinsicModule::ImportlibResources),
         "util" => Some(IntrinsicModule::ImportlibUtil),
         _ => None,
     }
@@ -2740,6 +2758,7 @@ fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
         IntrinsicModule::ImportlibMachinery => Some("machinery"),
         IntrinsicModule::ImportlibBootstrapExternal => Some("_bootstrap_external"),
         IntrinsicModule::ImportlibMetadata => Some("metadata"),
+        IntrinsicModule::ImportlibResources => Some("resources"),
         IntrinsicModule::ImportlibUtil => Some("util"),
         _ => None,
     }
@@ -3656,6 +3675,7 @@ impl<'a> Loader<'a> {
                             IntrinsicModule::Marshal
                                 | IntrinsicModule::Pickle
                                 | IntrinsicModule::Struct
+                                | IntrinsicModule::ImportlibResources
                         ) && matches!(
                             binding,
                             Binding::Intrinsic(

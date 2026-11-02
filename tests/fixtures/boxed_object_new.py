@@ -33,6 +33,31 @@ def current():
     assert type(object.__new__(Custom)) is Custom
     assert type(object.__new__(object)) is object
 
+    from typing import Generic, Protocol, TypeVar
+
+    parameter = TypeVar("parameter")
+
+    class Marker(Protocol[parameter]):
+        pass
+
+    class Concrete(Marker[parameter]):
+        def __new__(cls, *args):
+            return super().__new__(cls, *args)
+
+    assert type(Concrete[int]()) is Concrete
+    for base in (Generic, Protocol, Marker):
+        assert type(object.__new__(base)) is base
+
+    class ListMarker(Marker, list):
+        pass
+
+    try:
+        object.__new__(ListMarker)
+    except TypeError as exc:
+        assert str(exc) == "object.__new__(ListMarker) is not safe, use ListMarker.__new__()"
+    else:
+        raise AssertionError("object.__new__ allocated a list subclass")
+
     for args in ((), (42,), (Plain, 1), (Custom, 1), (list,), (NativeList,),
                  (ModuleType,), (Abstract,)):
         try:

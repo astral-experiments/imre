@@ -41,6 +41,7 @@ impl BuiltinDescriptor {
                 ][..],
             )),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
+            Some(("bytes", attr)) => Some(("bytes", attr, &["endswith"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
@@ -73,6 +74,7 @@ impl BuiltinDescriptor {
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__repr__" => ("object", "__repr__"),
+            "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
@@ -127,6 +129,7 @@ impl BuiltinDescriptor {
                 ctx.type_name(receiver) == class
             }
             "object" => true,
+            "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => {
@@ -153,7 +156,8 @@ impl BuiltinDescriptor {
                     "descriptor '{}' for '{}' objects doesn't apply to a '{}' object",
                     self.name,
                     self.owner,
-                    ctx.type_name(receiver)
+                    ctx.builtin_type_name(receiver)
+                        .unwrap_or_else(|| ctx.type_name(receiver))
                 ),
             ));
         }
@@ -190,6 +194,10 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),
+            "__text_signature__" if self.name == "__call__" => {
+                ctx.text("($self, /, *args, **kwargs)")
+            }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
@@ -197,6 +205,13 @@ impl BuiltinDescriptor {
             "__text_signature__" if matches!(self.name, "__add__" | "__iadd__") => {
                 ctx.text("($self, value, /)")
             }
+            "__text_signature__" if self.name == "endswith" => {
+                ctx.text("($self, suffix[, start[, end]], /)")
+            }
+            "__doc__" if self.name == "endswith" => ctx.text(format!(
+                "Return True if the {owner} ends with the specified suffix, False otherwise.\n\n  suffix\n    A bytes or a tuple of bytes to try.\n  start\n    Optional start position. Default: start of the {owner}.\n  end\n    Optional stop position. Default: end of the {owner}.",
+                owner = self.owner
+            )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
                     ("isascii", "__doc__") => {

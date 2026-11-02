@@ -71,7 +71,20 @@ def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs)
     return _boxedRaises(self, "assertRaisesRegex", expected_exception, regex, args, kwargs)
 
 
+def assertRegex(self, text, expected_regex, msg=None):
+    """Fail the test unless the text matches the regular expression."""
+    if isinstance(expected_regex, (str, bytes)):
+        assert expected_regex, "expected_regex must not be empty."
+        expected_regex = re.compile(expected_regex)
+    if not expected_regex.search(text):
+        standardMsg = "Regex didn't match: %r not found in %r" % (
+            expected_regex.pattern, text)
+        # _formatMessage ensures the longMessage option is respected
+        msg = self._formatMessage(msg, standardMsg)
+        raise self.failureException(msg)
+
+TestCase.assertRegex = assertRegex
 TestCase.assertRaisesRegex = assertRaisesRegex
 TestCase._formatMessage = _boxed_format_message
 TestCase.assertRaises = assertRaises
-del assertRaises, assertRaisesRegex
+del assertRegex, assertRaises, assertRaisesRegex

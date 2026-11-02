@@ -46,7 +46,7 @@ pub(crate) fn emit(
     let mut main = format!(
         "define i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
-    for (name, path, source) in modules {
+    for (unit, (name, path, source)) in modules.iter().enumerate() {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
         crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
@@ -63,10 +63,19 @@ pub(crate) fn emit(
         };
         let name = output.data(name.as_bytes());
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
+        let has_templates = parsed
+            .tokens()
+            .iter()
+            .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
+        let template_expressions =
+            imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
         let location = SourceMap {
+            unit,
+            has_templates,
+            template_expressions,
             replacements,
             method_imports,
             barry_as_flufl: body.iter().any(|stmt| {
@@ -111,6 +120,9 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    unit: usize,
+    has_templates: bool,
+    template_expressions: HashMap<ruff_text_size::TextSize, String>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
@@ -128,9 +140,16 @@ impl SourceMap<'_> {
     }
 }
 
+#[derive(Eq, Hash, PartialEq)]
+enum StringConstant {
+    Text(Vec<u8>),
+    Tuple(Vec<Vec<u8>>),
+}
+
 #[derive(Default)]
 struct Output {
     keep_docstrings: bool,
+    string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
     positions: HashMap<[usize; 4], usize>,
