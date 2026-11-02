@@ -4464,14 +4464,17 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 }
 
 impl Context {
-    /// Native timedelta participates in the same reflected arithmetic ordering as a Python class.
-    fn timedelta_slot_class(&self, value: Id) -> Option<Id> {
-        match self.heap.get(value) {
-            Value::Calendar { value, .. } if value.class() == "timedelta" => {
-                self.builtins.get("datetime.timedelta").copied()
-            }
-            _ => None,
-        }
+    /// Exact native calendar operands participate in Python's reflected numeric slot ordering.
+    fn calendar_slot_class(&self, value: Id, add_or_subtract: bool) -> Option<Id> {
+        let Value::Calendar { value, .. } = self.heap.get(value) else {
+            return None;
+        };
+        let class = match value.class() {
+            "timedelta" => "datetime.timedelta",
+            "datetime" if add_or_subtract => "datetime.datetime",
+            _ => return None,
+        };
+        self.builtins.get(class).copied()
     }
 
     /// An inherited object.__ne__ leaves ordinary comparison to the equality fallback.
@@ -4506,7 +4509,12 @@ impl Context {
                 | "__rtruediv__"
                 | "__floordiv__"
                 | "__rfloordiv__"
-        ) && self.timedelta_slot_class(obj).is_some()
+        ) && self
+            .calendar_slot_class(
+                obj,
+                matches!(name, "__add__" | "__radd__" | "__sub__" | "__rsub__"),
+            )
+            .is_some()
         {
             Some(self.lookup_attr(obj, name)?)
         } else {
@@ -4799,7 +4807,7 @@ impl Context {
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
                 if matches!(op, "+" | "-" | "*" | "/" | "//") {
-                    self.timedelta_slot_class(id)
+                    self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None
                 }
