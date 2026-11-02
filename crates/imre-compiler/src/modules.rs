@@ -1906,6 +1906,11 @@ impl SourceModule {
                 return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(export)));
             }
         }
+        if self.is_bundled("unittest.mock") && matches!(name, "sentinel" | "DEFAULT") {
+            return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                "unittest.mock sentinel objects",
+            )));
+        }
         let binding = *self.bindings.get(name)?;
         (self.archive.is_none() || matches!(binding, Binding::Definition(_))).then_some(binding)
     }
