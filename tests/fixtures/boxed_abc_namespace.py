@@ -65,8 +65,10 @@ def check_collection_flags():
             raise AssertionError("ABCMeta called __index__")
 
     for mask in (0, 32, 64, True, IntSubclass(96), Index()):
-        cls = abc.ABCMeta("Valid", (Base,), {"__abc_tpflags__": mask})
+        namespace = {"__abc_tpflags__": mask}
+        cls = abc.ABCMeta("Valid", (Base,), namespace)
         assert captured[-1] == (cls, mask)
+        assert "__abc_tpflags__" not in cls.__dict__ and namespace["__abc_tpflags__"] is mask
 
     class Plain:
         __abc_tpflags__ = 96
