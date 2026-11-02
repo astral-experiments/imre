@@ -8,7 +8,7 @@ from test import test_os
 def process_environment(label):
     # env(1) reads the child's process environment independently of os.environb.
     completed = subprocess.run(["/usr/bin/env", "-0"], stdout=subprocess.PIPE, check=True)
-    print(label + " " + completed.stdout.hex())
+    print(label + " " + repr(completed.stdout))
 
 
 def audit_environment(label):
@@ -63,6 +63,8 @@ def main():
     print("RAN " + str(result.testsRun))
     if result.skipped:
         print("OUTCOME SKIP")
+        for _, reason in result.skipped:
+            print("SKIP_REASON " + reason)
     elif result.errors:
         print("OUTCOME ERROR")
     elif result.failures:

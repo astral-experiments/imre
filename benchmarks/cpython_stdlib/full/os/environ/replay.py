@@ -124,10 +124,10 @@ def raw_environment(result, label):
     if len(parts) != 1:
         return None
     try:
-        snapshot = bytes.fromhex(parts[0])
-    except ValueError:
+        snapshot = ast.literal_eval(parts[0])
+    except (SyntaxError, ValueError):
         return None
-    if not snapshot.endswith(b"\0"):
+    if not isinstance(snapshot, bytes) or not snapshot.endswith(b"\0"):
         return None
     entries = snapshot[:-1].split(b"\0")
     if any(b"=" not in entry for entry in entries):
@@ -190,9 +190,9 @@ def main():
         results["toolchain_sha256"] = {str(p): sha256(p) for p in (launcher, archive, clang)}
         flags = ["--no-cache", "--runtime", str(archive), "--clang", str(clang), "--opt-level", args.level]
         binary = work / "environ-tests"
-        command = [launcher, "build", entry, "--module-root", root, *flags, "-o", binary]
         if args.engine == "boxed":
-            command.append("--runtime-imports")
+            flags.append("--runtime-imports")
+        command = [launcher, "build", entry, "--module-root", root, *flags, "-o", binary]
         buildenv = dict(os.environ)
         for key in ("PYTHONPATH", "IMREFLAGS", "IMRE_ENCODED_FLAGS"):
             buildenv.pop(key, None)
@@ -243,6 +243,8 @@ def main():
             "parent_environment_unchanged": parent_ok, "expected_python_executable": executable_ok,
             "outcome": outcome[0] if len(outcome) == 1 else "UNOBSERVED", "verified": verified,
         }
+        if outcome == ["SKIP"]:
+            results["rows"][identifier]["skip_reasons"] = fields(execution, "SKIP_REASON")
         save()
         print(identifier, results["rows"][identifier]["outcome"], verified, flush=True)
         if not parent_ok:
