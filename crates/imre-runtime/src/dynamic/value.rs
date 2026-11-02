@@ -3272,16 +3272,21 @@ impl Heap {
         } = cycles;
         unowned.clear();
         incoming.fill(0);
-        for slot in &self.slots {
+        for (id, slot) in self.slots.iter().enumerate() {
             if !slot.marked()
                 && let Some(value) = &slot.value
             {
+                // Count the candidate itself so that zero denotes a vacant or reachable slot.
+                incoming[id] += 1;
                 self.unreachable_children(value, |child| incoming[child] += 1);
             }
         }
-        for (id, slot) in self.slots.iter().enumerate() {
-            if !slot.marked() && slot.value.is_some() && incoming[id] == 0 {
-                unowned.push(id);
+        for (id, count) in incoming.iter_mut().enumerate() {
+            if *count != 0 {
+                *count -= 1;
+                if *count == 0 {
+                    unowned.push(id);
+                }
             }
         }
         while let Some(id) = unowned.pop() {
