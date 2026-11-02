@@ -206,7 +206,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(owner, "object" | "float" | "int" | "str") || is_exception(owner)).then_some(owner)
+    (matches!(owner, "object" | "dict" | "float" | "int" | "str") || is_exception(owner))
+        .then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -301,6 +302,7 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__new__",
     "__repr__",
     "__init__",
     "__len__",
