@@ -21,6 +21,9 @@ class PathEntryFinder(metaclass=abc.ABCMeta):
         pass
 
 
+PathEntryFinder.register(machinery.FileFinder)
+
+
 class ResourceLoader(Loader):
     @abc.abstractmethod
     def get_data(self, path):

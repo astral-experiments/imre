@@ -1365,6 +1365,9 @@ impl IntrinsicModule {
             (Self::ImportlibMetadata, "entry_points") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
             }
+            (Self::ImportlibMachinery, "FileFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.FileFinder")
+            }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::ImportlibMachinery, "all_suffixes") => {
                 Intrinsic::ObjectRuntimeExport("importlib.machinery.all_suffixes")
