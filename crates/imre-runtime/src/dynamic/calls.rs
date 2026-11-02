@@ -978,7 +978,11 @@ impl Context {
             }
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
-            (None, None) if matches!(name, "__getattribute__" | "__delattr__") => {
+            (None, None)
+                if matches!(name, "__getattribute__" | "__delattr__")
+                    || (name == "__str__"
+                        && self.allocation_base(class) == Some(self.builtin("object"))) =>
+            {
                 let method = self.builtin(&format!("object.{name}"));
                 self.bind_attribute(method, object, class)
             }
