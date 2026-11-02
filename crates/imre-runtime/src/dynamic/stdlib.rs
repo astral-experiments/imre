@@ -133,6 +133,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "genericpath"
             | "hmac"
             | "urllib.parse"
+            | "re._constants"
             | "io"
             | "itertools"
             | "json"

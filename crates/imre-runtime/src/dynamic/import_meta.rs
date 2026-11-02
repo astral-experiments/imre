@@ -84,7 +84,7 @@ impl Context {
         {
             return Ok(vec![path.parent().unwrap().to_owned()]);
         }
-        if matches!(name, "email" | "importlib" | "json" | "urllib") {
+        if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
             return Ok(vec![PathBuf::from(format!("<imre stdlib>/{name}"))]);
         }
         Ok(Vec::new())
