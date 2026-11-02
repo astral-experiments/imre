@@ -79,7 +79,7 @@ fn is_final_sigma(before: impl Iterator<Item = u32>, after: impl Iterator<Item =
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Case {
+pub(crate) enum Case {
     Lower,
     Upper,
     Capitalize,
@@ -137,13 +137,17 @@ fn case_chars(source: &str, case: Case) -> impl Iterator<Item = char> {
     })
 }
 
-/// Titlecase or swap the case of a scalar string using the pinned Unicode tables.
-pub(crate) fn case_map(source: &str, title: bool) -> super::Result<String> {
-    let case = if title { Case::Title } else { Case::Swap };
+/// Map a scalar string with the same Unicode data used by native string operations.
+pub(crate) fn case_map(source: &str, case: Case) -> super::Result<String> {
     let mut result = String::new();
     result
         .try_reserve_exact(source.len())
         .map_err(|_| Error::allocation())?;
+    if case == Case::Lower && source.is_ascii() {
+        result.push_str(source);
+        result.make_ascii_lowercase();
+        return Ok(result);
+    }
     for ch in case_chars(source, case) {
         result
             .try_reserve(ch.len_utf8())
@@ -153,9 +157,8 @@ pub(crate) fn case_map(source: &str, title: bool) -> super::Result<String> {
     Ok(result)
 }
 
-/// Surrogates survive as code points and form uncased boundaries for both title and sigma.
-pub(crate) fn case_map_points(points: &[u32], title: bool) -> super::Result<Vec<u32>> {
-    let case = if title { Case::Title } else { Case::Swap };
+/// Preserve surrogates as uncased boundaries when mapping Python code points.
+pub(crate) fn case_map_points(points: &[u32], case: Case) -> super::Result<Vec<u32>> {
     let mut result = Vec::new();
     result
         .try_reserve_exact(points.len())
@@ -193,7 +196,8 @@ pub unsafe extern "C" fn imre_str_case_map(source: *const Str, title: u32) -> *c
     let result = if source.is_empty() {
         super::try_owned_string("")
     } else {
-        case_map(source, title != 0)
+        let case = if title != 0 { Case::Title } else { Case::Swap };
+        case_map(source, case)
             .and_then(|value| StrOwner::try_new(Str::from(value)).map_err(|_| Error::allocation()))
     };
     finish(result.map(StrOwner::into_raw), std::ptr::null())

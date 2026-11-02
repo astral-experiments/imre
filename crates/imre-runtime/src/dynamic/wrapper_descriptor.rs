@@ -209,6 +209,7 @@ impl BuiltinDescriptor {
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
             "str.isidentifier" => ("str", "isidentifier"),
+            "str.lower" => ("str", "lower"),
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
             "str.islower" => ("str", "islower"),
@@ -273,6 +274,7 @@ impl BuiltinDescriptor {
                     | "ljust"
                     | "rjust"
                     | "zfill"
+                    | "lower"
                     | "title"
                     | "swapcase"
             ),
@@ -572,6 +574,7 @@ impl BuiltinDescriptor {
                         "Pad a numeric string with zeros on the left, to fill a field of the given width.\n\nThe string is never truncated."
                     }
                     ("zfill", _) => "($self, width, /)",
+                    ("lower", "__doc__") => "Return a copy of the string converted to lowercase.",
                     ("title", "__doc__") => {
                         "Return a version of the string where each word is titlecased.\n\nMore specifically, words start with uppercased characters and all remaining\ncased characters have lower case."
                     }
@@ -579,7 +582,7 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "title"
+                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "lower" | "title"
                         | "swapcase",
                         _,
                     ) => "($self, /)",

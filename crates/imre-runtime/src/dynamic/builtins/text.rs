@@ -14,7 +14,9 @@ use super::super::operators::append_rendered_text;
 use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
-use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
+use crate::objects::{
+    Case, python_whitespace, split_parts, translate, visit_line_fields as split_lines,
+};
 
 mod bytes_fields;
 mod maketrans;
@@ -2106,8 +2108,13 @@ pub(super) fn method(
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
     };
-    let mapping = matches!(name, "title" | "swapcase");
-    if predicate.is_some() || mapping {
+    let mapping = match name {
+        "lower" if owner == "str" => Some(Case::Lower),
+        "title" => Some(Case::Title),
+        "swapcase" => Some(Case::Swap),
+        _ => None,
+    };
+    if predicate.is_some() || mapping.is_some() {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "str.{name}() takes no keyword arguments"
@@ -2120,14 +2127,13 @@ pub(super) fn method(
             )));
         }
     }
-    if mapping {
-        let title = name == "title";
+    if let Some(case) = mapping {
         let storage = ctx.string_storage(receiver).unwrap();
         let mapped = match ctx.heap.get(storage) {
             Value::Str(text) if text.is_empty() => return ctx.heap.string_literal(""),
-            Value::Str(text) => Value::Str(crate::objects::case_map(text, title)?),
+            Value::Str(text) => Value::Str(crate::objects::case_map(text, case)?),
             Value::SurrogateStr(points) => {
-                Value::SurrogateStr(crate::objects::case_map_points(points, title)?)
+                Value::SurrogateStr(crate::objects::case_map_points(points, case)?)
             }
             _ => unreachable!(),
         };
@@ -2443,12 +2449,11 @@ pub(super) fn method(
             split_lines(&source, keep, |field| values.push(ctx.text(field)));
             Ok(ctx.alloc(Value::List(values)))
         }
-        "capitalize" | "lower" | "upper" => {
+        "capitalize" | "upper" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
             Ok(ctx.text(match name {
                 "capitalize" => crate::objects::capitalize(&source)?.into_string(),
-                "lower" => source.to_lowercase(),
                 _ => source.to_uppercase(),
             }))
         }
