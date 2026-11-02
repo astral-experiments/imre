@@ -858,20 +858,43 @@ fn read_into(fd: RawFd, buf: &mut [u8]) -> Result<Option<usize>> {
     transfer(|| unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) })
 }
 
-fn read(ctx: &mut Context, fd: RawFd, size: i64, line: bool) -> Result<Id> {
+/// A signal handler can raise, close or reinitialize this FileIO before the retry.
+fn read_interruptible(ctx: &mut Context, raw: &RawFile, buf: &mut [u8]) -> Result<Option<usize>> {
+    loop {
+        let fd = raw.live_fd().unwrap_or(-1);
+        // SAFETY: the destination is an owned buffer, with no borrowed Python storage.
+        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+        if n >= 0 {
+            return Ok(Some(n as usize));
+        }
+        let err = std::io::Error::last_os_error();
+        match err.kind() {
+            ErrorKind::Interrupted => ctx.dispatch_signals()?,
+            ErrorKind::WouldBlock => return Ok(None),
+            _ => return Err(os_error(err)),
+        }
+    }
+}
+
+pub(super) fn read(
+    ctx: &mut Context,
+    raw: &RawFile,
+    size: i64,
+    line: bool,
+    mut bytes: Vec<u8>,
+) -> Result<Id> {
     if size >= 0 && !line {
         let mut bytes = builtins::zeroed_bytes(size)?;
-        let Some(n) = read_into(fd, &mut bytes)? else {
+        let Some(n) = read_interruptible(ctx, raw, &mut bytes)? else {
             return Ok(NONE);
         };
         bytes.truncate(n);
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    let mut bytes = Vec::new();
     let mut chunk = [0; 8192];
     while size < 0 || bytes.len() < size as usize {
         let cap = if line { 1 } else { chunk.len() };
-        match read_into(fd, &mut chunk[..cap])? {
+        match read_interruptible(ctx, raw, &mut chunk[..cap])? {
             None if line => {
                 return Err(Error::new(
                     "OSError",
@@ -1104,7 +1127,7 @@ pub(super) fn call(
         "tell" => Ok(ctx.int(os::seek(fd, 0, libc::SEEK_CUR)?)),
         "read" | "readall" | "readline" => {
             raw.check_direction(true)?;
-            read(ctx, fd, size, name == "readline")
+            read(ctx, &raw, size, name == "readline", Vec::new())
         }
         "readinto" => {
             raw.check_direction(true)?;
