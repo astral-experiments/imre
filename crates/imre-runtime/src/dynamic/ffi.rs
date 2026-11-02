@@ -725,7 +725,13 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    let result = ctx.module("sys").and_then(|_| ctx.module("__main__"));
+    let mark = ctx.heap.temporary_mark();
+    let result = ctx.module("sys").and_then(|_| {
+        // The module registry now owns sys. Its startup temporaries must not
+        // keep replaced streams alive throughout the main module's execution.
+        ctx.heap.release_temporaries_since(mark);
+        ctx.module("__main__")
+    });
     let status = match result {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
