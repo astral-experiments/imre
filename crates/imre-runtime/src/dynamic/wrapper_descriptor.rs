@@ -324,6 +324,10 @@ impl BuiltinDescriptor {
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::os::stat::CLASS => return Some(NONE),
                     ("__reduce__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /)",
+                    ("count", "__doc__") if self.owner == "bytes" => {
+                        "Return the number of non-overlapping occurrences of subsection 'sub' in bytes B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes."
+                    }
+                    ("count", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }

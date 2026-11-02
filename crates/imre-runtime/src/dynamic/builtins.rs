@@ -352,6 +352,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
     "__repr__",
+    "count",
     "decode",
     "endswith",
     "join",

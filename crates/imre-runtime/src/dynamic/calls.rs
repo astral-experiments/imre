@@ -754,6 +754,7 @@ impl Context {
                             | "module.__repr__"
                             | "module.__getattribute__"
                             | "object.__str__"
+                            | "bytes.count"
                             | "bytes.decode"
                             | "bytes.rfind"
                             | "bytes.rsplit"
