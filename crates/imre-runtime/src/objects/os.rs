@@ -340,6 +340,20 @@ pub extern "C" fn imre_os_close(fd: usize) {
     finish(c_int(fd).and_then(close), ());
 }
 
+/// Return the process group selected by the kernel for this PID.
+#[cfg(unix)]
+pub(crate) fn getpgid(pid: libc::pid_t) -> Result<libc::pid_t> {
+    // SAFETY: getpgid takes a process ID and retains no pointers.
+    checked(unsafe { libc::getpgid(pid) })
+}
+
+/// Set a process group, preserving the kernel's membership and permission checks.
+#[cfg(unix)]
+pub(crate) fn setpgid(pid: libc::pid_t, group: libc::pid_t) -> Result<()> {
+    // SAFETY: setpgid accepts two integers and reports failures through errno.
+    checked(unsafe { libc::setpgid(pid, group) }).map(|_| ())
+}
+
 /// Read the kernel session ID without changing the caller's process state.
 pub(crate) fn getsid(pid: libc::pid_t) -> Result<libc::pid_t> {
     // SAFETY: getsid accepts any pid_t and retains no pointers.

@@ -450,6 +450,9 @@ pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if matches!(name, "getpgid" | "setpgid") {
+        return cfg!(unix);
+    }
     if name == "_exit" {
         return cfg!(unix);
     }
@@ -940,6 +943,31 @@ pub(super) fn descriptor(
         // SAFETY: umask takes a numeric mode and returns the process's previous mask.
         let previous = unsafe { libc::umask(mask as libc::mode_t) };
         return Ok(ctx.int(i64::from(previous)));
+    }
+    #[cfg(unix)]
+    if name == "getpgid" {
+        let [Some(pid)] = builtins::bind_builtin_arguments(name, args, kwargs, ["pid"], 1)? else {
+            unreachable!("pid is required")
+        };
+        let group = native::getpgid(c_int(ctx, pid)?)?;
+        return Ok(ctx.int(i64::from(group)));
+    }
+    #[cfg(unix)]
+    if name == "setpgid" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "posix.setpgid() takes no keyword arguments",
+            ));
+        }
+        let [pid, group] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("setpgid expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        native::setpgid(c_int(ctx, *pid)?, c_int(ctx, *group)?)?;
+        return Ok(NONE);
     }
     if name == "open" {
         return open(ctx, args, kwargs);

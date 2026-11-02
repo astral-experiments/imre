@@ -95,6 +95,7 @@ impl BoxedPopen {
         bufsize: Int,
         pipesize: Int,
         start_new_session: bool,
+        process_group: i32,
         umask: i32,
         keep: Vec<RawFd>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
@@ -147,9 +148,9 @@ impl BoxedPopen {
             environment: env,
             boxed_child: Some(ChildAttributes {
                 new_session: start_new_session,
+                group: process_group,
                 mask: (umask >= 0).then_some(umask as libc::mode_t),
                 keep,
-                ..Default::default()
             }),
             ..Default::default()
         };
