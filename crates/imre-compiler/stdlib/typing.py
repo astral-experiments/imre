@@ -774,10 +774,12 @@ def _specialize_generic_alias_uncached(alias, args):
         which = "few" if len(expanded) < len(parameters) else "many"
         expected = f"at least {len(expanded) + 1}" if which == "few" else str(len(parameters))
         raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
-    for arg in expanded:
+    replacements = {}
+    for parameter, arg in zip(parameters, expanded):
+        arg = _alias_type_arg(arg)
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
-    replacements = dict(zip(parameters, (_alias_type_arg(arg) for arg in expanded)))
+        replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 

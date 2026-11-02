@@ -267,6 +267,7 @@ for alias, args, message in (
     (t.Generic[K], int, f"Cannot subscript already-subscripted {t.Generic[K]}"),
     (t.Protocol[K], int, f"Cannot subscript already-subscripted {t.Protocol[K]}"),
     (Pair[K, V], (), f"Too few arguments for {Pair[K, V]}; actual 0, expected at least 1"),
+    (Pair[K, V], (t.Final, t.Unpack[t.TypeVarTuple("Ts")]), "Plain typing.Final is not valid as type argument"),
     (repeat, (int, t.Generic), f"Too many arguments for {repeat}; actual 2, expected 1"),
     (Pair[int, str], bytes, f"{Pair[int, str]} is not a generic class"),
 ):
