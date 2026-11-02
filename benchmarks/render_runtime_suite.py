@@ -162,7 +162,7 @@ def workload_panels(rows, path):
     runs = len(rows[0][0]["samples_ns"])
     fig, ax = benchmark_card(
         height,
-        "Comparing Imre, Rust and CPython",
+        "Comparing Imre, Rust, and CPython",
         f"{runs} runs per engine",
     )
     for i, (case, medians) in enumerate(rows):
@@ -175,16 +175,6 @@ def workload_panels(rows, path):
             y + 23,
             PANEL_TITLES.get(case["name"], case["name"]),
             17,
-        )
-        speedup = medians["cpython"] / medians["imre"]
-        label(
-            ax,
-            x + 397,
-            y + 23,
-            f"{speedup:.1f}× speedup",
-            13,
-            color=ACCENT,
-            align="right",
         )
         label(ax, x + 4, y + 47, case["input"], 13, color=MUTED)
         bars(ax, medians, x + 4, y + 74, 393)

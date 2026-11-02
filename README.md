@@ -17,8 +17,7 @@ An experimental ahead-of-time compiler for typed Python, written in Rust.
 
 Imre and CPython 3.14.5 run the same Python programs. The Rust versions use
 the same inputs and produce the same outputs. Each bar shows the median time
-for 12 fresh processes pinned to one AMD EPYC Milan CPU. The speedup is the
-CPython median divided by the Imre median.
+for 12 fresh processes pinned to one AMD EPYC Milan CPU.
 
 <p align="center">
   <img src="benchmarks/results/frozen-flask.svg" width="100%" alt="Median mixed HTTP throughput in requests per second. Frozen Flask on Imre handles 7,802, Node.js 2,266, Bun 7,733 and Rust/Hyper 8,138.">
