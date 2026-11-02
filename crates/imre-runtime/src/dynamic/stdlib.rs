@@ -119,6 +119,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "posixpath"
             | "_imre_posixpath"
             | "_imre_metadata"
+            | "_imre_json"
             | "_imre_linecache"
             | "_imre_csv"
             | "_imre_tokenize"
@@ -681,6 +682,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
+        | ("_imre_json", "loads")
         | ("_imre_linecache", "source_lines")
         | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
         | (
@@ -2007,6 +2009,7 @@ pub(super) fn call(
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.loads" => (1, &["s"]),
+        "_imre_json.loads" => (2, &[]),
         "json.dump" => (2, JSON_DUMP_KEYWORDS),
         "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
@@ -2246,6 +2249,7 @@ pub(super) fn call(
             let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
             structure::unpack(ctx, &layout, argument(args, 1)?)?
         }
+        "_imre_json.loads" => json::loads(ctx, argument(args, 0)?, Some(argument(args, 1)?))?,
         "json.loads" => {
             let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {
                 Error::new(
@@ -2253,7 +2257,7 @@ pub(super) fn call(
                     "loads() missing 1 required positional argument: 's'",
                 )
             })?;
-            json::loads(ctx, input)?
+            json::loads(ctx, input, None)?
         }
         "json.dump" | "json.dumps" => {
             let function = name.strip_prefix("json.").unwrap();

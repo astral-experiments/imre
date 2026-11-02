@@ -1921,6 +1921,7 @@ def report(text):
             "boxed_sequence_repeat.py",
             "boxed_sequence_order.py",
             "boxed_json_containers.py",
+            "boxed_json_decoder.py",
             "boxed_json_module_doc.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
