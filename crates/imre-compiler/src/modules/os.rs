@@ -47,6 +47,21 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             return Some(Intrinsic::Credential(known));
         }
     }
+    #[cfg(all(target_os = "linux", any(target_env = "gnu", target_env = "musl")))]
+    if name.starts_with("RTLD_") {
+        let flag = match name {
+            "RTLD_LAZY" => libc::RTLD_LAZY,
+            "RTLD_NOW" => libc::RTLD_NOW,
+            "RTLD_GLOBAL" => libc::RTLD_GLOBAL,
+            "RTLD_LOCAL" => libc::RTLD_LOCAL,
+            "RTLD_NODELETE" => libc::RTLD_NODELETE,
+            "RTLD_NOLOAD" => libc::RTLD_NOLOAD,
+            #[cfg(target_env = "gnu")]
+            "RTLD_DEEPBIND" => libc::RTLD_DEEPBIND,
+            _ => return None,
+        };
+        return Some(Intrinsic::IntConstant(i64::from(flag)));
+    }
     Some(match name {
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),

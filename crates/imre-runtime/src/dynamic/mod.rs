@@ -2515,7 +2515,23 @@ impl Context {
                 self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
-            "posix" if source.is_none() => stdlib::os::scheduler::initialize(self, scope),
+            "posix" if source.is_none() => {
+                stdlib::os::scheduler::initialize(self, scope);
+                #[cfg(any(target_env = "gnu", target_env = "musl"))]
+                for (attr, flag) in [
+                    ("RTLD_LAZY", libc::RTLD_LAZY),
+                    ("RTLD_NOW", libc::RTLD_NOW),
+                    ("RTLD_GLOBAL", libc::RTLD_GLOBAL),
+                    ("RTLD_LOCAL", libc::RTLD_LOCAL),
+                    ("RTLD_NODELETE", libc::RTLD_NODELETE),
+                    ("RTLD_NOLOAD", libc::RTLD_NOLOAD),
+                    #[cfg(target_env = "gnu")]
+                    ("RTLD_DEEPBIND", libc::RTLD_DEEPBIND),
+                ] {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, attr, value);
+                }
+            }
             #[cfg(unix)]
             "_signal" if source.is_none() => {
                 #[cfg(target_os = "linux")]
