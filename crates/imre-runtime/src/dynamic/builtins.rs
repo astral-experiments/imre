@@ -434,6 +434,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ..
         } if attr == "geturl" => "urllib.parse.ParseResult",
         Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
+        Value::Hash(state)
+            if crate::objects::HashState::is_provider_class(state.borrow().class_name())
+                && matches!(attr, "update" | "copy" | "digest" | "hexdigest") =>
+        {
+            state.borrow().class_name()
+        }
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
         Value::Socket(_)
@@ -922,6 +928,11 @@ pub(super) fn call(
         return Ok(NONE);
     }
     if name == "object.__init__" {
+        if let Some(receiver) = args.first()
+            && crate::objects::HashState::is_provider_class(ctx.type_name(*receiver))
+        {
+            return Ok(NONE);
+        }
         if args.len() != 1 || !kwargs.is_empty() {
             return Err(type_error(
                 "object.__init__() takes exactly one argument (the instance to initialize)",
