@@ -2170,6 +2170,7 @@ def report(text):
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",
+            "boxed_bytes_count.py",
             "boxed_bytes_separators.py",
             "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
