@@ -1,0 +1,3 @@
+Parent reproduction on current public main.
+
+Stock CPython 3.14.5 ran the complete 43-method class and its inherited setup and teardown. Both prior signed archives and signer pins are linked in scope.json. The focused selector retained the exact targeted methods, the upstream raw fixture, and public/private BufferedWriter class identity. Each column in originals.tsv names its runtime and source stage. Blank cells mean that stage did not run that ID. The original ordinals and occurrence numbers are those of the intact pinned module on stock. callback-index.tsv keys each new focused callback to its raw stdout stream and process receipt. The two provider-specific skips and any process bounds in the prior primary are distinct from its optimized-runtime supplement.
