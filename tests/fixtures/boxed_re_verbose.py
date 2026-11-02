@@ -22,6 +22,10 @@ def current():
     print(pattern.fullmatch("# #\n") is None, pattern.fullmatch("# #").groups())
     print(pattern.match("é# #").group("optional"))
     print(re.match(r"a \s # ignored", "a\x1c", re.X).groups())
+    for flags in (0, re.VERBOSE):
+        magic = re.compile(b"([*?[])", flags)
+        assert magic.search(b"name[1]").group(1) == b"["
+        assert magic.search(b"name]") is None
     octets = re.compile(rb"[\x00-\x19\",;\\\x7f-\xff]", re.A)
     print(type(octets.pattern) is bytes, octets.flags, octets.groups)
     print([n for n in range(256) if octets.fullmatch(bytes([n])) is not None])
