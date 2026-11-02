@@ -84,6 +84,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__rmul__",
                 "__truediv__",
                 "__rtruediv__",
+                "__floordiv__",
+                "__rfloordiv__",
                 "__reduce__",
                 "__repr__",
                 "__str__",
@@ -242,8 +244,7 @@ fn delta_component(ctx: &mut Context, value: Id) -> Result<i32> {
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
 }
 
-/// Integer subclasses can return arbitrary objects from multiplication. CPython splits
-/// that result with divmod and validates the normalized microsecond and second fields.
+/// Split a custom numeric result with divmod and validate the normalized remainder.
 fn split_delta_component(ctx: &mut Context, value: Id, unit: i32) -> Result<(Id, i32)> {
     let divisor = ctx.int(i64::from(unit));
     let result = ctx.divmod(value, divisor)?;
@@ -272,12 +273,12 @@ fn split_delta_component(ctx: &mut Context, value: Id, unit: i32) -> Result<(Id,
     Ok((*quotient, remainder))
 }
 
-fn multiply_delta_integer(ctx: &mut Context, factor: Id, us: Id) -> Result<crate::Int> {
-    let product = ctx.binary("*", factor, us)?;
-    if let Value::Int(n) = ctx.heap.get(product) {
+/// Convert the microseconds returned by integer multiplication or floor division.
+fn result_microseconds(ctx: &mut Context, result: Id) -> Result<crate::Int> {
+    if let Value::Int(n) = ctx.heap.get(result) {
         Ok(n.clone())
     } else {
-        let (seconds, micros) = split_delta_component(ctx, product, 1_000_000)?;
+        let (seconds, micros) = split_delta_component(ctx, result, 1_000_000)?;
         let (days, seconds) = split_delta_component(ctx, seconds, 86_400)?;
         let days = delta_component(ctx, days)?;
         let total =
@@ -345,22 +346,36 @@ fn scale_delta(
     let us = ctx.alloc(Value::Int(crate::Int::new(
         duration.delta_microseconds().into(),
     )));
-    let division = matches!(name, "__truediv__" | "__rtruediv__");
-    if division && let Some(other) = calendar(ctx, factor, "timedelta") {
+    let op = match name {
+        "__truediv__" | "__rtruediv__" => "/",
+        "__floordiv__" | "__rfloordiv__" => "//",
+        _ => "*",
+    };
+    let reflected_division = matches!(name, "__rtruediv__" | "__rfloordiv__");
+    if op != "*"
+        && let Some(other) = calendar(ctx, factor, "timedelta")
+    {
         let other = ctx.alloc(Value::Int(crate::Int::new(
             other.delta_microseconds().into(),
         )));
-        return if name == "__rtruediv__" {
-            ctx.binary("/", other, us)
+        return if reflected_division {
+            ctx.binary(op, other, us)
         } else {
-            ctx.binary("/", us, other)
+            ctx.binary(op, us, other)
         };
     }
     let micros = match ctx.heap.get(ctx.scalar_value(factor)) {
-        _ if name == "__rtruediv__" => return Ok(crate::dynamic::value::NOT_IMPLEMENTED),
-        Value::Int(_) | Value::Bool(_) if division => nearest_quotient(ctx, us, factor)?,
-        Value::Int(_) | Value::Bool(_) => multiply_delta_integer(ctx, factor, us)?,
-        Value::Float(_) => {
+        _ if reflected_division => return Ok(crate::dynamic::value::NOT_IMPLEMENTED),
+        Value::Int(_) | Value::Bool(_) if op == "/" => nearest_quotient(ctx, us, factor)?,
+        Value::Int(_) | Value::Bool(_) => {
+            let result = if op == "//" {
+                ctx.binary("//", us, factor)?
+            } else {
+                ctx.binary("*", factor, us)?
+            };
+            result_microseconds(ctx, result)?
+        }
+        Value::Float(_) if op != "//" => {
             let ratio = ctx.lookup_attr(factor, "as_integer_ratio")?;
             let pair = ctx.call(ratio, Vec::new(), Vec::new())?;
             let tuple = ctx.tuple_items(pair)?.ok_or_else(|| {
@@ -375,7 +390,7 @@ fn scale_delta(
                     "as_integer_ratio() must return a 2-tuple",
                 ));
             };
-            let (scale, divisor) = if division {
+            let (scale, divisor) = if op == "/" {
                 (denominator, numerator)
             } else {
                 (numerator, denominator)
@@ -420,7 +435,9 @@ pub(super) fn call(
         "timedelta.__mul__"
         | "timedelta.__rmul__"
         | "timedelta.__truediv__"
-        | "timedelta.__rtruediv__" => scale_delta(ctx, method, args, kwargs),
+        | "timedelta.__rtruediv__"
+        | "timedelta.__floordiv__"
+        | "timedelta.__rfloordiv__" => scale_delta(ctx, method, args, kwargs),
         "datetime.combine" => {
             let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
             let day = required(day, "combine()", "date", 1)?;
