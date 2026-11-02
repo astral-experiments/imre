@@ -2963,6 +2963,8 @@ impl Context {
             }
             "threading" if source.is_none() => {
                 let thread = self.module("_thread")?;
+                let error = self.lookup_attr(thread, "error")?;
+                self.bind(scope, "ThreadError", error);
                 let limit = self.lookup_attr(thread, "TIMEOUT_MAX")?;
                 self.bind(scope, "TIMEOUT_MAX", limit);
             }
@@ -3301,6 +3303,8 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
+            let error = self.builtin("RuntimeError");
+            self.bind(scope, "error", error);
             #[cfg(unix)]
             {
                 let interrupt = self.builtin("_thread.interrupt_main");
