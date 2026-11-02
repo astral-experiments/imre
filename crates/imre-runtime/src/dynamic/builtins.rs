@@ -596,15 +596,15 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "function"
         }
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
-            "contextvars.ContextVar"
+            "_contextvars.ContextVar"
         }
         Value::Context(_)
             if matches!(attr, "copy" | "run" | "get" | "keys" | "values" | "items") =>
         {
-            "contextvars.Context"
+            "_contextvars.Context"
         }
         Value::ContextToken { .. } if matches!(attr, "__enter__" | "__exit__") => {
-            "contextvars.Token"
+            "_contextvars.Token"
         }
         _ => return None,
     };
