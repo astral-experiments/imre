@@ -3148,11 +3148,19 @@ impl Heap {
             if !slot.marked()
                 && let Some(value) = &slot.value
             {
-                unowned.push(id);
+                // Count the candidate itself so that zero denotes a vacant or reachable slot.
+                incoming[id] += 1;
                 self.unreachable_children(value, |child| incoming[child] += 1);
             }
         }
-        unowned.retain(|&id| incoming[id] == 0);
+        for (id, count) in incoming.iter_mut().enumerate() {
+            if *count != 0 {
+                *count -= 1;
+                if *count == 0 {
+                    unowned.push(id);
+                }
+            }
+        }
         while let Some(id) = unowned.pop() {
             if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
                 first_finalizer = Some(id as Id);
