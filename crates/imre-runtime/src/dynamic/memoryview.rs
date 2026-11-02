@@ -18,11 +18,31 @@ impl ViewLayout {
         }
     }
 
-    fn element(self, index: usize) -> usize {
-        (self.start as i128 + index as i128 * i128::from(self.stride)) as usize
+    fn position(self, index: usize) -> i128 {
+        self.start as i128 + index as i128 * i128::from(self.stride)
     }
 
-    fn sliced(self, bounds: [Option<i64>; 3]) -> Result<Self> {
+    // The first and last element bound every address in a one-dimensional view.
+    fn checked(self, elements: usize) -> Result<Self> {
+        if self.len > elements
+            || self.start > elements
+            || (self.len != 0
+                && (self.start == elements
+                    || !(0..elements as i128).contains(&self.position(self.len - 1))))
+        {
+            return Err(Error::new(
+                "BufferError",
+                "underlying buffer has changed size",
+            ));
+        }
+        Ok(self)
+    }
+
+    fn element(self, index: usize) -> usize {
+        self.position(index) as usize
+    }
+
+    fn sliced(self, bounds: [Option<i64>; 3]) -> Self {
         let [start, stop, step] = slice::normalize(bounds, self.len as i64);
         // PySlice_Unpack limits the absolute step to PY_SSIZE_T_MAX.
         let step = step.max(-i64::MAX);
@@ -31,7 +51,7 @@ impl ViewLayout {
         // A stride too large to address another element is still reported by CPython
         // using signed Py_ssize_t arithmetic on singleton and empty views.
         let stride = self.stride.wrapping_mul(step);
-        Ok(Self {
+        Self {
             start: if len == 0 {
                 0
             } else {
@@ -39,7 +59,7 @@ impl ViewLayout {
             },
             len,
             stride,
-        })
+        }
     }
 }
 
@@ -112,10 +132,12 @@ impl Context {
             unreachable!()
         };
         let owner = Self::memoryview_owner(owner)?;
-        match layout {
-            Some(layout) => Ok(layout),
-            None => Ok(ViewLayout::full(self.view_element_count(owner)?)),
-        }
+        let layout = match layout {
+            Some(layout) => layout,
+            None => ViewLayout::full(self.view_element_count(owner)?),
+        };
+        let (_, width) = self.view_format_width(owner);
+        layout.checked(self.owner_bytes(owner)?.len() / width)
     }
 
     fn view_format_width(&self, owner: Id) -> (&'static str, usize) {
@@ -259,7 +281,8 @@ impl Context {
             });
             let mark = self.heap.temporary_mark();
             self.heap.keep(child);
-            let sliced = slice::sequence_components(self, parts).and_then(|b| layout.sliced(b));
+            let sliced = slice::sequence_components(self, parts)
+                .and_then(|bounds| Ok(self.view_layout(child)?.sliced(bounds)));
             self.heap.release_temporaries_since(mark);
             let Value::MemoryView { layout, .. } = self.heap.get_mut(child) else {
                 unreachable!()
@@ -387,7 +410,7 @@ impl Context {
             self.buffer_span(value)?;
             self.with_buffer_export(value, |ctx| {
                 let bounds = slice::sequence_components(ctx, parts)?;
-                let dest = ctx.view_layout(view)?.sliced(bounds)?;
+                let dest = ctx.view_layout(view)?.sliced(bounds);
                 let rhs = ctx.buffer_span(value)?;
                 if rhs.format != format || rhs.layout.len != dest.len {
                     return Err(structure_error());
@@ -410,6 +433,7 @@ impl Context {
         };
         let storage = self.view_storage_id(owner);
         let bytes = self.writable_storage_bytes(storage)?;
+        dest.checked(bytes.len() / width)?;
         for (i, item) in source.chunks_exact(width).enumerate() {
             let start = dest.element(i) * width;
             bytes[start..start + width].copy_from_slice(item);
