@@ -25,10 +25,30 @@ fn contains(class: &ClassUnicode, ch: char) -> bool {
         .is_some_and(|r| r.start() <= ch)
 }
 
+static CASED: LazyLock<ClassUnicode> = LazyLock::new(|| property(r"\p{Cased}"));
+
+/// True if at least one character is cased and every cased character is lowercase.
+pub(crate) fn python_islower(chars: impl Iterator<Item = char>) -> bool {
+    static LOWERCASE: LazyLock<ClassUnicode> = LazyLock::new(|| property(r"\p{Lowercase}"));
+    let mut seen_lower = false;
+    for ch in chars {
+        if ch.is_ascii() {
+            if ch.is_ascii_uppercase() {
+                return false;
+            }
+            seen_lower |= ch.is_ascii_lowercase();
+        } else if contains(&LOWERCASE, ch) {
+            seen_lower = true;
+        } else if contains(&CASED, ch) {
+            return false;
+        }
+    }
+    seen_lower
+}
+
 /// U+03A3 is final after a cased character unless another cased character follows.
 /// Both searches ignore Case_Ignorable code points (even when also Cased).
 fn is_final_sigma(before: &str, after: &str) -> bool {
-    static CASED: LazyLock<ClassUnicode> = LazyLock::new(|| property(r"\p{Cased}"));
     static IGNORABLE: LazyLock<ClassUnicode> = LazyLock::new(|| property(r"\p{Case_Ignorable}"));
     let significant = |c: &char| !contains(&IGNORABLE, *c);
     let is_cased = |c| contains(&CASED, c);
