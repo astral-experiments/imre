@@ -8,6 +8,7 @@ use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
 mod casefold;
+mod group_names;
 mod progress;
 mod scanner;
 mod split;
@@ -286,7 +287,7 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool)
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
-fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(&'static str, usize)> {
+fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, usize)> {
     use regex_syntax::ast::{ErrorKind, parse::ParserBuilder};
     use std::borrow::Cow;
 
@@ -294,11 +295,18 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(&'static 
         Value::Bytes(bytes) => Cow::Owned(bytes.iter().copied().map(char::from).collect()),
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
-    let error = ParserBuilder::new()
+    let parsed = ParserBuilder::new()
         .ignore_whitespace(flags & VERBOSE != 0)
         .build()
-        .parse(&text)
-        .err()?;
+        .parse(&text);
+    if let Some(error) = group_names::diagnostic(
+        &text,
+        matches!(ctx.heap.get(source), Value::Bytes(_)),
+        &parsed,
+    ) {
+        return Some(error);
+    }
+    let error = parsed.err()?;
     let message = match error.kind() {
         ErrorKind::ClassUnclosed => "unterminated character set",
         ErrorKind::GroupUnclosed => "missing ), unterminated subpattern",
@@ -307,18 +315,32 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(&'static 
         ErrorKind::EscapeUnexpectedEof => "bad escape (end of pattern)",
         _ => return None,
     };
-    Some((message, text[..error.span().start.offset].chars().count()))
+    Some((
+        message.into(),
+        text[..error.span().start.offset].chars().count(),
+    ))
 }
 
 /// Construct the public exception with the original pattern and the engine's diagnostic.
 fn pattern_error(ctx: &mut Context, source: Id, flags: i64, message: String) -> Error {
+    let (message, position) = match syntax_diagnostic(ctx, source, flags) {
+        Some((message, position)) => (message, Some(position)),
+        None => (message, None),
+    };
+    pattern_error_at(ctx, source, message, position)
+}
+
+fn pattern_error_at(
+    ctx: &mut Context,
+    source: Id,
+    message: String,
+    position: Option<usize>,
+) -> Error {
     let Some(&class) = ctx.classes.get("re.PatternError") else {
         return Error::new("re.PatternError", message);
     };
-    let (message, position) = match syntax_diagnostic(ctx, source, flags) {
-        Some((message, position)) => (ctx.text(message), ctx.int(position as i64)),
-        None => (ctx.text(message), NONE),
-    };
+    let message = ctx.text(message);
+    let position = position.map_or(NONE, |pos| ctx.int(pos as i64));
     match ctx.call(class, vec![message, source, position], Vec::new()) {
         Ok(id) => match ctx.heap.get(id) {
             Value::Raised(error) => {
@@ -333,16 +355,35 @@ fn pattern_error(ctx: &mut Context, source: Id, flags: i64, message: String) -> 
 }
 
 /// A plain literal capture always participates and has exactly one possible spelling.
-fn repeats_literal_capture(pattern: &[u8], flags: i64) -> bool {
-    let Some(body) = pattern
-        .strip_prefix(b"(")
-        .and_then(|p| p.strip_suffix(br")\1"))
-    else {
-        return false;
+fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<(usize, usize)> {
+    if flags & (IGNORECASE | LOCALE | VERBOSE) != 0 {
+        return None;
+    }
+    let capture = pattern.strip_prefix(b"(")?;
+    let (name, body) = if let Some(named) = capture.strip_prefix(b"?P<") {
+        let end = named.iter().position(|&b| b == b'>')?;
+        let name = std::str::from_utf8(&named[..end]).ok()?;
+        if !group_names::valid(name, bytes) {
+            return None;
+        }
+        (Some(name.as_bytes()), &named[end + 1..])
+    } else {
+        (None, capture)
     };
-    flags & (IGNORECASE | LOCALE | VERBOSE) == 0
-        && !body.is_empty()
-        && !body.iter().any(|byte| br"\.^$*+?{}[]|()".contains(byte))
+    let close = body.iter().position(|&b| b == b')')?;
+    let reference = &body[close + 1..];
+    if reference != br"\1"
+        && !(name.is_some()
+            && reference
+                .strip_prefix(b"(?P=")
+                .and_then(|r| r.strip_suffix(b")"))
+                == name)
+    {
+        return None;
+    }
+    let literal = &body[..close];
+    (!literal.is_empty() && !literal.iter().any(|b| br"\.^$*+?{}[]|()".contains(b)))
+        .then_some((pattern.len() - body.len(), reference.len()))
 }
 
 fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
@@ -410,10 +451,10 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             (text.to_owned(), text.as_bytes())
         }
     };
-    if repeats_literal_capture(spelling, flags) {
+    if let Some((start, suffix)) = repeated_literal_capture(spelling, flags, bytes) {
         // Keep group 1 and repeat its engine spelling, including any escaped high bytes.
-        source.truncate(source.len() - br"\1".len());
-        source.extend_from_within(1..source.len() - 1);
+        source.truncate(source.len() - suffix);
+        source.extend_from_within(start..source.len() - 1);
     }
     let ascii = bytes || flags & ASCII != 0;
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
@@ -468,6 +509,24 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         }
         Err(message) => return Err(pattern_error(ctx, id, flags, message)),
     };
+    // GroupInfo contains the synthetic final-newline capture as well as user names.
+    let names = regex.group_info().pattern_names(PatternID::ZERO).flatten();
+    if let Some(name) = names
+        .filter(|name| *name != "imre.eol" || source.contains("(?P<imre.eol>"))
+        .find(|name| !group_names::valid(name, bytes))
+    {
+        if let Some((message, position)) = syntax_diagnostic(ctx, id, flags) {
+            return Err(pattern_error_at(ctx, id, message, Some(position)));
+        }
+        if name != "imre.eol" {
+            return Err(pattern_error_at(
+                ctx,
+                id,
+                group_names::bad_name(name, bytes),
+                None,
+            ));
+        }
+    }
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },
