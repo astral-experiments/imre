@@ -2266,6 +2266,12 @@ pub(super) fn call(
     if name == "collections.abc._CallableGenericAlias" {
         return super::typing::abc_callable_alias(ctx, args, kwargs);
     }
+    if let Some(owner @ ("types.GenericAlias" | "generic_alias_iterator")) =
+        name.strip_suffix(".__reduce__")
+    {
+        let receiver = builtins::noargs_method_receiver(ctx, owner, "__reduce__", args, kwargs)?;
+        return super::typing::reduce_builtin_alias(ctx, receiver);
+    }
     if name == "types.GenericAlias" {
         if !kwargs.is_empty() {
             return Err(Error::new(

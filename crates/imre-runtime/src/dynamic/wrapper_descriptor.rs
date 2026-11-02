@@ -157,6 +157,12 @@ impl BuiltinDescriptor {
             Some((namespace::CLASS, attr)) => {
                 Some((namespace::CLASS, attr, &["__reduce__", "__replace__"][..]))
             }
+            Some(("types.GenericAlias", attr)) => {
+                Some(("types.GenericAlias", attr, &["__reduce__"][..]))
+            }
+            Some(("generic_alias_iterator", attr)) => {
+                Some(("generic_alias_iterator", attr, &["__reduce__"][..]))
+            }
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
             }

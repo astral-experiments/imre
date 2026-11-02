@@ -3,6 +3,9 @@ from types import UnionType
 from typing import TypeVar, Union, get_args, get_origin
 
 
+T = TypeVar("T")
+
+
 class Left:
     pass
 
@@ -43,6 +46,24 @@ def current():
     assert type(Union['A', 'A']) is ForwardRef
     assert (int | str | 'A').__args__ == (int, str, ForwardRef('A'))
     assert ('A' | (int | str)).__args__ == (ForwardRef('A'), int, str)
+    import copy
+    import pickle
+    from types import GenericAlias
+
+    alias = list[T]
+    assert alias.__reduce__() == (GenericAlias, (list, (T,)))
+    iterator = iter(alias)
+    assert iterator.__reduce__() == (iter, (alias,))
+    starred = next(iterator)
+    assert iterator.__reduce__() == (iter, ((),))
+    factory, (fresh,) = starred.__reduce__()
+    assert factory is next and fresh.__reduce__() == (iter, (alias,))
+    for original in (starred, alias | int):
+        assert copy.copy(original) == copy.deepcopy(original) == original
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            result = pickle.loads(pickle.dumps(original, protocol))
+            assert result == original and result.__parameters__ == (T,)
+
     variable = TypeVar('Variable')
     assert (variable | int)[int] is int
     assert (list[variable] | int)[str].__args__ == (list[str], int)

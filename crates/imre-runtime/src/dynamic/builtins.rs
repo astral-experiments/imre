@@ -1131,7 +1131,7 @@ pub(super) fn method_receiver_args<'a>(
     Ok((receiver, rest))
 }
 
-fn noargs_method_receiver(
+pub(super) fn noargs_method_receiver(
     ctx: &Context,
     owner: &str,
     method: &str,

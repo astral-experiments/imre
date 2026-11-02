@@ -574,6 +574,29 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     )
 }
 
+/// Rebuild PEP 585 aliases and their one-shot unpacking iterators through public constructors.
+pub(super) fn reduce_builtin_alias(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let (constructor, args) = match ctx.heap.get(receiver) {
+        Value::GenericAlias(alias) => {
+            let (origin, args) = (alias.origin, alias.args);
+            if alias.unpacked {
+                let plain = builtin_alias(ctx, origin, args);
+                let iterator = ctx.iterator(plain)?;
+                (ctx.builtin("next"), vec![iterator])
+            } else {
+                (ctx.exact_type(receiver)?, vec![origin, args])
+            }
+        }
+        Value::GenericAliasIterator(source) => {
+            let source = (*source).unwrap_or_else(|| ctx.alloc(Value::Tuple(Vec::new())));
+            (ctx.builtin("iter"), vec![source])
+        }
+        _ => unreachable!("validated generic alias or iterator"),
+    };
+    let args = ctx.alloc(Value::Tuple(args));
+    Ok(ctx.alloc(Value::Tuple(vec![constructor, args])))
+}
+
 /// Construct the collections.abc subclass of GenericAlias, including direct keyword calls.
 pub(super) fn abc_callable_alias(
     ctx: &mut Context,
@@ -1374,6 +1397,20 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ctx.text(module)
         }
         Value::Native(class)
+            if name == "__reduce__"
+                && matches!(
+                    class.as_str(),
+                    "types.GenericAlias" | "generic_alias_iterator"
+                ) =>
+        {
+            ctx.builtin(&format!("{class}.__reduce__"))
+        }
+        Value::GenericAliasIterator(_) if name == "__reduce__" => {
+            let class = ctx.builtin("generic_alias_iterator");
+            let reducer = ctx.builtin("generic_alias_iterator.__reduce__");
+            return Some(ctx.bind_attribute(reducer, value, class));
+        }
+        Value::Native(class)
             if name == "__reduce__" && class == "collections.abc._CallableGenericAlias" =>
         {
             ctx.typing.abc_callable_reducer?
@@ -1385,7 +1422,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             if name == "__reduce__"
                 && matches!(
                     alias.kind,
-                    AliasKind::Generic | AliasKind::Callable | AliasKind::AbcCallable
+                    AliasKind::Builtin
+                        | AliasKind::Generic
+                        | AliasKind::Callable
+                        | AliasKind::AbcCallable
                 ) =>
         {
             let class = ctx.builtin(alias.kind.class());
