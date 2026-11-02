@@ -2701,7 +2701,7 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if class == "tuple" && matches!(name, "__new__" | "__getitem__") =>
+                if class == "tuple" && matches!(name, "__new__" | "__getitem__" | "index") =>
             {
                 return Ok(self.builtin(&format!("tuple.{name}")));
             }
