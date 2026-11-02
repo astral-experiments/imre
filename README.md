@@ -112,7 +112,7 @@ branches. Skipped tests count toward the suite size only.
 | Module | Paired passes | Upstream tests | How the tests ran |
 | --- | ---: | ---: | --- |
 | `argparse` | 1,614 | 1,893 | The intact baseline passed 1,397 cases. Selected runs added 217 distinct original registrations, including 18 more help cases and three Boolean-action, encoding and FileType cases verified with teardown and failing controls. |
-| `collections` | 528 | 659 | Eleven new passes came from intact UserDict, UserList, Counter and test_collections runs on a development build. The last of these ran all 116 registrations, with 74 passes at each native level. |
+| `collections` | 555 | 659 | Twenty-seven more originals passed on the same documented build at O0 and O3. They cover ABCs, Counter, UserDict, defaultdict and UserList. Public 73535497 passed the original UserList pickle case. Its intact test_collections file still stopped while importing ByteString. |
 | `csv` | 122 | 128 | Complete suite on `main`, 122 passed and six matched upstream skips. |
 | `dataclasses` | 247 | 276 | The latest intact public run passed 206, and the retained intact run passed 207. Thirteen more TestDocString originals pass on a sealed development tree after all 276 register. Their public replay needs annotationlib.get_annotations for #3578. |
 | `datetime` | 636 | 1,098 | The intact development build ran all 1,098 registrations under the reference resource settings. Both levels passed 628, errored on 416 and skipped 54. Eight additional originals passed on earlier focused builds. |
@@ -129,14 +129,14 @@ branches. Skipped tests count toward the suite size only.
 | `re` | 125 | 165 | Earlier native runs verified 125 distinct originals. On the later public build, the full 165-case run passed 72 with fd 0 closed. The ordinary-stdin run finished one successful case before it stopped. The closed-fd result adds no cases to the table. |
 | `shutil` | 89 | 223 | The complete original TestCopyTree, TestMove and TestCopyFile classes passed all 44 Linux-runnable cases on public main, with two matching skips. Sixteen of the passes were already counted. Earlier sendfile and archive results are included. |
 | `socket` | 61 | 746 | Earlier and focused cases total 61. Four native modes pass 14/19 resolver originals, including the new service database lookup. The 746-case discovery run executed no test bodies. |
-| `subprocess` | 178 | 353 | The intact public run passed 151 of 353 originals. Later runs added 12 cwd cases with Imre children and one additional communicate case using a non-byte memoryview. Its output matched all 16,388 expected bytes at both levels. Earlier focused passes are included. |
+| `subprocess` | 183 | 353 | The intact public run passed 151 of 353 originals. All 17 subsequent cwd and executable cases passed on public main with actual Imre children where the test launches Python. Removing the executable argument made the five latest gains fail at both levels and on stock. Earlier focused results are included. |
 | `tempfile` | 85 | 118 | Thirty selected filesystem cases ran in all four public native modes, with 27 passes and three skips. A later public replay also passed the original explicit-cleanup-with-ignored-errors case, including its fixture cleanup. |
 | `textwrap` | 68 | 68 | Complete suite on `main`, all 68 passed. |
 | `threading` | 83 | 228 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 107 | 712 | The public TypedDict class now runs all 32 originals at both levels, with 25 passes, one failure and six erroring IDs. Its overlap with the earlier 107 distinct cases is still being reconciled. |
 | `unittest` | 275 | 1,090 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
-| `urllib` | 145 | 178 | On macOS and Linux, 67/77 parser cases and 75/101 request cases matched the pinned callbacks at O0 and O3. Three historical passes bring the total to 145. A further parser case matched 54 subtest outcomes and one subtest skip without a parent success callback. |
-| **Total** | **5,466** | **13,328** | **3 complete suites on `main`** |
+| `urllib` | 156 | 178 | On Linux and macOS, ordinary and runtime imports matched stock parent-success callbacks for 67/77 parser cases and 86/101 request cases at both levels. Ten HTTP cases and one redirect case are new. Three historical passes bring the cumulative total to 156. Both intact suites still exit 1. |
+| **Total** | **5,509** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
