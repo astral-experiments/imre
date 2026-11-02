@@ -491,7 +491,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "time",
             "time" | "monotonic" | "perf_counter" | "gmtime" | "localtime" | "mktime" | "strftime"
-            | "struct_time",
+            | "ctime" | "struct_time",
         ) => ctx.builtin(&format!("time.{name}")),
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
