@@ -52,7 +52,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         #[cfg(target_os = "linux")]
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
-        "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
+        "zlib" if matches!(function, "adler32" | "crc32" | "compress" | "decompress") => Some((module, function)),
         "_hashlib" if !function.contains('.') => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
