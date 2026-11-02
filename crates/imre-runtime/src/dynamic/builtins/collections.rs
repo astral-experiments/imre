@@ -9,7 +9,9 @@ pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
     let released = ctx.heap.has_unbound_finalizer(NONE)
         && match ctx.heap.get(receiver) {
             Value::List(items) => items.iter().any(owns_finalizer),
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => entries
+            Value::Dict(entries)
+            | Value::DefaultDict { entries, .. }
+            | Value::Set { entries, .. } => entries
                 .iter()
                 .any(|(key, value)| owns_finalizer(key) || owns_finalizer(value)),
             Value::Deque(ring) => ring.items.iter().any(owns_finalizer),
@@ -21,7 +23,7 @@ pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
                 ctx.heap.weak_edge_removed(item);
             }
         }
-        Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+        Value::Dict(entries) | Value::DefaultDict { entries, .. } | Value::Set { entries, .. } => {
             for (key, value) in entries.clear() {
                 ctx.heap.weak_edge_removed(key);
                 ctx.heap.weak_edge_removed(value);
@@ -886,7 +888,7 @@ pub(super) fn method(
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
             None if matches!(
                 name,
-                "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
+                "set.clear" | "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
             ) || name.ends_with(".issubset")
                 || name.ends_with(".intersection")
                 || name.ends_with(".difference")
@@ -925,7 +927,7 @@ pub(super) fn method(
         })?
     } else if matches!(
         name,
-        "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
+        "set.clear" | "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
     ) {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
@@ -1027,6 +1029,7 @@ pub(super) fn method(
             | "frozenset.issubset"
             | "set.issuperset"
             | "frozenset.issuperset"
+            | "set.clear"
             | "set.discard"
             | "set.pop"
             | "set.remove"
@@ -1205,12 +1208,16 @@ pub(super) fn method(
             }
             Ok(NONE)
         }
-        "set.pop" => {
+        "set.pop" | "set.clear" => {
             if !args.is_empty() {
                 return Err(type_error(format!(
-                    "set.pop() takes no arguments ({} given)",
+                    "{name}() takes no arguments ({} given)",
                     args.len()
                 )));
+            }
+            if name == "set.clear" {
+                clear_container(ctx, receiver);
+                return Ok(NONE);
             }
             let Some(last) = ctx.stored_entries(receiver).len().checked_sub(1) else {
                 let message = ctx.text("pop from an empty set");

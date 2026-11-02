@@ -670,6 +670,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if matches!(
                 attr,
                 "add"
+                    | "clear"
                     | "copy"
                     | "discard"
                     | "difference"
