@@ -633,6 +633,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
+    /// The qualified name reported when writes to a static type are rejected.
+    pub immutable_name: Option<&'static str>,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.

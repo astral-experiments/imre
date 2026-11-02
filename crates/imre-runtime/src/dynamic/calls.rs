@@ -2981,6 +2981,23 @@ impl Context {
         }
     }
 
+    /// Honor static type immutability without restricting writes to Python subclasses.
+    fn check_class_write(&self, obj: Id, name: &str) -> Result<()> {
+        if let Value::Class { scope, .. } = self.heap.get(obj)
+            && let Some(class) = self
+                .scope_data(*scope)
+                .class_namespace
+                .as_ref()
+                .and_then(|ns| ns.immutable_name)
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{name}' attribute of immutable type '{class}'"),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         if let Value::Native(class) = self.heap.get(obj)
             && HashState::is_provider_class(class)
@@ -3041,7 +3058,7 @@ impl Context {
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         self.check_template_write(obj, name)?;
-        super::namespace::check_class_write(self, obj, name)?;
+        self.check_class_write(obj, name)?;
         self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
@@ -3569,7 +3586,7 @@ impl Context {
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         self.check_template_write(obj, name)?;
-        super::namespace::check_class_write(self, obj, name)?;
+        self.check_class_write(obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
             && (builtins::is_static_gc_type(class)
                 || HashState::is_provider_class(class)
@@ -3950,7 +3967,10 @@ impl Context {
     fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| match self.heap.get(base) {
             Value::Native(_) => Some(base),
-            Value::Class { scope, .. } if self.scope_data(*scope).class_cell.is_none() => {
+            Value::Class { scope, .. }
+                if self.scope_data(*scope).class_cell.is_none()
+                    && self.builtins.get(stdlib::io::NEWLINE_DECODER) != Some(&base) =>
+            {
                 Some(base)
             }
             _ => None,

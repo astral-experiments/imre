@@ -3,6 +3,8 @@
 use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
 use crate::dynamic::builtins::boolean;
 
+pub(in crate::dynamic) const CLASS: &str = "_io.IncrementalNewlineDecoder";
+
 pub(super) const METHODS: &[&str] = &[
     "__init__", "decode", "getstate", "setstate", "reset", "newlines",
 ];
@@ -52,33 +54,55 @@ fn parameters<const N: usize>(
     for (i, &value) in args.iter().enumerate() {
         values[i] = Some(value);
     }
-    for (key, value) in kwargs {
-        let Some(i) = names.iter().position(|&n| n == key) else {
-            return Err(type_error(format!(
-                "{name}() got an unexpected keyword argument '{key}'"
-            )));
-        };
-        if values[i].replace(*value).is_some() {
-            return Err(type_error(format!(
-                "argument for {name}() given by name ('{key}') and position ({})",
-                i + 1
-            )));
-        }
-    }
-    for (i, key) in names.iter().take(required).enumerate() {
-        if values[i].is_none() {
+    for (i, &key) in names.iter().enumerate().skip(args.len()) {
+        if let Some((_, value)) = kwargs.iter().find(|(name, _)| name == key) {
+            values[i] = Some(*value);
+        } else if i < required {
             return Err(type_error(format!(
                 "{name}() missing required argument '{key}' (pos {})",
                 i + 1
             )));
         }
     }
+    for (key, _) in kwargs {
+        match names.iter().position(|&param| param == key) {
+            Some(i) if i < args.len() => {
+                return Err(type_error(format!(
+                    "argument for {name}() given by name ('{key}') and position ({})",
+                    i + 1
+                )));
+            }
+            None => {
+                return Err(type_error(format!(
+                    "{name}() got an unexpected keyword argument '{key}'"
+                )));
+            }
+            _ => {}
+        }
+    }
     Ok(values)
 }
 
-fn invoke(ctx: &mut Context, delegate: Id, method: &str, args: Vec<Id>) -> Result<Id> {
-    let callable = ctx.lookup_attr(delegate, method)?;
-    ctx.call(callable, args, Vec::new())
+/// Attribute lookup can reinitialize the wrapper and release its delegate; only the
+/// resulting callable owns the receiver, if applicable, when its Python body runs.
+fn invoke(ctx: &mut Context, delegate: Id, name: &str, args: Vec<Id>) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(delegate);
+    let callable = ctx.lookup_attr(delegate, name);
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.weak_edge_removed(delegate);
+    match callable {
+        Ok(callable) => {
+            ctx.heap.keep(callable);
+            ctx.call(callable, args, Vec::new())
+        }
+        Err(error) => {
+            for value in error.roots() {
+                ctx.heap.keep(value);
+            }
+            Err(error)
+        }
+    }
 }
 
 /// The "K" state format converts with __index__ and masks to an unsigned long long.
@@ -98,14 +122,10 @@ fn unpack_state(ctx: &mut Context, arg: Id, setting: bool) -> Result<(Id, u64)> 
     let [buffer, flag] = items.as_slice() else {
         return Err(type_error(message));
     };
-    ctx.heap.keep(*buffer);
-    let number = ctx.index_integer(*flag).map_err(|e| {
-        if e.kind == "TypeError" {
-            type_error(message)
-        } else {
-            e
-        }
-    })?;
+    ctx.heap.keep(arg);
+    let (_, number) = ctx
+        .index_result(*flag)?
+        .ok_or_else(|| type_error(message))?;
     let bigint = number.big();
     let magnitude = bigint.magnitude().iter_u64_digits().next().unwrap_or(0);
     let bits = if bigint.sign() == num_bigint::Sign::Minus {
@@ -128,14 +148,27 @@ fn decode(ctx: &mut Context, receiver: Id, text: Id, final_: bool) -> Result<Id>
     } else {
         invoke(ctx, delegate, "decode", vec![text, boolean(final_)])?
     };
-    if ctx.string_storage(output).is_none() {
+    let Some(storage) = ctx.string_storage(output) else {
         return Err(type_error(format!(
-            "decoder should return a string result, not '{}'",
+            "decoder should return a string result, not '{:.200}'",
             ctx.type_name(output)
         )));
-    }
-    // A delegate may have reinitialized this decoder. Take its current state after the call.
+    };
+    // A delegate may have reinitialized this decoder. Read the live state after the call.
     let current = *state(ctx, receiver)?;
+    if !current.pending {
+        let only_lf = match ctx.heap.get(storage) {
+            Value::Str(s) if !s.contains('\r') => Some(s.contains('\n')),
+            Value::SurrogateStr(s) if !s.contains(&13) => Some(s.contains(&10)),
+            _ => None,
+        };
+        if let Some(has_lf) = only_lf {
+            if has_lf {
+                state(ctx, receiver)?.seen |= 2;
+            }
+            return Ok(output);
+        }
+    }
     let points = ctx.string_codepoints(output)?;
     if points.is_empty() && (!current.pending || !final_) {
         return Ok(output);
@@ -223,7 +256,12 @@ pub(super) fn call(
         let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
             unreachable!("validated decoder instance")
         };
-        *memory_stream = Some(MemoryStream::Decoder(state));
+        if let Some(MemoryStream::Decoder(previous)) =
+            memory_stream.replace(MemoryStream::Decoder(state))
+        {
+            ctx.heap.weak_edge_removed(previous.delegate);
+            ctx.heap.weak_edge_removed(previous.errors);
+        }
         return Ok(NONE);
     }
     if name == "decode" {

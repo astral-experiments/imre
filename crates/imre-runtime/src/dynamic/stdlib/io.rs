@@ -10,6 +10,7 @@ mod bytes_io;
 mod file_io;
 mod newline_decoder;
 pub(in crate::dynamic) use file_io::open;
+pub(in crate::dynamic) use newline_decoder::CLASS as NEWLINE_DECODER;
 mod text_wrapper;
 
 #[derive(Clone)]
@@ -130,8 +131,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         object,
         newline_decoder::METHODS,
     );
-    ctx.builtins
-        .insert("_io.IncrementalNewlineDecoder".into(), decoder);
+    ctx.builtins.insert(NEWLINE_DECODER.into(), decoder);
     let io = class(
         ctx,
         module,
@@ -213,6 +213,13 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
             "io"
         },
     );
+    if name == "IncrementalNewlineDecoder"
+        && let Value::Scope(frame) = ctx.heap.get_mut(scope)
+    {
+        let namespace = frame.class_namespace.as_mut().unwrap();
+        namespace.slot_names = Some([].into());
+        namespace.immutable_name = Some(NEWLINE_DECODER);
+    }
     ctx.bind(scope, "__module__", module_name);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
@@ -220,7 +227,7 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     let descriptor_owner = match name {
         "TextIOBase" => "_io._TextIOBase",
         "StringIO" => "_io.StringIO",
-        "IncrementalNewlineDecoder" => "_io.IncrementalNewlineDecoder",
+        "IncrementalNewlineDecoder" => NEWLINE_DECODER,
         "FileIO" => "_io.FileIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
         "BytesIO" => "_io.BytesIO",
@@ -351,12 +358,19 @@ pub(in super::super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let bytes_io = ctx.builtins.get("_io.BytesIO").copied();
+    let descr = if bytes_io == Some(owner) {
+        Some("BytesIO")
+    } else if ctx.builtins.get(NEWLINE_DECODER) == Some(&owner) {
+        Some("IncrementalNewlineDecoder")
+    } else {
+        None
+    };
     let Some((&receiver, rest)) = args.split_first() else {
-        let message = if bytes_io == Some(owner) {
+        let message = if let Some(class) = descr {
             if name == "__init__" {
-                "descriptor '__init__' of '_io.BytesIO' object needs an argument".into()
+                format!("descriptor '__init__' of '_io.{class}' object needs an argument")
             } else {
-                format!("unbound method BytesIO.{name}() needs an argument")
+                format!("unbound method {class}.{name}() needs an argument")
             }
         } else {
             format!("unbound I/O method {name} needs a receiver")
@@ -364,15 +378,15 @@ pub(in super::super) fn call(
         return Err(Error::new("TypeError", message));
     };
     if !ctx.instance_of(receiver, owner) {
-        let message = if bytes_io == Some(owner) {
+        let message = if let Some(class) = descr {
             let actual = ctx.type_name(receiver);
             if name == "__init__" {
                 format!(
-                    "descriptor '__init__' requires a '_io.BytesIO' object but received a '{actual}'"
+                    "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
                 )
             } else {
                 format!(
-                    "descriptor '{name}' for '_io.BytesIO' objects doesn't apply to a '{actual}' object"
+                    "descriptor '{name}' for '_io.{class}' objects doesn't apply to a '{actual}' object"
                 )
             }
         } else {
@@ -380,7 +394,7 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     }
-    if ctx.builtins.get("_io.IncrementalNewlineDecoder") == Some(&owner) {
+    if ctx.builtins.get(NEWLINE_DECODER) == Some(&owner) {
         return newline_decoder::call(ctx, receiver, name, rest, kwargs);
     }
     if bytes_io != Some(owner)
