@@ -470,9 +470,9 @@ fn pattern_error_at(
     }
 }
 
-/// A plain literal capture always participates and has exactly one possible spelling.
+/// Repeat a literal when matching its spelling again is equivalent to comparing the capture.
 fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<(usize, usize)> {
-    if flags & (IGNORECASE | LOCALE | VERBOSE) != 0 {
+    if flags & VERBOSE != 0 || flags & (IGNORECASE | LOCALE) == IGNORECASE | LOCALE {
         return None;
     }
     let capture = pattern.strip_prefix(b"(")?;
@@ -498,6 +498,16 @@ fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<(
         return None;
     }
     let literal = &body[..close];
+    // Unicode literals match a wider class than a backreference's lowercase comparison.
+    // Of the ASCII literals, I/i admit dotless i and S/s admit long s.
+    if !bytes
+        && flags & (ASCII | IGNORECASE) == IGNORECASE
+        && literal
+            .iter()
+            .any(|b| !b.is_ascii() || matches!(b, b'I' | b'i' | b'S' | b's'))
+    {
+        return None;
+    }
     (!literal.is_empty() && !literal.iter().any(|b| br"\.^$*+?{}[]|()".contains(b)))
         .then_some((pattern.len() - body.len(), reference.len()))
 }
