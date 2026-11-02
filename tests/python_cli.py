@@ -1969,6 +1969,7 @@ def report(text):
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
+            "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
             "boxed_time_strftime.py",

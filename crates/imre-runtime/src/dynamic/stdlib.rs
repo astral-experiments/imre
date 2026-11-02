@@ -793,7 +793,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_signature_mapping"
             | "_signature_layout",
         )
-        | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
+        | (
+            "email.utils",
+            "parsedate_to_datetime" | "format_datetime" | "formatdate" | "_has_surrogates",
+        )
         | ("warnings", "warn")
         | (
             "fnmatch",
