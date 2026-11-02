@@ -563,6 +563,11 @@ pub(super) fn bind_new(
     }
     let descriptor = super::method_decorator::static_method(ctx, new)?;
     ctx.bind(scope, "__new__", descriptor);
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_getnewargs")?;
+    let name = ctx.text(typename);
+    let getargs = ctx.call(factory, vec![name], Vec::new())?;
+    ctx.bind(scope, "__getnewargs__", getargs);
     Ok(new)
 }
 

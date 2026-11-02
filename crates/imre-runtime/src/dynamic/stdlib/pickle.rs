@@ -35,11 +35,50 @@ fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     )
 }
 
+/// Named tuples have a tuple payload in addition to any state supplied by a subclass.
+fn namedtuple_reduce(ctx: &mut Context, receiver: Id, class: Id, protocol: i32) -> Result<Id> {
+    let copyreg = ctx.module("copyreg")?;
+    if protocol < 2 {
+        let reducer = ctx.lookup_attr(copyreg, "_reduce_ex_with_base")?;
+        ctx.heap.keep(reducer);
+        let reported_class = ctx.lookup_attr(receiver, "__class__")?;
+        ctx.heap.keep(reported_class);
+        let protocol = ctx.int(i64::from(protocol));
+        // The declared NamedTuple base still represents a native tuple layout.
+        // An unrelated reported class must choose its own legacy reconstructor base.
+        let base = if ctx.namedtuple_fields(reported_class).is_some() {
+            ctx.builtin("tuple")
+        } else {
+            NONE
+        };
+        return ctx.call(
+            reducer,
+            vec![receiver, protocol, reported_class, base],
+            Vec::new(),
+        );
+    }
+    let extended = ctx.class_attr(class, "__getnewargs_ex__");
+    let hook = extended.or_else(|| ctx.class_attr(class, "__getnewargs__"));
+    let args = if let Some(hook) = hook {
+        let method = ctx.bind_attribute(hook, receiver, class)?;
+        ctx.call(method, Vec::new(), Vec::new())?
+    } else {
+        ctx.alloc(Value::Tuple(Vec::new()))
+    };
+    ctx.heap.keep(args);
+    let reducer = ctx.lookup_attr(copyreg, "_namedtuple_newobj")?;
+    let extended = super::super::builtins::boolean(extended.is_some());
+    ctx.call(reducer, vec![receiver, args, extended], Vec::new())
+}
+
 /// Reduce an ordinary Python instance using the state rules for its pickle protocol.
 fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Result<Id> {
     let Value::Instance { class, .. } = *ctx.heap.get(receiver) else {
         return Err(unsupported_reducer(ctx, receiver));
     };
+    if ctx.namedtuple_fields(class).is_some() {
+        return namedtuple_reduce(ctx, receiver, class, protocol);
+    }
     // A native base may have state beyond the Python dictionary and slots.
     let Value::Class { ancestors, .. } = ctx.heap.get(class) else {
         return Err(unsupported_reducer(ctx, receiver));
