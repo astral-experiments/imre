@@ -6,6 +6,8 @@ use super::*;
 use crate::dynamic::builtins::bind;
 use crate::objects::{Calendar, CalendarNumber};
 
+mod reduction;
+
 const FIELDS: [&str; 8] = [
     "year",
     "month",
@@ -39,6 +41,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &FIELDS[..3],
             &[
                 "__format__",
+                "__reduce__",
                 "__repr__",
                 "__str__",
                 "ctime",
@@ -51,12 +54,25 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.datetime" => (
             "datetime.datetime",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
-            &["__repr__", "__str__", "ctime", "timetuple"],
+            &[
+                "__reduce__",
+                "__reduce_ex__",
+                "__repr__",
+                "__str__",
+                "ctime",
+                "timetuple",
+            ],
         ),
         "datetime.time" => (
             "datetime.time",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
-            &["__format__", "__repr__", "__str__"],
+            &[
+                "__format__",
+                "__reduce__",
+                "__reduce_ex__",
+                "__repr__",
+                "__str__",
+            ],
         ),
         "datetime.timedelta" => (
             "datetime.timedelta",
@@ -68,6 +84,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__rmul__",
                 "__truediv__",
                 "__rtruediv__",
+                "__reduce__",
                 "__repr__",
                 "__str__",
                 "total_seconds",
@@ -98,6 +115,7 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
     if class == "datetime.datetime" {
         ctx.builtin("datetime.date");
     }
+    ctx.builtin("object.__reduce_ex__");
     ctx.builtin(&format!("{class}.__new__"));
     for method in members.methods {
         ctx.builtin(&format!("{class}.{method}"));
@@ -380,6 +398,12 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some((kind, operation @ ("__reduce__" | "__reduce_ex__"))) = method.split_once('.') {
+        return reduction::reduce(ctx, kind, operation, args, kwargs);
+    }
+    if let Some(value) = reduction::from_state(ctx, method, args)? {
+        return Ok(value);
+    }
     if let Some(kind @ ("date" | "datetime" | "time" | "timedelta")) =
         method.strip_suffix(".__new__")
     {
