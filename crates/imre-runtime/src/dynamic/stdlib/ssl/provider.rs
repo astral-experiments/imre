@@ -4,6 +4,8 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
+pub(in crate::dynamic) mod objects;
+
 type Handle = *mut c_void;
 type VerifyCallback = Option<unsafe extern "C" fn(c_int, Handle) -> c_int>;
 
@@ -50,6 +52,14 @@ macro_rules! functions {
 
 functions! {
     OpenSSL_version(c_int) -> *const c_char;
+    OpenSSL_version_num() -> c_ulong;
+    OBJ_txt2obj(*const c_char, c_int) -> Handle;
+    OBJ_nid2obj(c_int) -> Handle;
+    OBJ_obj2nid(Handle) -> c_int;
+    OBJ_nid2sn(c_int) -> *const c_char;
+    OBJ_nid2ln(c_int) -> *const c_char;
+    OBJ_obj2txt(*mut c_char, c_int, Handle, c_int) -> c_int;
+    ASN1_OBJECT_free(Handle) -> ();
     TLS_client_method() -> Handle;
     SSL_CTX_new(Handle) -> Handle;
     SSL_CTX_free(Handle) -> ();

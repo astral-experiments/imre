@@ -1,9 +1,12 @@
 """TLS client contexts and blocking, connected sockets using system OpenSSL."""
 
 import _imre_ssl
-from enum import IntEnum as _IntEnum, IntFlag as _IntFlag
+import _ssl
+from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
+from _ssl import nid2obj as _nid2obj, txt2obj as _txt2obj
+from collections import namedtuple
+from enum import Enum as _Enum, IntEnum as _IntEnum, IntFlag as _IntFlag
 
-OPENSSL_VERSION = _imre_ssl.OPENSSL_VERSION
 SSL_ERROR_SSL = 1
 
 
@@ -82,6 +85,40 @@ def _call(function, *args):
         return function(*args)
     except _imre_ssl.Error as exc:
         raise SSLError(SSL_ERROR_SSL, str(exc)) from None
+
+
+class _ASN1Object(namedtuple("_ASN1Object", "nid shortname longname oid")):
+    """ASN.1 object identifier lookup
+    """
+    __slots__ = ()
+
+    def __new__(cls, oid):
+        return super().__new__(cls, *_txt2obj(oid, name=False))
+
+    @classmethod
+    def fromnid(cls, nid):
+        """Create _ASN1Object from OpenSSL numeric ID
+        """
+        return super().__new__(cls, *_nid2obj(nid))
+
+    @classmethod
+    def fromname(cls, name):
+        """Create _ASN1Object from short name, long name or OID
+        """
+        return super().__new__(cls, *_txt2obj(name, name=True))
+
+
+class Purpose(_ASN1Object, _Enum):
+    """SSLContext purpose flags with X509v3 Extended Key Usage objects
+    """
+    def __new__(cls, oid):
+        member = _ASN1Object.__new__(cls, oid)
+        # Enum reverse lookup uses the typed ASN.1 value as its key.
+        member._value_ = _ASN1Object(oid)
+        return member
+
+    SERVER_AUTH = '1.3.6.1.5.5.7.3.1'
+    CLIENT_AUTH = '1.3.6.1.5.5.7.3.2'
 
 
 class SSLContext:
@@ -233,9 +270,16 @@ class SSLSocket:
         self.close()
 
 
-def create_default_context(*, cafile=None, capath=None, cadata=None):
+def create_default_context(purpose=Purpose.SERVER_AUTH, *, cafile=None, capath=None, cadata=None):
     """Create a verifying client context for server authentication."""
-    context = SSLContext(PROTOCOL_TLS_CLIENT)
+    if not isinstance(purpose, _ASN1Object):
+        raise TypeError(purpose)
+    if purpose == Purpose.SERVER_AUTH:
+        context = SSLContext(PROTOCOL_TLS_CLIENT)
+    elif purpose == Purpose.CLIENT_AUTH:
+        raise NotImplementedError("server contexts are unsupported")
+    else:
+        raise ValueError(purpose)
     _call(_imre_ssl.default_verify_flags, context._ctx)
     if cafile or capath or cadata:
         context.load_verify_locations(cafile, capath, cadata)

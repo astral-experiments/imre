@@ -2953,9 +2953,6 @@ impl Context {
         if let Some(value) = super::union::subscribe(self, obj, key) {
             return value;
         }
-        if let Some(value) = super::typing::subscribe(self, obj, key) {
-            return value;
-        }
         if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
             return self.call(getter, vec![key], Vec::new());
         }
@@ -2965,6 +2962,9 @@ impl Context {
                 .filter(|&names| matches!(self.heap.get(names), Value::Dict(_)))
                 .ok_or_else(|| Error::new("TypeError", "enum member names must be a dictionary"))?;
             return self.get_item(names, key);
+        }
+        if let Some(value) = super::typing::subscribe(self, obj, key) {
+            return value;
         }
         if matches!(self.heap.get(obj), Value::MappingProxy(_)) {
             return self.get_item(self.mapping_proxy_target(obj), key);

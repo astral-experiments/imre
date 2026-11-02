@@ -116,7 +116,7 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 
 pub(super) fn is_module(name: &str) -> bool {
     #[cfg(unix)]
-    if name == "_imre_ssl" {
+    if matches!(name, "_ssl" | "_imre_ssl") {
         return ssl::provider::available();
     }
     if name == "_hashlib" {
@@ -2325,6 +2325,10 @@ pub(super) fn call(
         "_operator._compare_digest" | "_hashlib.compare_digest"
     ) {
         return hmac::compare(ctx, name, args, kwargs);
+    }
+    #[cfg(unix)]
+    if let Some(function) = name.strip_prefix("_ssl.") {
+        return ssl::provider::objects::call(ctx, function, args, kwargs);
     }
     #[cfg(unix)]
     if let Some(function) = name.strip_prefix("_imre_ssl.") {
