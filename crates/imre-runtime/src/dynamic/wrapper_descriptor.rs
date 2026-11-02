@@ -46,6 +46,7 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::METHODS))
             }
+            Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -161,6 +162,7 @@ impl BuiltinDescriptor {
             owner if DictIterator::class(owner).is_some() => {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
+            "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
             "object" => true,
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),

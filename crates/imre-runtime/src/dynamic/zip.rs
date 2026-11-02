@@ -208,6 +208,7 @@ impl Context {
             Value::Filter { .. } => owner == "filter",
             Value::Enumerate { .. } => owner == "enumerate",
             Value::DictIterator(iter) => owner == iter.class_name(),
+            Value::Generator { .. } => owner == "generator",
             _ => false,
         };
         if !accepts {

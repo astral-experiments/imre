@@ -405,7 +405,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
+        Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
             "coroutine"
         }
@@ -987,6 +987,9 @@ pub(super) fn call(
                 };
                 arity(name, args, min, max)?;
                 ctx.call_coroutine_method(owner, method, args)
+            }
+            "generator" if matches!(method, "__iter__" | "__next__") => {
+                ctx.iterator_method(owner, method, args, kwargs)
             }
             "generator" if method == "send" => {
                 let [generator, value] = args else {
