@@ -120,6 +120,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/tempfile/boxed_spool.py"),
             ),
         )),
+        "doctest" => Some((
+            "doctest.py",
+            concat!(
+                include_str!("../../stdlib/doctest.py"),
+                "\n",
+                include_str!("../../stdlib/doctest_boxed.py"),
+            ),
+        )),
+        "_imre_doctest" => Some((
+            "_imre_doctest.py",
+            include_str!("../../stdlib/_imre_doctest.py"),
+        )),
         "unittest" => Some((
             "unittest/__init__.py",
             concat!(
