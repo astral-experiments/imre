@@ -55,6 +55,16 @@ def unsigned_cast():
     assert BytesIO(b"XYZ").readinto(view[2:5]) == 3
     assert data.tobytes() == b"AAAABBXYZCCCDDDD"
     assert view[::2] == b"BXZC"
+    empty = view[:0:2]
+    assert not empty.c_contiguous and bytes(empty) == b""
+    try:
+        BytesIO(b"x").readinto(empty)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("read into a noncontiguous cast slice")
+    empty.release()
+    assert view[:1:2].c_contiguous
     part = view[1:4].cast("@B")
     assert part.format == "@B" and part[0] == ord("B")
     assert part.shape == (3,) and part.obj is data

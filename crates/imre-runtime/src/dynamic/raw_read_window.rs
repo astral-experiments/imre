@@ -99,7 +99,7 @@ impl Context {
             Value::MemoryView { owner, .. } => {
                 let owner = Self::memoryview_owner(owner)?;
                 let view = self.view_layout(object)?;
-                if view.len > 1 && view.stride != 1 {
+                if !view.is_contiguous() {
                     return Ok(None);
                 }
                 let (_, width) = self.view_format_width(owner, view);

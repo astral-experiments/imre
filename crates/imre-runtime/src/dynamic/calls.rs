@@ -2188,7 +2188,7 @@ impl Context {
                     }
                     "suboffsets" => self.alloc(Value::Tuple(vec![])),
                     "contiguous" | "c_contiguous" | "f_contiguous" => {
-                        builtins::boolean(len <= 1 || view.stride == 1)
+                        builtins::boolean(view.is_contiguous())
                     }
                     "nbytes" => self.int((len * width) as i64),
                     "itemsize" => self.int(width as i64),

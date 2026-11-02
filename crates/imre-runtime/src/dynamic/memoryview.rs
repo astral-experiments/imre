@@ -20,6 +20,10 @@ impl ViewLayout {
         }
     }
 
+    pub(super) fn is_contiguous(self) -> bool {
+        self.len == 1 || self.stride == 1
+    }
+
     fn position(self, index: usize) -> i128 {
         self.start as i128 + index as i128 * i128::from(self.stride)
     }
@@ -81,7 +85,7 @@ impl<'a> Span<'a> {
     }
 
     fn contiguous(&self) -> Result<&'a [u8]> {
-        if self.layout.len > 1 && self.layout.stride != 1 {
+        if !self.layout.is_contiguous() {
             return Err(Error::new(
                 "BufferError",
                 "memoryview: underlying buffer is not C-contiguous",
@@ -205,7 +209,7 @@ impl Context {
             )
         })?;
         let span = self.buffer_span(view)?;
-        if span.layout.len != 1 && span.layout.stride != 1 {
+        if !span.layout.is_contiguous() {
             return Err(Error::new(
                 "TypeError",
                 "memoryview: casts are restricted to C-contiguous views",
