@@ -831,6 +831,8 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        /// Private layout tag for native I/O class generations.
+        io_kind: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1139,6 +1141,13 @@ impl Value {
             Self::PythonFrame { .. } => "frame",
             _ => return None,
         })
+    }
+
+    pub(super) fn io_kind(&self) -> Option<&'static str> {
+        match self {
+            Self::Class { io_kind, .. } => *io_kind,
+            _ => None,
+        }
     }
 
     pub(super) fn instance_class(&self) -> Option<Id> {
