@@ -137,6 +137,7 @@ CASES = {
                      ["-q", "-q", "-q"], ["--off"], ["--off=x"], ["-s=x"], ["-v=3"], ["-vh"],
                      ["-v=f", "--help"], ["--help", "--off=x"], ["-f", "extra"]],
     "method_args": [[]],
+    "supplied_namespace": [[]],
     "known_args": [
         [], ["--help"], ["--foo", "F", "--bar", "--baz"], ["--foo"],
         ["one", "two", "--unknown", "-v", "three"], ["-vvv", "π", "one", "两"],
