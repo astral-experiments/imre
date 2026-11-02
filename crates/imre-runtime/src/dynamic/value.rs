@@ -456,7 +456,7 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
-            Value::BufferedRandom(_) => "_io.BufferedRandom",
+            Value::BufferedRandom(..) => "_io.BufferedRandom",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -981,7 +981,10 @@ pub(super) enum Value {
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
-    BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
+    BufferedRandom(
+        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        Id,
+    ),
     RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
@@ -1494,8 +1497,8 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::TextFile(_)
-            | Self::NamedFileCloser(_)
-            | Self::BufferedRandom(_) => {}
+            | Self::NamedFileCloser(_) => {}
+            Self::BufferedRandom(_, name) => visit.push(*name),
         }
     }
 }

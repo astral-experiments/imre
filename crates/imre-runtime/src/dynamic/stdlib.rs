@@ -397,7 +397,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("locale" | "_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
-        ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
+        ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
+            ctx.builtin("tempfile.TemporaryFile")
+        }
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         (
             "_imp",
