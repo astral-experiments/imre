@@ -88,6 +88,13 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         #[cfg(target_os = "linux")]
         "MFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::MFD_CLOEXEC)),
+        #[cfg(target_os = "linux")]
+        "SPLICE_F_MOVE" => Intrinsic::IntConstant(i64::from(libc::SPLICE_F_MOVE)),
+        #[cfg(target_os = "linux")]
+        "SPLICE_F_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::SPLICE_F_NONBLOCK)),
+        #[cfg(target_os = "linux")]
+        "SPLICE_F_MORE" => Intrinsic::IntConstant(i64::from(libc::SPLICE_F_MORE)),
+        "splice" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.splice"),
         "memfd_create" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.memfd_create")
         }

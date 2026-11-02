@@ -555,6 +555,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             && matches!(
                 name,
                 "copy_file_range"
+                    | "splice"
                     | "lockf"
                     | "mknod"
                     | "posix_fadvise"
@@ -576,6 +577,22 @@ fn posix_file_call(ctx: &mut Context, mut call: impl FnMut() -> i32) -> Result<I
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
+#[cfg(target_os = "linux")]
+fn unsigned(ctx: &mut Context, id: Id, max: u64, kind: &str) -> Result<u64> {
+    use num_traits::{Signed, ToPrimitive};
+    let integer = ctx.index_integer(id)?;
+    let n = integer.big();
+    if n.is_negative() {
+        return Err(Error::new("ValueError", "Cannot convert negative int"));
+    }
+    n.to_u64().filter(|&n| n <= max).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            format!("Python int too large for C unsigned {kind}"),
+        )
+    })
+}
+
 pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
@@ -1035,21 +1052,49 @@ pub(super) fn descriptor(
         return open(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
-    if name == "copy_file_range" {
-        let [Some(src), Some(dst), Some(count), offset_src, offset_dst] =
+    if matches!(name, "copy_file_range" | "splice") {
+        let [
+            Some(src),
+            Some(dst),
+            Some(count),
+            offset_src,
+            offset_dst,
+            flags,
+        ] = (if name == "splice" {
             builtins::bind_builtin_arguments(
+                name,
+                args,
+                kwargs,
+                ["src", "dst", "count", "offset_src", "offset_dst", "flags"],
+                3,
+            )?
+        } else {
+            let [src, dst, count, offset_src, offset_dst] = builtins::bind_builtin_arguments(
                 name,
                 args,
                 kwargs,
                 ["src", "dst", "count", "offset_src", "offset_dst"],
                 3,
-            )?
+            )?;
+            [src, dst, count, offset_src, offset_dst, None]
+        })
         else {
-            unreachable!("copy_file_range requires both descriptors and count")
+            unreachable!("both descriptors and a count are required")
         };
         let src = c_int(ctx, src)?;
         let dst = c_int(ctx, dst)?;
-        let count = usize::try_from(ssize_t(ctx, count)?)
+        let count = ssize_t(ctx, count)?;
+        // Argument Clinic converts flags before splice checks count or converts offsets.
+        let operation = if name == "splice" {
+            let flags = flags
+                .map(|id| unsigned(ctx, id, u64::from(u32::MAX), "int"))
+                .transpose()?
+                .unwrap_or(0);
+            native::RangeTransfer::Splice(flags as u32)
+        } else {
+            native::RangeTransfer::CopyFileRange
+        };
+        let count = usize::try_from(count)
             .map_err(|_| Error::new("ValueError", "negative value for 'count' not allowed"))?;
         let mut offset = |value| match value {
             None | Some(NONE) => Ok(None),
@@ -1057,7 +1102,7 @@ pub(super) fn descriptor(
         };
         let offset_src = offset(offset_src)?;
         let offset_dst = offset(offset_dst)?;
-        let copied = native::copy_file_range(src, dst, count, offset_src, offset_dst, || {
+        let copied = operation.run(src, dst, count, offset_src, offset_dst, || {
             ctx.dispatch_signals()
         })?;
         return Ok(ctx.int(copied as i64));

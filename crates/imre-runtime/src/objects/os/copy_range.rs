@@ -1,4 +1,4 @@
-use super::{Error, Int, Kind, Result, c_int, copy_file_range, finish};
+use super::{Error, Int, Kind, RangeTransfer, Result, c_int, finish};
 
 unsafe fn count_word(word: usize) -> Result<usize> {
     // SAFETY: the caller roots a native integer.
@@ -71,15 +71,16 @@ pub unsafe extern "C" fn imre_os_copy_file_range(
                     offset_word(offset_dst)?,
                 )
             };
-            copy_file_range(
-                src,
-                dst,
-                count,
-                offset_src,
-                offset_dst,
-                super::super::stdlib::check_interrupt,
-            )
-            .map(|n| Int::from_usize(n).into_raw())
+            RangeTransfer::CopyFileRange
+                .run(
+                    src,
+                    dst,
+                    count,
+                    offset_src,
+                    offset_dst,
+                    super::super::stdlib::check_interrupt,
+                )
+                .map(|n| Int::from_usize(n).into_raw())
         })(),
         0,
     )
