@@ -1,5 +1,6 @@
 //! Compile the no-progress check used by Python's nullable repetitions into the NFA.
 //! Matching can then use the ordinary priority-ordered Pike VM, including for captures.
+use super::assertions::{Guard, Kind};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -30,12 +31,12 @@ pub(super) struct AssertedMatcher {
 /// Internal capture instructions can also mark a zero-width assertion.
 pub(super) enum AssertionSlot {
     Public(usize),
-    Guard(Regex),
+    Guard(Guard),
     Ignore,
 }
 
 impl AssertedMatcher {
-    fn new(nfa: NFA, guards: &[(String, Regex)]) -> Result<Self, String> {
+    fn new(nfa: NFA, guards: &[(String, Guard)]) -> Result<Self, String> {
         let guards: HashMap<_, _> = guards
             .iter()
             .map(|(name, re)| (name.as_str(), re))
@@ -44,6 +45,17 @@ impl AssertedMatcher {
         let mut slots = Vec::new();
         for name in nfa.group_info().pattern_names(PatternID::ZERO) {
             if let Some(guard) = name.and_then(|name| guards.get(name)) {
+                if guard.kind == Kind::NegativeBehind {
+                    // A successful negative guard leaves its captures unset. Reserve the
+                    // public group numbers without mapping any NFA slots to those groups.
+                    names.extend(
+                        guard
+                            .regex
+                            .group_info()
+                            .pattern_names(PatternID::ZERO)
+                            .skip(1),
+                    );
+                }
                 slots.push(AssertionSlot::Guard((**guard).clone()));
                 slots.push(AssertionSlot::Ignore);
             } else {
@@ -65,7 +77,7 @@ impl Matcher {
         regex: Regex,
         hir: Hir,
         utf8: bool,
-        assertions: &[(String, Regex)],
+        assertions: &[(String, Guard)],
     ) -> Result<Self, String> {
         let progress = needs_guard(&hir);
         if !progress && assertions.is_empty() {

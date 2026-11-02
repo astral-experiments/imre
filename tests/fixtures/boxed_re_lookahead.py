@@ -2,6 +2,18 @@ import re
 
 
 def current():
+    for flags in (0, re.L):
+        guard = re.compile(b"(?<!abc)(d.f)", flags)
+        assert guard.search(b"abcdefdof", 3, 6) is None
+        assert guard.search(b"xbcdefdof", 3, 6).span(1) == (3, 6)
+        groups = re.compile(b"^([ab]*?)(?<!(?P<before>a))(?P<end>c)", flags)
+        match = groups.fullmatch(b"abc")
+        assert match.groups() == (b"ab", None, b"c") and match.span("before") == (-1, -1)
+        assert groups.groupindex["end"] == 3 and groups.search(b"ac") is None
+        high = re.compile(b"(?<=\xff\x80)(.)", flags)
+        assert high.match(b"\xff\x80x", 2, 3).group(1) == b"x"
+        assert high.match(b"\xff\x81x", 2, 3) is None
+
     probe = re.compile(r"(?=(?P<a>.)(?P<b>.))(?P<first>.)")
     found = probe.search("xé中!", 1, 3)
     assert re.match(r"(?=(?P<é>x))", "x").group("é") == "x"
