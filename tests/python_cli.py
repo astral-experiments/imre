@@ -1914,6 +1914,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare("-IB", fixtures / "boxed_pickle_writer.py")
         compare(
             "-B", "-c",
             "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"
@@ -2393,6 +2394,7 @@ def report(text):
             "boxed_bytes_fromhex.py",
             "boxed_binary_endswith.py",
             "boxed_struct.py",
+            "boxed_pickle_writer.py",
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
