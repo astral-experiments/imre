@@ -41,6 +41,7 @@ impl BuiltinDescriptor {
                 ][..],
             )),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
+            Some(("bytes", attr)) => Some(("bytes", attr, &["endswith"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
@@ -204,6 +205,13 @@ impl BuiltinDescriptor {
             "__text_signature__" if matches!(self.name, "__add__" | "__iadd__") => {
                 ctx.text("($self, value, /)")
             }
+            "__text_signature__" if self.name == "endswith" => {
+                ctx.text("($self, suffix[, start[, end]], /)")
+            }
+            "__doc__" if self.name == "endswith" => ctx.text(format!(
+                "Return True if the {owner} ends with the specified suffix, False otherwise.\n\n  suffix\n    A bytes or a tuple of bytes to try.\n  start\n    Optional start position. Default: start of the {owner}.\n  end\n    Optional stop position. Default: end of the {owner}.",
+                owner = self.owner
+            )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
                     ("isascii", "__doc__") => {
