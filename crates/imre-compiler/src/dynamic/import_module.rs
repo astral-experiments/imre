@@ -226,6 +226,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/resources/__init__.py",
             include_str!("../../stdlib/importlib/resources/__init__.py"),
         )),
+        "importlib.readers" => Some((
+            "importlib/readers.py",
+            include_str!("../../stdlib/importlib/readers.py"),
+        )),
+        "importlib.resources._itertools" => Some((
+            "importlib/resources/_itertools.py",
+            include_str!("../../stdlib/importlib/resources/_itertools.py"),
+        )),
+        "importlib.resources.readers" => Some((
+            "importlib/resources/readers.py",
+            include_str!("../../stdlib/importlib/resources/readers.py"),
+        )),
         "importlib.resources.abc" => Some((
             "importlib/resources/abc.py",
             include_str!("../../stdlib/importlib/resources/abc.py"),

@@ -383,7 +383,9 @@ pub(crate) enum IntrinsicModule {
     ImportlibMachinery,
     ImportlibBootstrapExternal,
     ImportlibMetadata,
+    ImportlibReaders,
     ImportlibResources,
+    ImportlibResourceReaders,
     ImportlibResourcesAbc,
     ImportlibUtil,
     Array,
@@ -935,7 +937,9 @@ impl IntrinsicModule {
                 Some(Self::ImportlibBootstrapExternal)
             }
             "importlib.metadata" => Some(Self::ImportlibMetadata),
+            "importlib.readers" => Some(Self::ImportlibReaders),
             "importlib.resources" => Some(Self::ImportlibResources),
+            "importlib.resources.readers" => Some(Self::ImportlibResourceReaders),
             "importlib.resources.abc" => Some(Self::ImportlibResourcesAbc),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
@@ -1044,6 +1048,9 @@ impl IntrinsicModule {
         }
         if self == Self::ImportlibResources && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::ImportlibResourcesAbc));
+        }
+        if self == Self::ImportlibResources && name == "readers" {
+            return Some(Binding::IntrinsicModule(Self::ImportlibResourceReaders));
         }
         if self == Self::Collections && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::CollectionsAbc));
@@ -1182,6 +1189,12 @@ impl IntrinsicModule {
             }
             (Self::ImportlibResourcesAbc, "Traversable") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.Traversable")
+            }
+            (Self::ImportlibReaders | Self::ImportlibResourceReaders, "MultiplexedPath") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.readers.MultiplexedPath")
+            }
+            (Self::ImportlibReaders | Self::ImportlibResourceReaders, "NamespaceReader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.readers.NamespaceReader")
             }
             (Self::ImportlibResourcesAbc, "TraversalError") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.TraversalError")
@@ -3254,6 +3267,7 @@ fn importlib_child(name: &str) -> Option<IntrinsicModule> {
         "machinery" => Some(IntrinsicModule::ImportlibMachinery),
         "_bootstrap_external" => Some(IntrinsicModule::ImportlibBootstrapExternal),
         "metadata" => Some(IntrinsicModule::ImportlibMetadata),
+        "readers" => Some(IntrinsicModule::ImportlibReaders),
         "resources" => Some(IntrinsicModule::ImportlibResources),
         "util" => Some(IntrinsicModule::ImportlibUtil),
         _ => None,
@@ -3265,6 +3279,7 @@ fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
         IntrinsicModule::ImportlibMachinery => Some("machinery"),
         IntrinsicModule::ImportlibBootstrapExternal => Some("_bootstrap_external"),
         IntrinsicModule::ImportlibMetadata => Some("metadata"),
+        IntrinsicModule::ImportlibReaders => Some("readers"),
         IntrinsicModule::ImportlibResources => Some("resources"),
         IntrinsicModule::ImportlibUtil => Some("util"),
         _ => None,
@@ -4187,6 +4202,8 @@ impl<'a> Loader<'a> {
                             IntrinsicModule::Marshal
                                 | IntrinsicModule::Pickle
                                 | IntrinsicModule::Struct
+                                | IntrinsicModule::ImportlibReaders
+                                | IntrinsicModule::ImportlibResourceReaders
                                 | IntrinsicModule::ImportlibResources
                         ) && matches!(
                             binding,

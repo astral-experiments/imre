@@ -27,6 +27,9 @@ REJECTED = {
                    "def identity(value: int) -> int: return value\n"
                    "m = Mock(custom=identity('wrong'))\n",
     }, "expected int, got str"),
+    "unused_resource_reader_keeps_return_check": ({
+        "main.py": "from importlib.readers import MultiplexedPath\ndef wrong() -> int: return 'bad'\nwrong()\n",
+    }, "int"),
     "wildcard_keeps_return_check": ({
         "main.py": "from helper import *\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
         "helper.py": HELPER,
@@ -596,6 +599,15 @@ ACCEPTED = {
             "try:\n    SourceFileLoader('other', path + '.missing').get_code('other')\n"
             "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
         ),
+    },
+    "multiplexed_resources": {
+        "main.py": (FIXTURES.parent / "boxed_multiplexed_resources.py").read_text(),
+        "first/same.txt": "first",
+        "first/shared/one": "1",
+        "first/mixed/one": "1",
+        "second/same.txt": "second",
+        "second/shared/two": "2",
+        "second/mixed": "file",
     },
     "filesystem_resources": {
         "main.py": (FIXTURES.parent / "boxed_filesystem_resources.py").read_text(),
