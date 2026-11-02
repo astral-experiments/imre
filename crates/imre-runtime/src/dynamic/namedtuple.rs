@@ -402,6 +402,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
     bind_new(ctx, scope, &typename, &names, defaults)?;
     let tuple = ctx.builtin("tuple");
+    ctx.enable_class_annotation_provider(scope);
     let class = ctx.allocate_class(typename, scope, vec![tuple])?;
     let Value::Class {
         namedtuple_fields, ..
