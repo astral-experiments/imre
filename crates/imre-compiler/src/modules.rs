@@ -587,6 +587,7 @@ pub(crate) enum IntrinsicModule {
     Posix,
     OsPath,
     GenericPath,
+    NtPath,
     PosixPath,
     Urllib,
     UrllibParse,
@@ -1121,6 +1122,7 @@ impl IntrinsicModule {
             "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" => Some(Self::OsPath),
             "genericpath" => Some(Self::GenericPath),
+            "ntpath" => Some(Self::NtPath),
             "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
             "email._header_value_parser" => Some(Self::EmailHeaderValueParser),
@@ -1192,6 +1194,10 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        // The bundled ntpath binds platform-dependent names during module initialization.
+        if self == Self::NtPath {
+            return Some(Binding::ConditionalValue);
+        }
         if self == Self::DatetimeNative {
             return Self::Datetime.symbol(name);
         }
@@ -5227,6 +5233,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Ast
+                    | IntrinsicModule::NtPath
                     | IntrinsicModule::Blake2
                     | IntrinsicModule::OperatorNative
                     | IntrinsicModule::Sha3
