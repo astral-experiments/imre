@@ -552,6 +552,8 @@ class _TypedDictSymbol:
                  *self.__operand__(right, precedence + 1)), precedence)
         return binary
 
+    __add__ = _binary("+", 10)
+    __radd__ = _binary("+", 10, reverse=True)
     __or__ = _binary("|", 6)
     __ror__ = _binary("|", 6, reverse=True)
     __eq__ = _binary("==", 5, comparison=True)
