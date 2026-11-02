@@ -73,7 +73,7 @@ impl Rows {
         match &self.storage {
             RowStorage::Packed(words) => Some((words.as_ptr(), usize::MAX)),
             RowStorage::Periodic { words, mask } => Some((words.as_ptr(), *mask)),
-            RowStorage::Repeated(base, edits) if edits.len == 0 => {
+            RowStorage::Repeated(base, edits) if edits.len() == 0 => {
                 Some((base.word as *const usize, 0))
             }
             _ => None,
@@ -90,7 +90,7 @@ impl Rows {
             return Ok(false);
         };
         debug_assert_eq!(order.len(), self.len);
-        if edits.len != 0 {
+        if edits.len() != 0 {
             let mut out = Overrides::default();
             for (new, &old) in order.iter().enumerate() {
                 if let Some(row) = edits.get(old, self.layout.length) {
@@ -307,7 +307,9 @@ impl Rows {
         // Storage must preserve them: fields can expose the original float bits.
         if row == base_row(base, width) {
             edits.remove(at, width);
-        } else if !edits.should_pack_after_insert(at, len) || edits.get(at, width).is_some() {
+        } else if edits.write_binary(at, len, row) {
+            return Ok(());
+        } else if !edits.should_pack(at, len, width) {
             edits.put(at, row)?;
         } else {
             let append = at == self.len;
@@ -366,7 +368,7 @@ impl Rows {
             if let RowStorage::Repeated(base, edits) = &self.storage {
                 out = self.with_default(base.clone(), len);
                 // A sparse slice takes work proportional to the smaller side.
-                if len < edits.len {
+                if len < edits.len() {
                     for (dest, source) in indices.enumerate() {
                         if let Some(row) = edits.get(source, self.layout.length) {
                             out.set(dest, row)?;
@@ -481,6 +483,78 @@ pub unsafe extern "C" fn imre_struct_cycle_prefix(
             stop - 2
         })
     }
+}
+
+/// Borrowed dictionary payloads and flat tags for a stable scalar row scan.
+#[repr(C)]
+pub struct BinaryRead {
+    rows: [*const usize; 2],
+    bits: *const u64,
+    words: usize,
+}
+
+/// Expose two rows and their tags if both occur before the last element.
+/// Returns the alternate count in that prefix, or a negative value on a miss.
+///
+/// # Safety
+/// The caller roots an exact scalar struct list and provides a writable descriptor.
+/// Its borrowed data remains valid until the list is mutated.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_binary_prefix(
+    list: *const Object,
+    out: *mut BinaryRead,
+) -> i64 {
+    // SAFETY: the typed traversal owns the list and the output slots for this call.
+    unsafe {
+        object(list).0.with(|storage| {
+            let Storage::Sequence(words) = storage else {
+                return -1;
+            };
+            let Some(rows) = words.rows() else { return -1 };
+            let RowStorage::Repeated(base, edits @ Overrides::Binary(binary)) = &rows.storage
+            else {
+                return -1;
+            };
+            let last = rows.len - 1;
+            let count = edits.len() - usize::from(edits.get(last, rows.layout.length).is_some());
+            if count == 0 || count == last {
+                return -1;
+            }
+            out.write(BinaryRead {
+                rows: [base.word as *const usize, binary.row.as_ptr()],
+                bits: binary.bits.as_ptr(),
+                words: binary.bits.len(),
+            });
+            count as i64
+        })
+    }
+}
+
+/// Sum two projected terms in their original row order when rounding matters.
+///
+/// # Safety
+/// The successful prefix query and this call borrow the same unmodified list.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_binary_ordered(
+    view: *const BinaryRead,
+    len: usize,
+    mut sum: f64,
+    default: f64,
+    alternate: f64,
+) -> f64 {
+    // SAFETY: the query initialized this descriptor; the originating list owns its bitmap.
+    let bits = unsafe { std::slice::from_raw_parts((*view).bits, (*view).words) };
+    let terms = [default, alternate];
+    let width = u64::BITS as usize;
+    for (block, start) in (0..len).step_by(width).enumerate() {
+        // Appending default rows need not extend the bitmap.
+        let mut tags = bits.get(block).copied().unwrap_or(0);
+        for _ in 0..width.min(len - start) {
+            sum += terms[(tags & 1) as usize];
+            tags >>= 1;
+        }
+    }
+    sum
 }
 
 /// Append a loop-invariant value to an empty scalar struct list in one step.
@@ -720,7 +794,7 @@ impl Rows {
                 .all(|(i, row)| self.equal_row(row, other.row(i))),
             (_, RowStorage::Packed(_)) => other.equal(self),
             (RowStorage::Repeated(a, left), RowStorage::Repeated(b, right)) => {
-                let mut covered = left.len;
+                let mut covered = left.len();
                 for (i, row) in left.iter(width) {
                     if !self.equal_row(row, other.row(i)) {
                         return false;
@@ -750,7 +824,7 @@ impl Rows {
                 .chunks_exact(width)
                 .any(|row| self.equal_row(row, needle)),
             RowStorage::Repeated(base, edits) => {
-                (edits.len < self.len && self.equal_row(base_row(base, width), needle))
+                (edits.len() < self.len && self.equal_row(base_row(base, width), needle))
                     || edits
                         .iter(width)
                         .any(|(_, row)| self.equal_row(row, needle))
@@ -947,15 +1021,40 @@ mod tests {
     }
 
     #[test]
+    fn third_payload_preserves_low_density_sparse_rows() {
+        let mut seed = Rows::new(POINT);
+        ok(seed.append(&[0, 0]));
+        let mut list = ok(seed.repeat(8192));
+        let rows = list.rows_mut().unwrap();
+        for i in 0..48 {
+            ok(rows.set(i * 129, &[1, 2]));
+        }
+        assert!(matches!(
+            rows.storage,
+            RowStorage::Repeated(_, Overrides::Binary(_))
+        ));
+        ok(rows.set(64, &[3, 4]));
+        assert!(matches!(
+            rows.storage,
+            RowStorage::Repeated(_, Overrides::Sparse(_))
+        ));
+        assert_eq!(rows.row(64), [3, 4]);
+        assert_eq!(rows.row(129), [1, 2]);
+        assert_eq!(rows.row(128), [0, 0]);
+    }
+
+    #[test]
     fn scattered_slots_promote_earlier_than_clustered_slots() {
         let mut seed = Rows::new(POINT);
         ok(seed.append(&[0, 0]));
         let n = 4096;
         let mut clustered = ok(seed.repeat(n));
         let mut scattered = ok(seed.repeat(n));
+        // Distinct payloads exercise the general sparse-to-dense cutoff.
         for i in 0..64 {
-            ok(clustered.rows_mut().unwrap().set(i, &[1, 1]));
-            ok(scattered.rows_mut().unwrap().set(i * 64, &[1, 1]));
+            let row = [i + 1, 1];
+            ok(clustered.rows_mut().unwrap().set(i, &row));
+            ok(scattered.rows_mut().unwrap().set(i * 64, &row));
         }
         // At exactly 1/64 neither promotes, even after touching every block.
         assert!(scattered.rows().unwrap().direct_view().is_none());
@@ -968,7 +1067,7 @@ mod tests {
             usize::MAX
         );
         assert!(clustered.rows().unwrap().direct_view().is_none());
-        for (at, expected) in [(0, [2, 1]), (1, [3, 1]), (2, [0, 0]), (4032, [1, 1])] {
+        for (at, expected) in [(0, [2, 1]), (1, [3, 1]), (2, [0, 0]), (4032, [64, 1])] {
             assert_eq!(scattered.rows().unwrap().row(at), expected);
         }
     }
@@ -1032,9 +1131,17 @@ mod tests {
         assert!(rows.set(0, &plus).is_ok());
         assert!(rows.direct_view().is_none());
         assert!(rows.set(cutoff, &plus).is_ok());
-        assert_eq!(rows.direct_view().unwrap().1, usize::MAX);
+        assert!(matches!(
+            rows.storage,
+            RowStorage::Repeated(_, Overrides::Binary(_))
+        ));
         assert_eq!(rows.row(cutoff), plus);
         assert_eq!(rows.row(cutoff + 1), minus);
+        let third = [1.0_f64.to_bits() as usize, 1];
+        ok(rows.set(cutoff + 1, &third));
+        assert_eq!(rows.direct_view().unwrap().1, usize::MAX);
+        assert_eq!(rows.row(cutoff), plus);
+        assert_eq!(rows.row(cutoff + 1), third);
         // The box captured before mutation remains independently rooted.
         // SAFETY: saved owns one initialized two-word POINT.
         assert_eq!(unsafe { *(saved.word as *const usize) }, minus[0]);
