@@ -2466,7 +2466,7 @@ impl Context {
             }
             "io" => stdlib::io::install(self, scope),
             "_json" => {
-                for name in ["encode_basestring", "encode_basestring_ascii"] {
+                for name in ["encode_basestring", "encode_basestring_ascii", "scanstring"] {
                     let callable = self.builtin(&format!("_json.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,

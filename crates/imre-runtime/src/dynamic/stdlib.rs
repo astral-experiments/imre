@@ -2153,6 +2153,7 @@ pub(super) fn call(
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
+        "_json.scanstring" => return json::scanstring(ctx, args, kwargs),
         "_json.encode_basestring" | "_json.encode_basestring_ascii" => {
             return json::encode_basestring(ctx, name, args, kwargs);
         }
