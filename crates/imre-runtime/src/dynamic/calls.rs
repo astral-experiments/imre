@@ -1278,7 +1278,6 @@ impl Context {
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
             Value::Union(_) => "typing.Union",
-            Value::Super { .. } => "super",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",

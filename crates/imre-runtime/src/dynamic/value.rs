@@ -1196,6 +1196,7 @@ impl Value {
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
+            Self::Super { .. } => "super",
             Self::None => "NoneType",
             Self::Weak(wr) => wr.kind.class(),
             Self::Ellipsis => "ellipsis",
