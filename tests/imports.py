@@ -42,6 +42,18 @@ REJECTED = {
         "records.py": "from imre import struct as layout\n@layout\nclass Point:\n    x: float\n",
         "main.py": "from records import Point\nfrom weakref import ref\nref(Point(1.0))\n",
     }, "weakref.ref requires native Python object operations"),
+    "deque_repr_checks_receiver_expression": ({
+        "main.py": (
+            "from collections import deque\ndef queue(n: int) -> int:\n    return n\n"
+            "deque.__repr__(queue('wrong'))\n"
+        ),
+    }, "expected int, got str"),
+    "saved_deque_repr_keeps_checked_calls": ({
+        "main.py": (
+            "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
+            "render = deque.__repr__\nrender(deque([1]))\nidentity('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "patch_object_checks_replacement": ({
         "main.py": (
             "from unittest.mock import patch\nclass Owner:\n    value = 0\n"

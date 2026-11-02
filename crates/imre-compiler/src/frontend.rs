@@ -7497,6 +7497,9 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if self.deque_repr_descriptor(attribute) {
+                    return Err(self.scoped_builtin_error("collections.deque.__repr__", attribute));
+                }
                 if attribute.attr.as_str() == "MISSING"
                     && self.resolve(&attribute.value)
                         == Some(Binding::Intrinsic(Intrinsic::ContextToken))
@@ -8558,6 +8561,11 @@ impl<'a> Checker<'a> {
             && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
         {
             return self.counter_elements(call, None);
+        }
+        if let ast::Expr::Attribute(attribute) = &*call.func
+            && self.deque_repr_descriptor(attribute)
+        {
+            return self.boxed_deque_repr_call(call);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "reverse"
