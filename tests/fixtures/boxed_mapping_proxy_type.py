@@ -11,6 +11,16 @@ def current():
     assert MappingProxyType.__repr__ is not dict.__repr__
     assert MappingProxyType.__repr__(view) == view.__repr__() == "mappingproxy({'a': 1})"
     assert MappingProxyType.__str__(view) == view.__str__() == "{'a': 1}"
+    class Display(str):
+        pass
+
+    display = Display('mapping display')
+
+    class Mapping(dict):
+        def __str__(self):
+            return display
+
+    assert MappingProxyType.__str__(MappingProxyType(Mapping())) is display
     values['b'] = 2
     assert list(view) == ['a', 'b'] and view['b'] == 2
     assert list(MappingProxyType(view)) == ['a', 'b']
