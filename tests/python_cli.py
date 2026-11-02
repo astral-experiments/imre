@@ -1872,6 +1872,7 @@ def report(text):
             "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
             "boxed_locale.py",
+            "boxed_locale_error.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
             "boxed_logging_handler_list.py",

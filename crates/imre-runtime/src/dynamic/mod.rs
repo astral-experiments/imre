@@ -2062,6 +2062,7 @@ impl Context {
             scope,
             origin,
             initializing: source.is_some(),
+            locale_error: None,
             constructor: None,
         });
         let key = self.text(name);
@@ -2211,6 +2212,7 @@ impl Context {
                 self.bind(scope, "_bootstrap_external", external);
             }
             "io" => stdlib::io::install(self, scope),
+            "_locale" => stdlib::locale::install(self, module, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope),

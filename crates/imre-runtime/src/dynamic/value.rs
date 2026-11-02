@@ -811,6 +811,8 @@ pub(super) enum Value {
         scope: Id,
         origin: Option<Id>,
         initializing: bool,
+        // Exception class retained by this generation of the _locale module.
+        locale_error: Option<Id>,
         // Imported modules are resolved separately from independently constructed ones.
         constructor: Option<Id>,
     },
@@ -1339,9 +1341,11 @@ impl Value {
                 scope,
                 origin,
                 constructor,
+                locale_error,
                 ..
             } => {
                 visit.push(*scope);
+                visit.extend(locale_error);
                 visit.extend(origin);
                 visit.extend(constructor);
             }
