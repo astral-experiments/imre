@@ -402,6 +402,7 @@ pub(crate) enum IntrinsicModule {
     LoggingConfig,
     LoggingHandlers,
     Datetime,
+    DatetimeNative,
     Abc,
     Asyncio,
     Contextlib,
@@ -846,7 +847,7 @@ impl IntrinsicModule {
     pub(crate) fn lacks_builtin_stub(self) -> bool {
         matches!(
             self,
-            Self::Opcode | Self::StringFormatting | Self::CollectionsNative
+            Self::Opcode | Self::StringFormatting | Self::CollectionsNative | Self::DatetimeNative
         )
     }
 
@@ -866,6 +867,7 @@ impl IntrinsicModule {
             "logging.config" => Some(Self::LoggingConfig),
             "logging.handlers" => Some(Self::LoggingHandlers),
             "datetime" => Some(Self::Datetime),
+            "_datetime" => Some(Self::DatetimeNative),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "contextvars" => Some(Self::ContextVars),
@@ -969,6 +971,9 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::DatetimeNative {
+            return Self::Datetime.symbol(name);
+        }
         if self == Self::Inspect
             && let Some(&(_, flag)) = imre_ast::code_flags::INSPECT_FLAGS
                 .iter()
@@ -1503,6 +1508,9 @@ impl IntrinsicModule {
             (Self::Datetime, "timedelta") => Intrinsic::Calendar(crate::ir::CalendarType::Delta),
             (Self::Datetime, "timezone") => Intrinsic::Calendar(crate::ir::CalendarType::Zone),
             (Self::Datetime, "UTC") => Intrinsic::CalendarUtc,
+            (Self::Datetime, "MINYEAR") => Intrinsic::IntConstant(1),
+            (Self::Datetime, "MAXYEAR") => Intrinsic::IntConstant(9999),
+            (Self::Datetime, "tzinfo") => Intrinsic::ObjectRuntimeExport("datetime.tzinfo"),
             (Self::Logging, "Logger") => Intrinsic::Logger,
             (Self::Logging, "Manager") => Intrinsic::LogManager,
             (Self::Logging, "root") => Intrinsic::LogRoot,

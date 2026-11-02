@@ -104,7 +104,13 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
-        "_imre_ordered_dict" | "atexit" | "builtins" | "errno" | "genericpath" | "itertools"
+        "_datetime"
+            | "_imre_ordered_dict"
+            | "atexit"
+            | "builtins"
+            | "errno"
+            | "genericpath"
+            | "itertools"
     )
         || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
@@ -172,7 +178,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "marshal"
             | "pickle"
             | "zlib"
-            | "datetime"
             | "email"
             | "email.utils"
             | "tempfile"
@@ -561,15 +566,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
-        ("datetime", "UTC") => datetime::utc(ctx),
         (
             "time",
             "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
             | "mktime" | "strftime" | "ctime" | "struct_time",
         ) => ctx.builtin(&format!("time.{name}")),
-        ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
-            ctx.builtin(&format!("datetime.{name}"))
-        }
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
             if let Some(class) = crate::objects::HashState::public_constructor(name) =>

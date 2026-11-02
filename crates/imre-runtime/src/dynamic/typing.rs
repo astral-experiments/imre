@@ -1703,6 +1703,7 @@ impl Context {
                         "typing.TypeVar"
                             | "typing.TypeVarTuple"
                             | "NoDefaultType"
+                            | "datetime.timezone"
                             | super::stdlib::flags::TYPE
                             | "slice"
                             | "NoneType"
