@@ -6,19 +6,21 @@ import io
 import os
 import re
 import socket
+import string
 import sys
 import tempfile
 
 from email.message import Message
-from urllib.error import ContentTooShortError, URLError
+from urllib.error import ContentTooShortError, HTTPError, URLError
 from urllib.response import addinfourl
 from urllib.parse import (
-    _splithost, _splitport, _splittag, _splittype, quote, unquote, unquote_to_bytes, unwrap, urlparse, urlsplit,
+    _splithost, _splitport, _splittag, _splittype, quote, unquote, unquote_to_bytes, unwrap, urljoin, urlparse, urlsplit, urlunparse,
 )
 
 
 __all__ = [
     "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "UnknownHandler",
+    "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
     "pathname2url", "url2pathname",
 ]
@@ -400,7 +402,8 @@ def build_opener(*handlers):
     default handlers, the default handlers will not be used.
     """
     opener = OpenerDirector()
-    default_classes = [UnknownHandler, FileHandler, DataHandler]
+    default_classes = [UnknownHandler, HTTPDefaultErrorHandler, HTTPRedirectHandler, FileHandler,
+                       HTTPErrorProcessor, DataHandler]
     skip = set()
     for klass in default_classes:
         for check in handlers:
@@ -440,6 +443,141 @@ class BaseHandler:
             # classes which are not aware of handler_order).
             return True
         return self.handler_order < other.handler_order
+
+
+class HTTPErrorProcessor(BaseHandler):
+    """Process HTTP error responses."""
+    handler_order = 1000  # after all other processing
+
+    def http_response(self, request, response):
+        code, msg, hdrs = response.code, response.msg, response.info()
+
+        # According to RFC 2616, "2xx" code indicates that the client's
+        # request was successfully received, understood, and accepted.
+        if not (200 <= code < 300):
+            response = self.parent.error(
+                'http', request, response, code, msg, hdrs)
+
+        return response
+
+    https_response = http_response
+
+class HTTPDefaultErrorHandler(BaseHandler):
+    def http_error_default(self, req, fp, code, msg, hdrs):
+        raise HTTPError(req.full_url, code, msg, hdrs, fp)
+
+class HTTPRedirectHandler(BaseHandler):
+    # maximum number of redirections to any single URL
+    # this is needed because of the state that cookies introduce
+    max_repeats = 4
+    # maximum total number of redirections (regardless of URL) before
+    # assuming we're in a loop
+    max_redirections = 10
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Return a Request or None in response to a redirect.
+
+        This is called by the http_error_30x methods when a
+        redirection response is received.  If a redirection should
+        take place, return a new Request to allow http_error_30x to
+        perform the redirect.  Otherwise, raise HTTPError if no-one
+        else should try to handle this url.  Return None if you can't
+        but another Handler might.
+        """
+        m = req.get_method()
+        if (not (code in (301, 302, 303, 307, 308) and m in ("GET", "HEAD")
+            or code in (301, 302, 303) and m == "POST")):
+            raise HTTPError(req.full_url, code, msg, headers, fp)
+
+        # Strictly (according to RFC 2616), 301 or 302 in response to
+        # a POST MUST NOT cause a redirection without confirmation
+        # from the user (of urllib.request, in this case).  In practice,
+        # essentially all clients do redirect in this case, so we do
+        # the same.
+
+        # Be conciliant with URIs containing a space.  This is mainly
+        # redundant with the more complete encoding done in http_error_302(),
+        # but it is kept for compatibility with other callers.
+        newurl = newurl.replace(' ', '%20')
+
+        CONTENT_HEADERS = ("content-length", "content-type")
+        newheaders = {k: v for k, v in req.headers.items()
+                      if k.lower() not in CONTENT_HEADERS}
+        return Request(newurl,
+                       method="HEAD" if m == "HEAD" else "GET",
+                       headers=newheaders,
+                       origin_req_host=req.origin_req_host,
+                       unverifiable=True)
+
+    # Implementation note: To avoid the server sending us into an
+    # infinite loop, the request object needs to track what URLs we
+    # have already seen.  Do this by adding a handler-specific
+    # attribute to the Request object.
+    def http_error_302(self, req, fp, code, msg, headers):
+        # Some servers (incorrectly) return multiple Location headers
+        # (so probably same goes for URI).  Use first header.
+        if "location" in headers:
+            newurl = headers["location"]
+        elif "uri" in headers:
+            newurl = headers["uri"]
+        else:
+            return
+
+        # fix a possible malformed URL
+        urlparts = urlparse(newurl)
+
+        # For security reasons we don't allow redirection to anything other
+        # than http, https or ftp.
+
+        if urlparts.scheme not in ('http', 'https', 'ftp', ''):
+            raise HTTPError(
+                newurl, code,
+                "%s - Redirection to url '%s' is not allowed" % (msg, newurl),
+                headers, fp)
+
+        if not urlparts.path and urlparts.netloc:
+            urlparts = list(urlparts)
+            urlparts[2] = "/"
+        newurl = urlunparse(urlparts)
+
+        # http.client.parse_headers() decodes as ISO-8859-1.  Recover the
+        # original bytes and percent-encode non-ASCII bytes, and any special
+        # characters such as the space.
+        newurl = quote(
+            newurl, encoding="iso-8859-1", safe=string.punctuation)
+        newurl = urljoin(req.full_url, newurl)
+
+        # XXX Probably want to forget about the state of the current
+        # request, although that might interact poorly with other
+        # handlers that also use handler-specific request attributes
+        new = self.redirect_request(req, fp, code, msg, headers, newurl)
+        if new is None:
+            return
+
+        # loop detection
+        # .redirect_dict has a key url if url was previously visited.
+        if hasattr(req, 'redirect_dict'):
+            visited = new.redirect_dict = req.redirect_dict
+            if (visited.get(newurl, 0) >= self.max_repeats or
+                len(visited) >= self.max_redirections):
+                raise HTTPError(req.full_url, code,
+                                self.inf_msg + msg, headers, fp)
+        else:
+            visited = new.redirect_dict = req.redirect_dict = {}
+        visited[newurl] = visited.get(newurl, 0) + 1
+
+        # Don't close the fp until we are sure that we won't use it
+        # with HTTPError.
+        fp.read()
+        fp.close()
+
+        return self.parent.open(new, timeout=req.timeout)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+    inf_msg = "The HTTP server returned a redirect error that would " \
+              "lead to an infinite loop.\n" \
+              "The last 30x error message was:\n"
 
 
 class UnknownHandler(BaseHandler):

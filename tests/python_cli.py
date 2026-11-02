@@ -2021,6 +2021,7 @@ def report(text):
             "boxed_urllib_cleanup.py",
             "boxed_urllib_retrieve.py",
             "boxed_urllib_data.py",
+            "boxed_urllib_http_status.py",
             "boxed_message_parameters.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
