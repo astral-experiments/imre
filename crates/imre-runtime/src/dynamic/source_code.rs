@@ -2952,21 +2952,22 @@ impl Context {
         self.run_in_namespace(code, globals, Some(locals), None, "eval")
     }
 
-    /// Evaluate an expression in the supplied namespaces or the active Python frame.
-    pub(super) fn eval_source(
+    /// Run eval or exec with explicit namespaces or the active Python frame.
+    pub(super) fn call_eval_exec(
         &mut self,
         scope: Id,
+        name: &str,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
         let Some((&source, namespaces)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
-                "eval expected at least 1 positional argument",
+                format!("{name}() takes at least 1 positional argument (0 given)"),
             ));
         };
         let [globals, locals] =
-            builtins::bind_method_arguments("eval", namespaces, kwargs, ["globals", "locals"], 2)?;
+            builtins::bind_method_arguments(name, namespaces, kwargs, ["globals", "locals"], 2)?;
         let globals = globals.filter(|&g| g != NONE);
         let locals = match locals.filter(|&l| l != NONE) {
             Some(locals) => Some(locals),
@@ -2977,7 +2978,11 @@ impl Context {
             Some(globals) => globals,
             None => self.module_globals(scope)?,
         };
-        self.run_in_namespace(source, globals, locals, None, "eval")
+        if name == "exec" {
+            self.exec_source(source, globals, locals, None)
+        } else {
+            self.run_in_namespace(source, globals, locals, None, "eval")
+        }
     }
 
     /// Resolve the caller's namespace, copying bindings only for optimized frames.

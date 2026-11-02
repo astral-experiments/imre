@@ -682,6 +682,25 @@ def source_eval():
         raise AssertionError("eval accepted a statement")
 
 
+def exec_caller_namespaces():
+    seen = []
+    value = 7
+    execute = exec
+    execute("seen.append(value)\nvalue = 99")
+    assert seen == [7] and value == 7
+
+    class C:
+        first = 11
+        exec("second = first + 1")
+        third = second
+
+    assert C.second == C.third == 12
+    separate = {}
+    assert exec(compile("40 + 2", "caller", "eval"), {}, separate) is None
+    exec("result = n", globals={"n": 8}, locals=separate)
+    assert separate == {"result": 8}
+
+
 def starred_calls():
     events = []
 
@@ -868,6 +887,7 @@ def current():
     starred_calls()
     caller_namespaces(3)
     source_eval()
+    exec_caller_namespaces()
     method_argument_lifetime()
     named_bindings()
     source_annotations()
