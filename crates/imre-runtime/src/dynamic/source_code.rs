@@ -59,6 +59,11 @@ enum Instruction {
         handler: usize,
     },
     ExitWith,
+    EnterExcept {
+        handler: usize,
+        end: usize,
+    },
+    ExceptMatch(ast::Expr, usize),
     StartFinally,
     EndFinally,
     Delegate,
@@ -201,6 +206,13 @@ enum Transfer {
     Raise(Id),
 }
 
+#[derive(Clone, Copy)]
+enum HandlerKind {
+    Finally,
+    Except,
+    With(Id),
+}
+
 /// A protected source region survives yields, including yields in its cleanup.
 #[derive(Clone)]
 pub(super) struct FinallyBlock {
@@ -209,12 +221,16 @@ pub(super) struct FinallyBlock {
     end: usize,
     depth: usize,
     pending: Option<Transfer>,
-    exit: Option<Id>,
+    kind: HandlerKind,
 }
 
 impl FinallyBlock {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
-        self.exit.into_iter().chain(match self.pending {
+        let exit = match self.kind {
+            HandlerKind::With(exit) => Some(exit),
+            _ => None,
+        };
+        exit.into_iter().chain(match self.pending {
             Some(Transfer::Raise(id) | Transfer::Return(id)) => Some(id),
             _ => None,
         })
@@ -381,9 +397,10 @@ impl Program {
         };
         for (_, op) in &mut self.instructions {
             match op {
-                Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
-                    strings.visit_expr(e)
-                }
+                Instruction::Eval(e)
+                | Instruction::Unless(e, _)
+                | Instruction::ExceptMatch(e, _)
+                | Instruction::Iter(e) => strings.visit_expr(e),
                 Instruction::EnterWith { item, .. } => {
                     strings.visit_expr(&item.context_expr);
                     if let Some(target) = &item.optional_vars {
@@ -471,6 +488,7 @@ impl Program {
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
                 | Instruction::ExitWith
+                | Instruction::EnterExcept { .. }
                 | Instruction::StartFinally
                 | Instruction::EndFinally
                 | Instruction::Delegate => {}
@@ -785,6 +803,54 @@ impl Program {
                             unreachable!("context manager entry")
                         };
                         *handler = cleanup;
+                    }
+                    continue;
+                }
+                Stmt::Try(s)
+                    if !s.is_star
+                        && !s.handlers.is_empty()
+                        && s.finalbody.is_empty()
+                        && s.handlers
+                            .iter()
+                            .all(|ast::ExceptHandler::ExceptHandler(h)| h.name.is_none()) =>
+                {
+                    let entry = self.instructions.len();
+                    self.instructions
+                        .push((line, Instruction::EnterExcept { handler: 0, end: 0 }));
+                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    // On fallthrough, leave the protected body before running the else suite.
+                    self.instructions.push((line, Instruction::StartFinally));
+                    let handler = self.instructions.len();
+                    let mut handled = Vec::new();
+                    for ast::ExceptHandler::ExceptHandler(h) in s.handlers {
+                        let handler_line =
+                            lines.partition_point(|n| *n <= h.start().to_usize()) as u32;
+                        let check = h.type_.map(|class| {
+                            let i = self.instructions.len();
+                            self.instructions
+                                .push((handler_line, Instruction::ExceptMatch(*class, 0)));
+                            i
+                        });
+                        self.lower(h.body, lines, function, active.as_deref_mut())?;
+                        handled.push(self.instructions.len());
+                        self.instructions.push((handler_line, Instruction::Jump(0)));
+                        if let Some(i) = check {
+                            let next = self.instructions.len();
+                            let Instruction::ExceptMatch(_, next_handler) =
+                                &mut self.instructions[i].1
+                            else {
+                                unreachable!()
+                            };
+                            *next_handler = next;
+                        }
+                    }
+                    self.instructions.push((line, Instruction::EndFinally));
+                    let end = self.instructions.len();
+                    self.instructions[entry].1 = Instruction::EnterExcept { handler, end };
+                    self.lower(s.orelse, lines, function, active.as_deref_mut())?;
+                    let done = self.instructions.len();
+                    for i in handled {
+                        self.instructions[i].1 = Instruction::Jump(done);
                     }
                     continue;
                 }
@@ -1764,7 +1830,10 @@ impl Context {
                 let iter = cursor.iterators.pop().expect("inner iterator");
                 self.release_loop_iterator(iter);
             }
-            if block.pending.is_none() {
+            if block.pending.is_none()
+                && (!matches!(block.kind, HandlerKind::Except)
+                    || matches!(transfer, Transfer::Raise(_)))
+            {
                 block.pending = Some(transfer);
                 cursor.ip = block.handler;
                 return Ok(None);
@@ -1888,14 +1957,19 @@ impl Context {
                 } else if let Some((_, op)) = op {
                     cursor.ip += 1;
                     match op {
-                        Instruction::EnterFinally { handler, end } => {
+                        Instruction::EnterFinally { handler, end }
+                        | Instruction::EnterExcept { handler, end } => {
                             cursor.protected.push(FinallyBlock {
                                 start: cursor.ip,
                                 handler: *handler,
                                 end: *end,
                                 depth: cursor.iterators.len(),
                                 pending: None,
-                                exit: None,
+                                kind: if matches!(op, Instruction::EnterExcept { .. }) {
+                                    HandlerKind::Except
+                                } else {
+                                    HandlerKind::Finally
+                                },
                             });
                             continue;
                         }
@@ -2199,7 +2273,7 @@ impl Context {
                     end: handler + 2,
                     depth: iterators.len(),
                     pending: None,
-                    exit: Some(exit),
+                    kind: HandlerKind::With(exit),
                 });
                 if let Some(target) = &item.optional_vars {
                     self.bind_target(code, scope, target, value)?;
@@ -2207,7 +2281,9 @@ impl Context {
             }
             Instruction::ExitWith => {
                 let block = cursor.protected.last_mut().expect("active context manager");
-                let exit = block.exit.expect("context manager exit");
+                let HandlerKind::With(exit) = block.kind else {
+                    unreachable!("context manager exit");
+                };
                 let exception = match block.pending {
                     Some(Transfer::Raise(error)) => error,
                     _ => NONE,
@@ -2221,7 +2297,32 @@ impl Context {
                     });
                 }
             }
+            Instruction::ExceptMatch(class, next_handler) => {
+                let class = eval(self, class)?;
+                let base = self.builtin("BaseException");
+                let items = self.tuple_items(class)?;
+                let classes = items.as_deref().unwrap_or(std::slice::from_ref(&class));
+                if !classes
+                    .iter()
+                    .all(|&target| self.direct_subclass(target, base))
+                {
+                    return Err(Error::new(
+                        "TypeError",
+                        "catching classes that do not inherit from BaseException is not allowed",
+                    ));
+                }
+                let Value::Raised(error) = self.heap.get(self.heap.active_exception()) else {
+                    unreachable!("matching an active exception")
+                };
+                if !classes
+                    .iter()
+                    .any(|&target| self.raised_error_matches(error, target))
+                {
+                    *ip = *next_handler;
+                }
+            }
             Instruction::EnterFinally { .. }
+            | Instruction::EnterExcept { .. }
             | Instruction::StartFinally
             | Instruction::EndFinally
             | Instruction::Jump(_)
@@ -2542,6 +2643,61 @@ impl Context {
         Ok(truth)
     }
 
+    fn source_keyword_mapping(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        callable: Id,
+        keywords: &[ast::Keyword],
+    ) -> Result<Id> {
+        let merged = self.dict(Vec::new());
+        self.heap.keep(merged);
+        // Merge each ** mapping immediately, but evaluate adjacent named arguments as a group.
+        for group in keywords.chunk_by(|left, right| left.arg.is_some() && right.arg.is_some()) {
+            let mapping = if group[0].arg.is_none() {
+                self.source_expr(code, scope, &group[0].value)?
+            } else {
+                let named = self.dict(Vec::new());
+                self.heap.keep(named);
+                for item in group {
+                    let key = self
+                        .heap
+                        .code_name(item.arg.as_ref().expect("named keyword").as_str());
+                    let value = self.source_expr(code, scope, &item.value)?;
+                    self.put_item(named, key, value)?;
+                }
+                named
+            };
+            self.op("keywords", merged, mapping, callable)?;
+        }
+        Ok(merged)
+    }
+
+    fn extend_source_call_args(
+        &mut self,
+        args: &mut Vec<Id>,
+        iterable: Id,
+        use_length_hint: bool,
+    ) -> Result<()> {
+        let iter = self.iterator(iterable)?;
+        self.heap.keep(iter);
+        if use_length_hint {
+            let default = self.int(8);
+            let hint = self.length_hint(iterable, Some(default))?;
+            args.try_reserve(self.as_integer(hint)? as usize)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        while let Some(item) = self.next_item(iter)? {
+            args.try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            // Further arguments may clear the iterable and invoke Python callbacks.
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(item);
+            args.push(item);
+        }
+        Ok(())
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -2685,19 +2841,37 @@ impl Context {
                 } else {
                     eval(self, &v.func)?
                 };
-                let args = v
-                    .arguments
-                    .args
-                    .iter()
-                    .map(|a| eval(self, a))
-                    .collect::<Result<Vec<_>>>()?;
+                let mut args = Vec::new();
+                let mut sole_star = None;
+                for arg in &v.arguments.args {
+                    if let Expr::Starred(star) = arg {
+                        let value = eval(self, &star.value)?;
+                        if v.arguments.args.len() == 1 {
+                            // CALL_FUNCTION_EX consumes a sole iterable after evaluating keywords.
+                            sole_star = Some(value);
+                        } else {
+                            self.extend_source_call_args(&mut args, value, true)?;
+                        }
+                    } else {
+                        args.push(eval(self, arg)?);
+                    }
+                }
+                let keywords = &v.arguments.keywords;
                 let mut kwargs = Vec::new();
-                for item in &v.arguments.keywords {
-                    let key = item
-                        .arg
-                        .as_ref()
-                        .ok_or_else(|| unsupported("keyword unpack"))?;
-                    kwargs.push((key.to_string(), eval(self, &item.value)?));
+                let mapping = if keywords.iter().any(|item| item.arg.is_none()) {
+                    Some(self.source_keyword_mapping(code, scope, f, keywords)?)
+                } else {
+                    for item in keywords {
+                        let key = item.arg.as_ref().expect("named keyword");
+                        kwargs.push((key.to_string(), eval(self, &item.value)?));
+                    }
+                    None
+                };
+                if let Some(value) = sole_star {
+                    self.extend_source_call_args(&mut args, value, false)?;
+                }
+                if let Some(mapping) = mapping {
+                    kwargs = self.keyword_args(mapping)?;
                 }
                 let result = self.call(f, args, kwargs)?;
                 self.finish_call_operands(mark, result);
