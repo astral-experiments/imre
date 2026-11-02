@@ -26,8 +26,8 @@ impl Context {
                     .scope_data(class_scope)
                     .class_namespace
                     .as_ref()
-                    .and_then(|ns| ns.annotation_sites.as_ref())
-                    .is_some_and(|sites| sites.contains_key(&offset))
+                    .and_then(|ns| ns.annotation_scratch.as_ref())
+                    .is_some_and(|(_, sites)| sites.contains(&offset))
                 {
                     let index = self.int(index as i64);
                     super::builtins::set_add(self, active, index)?;
@@ -38,29 +38,26 @@ impl Context {
         Ok(self.closure_environment(parent, names, &cells))
     }
 
-    /// Record each executed ordinary declaration once, in lexical order.
+    /// Mark the declaration as executed and record its field name for TypedDict.
     pub(super) fn record_class_annotation(
         &mut self,
         scope: Id,
         name: Id,
-        thunk: Id,
         offset: u32,
     ) -> Result<Id> {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled class scope")
         };
         let namespace = frame.class_namespace.get_or_insert_with(Default::default);
-        let Some(scratch) = namespace.annotation_scratch else {
+        let Some((fields, sites)) = &mut namespace.annotation_scratch else {
             return Err(Error::new(
                 "RuntimeError",
                 "annotation outside an executing class body",
             ));
         };
-        namespace
-            .annotation_sites
-            .get_or_insert_with(Default::default)
-            .insert(offset, (name, thunk));
-        self.put_item(scratch, name, NONE)?;
+        sites.insert(offset);
+        let fields = *fields;
+        self.put_item(fields, name, NONE)?;
         Ok(NONE)
     }
 
@@ -98,7 +95,6 @@ impl Context {
         };
         let namespace = frame.class_namespace.get_or_insert_with(Default::default);
         namespace.provider_annotations = true;
-        namespace.annotation_sites = None;
     }
 
     pub(super) fn has_class_annotation_provider(&self, scope: Id) -> bool {

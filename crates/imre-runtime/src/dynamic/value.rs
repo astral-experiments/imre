@@ -684,10 +684,8 @@ pub(super) struct ClassNamespace {
     pub dictionary: Option<Id>,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
-    /// Scratch field dictionary used while a class body is executing.
-    pub annotation_scratch: Option<Id>,
-    /// Executed deferred sites in source order, including repeated field names.
-    pub annotation_sites: Option<std::collections::BTreeMap<u32, (Id, Id)>>,
+    /// Field dictionary and executed annotation offsets while the class body is running.
+    pub annotation_scratch: Option<(Id, HashSet<u32>)>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Run pending instance finalizers after user exit callbacks, while the heap is live.
@@ -1484,11 +1482,8 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_dict_cell);
-                    visit.extend(class.annotation_scratch);
-                    if let Some(sites) = &class.annotation_sites {
-                        for &(name, thunk) in sites.values() {
-                            visit.extend([name, thunk]);
-                        }
+                    if let Some((fields, _)) = &class.annotation_scratch {
+                        visit.push(*fields);
                     }
                     visit.extend(class.dictionary);
                     visit.extend(class.defining_module);
