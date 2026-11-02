@@ -69,6 +69,22 @@ def clear_weak_target():
     return witness
 
 
+def check_weak_call_operand():
+    refs = []
+
+    def watched():
+        value = WeakTarget()
+        refs.append(ref(value, weak_callback))
+        return value
+
+    def consume(arg):
+        pass
+
+    # The completed call releases its nested argument before the next tuple item.
+    assert (consume([watched()]), refs[0](), events.copy()) == (None, None, ["weak"])
+    events.clear()
+
+
 def check_arguments(owner, witness):
     assert isinstance(owner, Owner) and witness() is None
     assert events == ["weak"]
@@ -122,6 +138,7 @@ def check_unraisable():
 
 
 def current():
+    check_weak_call_operand()
     check_unraisable()
     # Keep another pending finalizer reachable while cyclic and acyclic owners die.
     held = [Owner()]

@@ -139,6 +139,9 @@ pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
 
 /// Follow strong edges from the original sys module without retaining any of the streams.
 pub(in crate::dynamic) fn rooted_input_chain(ctx: &Context) -> Option<[Id; 3]> {
+    if !ctx.heap.tracks_finalizers() {
+        return None;
+    }
     let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
         return None;
     };
