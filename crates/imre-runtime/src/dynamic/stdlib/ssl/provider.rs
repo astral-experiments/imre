@@ -5,6 +5,7 @@ use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
 pub(in crate::dynamic) mod objects;
+pub(in crate::dynamic) mod versions;
 
 type Handle = *mut c_void;
 type VerifyCallback = Option<unsafe extern "C" fn(c_int, Handle) -> c_int>;
@@ -69,6 +70,9 @@ functions! {
     SSL_CTX_new(Handle) -> Handle;
     SSL_CTX_free(Handle) -> ();
     SSL_CTX_ctrl(Handle, c_int, c_long, Handle) -> c_long;
+    SSL_CTX_get_options(Handle) -> u64;
+    SSL_CTX_set_options(Handle, u64) -> u64;
+    SSL_CTX_clear_options(Handle, u64) -> u64;
     SSL_CTX_set_verify(Handle, c_int, VerifyCallback) -> ();
     SSL_CTX_set_cipher_list(Handle, *const c_char) -> c_int;
     SSL_CTX_get_security_level(Handle) -> c_int;
@@ -200,6 +204,16 @@ impl Context {
         {
             return Err(api.error("SSL_CTX_set_min_proto_version"));
         }
+        // CPython's adjusted OP_ALL and the options set on every new client context.
+        // OpenSSL 3 assigns zero to OP_NO_SSLv2 and both SINGLE_*_USE flags.
+        const WORKAROUNDS: u64 = (1 << 31) | (1 << 6) | (1 << 4);
+        const NO_COMPRESSION: u64 = 1 << 17;
+        const CIPHER_SERVER_PREFERENCE: u64 = 1 << 22;
+        let defaults =
+            WORKAROUNDS | versions::SSL_OP_NO_SSLV3 | NO_COMPRESSION | CIPHER_SERVER_PREFERENCE;
+        // SAFETY: options are set on a live, exclusively owned SSL_CTX.
+        unsafe { (api.SSL_CTX_set_options)(handle.as_ptr(), defaults) };
+
         // SAFETY: SSL_new inherits these flags from the context's owned parameters.
         unsafe {
             (api.X509_VERIFY_PARAM_set_hostflags)(
@@ -230,6 +244,23 @@ impl Context {
 
     pub(crate) fn apply_default_verify_flags(&mut self) -> Result<(), Failure> {
         self.add_verify_flags(X509_V_FLAG_PARTIAL_CHAIN | X509_V_FLAG_X509_STRICT)
+    }
+
+    pub(super) fn options(&self) -> u64 {
+        // SAFETY: SSL_CTX_get_options reads the live context.
+        unsafe { (self.api.SSL_CTX_get_options)(self.handle.as_ptr()) }
+    }
+
+    pub(super) fn change_options(&mut self, clear: u64, set: u64) {
+        // SAFETY: both masks apply to the same live SSL_CTX. OpenSSL preserves unrelated bits.
+        unsafe {
+            if clear != 0 {
+                (self.api.SSL_CTX_clear_options)(self.handle.as_ptr(), clear);
+            }
+            if set != 0 {
+                (self.api.SSL_CTX_set_options)(self.handle.as_ptr(), set);
+            }
+        }
     }
 
     pub(crate) fn verify_flags(&self) -> u64 {

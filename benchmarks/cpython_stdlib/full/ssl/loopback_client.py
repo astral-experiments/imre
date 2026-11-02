@@ -6,7 +6,8 @@ import sys
 
 def main():
     host, port, cafile, hostname, expected = sys.argv[1:6]
-    if sys.argv[6:]:
+    mode = sys.argv[6:]
+    if mode == ["https"]:
         import http.client
         import urllib.request
         with urllib.request.urlopen("data:,local") as response:
@@ -17,6 +18,16 @@ def main():
         assert ctx.verify_flags & required == required
     else:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    if mode and mode != ["https"]:
+        version = ssl.TLSVersion[mode[0]]
+        ctx.minimum_version = version
+        ctx.maximum_version = version
+        assert ctx.minimum_version == ctx.maximum_version == version
+        options = ctx.options
+        ctx.options |= ssl.OP_NO_TICKET
+        assert ctx.options & ssl.OP_NO_TICKET
+        ctx.options = options
+        assert ctx.options == options
     assert ctx.check_hostname and ctx.verify_mode == ssl.CERT_REQUIRED
     ctx.load_verify_locations(cafile=cafile)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw:

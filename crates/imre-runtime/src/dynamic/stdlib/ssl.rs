@@ -29,6 +29,9 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     for name in [
         "context",
         "security_level",
+        "minimum_version",
+        "maximum_version",
+        "options",
         "verify_flags",
         "default_verify_paths",
         "default_verify_flags",
@@ -95,6 +98,49 @@ pub(super) fn call(
         ("context", []) => {
             let handle = provider::Context::client().map_err(|e| provider_error(ctx, e))?;
             Ok(ctx.alloc(Value::TlsContext(Rc::new(RefCell::new(handle)))))
+        }
+        ("minimum_version" | "maximum_version", [handle]) => {
+            let n = context(ctx, *handle)?
+                .borrow()
+                .protocol_bound(name == "minimum_version");
+            Ok(ctx.int(i64::from(n)))
+        }
+        ("minimum_version" | "maximum_version", [handle, value]) => {
+            provider::versions::set(ctx, *handle, name == "minimum_version", *value)?;
+            Ok(NONE)
+        }
+        ("options", &[handle]) => {
+            let options = context(ctx, handle)?.borrow().options();
+            Ok(ctx.alloc(Value::Int(crate::Int::new(options.into()))))
+        }
+        ("options", &[handle, value]) => {
+            use num_traits::{Signed, ToPrimitive};
+            let integer = ctx.index_integer(value)?;
+            let bits = integer.big();
+            if bits.is_negative() {
+                return Err(Error::new("ValueError", "Cannot convert negative int"));
+            }
+            let next = bits.to_u64().ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large for C unsigned long long",
+                )
+            })?;
+            let old = context(ctx, handle)?.borrow().options();
+            let set = next & !old;
+            // The five OpenSSL 3 protocol-disable bits, from SSLv3 through TLSv1.3.
+            const NO_PROTOCOL: u64 = 0x3e00_0000;
+            if set & NO_PROTOCOL != 0 {
+                ctx.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::DeprecationWarning,
+                    "ssl.OP_NO_SSL*/ssl.OP_NO_TLS* options are deprecated",
+                    2,
+                )?;
+            }
+            context(ctx, handle)?
+                .borrow_mut()
+                .change_options(old & !next, set);
+            Ok(NONE)
         }
         ("security_level", &[handle]) => {
             let level = context(ctx, handle)?.borrow().security_level();

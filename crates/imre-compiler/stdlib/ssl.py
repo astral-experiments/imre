@@ -5,7 +5,7 @@ import _ssl
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
 from _ssl import nid2obj as _nid2obj, txt2obj as _txt2obj
 from collections import namedtuple
-from enum import Enum as _Enum, IntEnum as _IntEnum, IntFlag as _IntFlag
+from enum import Enum as _Enum, IntEnum as _IntEnum, IntFlag as _IntFlag, _simple_enum
 
 from _ssl import HAS_SNI, HAS_ECDH, HAS_NPN, HAS_ALPN, HAS_PSK, HAS_PHA
 
@@ -14,8 +14,44 @@ HAS_NEVER_CHECK_COMMON_NAME = hasattr(_ssl, "HOSTFLAG_NEVER_CHECK_SUBJECT")
 SSL_ERROR_SSL = 1
 
 
+class TLSVersion(_IntEnum):
+    MINIMUM_SUPPORTED = _ssl.PROTO_MINIMUM_SUPPORTED
+    SSLv3 = _ssl.PROTO_SSLv3
+    TLSv1 = _ssl.PROTO_TLSv1
+    TLSv1_1 = _ssl.PROTO_TLSv1_1
+    TLSv1_2 = _ssl.PROTO_TLSv1_2
+    TLSv1_3 = _ssl.PROTO_TLSv1_3
+    MAXIMUM_SUPPORTED = _ssl.PROTO_MAXIMUM_SUPPORTED
+
+
+for _flag in ("HAS_SSLv2", "HAS_SSLv3", "HAS_TLSv1", "HAS_TLSv1_1", "HAS_TLSv1_2", "HAS_TLSv1_3"):
+    if hasattr(_ssl, _flag):
+        globals()[_flag] = getattr(_ssl, _flag)
+del _flag
+
+
 class _SSLMethod(_IntEnum):
-    PROTOCOL_TLS_CLIENT = 16
+    if hasattr(_ssl, "PROTOCOL_SSLv3"):
+        PROTOCOL_SSLv3 = _ssl.PROTOCOL_SSLv3
+    PROTOCOL_TLS = _ssl.PROTOCOL_TLS
+    PROTOCOL_TLSv1 = _ssl.PROTOCOL_TLSv1
+    PROTOCOL_TLSv1_1 = _ssl.PROTOCOL_TLSv1_1
+    PROTOCOL_TLSv1_2 = _ssl.PROTOCOL_TLSv1_2
+    PROTOCOL_TLS_CLIENT = _ssl.PROTOCOL_TLS_CLIENT
+    PROTOCOL_TLS_SERVER = _ssl.PROTOCOL_TLS_SERVER
+
+
+def _options_enum():
+    # Enum._convert_ sorts by value and name for a consistent canonical alias.
+    members = sorted((getattr(_ssl, name), name) for name in dir(_ssl) if name.startswith("OP_"))
+    fields = {name: value for value, name in members}
+    fields["__module__"] = __name__
+    return _simple_enum(_IntFlag)(type("Options", (), fields))
+
+
+Options = _options_enum()
+globals().update(Options.__members__)
+del _options_enum
 
 
 class VerifyMode(_IntEnum):
@@ -42,10 +78,106 @@ VERIFY_X509_STRICT = VerifyFlags.VERIFY_X509_STRICT
 VERIFY_ALLOW_PROXY_CERTS = VerifyFlags.VERIFY_ALLOW_PROXY_CERTS
 VERIFY_X509_TRUSTED_FIRST = VerifyFlags.VERIFY_X509_TRUSTED_FIRST
 VERIFY_X509_PARTIAL_CHAIN = VerifyFlags.VERIFY_X509_PARTIAL_CHAIN
+if hasattr(_ssl, "PROTOCOL_SSLv3"):
+    PROTOCOL_SSLv3 = _SSLMethod.PROTOCOL_SSLv3
+PROTOCOL_TLS = _SSLMethod.PROTOCOL_TLS
+PROTOCOL_TLSv1 = _SSLMethod.PROTOCOL_TLSv1
+PROTOCOL_TLSv1_1 = _SSLMethod.PROTOCOL_TLSv1_1
+PROTOCOL_TLSv1_2 = _SSLMethod.PROTOCOL_TLSv1_2
 PROTOCOL_TLS_CLIENT = _SSLMethod.PROTOCOL_TLS_CLIENT
+PROTOCOL_TLS_SERVER = _SSLMethod.PROTOCOL_TLS_SERVER
+PROTOCOL_SSLv23 = _SSLMethod.PROTOCOL_SSLv23 = PROTOCOL_TLS
+_PROTOCOL_NAMES = {value: name for name, value in _SSLMethod.__members__.items()}
 CERT_NONE = VerifyMode.CERT_NONE
 CERT_OPTIONAL = VerifyMode.CERT_OPTIONAL
 CERT_REQUIRED = VerifyMode.CERT_REQUIRED
+
+
+@_simple_enum(_IntEnum)
+class _TLSContentType:
+    """Content types (record layer)
+
+    See RFC 8446, section B.1
+    """
+    CHANGE_CIPHER_SPEC = 20
+    ALERT = 21
+    HANDSHAKE = 22
+    APPLICATION_DATA = 23
+    # pseudo content types
+    HEADER = 0x100
+    INNER_CONTENT_TYPE = 0x101
+
+
+@_simple_enum(_IntEnum)
+class _TLSAlertType:
+    """Alert types for TLSContentType.ALERT messages
+
+    See RFC 8446, section B.2
+    """
+    CLOSE_NOTIFY = 0
+    UNEXPECTED_MESSAGE = 10
+    BAD_RECORD_MAC = 20
+    DECRYPTION_FAILED = 21
+    RECORD_OVERFLOW = 22
+    DECOMPRESSION_FAILURE = 30
+    HANDSHAKE_FAILURE = 40
+    NO_CERTIFICATE = 41
+    BAD_CERTIFICATE = 42
+    UNSUPPORTED_CERTIFICATE = 43
+    CERTIFICATE_REVOKED = 44
+    CERTIFICATE_EXPIRED = 45
+    CERTIFICATE_UNKNOWN = 46
+    ILLEGAL_PARAMETER = 47
+    UNKNOWN_CA = 48
+    ACCESS_DENIED = 49
+    DECODE_ERROR = 50
+    DECRYPT_ERROR = 51
+    EXPORT_RESTRICTION = 60
+    PROTOCOL_VERSION = 70
+    INSUFFICIENT_SECURITY = 71
+    INTERNAL_ERROR = 80
+    INAPPROPRIATE_FALLBACK = 86
+    USER_CANCELED = 90
+    NO_RENEGOTIATION = 100
+    MISSING_EXTENSION = 109
+    UNSUPPORTED_EXTENSION = 110
+    CERTIFICATE_UNOBTAINABLE = 111
+    UNRECOGNIZED_NAME = 112
+    BAD_CERTIFICATE_STATUS_RESPONSE = 113
+    BAD_CERTIFICATE_HASH_VALUE = 114
+    UNKNOWN_PSK_IDENTITY = 115
+    CERTIFICATE_REQUIRED = 116
+    NO_APPLICATION_PROTOCOL = 120
+
+
+@_simple_enum(_IntEnum)
+class _TLSMessageType:
+    """Message types (handshake protocol)
+
+    See RFC 8446, section B.3
+    """
+    HELLO_REQUEST = 0
+    CLIENT_HELLO = 1
+    SERVER_HELLO = 2
+    HELLO_VERIFY_REQUEST = 3
+    NEWSESSION_TICKET = 4
+    END_OF_EARLY_DATA = 5
+    HELLO_RETRY_REQUEST = 6
+    ENCRYPTED_EXTENSIONS = 8
+    CERTIFICATE = 11
+    SERVER_KEY_EXCHANGE = 12
+    CERTIFICATE_REQUEST = 13
+    SERVER_DONE = 14
+    CERTIFICATE_VERIFY = 15
+    CLIENT_KEY_EXCHANGE = 16
+    FINISHED = 20
+    CERTIFICATE_URL = 21
+    CERTIFICATE_STATUS = 22
+    SUPPLEMENTAL_DATA = 23
+    KEY_UPDATE = 24
+    NEXT_PROTO = 67
+    MESSAGE_HASH = 254
+    CHANGE_CIPHER_SPEC = 0x0101
 
 
 class SSLError(OSError):
@@ -159,6 +291,36 @@ class SSLContext:
             raise ValueError("Cannot set verify_mode to CERT_NONE when check_hostname is enabled.")
         if mode != CERT_REQUIRED:
             raise NotImplementedError("only CERT_REQUIRED is supported")
+
+    @property
+    def options(self):
+        return Options(_imre_ssl.options(self._ctx))
+
+    @options.setter
+    def options(self, value):
+        _imre_ssl.options(self._ctx, value)
+
+    @property
+    def minimum_version(self):
+        return TLSVersion(_imre_ssl.minimum_version(self._ctx))
+
+    @minimum_version.setter
+    def minimum_version(self, value):
+        if value == TLSVersion.SSLv3:
+            if hasattr(_ssl, "OP_ALL"):
+                self.options &= ~Options.OP_NO_SSLv3
+            else:
+                # Inverting a partial IntFlag would also clear unknown higher bits.
+                self.options = int(self.options) & ~int(Options.OP_NO_SSLv3)
+        _imre_ssl.minimum_version(self._ctx, value)
+
+    @property
+    def maximum_version(self):
+        return TLSVersion(_imre_ssl.maximum_version(self._ctx))
+
+    @maximum_version.setter
+    def maximum_version(self, value):
+        _imre_ssl.maximum_version(self._ctx, value)
 
     @property
     def hostname_checks_common_name(self):
