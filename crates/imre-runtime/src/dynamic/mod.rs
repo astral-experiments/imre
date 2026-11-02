@@ -2844,6 +2844,7 @@ impl Context {
                     let value = self.int(i64::from(flag));
                     self.bind(scope, attr, value);
                 }
+                stdlib::os::xattr::initialize(self, scope);
             }
             #[cfg(unix)]
             "_signal" if source.is_none() => {
@@ -2881,6 +2882,17 @@ impl Context {
                 self.bind(scope, "TIMEOUT_MAX", limit);
             }
             "os" => {
+                #[cfg(target_os = "linux")]
+                if source.is_none() {
+                    let posix = self.module("posix")?;
+                    for attr in [
+                        "getxattr", "setxattr", "listxattr", "removexattr",
+                        "XATTR_CREATE", "XATTR_REPLACE", "XATTR_SIZE_MAX",
+                    ] {
+                        let value = self.lookup_attr(posix, attr)?;
+                        self.bind(scope, attr, value);
+                    }
+                }
                 #[cfg(unix)]
                 stdlib::os::install_capabilities(self, module, scope)?;
                 let path = self.module("posixpath")?;

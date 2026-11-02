@@ -37,6 +37,11 @@ if sys.platform == "linux":
     )
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
 
+if sys.platform == "linux":
+    from posix import (
+        XATTR_CREATE, XATTR_REPLACE, XATTR_SIZE_MAX, getxattr, listxattr, removexattr, setxattr,
+    )
+
 
 curdir = path.curdir
 defpath = path.defpath
