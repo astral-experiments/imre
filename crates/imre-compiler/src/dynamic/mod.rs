@@ -26,6 +26,7 @@ struct Imports {
     operator_names: HashSet<String>,
     signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
+    boxed_mock_names: HashSet<String>,
     pkgutil_names: HashSet<String>,
     get_data_names: HashSet<String>,
     machinery_names: HashSet<String>,
@@ -232,6 +233,13 @@ impl<'a> Visitor<'a> for Imports {
                     {
                         self.runtime_imports = true;
                     }
+                    if imp.level == 0
+                        && name == "unittest.mock"
+                        && crate::modules::boxed_mock_export(suffix)
+                    {
+                        self.boxed_mock_names
+                            .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
+                    }
                     if imp.level == 0 && name == "pkgutil" && suffix == "get_data" {
                         self.get_data_names
                             .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
@@ -324,7 +332,8 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.runtime_imports = true;
         }
-        if matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
+        if matches!(e, Expr::Name(n) if n.ctx == ast::ExprContext::Load && self.boxed_mock_names.contains(n.id.as_str()))
+            || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
             || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
             self.runtime_imports = true;

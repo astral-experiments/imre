@@ -269,7 +269,7 @@ class Mock:
     def _assert_called_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         expected = _Call(args, kwargs)
         observed = self._node.call_args
-        if observed is not None and expected == observed:
+        if observed is not None and observed == expected:
             return
         actual = "not called." if observed is None else observed._format(self._name())
         raise AssertionError("expected call not found.\nExpected: " + expected._format(self._name()) + "\n  Actual: " + actual)

@@ -1738,6 +1738,14 @@ def report(text):
         )
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
+        call_args = fixtures / "unittest_mock_call_args.py"
+        compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
+        boxed_call_args = fixtures / "boxed_unittest_call_args.py"
+        compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
+        for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py"):
+            fixture = fixtures / name
+            compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
+            compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",

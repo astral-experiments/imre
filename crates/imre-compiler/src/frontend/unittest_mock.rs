@@ -33,6 +33,10 @@ impl Checker<'_> {
         module.bundled && module.name == "unittest.mock" && record.name == name
     }
 
+    pub(super) fn mock_call_record(&self, ty: Type) -> bool {
+        matches!(self.types.payload(ty).unwrap_or(ty), Type::Class(class) if self.bundled_mock_class(class, "_Call"))
+    }
+
     /// A recorded call has Python's tuple representation, including ordered keywords.
     pub(super) fn mock_call_repr(
         &mut self,
@@ -134,8 +138,46 @@ impl Checker<'_> {
         })
     }
 
+    /// Bind the entire public call before selecting object storage for an effect or
+    /// return value. Invalid keywords and errors within operands keep their diagnostics.
+    pub(super) fn configured_mock_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+    ) -> Result<ir::CallArgs, String> {
+        let mut params = params.to_vec();
+        let mut boxed = call.arguments.find_keyword("return_value").is_some();
+        if boxed {
+            params.push(ParameterKind::KeywordOnly.parameter(
+                "return_value",
+                Type::ObjectValue,
+                None,
+            ));
+        }
+        let args = self.arguments_with(call, &params, None, |checker, index, operand| {
+            let param = &params[index];
+            match param.name.as_str() {
+                "return_value" => checker.evaluated_argument(operand),
+                "side_effect" => {
+                    let value = checker.evaluated_argument(operand)?;
+                    if let Ok(fixed) = checker.coerce(value.clone(), param.ty, operand) {
+                        return Ok(fixed);
+                    }
+                    boxed = true;
+                    Ok(value)
+                }
+                _ => checker.direct_argument(operand, param.ty, param.sign_only),
+            }
+        })?;
+        if boxed {
+            Err(self.object_runtime_export("unittest.mock call configuration", call))
+        } else {
+            Ok(args)
+        }
+    }
+
     fn mock_argument(&mut self, node: &ast::Expr, argument: usize) -> Result<Expr, String> {
-        let mut value = self.expr(node)?;
+        let mut value = self.evaluated_argument(node)?;
         let kind = match value.ty {
             Type::Int => "int",
             Type::Bool => "bool",
@@ -147,11 +189,7 @@ impl Checker<'_> {
             Type::Bytes => "bytes",
             Type::None => "None",
             _ => {
-                return Err(error(
-                    self.source,
-                    node,
-                    "native mock call arguments require None, bool, int, str or bytes",
-                ));
+                return Err(self.object_runtime_export("unittest.mock object arguments", node));
             }
         };
         let constructor = self.classes.methods[argument]["__init__"].id;
