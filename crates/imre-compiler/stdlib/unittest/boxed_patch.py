@@ -61,12 +61,18 @@ def _patch_owner(name):
     return owner
 
 
+def _get_target(target):
+    try:
+        owner, attribute = target.rsplit('.', 1)
+    except (AttributeError, TypeError, ValueError):
+        raise TypeError(f"Need a valid target to patch. You supplied: {target!r}")
+    return lambda: _patch_owner(owner), attribute
+
+
 class _patch:
-    def __init__(self, target, new, create):
-        try:
-            self.owner_name, self.attribute = target.rsplit('.', 1)
-        except (AttributeError, TypeError, ValueError):
-            raise TypeError(f"Need a valid target to patch. You supplied: {target!r}")
+    def __init__(self, getter, attribute, new, create):
+        self.getter = getter
+        self.attribute = attribute
         self.new = new
         self.create = create
         self.is_started = False
@@ -74,7 +80,7 @@ class _patch:
     def __enter__(self):
         if self.is_started:
             raise RuntimeError("Patch is already started")
-        target = _patch_owner(self.owner_name)
+        target = self.getter()
         name = self.attribute
         try:
             original = target.__dict__[name]
@@ -131,7 +137,14 @@ class _patch:
 
 
 def _patch_attribute(self, target, new=DEFAULT, *, create=False):
-    return _patch(target, new, create)
+    getter, attribute = _get_target(target)
+    return _patch(getter, attribute, new, create)
+
+
+def _patch_object(target, attribute, new=DEFAULT, *, create=False):
+    if type(target) is str:
+        raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
+    return _patch(lambda: target, attribute, new, create)
 
 
 class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
@@ -153,3 +166,4 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
 
 _PatchFactory.__call__ = _patch_attribute
 _PatchFactory.dict = staticmethod(_BoxedDictionaryPatch)
+_PatchFactory.object = staticmethod(_patch_object)

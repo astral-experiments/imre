@@ -76,4 +76,12 @@ assert configured() is not child
 configured.side_effect = lambda: None
 assert configured() is None
 
+patch_object = patch.object
+with patch_object(owner, "value", None):
+    assert owner.value is None
+assert "value" not in owner.__dict__
+with patch.object(owner, "additional", create=True) as created:
+    assert owner.additional is created
+assert not hasattr(owner, "additional")
+
 print("patch restored")
