@@ -3,14 +3,14 @@
 use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+mod newline_decoder;
+pub(in crate::dynamic) use newline_decoder::CLASS as NEWLINE_DECODER;
 mod buffered_io;
 mod descriptor_buffer;
 pub(in crate::dynamic) use descriptor_buffer::BufferedFd;
 mod bytes_io;
 mod file_io;
-mod newline_decoder;
 pub(in crate::dynamic) use file_io::open;
-pub(in crate::dynamic) use newline_decoder::CLASS as NEWLINE_DECODER;
 mod text_wrapper;
 
 #[derive(Clone)]
