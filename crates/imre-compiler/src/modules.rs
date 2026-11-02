@@ -98,6 +98,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/importlib/metadata_boxed.py"),
                 "\n",
                 include_str!("../stdlib/importlib/metadata_version.py"),
+                "\n",
+                include_str!("../stdlib/importlib/metadata_entrypoints.py"),
             ),
         )),
         // CPython 3.14.5 Lib/queue.py with condition variables backed by native locks.
@@ -1111,9 +1113,30 @@ impl IntrinsicModule {
             (Self::ImportlibResources, "read_text") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.read_text")
             }
+            (Self::ImportlibMetadata, "Distribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.Distribution")
+            }
+            (Self::ImportlibMetadata, "PathDistribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.PathDistribution")
+            }
+            (Self::ImportlibMetadata, "distributions") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.distributions")
+            }
+            (Self::ImportlibMetadata, "distribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.distribution")
+            }
+            (Self::ImportlibMetadata, "_unique") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata._unique")
+            }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
+            (Self::ImportlibMetadata, "EntryPoint") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.EntryPoint")
+            }
+            (Self::ImportlibMetadata, "EntryPoints") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.EntryPoints")
+            }
             (Self::ImportlibMetadata, "entry_points") => {
-                Intrinsic::Declaration("importlib.metadata.entry_points")
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
