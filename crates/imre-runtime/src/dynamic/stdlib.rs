@@ -671,6 +671,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", "statvfs_result") => ctx.builtin(os::stat::VFS_CLASS),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", name @ ("statvfs" | "fstatvfs")) => ctx.builtin(&format!("posix.{name}")),
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -1515,11 +1519,15 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
-    if name == "os.stat_result.__reduce__" {
-        return os::stat::reduce(ctx, args, kwargs);
+    if let Some(layout) = name.strip_suffix(".__reduce__").and_then(os::stat::layout) {
+        return os::stat::reduce(ctx, layout, args, kwargs);
     }
-    if name == os::stat::CLASS {
-        return os::stat::construct(ctx, args, kwargs);
+    if let Some(layout) = os::stat::layout(name) {
+        return os::stat::construct(ctx, layout, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("statvfs" | "fstatvfs")) = name.strip_prefix("posix.") {
+        return os::statvfs::call(ctx, op, args, kwargs);
     }
     if let Some(op @ ("stat" | "lstat" | "fstat")) = name.strip_prefix("posix.") {
         return os::stat::call(ctx, op, args, kwargs);

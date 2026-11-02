@@ -1,5 +1,7 @@
 pub(in crate::dynamic) mod scandir;
 pub(in crate::dynamic) mod stat;
+#[cfg(target_os = "linux")]
+pub(super) mod statvfs;
 
 use std::ffi::CString;
 
@@ -24,7 +26,16 @@ pub(in crate::dynamic) fn install_capabilities(
         ),
         (
             "supports_fd",
-            &["chdir", "chmod", "listdir", "scandir", "stat", "utime"][..],
+            &[
+                "chdir",
+                "chmod",
+                "listdir",
+                "scandir",
+                "stat",
+                #[cfg(target_os = "linux")]
+                "statvfs",
+                "utime",
+            ][..],
         ),
         (
             "supports_follow_symlinks",

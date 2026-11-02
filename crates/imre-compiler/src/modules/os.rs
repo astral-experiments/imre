@@ -71,6 +71,11 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
+        "statvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.statvfs"),
+        "fstatvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.fstatvfs"),
+        "statvfs_result" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("os.statvfs_result")
+        }
         "terminal_size" => Intrinsic::ObjectRuntimeExport("os.terminal_size"),
         "close" => Intrinsic::Fd(FdOperation::Close),
         "read" => Intrinsic::Fd(FdOperation::Read),
