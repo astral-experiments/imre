@@ -330,6 +330,70 @@ than n."""
         raise StopIteration
 
 
+class _ZipLongestState:
+    __slots__ = ("sources", "active", "fillvalue")
+
+    def __init__(self, iterables, fillvalue):
+        self.sources = [iter(source) for source in iterables]
+        self.active = len(self.sources)
+        self.fillvalue = fillvalue
+
+    def next_row(self):
+        if not self.active:
+            raise StopIteration
+        row = []
+        for i, source in enumerate(self.sources):
+            if source is None:
+                item = self.fillvalue
+            else:
+                try:
+                    item = next(source)
+                except StopIteration:
+                    self.active -= 1
+                    if not self.active:
+                        # CPython keeps the final exhausted iterator until the zipper dies.
+                        break
+                    self.sources[i] = None
+                    item = self.fillvalue
+                except BaseException:
+                    self.active = 0
+                    raise
+            row.append(item)
+        else:
+            return tuple(row)
+        raise StopIteration
+
+
+class zip_longest:
+    """Return a zip_longest object whose .__next__() method returns a tuple where
+    the i-th element comes from the i-th iterable argument.  The .__next__()
+    method continues until the longest iterable in the argument sequence
+    is exhausted and then it raises StopIteration.  When the shorter iterables
+    are exhausted, the fillvalue is substituted in their place.  The fillvalue
+    defaults to None or can be specified by a keyword argument.
+    """
+
+    __slots__ = ()
+
+    def __new__(cls, /, *iterables, fillvalue=None):
+        if not issubclass(cls, __class__):
+            raise TypeError("expected a zip_longest subclass")
+        state = _ZipLongestState(iterables, fillvalue)
+        self = object.__new__(cls)
+        _zip_longest_state.__set__(self, state)
+        return self
+
+    def __init__(self, *args, **kwargs):
+        if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+            object.__init__(self, *args, **kwargs)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return _zip_longest_state.__get__(self).next_row()
+
+
 class groupby:
     """Group consecutive values with equal keys, sharing one input iterator."""
 

@@ -1871,6 +1871,9 @@ impl IntrinsicModule {
             (Self::Itertools, "filterfalse") => {
                 Intrinsic::ObjectRuntimeExport("itertools.filterfalse")
             }
+            (Self::Itertools, "zip_longest") => {
+                Intrinsic::ObjectRuntimeExport("itertools.zip_longest")
+            }
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
             (Self::Itertools, "cycle") => Intrinsic::Cycle,
