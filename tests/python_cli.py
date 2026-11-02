@@ -3022,6 +3022,8 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_fallocate.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            exports = (str(fixtures / "boxed_posix_spawn_exports.py"), "posix", "os")
+            compare("-ISB", *exports, native_args=("-IB", *exports))
             plugin.write_bytes((fixtures / "boxed_posix_spawn_actions.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sched_param.py").read_bytes())

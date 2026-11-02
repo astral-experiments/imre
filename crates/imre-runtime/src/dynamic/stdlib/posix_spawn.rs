@@ -6,23 +6,35 @@ mod actions;
 mod arguments;
 mod attributes;
 
-pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
-    for name in ["posix_spawn", "posix_spawnp"] {
-        let value = ctx.builtin(&format!("posix.{name}"));
-        ctx.bind(scope, name, value);
-    }
-    for (name, value) in [
-        ("POSIX_SPAWN_OPEN", 0),
-        ("POSIX_SPAWN_CLOSE", 1),
-        ("POSIX_SPAWN_DUP2", 2),
+/// The os facade copies the current posix namespace, including any reassigned exports.
+pub(in crate::dynamic) fn initialize(
+    ctx: &mut Context,
+    scope: Id,
+    posix: Option<Id>,
+) -> Result<()> {
+    for (name, number) in [
+        ("posix_spawn", None),
+        ("posix_spawnp", None),
+        ("POSIX_SPAWN_OPEN", Some(0)),
+        ("POSIX_SPAWN_CLOSE", Some(1)),
+        ("POSIX_SPAWN_DUP2", Some(2)),
+        ("POSIX_SPAWN_CLOSEFROM", Some(3)),
     ] {
-        let value = ctx.int(value);
+        let value = match posix {
+            Some(module) => match ctx.lookup_attr(module, name) {
+                Ok(value) => value,
+                Err(error) if ctx.is_attribute_error(&error) => continue,
+                Err(error) => return Err(error),
+            },
+            None if name == "POSIX_SPAWN_CLOSEFROM" && !actions::has_closefrom() => continue,
+            None => match number {
+                Some(code) => ctx.int(code),
+                None => ctx.builtin(&format!("posix.{name}")),
+            },
+        };
         ctx.bind(scope, name, value);
     }
-    if actions::has_closefrom() {
-        let value = ctx.int(3);
-        ctx.bind(scope, "POSIX_SPAWN_CLOSEFROM", value);
-    }
+    Ok(())
 }
 
 pub(super) fn call(

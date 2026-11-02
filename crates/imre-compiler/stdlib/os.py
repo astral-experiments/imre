@@ -23,9 +23,8 @@ if sys.platform == "linux":
     from posix import MFD_CLOEXEC, memfd_create
     import posix as _posix
     from posix import pipe2
-    from posix import POSIX_SPAWN_CLOSE, POSIX_SPAWN_DUP2, POSIX_SPAWN_OPEN, posix_spawn, posix_spawnp
     for _name in vars(_posix):
-        if _name.startswith("RTLD_") or _name == "POSIX_SPAWN_CLOSEFROM":
+        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
     from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
