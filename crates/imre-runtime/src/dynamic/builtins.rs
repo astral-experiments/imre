@@ -225,7 +225,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
-        || name == super::stdlib::hash_info::TYPE
+        || super::stdlib::structseq::lookup(name).is_some()
         || is_exception(name)
         || is_enum_base(name)
 }
