@@ -3546,8 +3546,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
-            Value::Native(ref class) if class == "method_descriptor" && name == "__get__" => {
-                return Ok(self.builtin("method_descriptor.__get__"));
+            Value::Native(ref class)
+                if matches!(class.as_str(), "method_descriptor" | "wrapper_descriptor")
+                    && name == "__get__" =>
+            {
+                return Ok(self.builtin(&format!("{class}.__get__")));
             }
             Value::Native(ref class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
