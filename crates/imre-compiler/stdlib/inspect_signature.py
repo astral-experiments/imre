@@ -1,7 +1,9 @@
 """Signature support for boxed Python functions. See CPython 3.14.5 Lib/inspect.py."""
 
 import enum
+import importlib.machinery
 import itertools
+import os
 import re
 import types
 from annotationlib import Format, ForwardRef

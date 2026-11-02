@@ -222,6 +222,28 @@ def files(distribution_name):
     return distribution(distribution_name).files
 
 
+def _get_toplevel_name(path):
+    top, *rest = path.parts
+    if rest:
+        return top
+    from inspect import getmodulename
+    return getmodulename(path) or str(path)
+
+
+def packages_distributions():
+    """Map top-level import names to the distributions providing them."""
+    result = {}
+    for dist in distributions():
+        names = (dist.read_text('top_level.txt') or '').split()
+        if not names:
+            paths = dist.files
+            inferred = set(map(_get_toplevel_name, () if paths is None else paths))
+            names = (name for name in inferred if '.' not in name)
+        for name in names:
+            result.setdefault(name, []).append(dist.metadata['Name'])
+    return result
+
+
 def __getattr__(name):
     # Loading pathlib is only necessary for callers using installed file paths.
     if name in ('PackagePath', 'FileHash'):

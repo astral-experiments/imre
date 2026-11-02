@@ -1319,6 +1319,9 @@ impl IntrinsicModule {
             (Self::ImportlibMetadata, "FileHash") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.FileHash")
             }
+            (Self::ImportlibMetadata, "packages_distributions") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.packages_distributions")
+            }
             (Self::ImportlibMetadata, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.files")
             }
@@ -1351,6 +1354,18 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibMachinery, "all_suffixes") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.all_suffixes")
+            }
+            (Self::ImportlibMachinery, "SOURCE_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.SOURCE_SUFFIXES")
+            }
+            (Self::ImportlibMachinery, "BYTECODE_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.BYTECODE_SUFFIXES")
+            }
+            (Self::ImportlibMachinery, "EXTENSION_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.EXTENSION_SUFFIXES")
+            }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
             }
@@ -1415,6 +1430,9 @@ impl IntrinsicModule {
                 "cache" => crate::ir::LinecacheOperation::Cache,
                 _ => return None,
             }),
+            (Self::Inspect, "getmodulename") => {
+                Intrinsic::ObjectRuntimeExport("inspect.getmodulename")
+            }
             (Self::Inspect, "Signature") => Intrinsic::ObjectRuntimeExport("inspect.Signature"),
             (Self::Inspect, "Parameter") => Intrinsic::ObjectRuntimeExport("inspect.Parameter"),
             (Self::Inspect, "BoundArguments") => {
