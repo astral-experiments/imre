@@ -106,6 +106,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "_blake2"
+            | "_sha3"
             | "_datetime"
             | "_imre_ordered_dict"
             | "_opcode"
