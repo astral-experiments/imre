@@ -286,6 +286,7 @@ enum StringConstant {
 #[derive(Default)]
 struct Output {
     keep_docstrings: bool,
+    declared_statement_line: bool,
     string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -509,6 +510,7 @@ struct Function<'a, 'p> {
 #[derive(Clone)]
 enum Cleanup {
     With {
+        line: usize,
         exit: String,
         caught: String,
     },
@@ -779,6 +781,16 @@ impl Function<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declare_exit_line_only_for_compiled_with() {
+        let path = Path::new("<imre stdlib>/example.py");
+        let declare = "declare void @imre_dyn_set_statement_line";
+        for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
+            let (_, ir) = provider("example", path, source, true).unwrap().unwrap();
+            assert_eq!(ir.matches(declare).count(), expected);
+        }
+    }
 
     #[test]
     fn provider_substitution() {
