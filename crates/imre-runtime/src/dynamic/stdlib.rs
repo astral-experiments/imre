@@ -85,6 +85,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
         name,
         "sys"
             | "_imp"
+            | "_imre_thread"
             | "threading"
             | "_thread"
             | "abc"
@@ -396,6 +397,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | ("_imre_dataclasses", "load_global" | "loaded_module" | "members" | "metadata") => {
+            ctx.builtin(&format!("{module}.{name}"))
+        }
+        ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
@@ -790,6 +794,31 @@ pub(super) fn call(
 ) -> Result<Id> {
     if super::lowlevel_threads::function_name(name).is_some() {
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
+    }
+    if name == "_thread.get_ident"
+        || (cfg!(any(target_os = "linux", target_os = "macos")) && name == "_thread.get_native_id")
+    {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no keyword arguments"),
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        let id = match name {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            "_thread.get_native_id" => crate::objects::locks::native_thread_id() as usize,
+            _ => crate::objects::locks::thread_ident(),
+        };
+        return Ok(ctx.alloc(Value::Int(crate::Int::from_usize(id))));
+    }
+    if let Some(function) = name.strip_prefix("_imre_thread.") {
+        return super::thread_worker::call(ctx, function, args, kwargs);
     }
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);

@@ -917,6 +917,7 @@ impl Context {
             | Value::Module { .. }
             | Value::ThreadLocal(_)
             | Value::Hash(_)
+            | Value::ThreadHandle(_)
             | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::DefaultDict { .. } => "collections.defaultdict",

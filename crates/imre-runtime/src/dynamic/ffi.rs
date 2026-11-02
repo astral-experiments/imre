@@ -601,6 +601,7 @@ pub(super) fn new_context<S: Into<String>>(
     let mut ctx = Context {
         heap: Heap::new(),
         threads: Default::default(),
+        workers: Default::default(),
         config,
         executable,
         argv: NONE,
@@ -1274,6 +1275,7 @@ impl Context {
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
         self.threads.reap(&mut self.heap);
+        self.reap_thread_operands();
         (
             &mut self.heap,
             self.classes
@@ -1285,6 +1287,7 @@ impl Context {
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
                 .copied()
+                .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.contexts.iter().copied())
                 .chain(self.bytearray_exports.iter().copied())

@@ -1457,7 +1457,7 @@ def report(text):
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
-        for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py"):
+        for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py", "boxed_thread_dangling.py"):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
