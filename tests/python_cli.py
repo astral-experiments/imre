@@ -1057,6 +1057,8 @@ def main():
 
         instance_check = root / "unittest_instance.py"
         for statement in (
+            "case.assertIsSubclass(bool, int)",
+            "check = Case.assertNotIsSubclass\ncheck(case, int, str)",
             "case.assertIsInstance(1, int)",
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
@@ -1568,6 +1570,7 @@ def report(text):
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_instance.py",
+            "boxed_unittest_subclass.py",
             "boxed_unittest_not_equal.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_identity.py",
