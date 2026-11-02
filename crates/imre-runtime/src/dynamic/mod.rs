@@ -2086,7 +2086,8 @@ impl Context {
             "io" => {
                 stdlib::io::install(self, scope);
                 let native = self.module("_io")?;
-                let decoder = self.lookup_attr(native, "IncrementalNewlineDecoder")?;
+                let member = self.text("IncrementalNewlineDecoder");
+                let decoder = self.import_from(native, member)?;
                 self.bind(scope, "IncrementalNewlineDecoder", decoder);
             }
             "pickle" => stdlib::pickle::install(self, scope)?,

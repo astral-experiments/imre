@@ -68,6 +68,17 @@ def current():
         assert wrapped.decode("x") == "x" and fresh(None, False).decode("y") == "y"
         del sys.modules["io"]
         assert __import__("io").IncrementalNewlineDecoder is fresh
+        native = sys.modules["_io"]
+        del native.IncrementalNewlineDecoder
+        del sys.modules["io"]
+        try:
+            __import__("io")
+        except ImportError as exc:
+            assert exc.name == "_io" and "io" not in sys.modules
+        else:
+            raise AssertionError("missing decoder import succeeded")
+        native.IncrementalNewlineDecoder = fresh
+        assert __import__("io").IncrementalNewlineDecoder is fresh
     finally:
         sys.modules["io"] = io
         sys.modules["_io"] = _io
