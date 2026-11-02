@@ -1356,6 +1356,9 @@ impl Context {
         let class = match self.heap.get(id) {
             Value::Instance { class, .. } => *class,
             Value::Raised(error) => error.class()?,
+            Value::Weak(wr) if wr.kind == weakref::Kind::Reference && name == "__repr__" => {
+                *self.builtins.get(weakref::REFERENCE_TYPE)?
+            }
             value if name == "__repr__" => match value.native_io_class_name()? {
                 class @ ("_io.BufferedReader" | "_io.BufferedWriter" | "_io.TextIOWrapper") => {
                     *self.builtins.get(class)?

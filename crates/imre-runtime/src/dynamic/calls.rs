@@ -748,6 +748,11 @@ impl Context {
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
+        if name == "__repr__"
+            && matches!(self.heap.get(object), Value::Weak(wr) if wr.kind == weakref::Kind::Reference)
+        {
+            return self.lookup_attr(object, name).map(Some);
+        }
         let Some(class) = self.heap.get(object).instance_class() else {
             return Ok(None);
         };
