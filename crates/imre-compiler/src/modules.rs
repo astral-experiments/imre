@@ -144,6 +144,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "dis" => Some(("dis.py", include_str!("../stdlib/dis.py"))),
         "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
         "_opcode_metadata" => Some((
             "_opcode_metadata.py",
@@ -4483,9 +4484,11 @@ impl<'a> Loader<'a> {
                         } else {
                             Binding::Module(self.load_module(&child_name)?)
                         }
-                    } else if self.modules[target].is_bundled("http.client") {
-                        // The checked source defines fixed-layout headers. Other imports
-                        // are resolved by the full Python module at run time.
+                    } else if self.modules[target].is_bundled("http.client")
+                        || self.modules[target].is_bundled("dis")
+                    {
+                        // http.client supplies names beyond its checked header types.
+                        // dis imports opcode's public names with a wildcard.
                         Binding::ConditionalValue
                     } else {
                         return Err(format!(
