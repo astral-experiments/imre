@@ -1343,7 +1343,7 @@ impl Context {
             Value::Instance { class, .. } => *class,
             Value::Raised(error) => error.class()?,
             value if name == "__repr__" => match value.native_io_class_name()? {
-                class @ ("_io.BufferedReader" | "_io.BufferedWriter") => {
+                class @ ("_io.BufferedReader" | "_io.BufferedWriter" | "_io.TextIOWrapper") => {
                     *self.builtins.get(class)?
                 }
                 _ => return None,
