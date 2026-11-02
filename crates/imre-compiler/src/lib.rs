@@ -32,6 +32,11 @@ mod watch;
 mod zip_entry;
 pub use zip_entry::is_zip_path;
 
+/// Emits native provider IR for packaging alongside the Linux toolchain.
+pub fn write_bundled_provider_ir(directory: &std::path::Path) -> Result<(), String> {
+    dynamic::provider_pack::write(directory)
+}
+
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
@@ -91,6 +96,8 @@ pub struct CompileOptions {
     pub runtime_imports: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
+    /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
+    pub bundled_provider_archive: Option<PathBuf>,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
 }
@@ -230,6 +237,47 @@ fn check_file_with(
     object_fallback(path, module_root, options, filesystem, typed, |_| ())
 }
 
+fn named_bytecode(path: &Path) -> bool {
+    path.as_os_str().as_encoded_bytes().ends_with(b".pyc")
+}
+
+/// Inspect only the required prefix of a named bytecode operand, which may be a pipe.
+fn read_bytecode_prefix(mut file: std::fs::File) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut prefix = Vec::with_capacity(37);
+    file.by_ref().take(4).read_to_end(&mut prefix)?;
+    if prefix == imre_ast::PYC_MAGIC_NUMBER_TOKEN.to_le_bytes() {
+        file.by_ref().take(13).read_to_end(&mut prefix)?;
+        if prefix.get(16).is_some_and(|tag| tag & 0x7f == b'c') {
+            file.take(20).read_to_end(&mut prefix)?;
+        }
+    }
+    Ok(prefix)
+}
+
+/// Classify a direct interpreter operand before decoding its contents as Python source.
+fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
+    let magic = imre_ast::PYC_MAGIC_NUMBER_TOKEN.to_le_bytes();
+    if !named_bytecode(path) && !bytes.starts_with(&magic[..2]) {
+        return None;
+    }
+    if bytes.len() < 4 {
+        return Some("EOFError: EOF read where not expected");
+    }
+    if bytes[..4] != magic {
+        return Some("RuntimeError: Bad magic number in .pyc file");
+    }
+    if bytes.len() < 16 {
+        return Some("EOFError: EOF read where not expected");
+    }
+    // The interpreter skips three header words, then expects a marshalled code record.
+    // Its first fields are five 32-bit integers, and the tag may carry the reference bit.
+    if bytes.len() < 16 + 1 + 5 * 4 || bytes[16] & 0x7f != b'c' {
+        return Some("RuntimeError: Bad code object in .pyc file");
+    }
+    Some("NotImplementedError: native marshal cannot load CPython code objects")
+}
+
 /// Compile runtime import paths with native object operations when static lowering cannot resolve them.
 fn object_fallback<T>(
     path: &Path,
@@ -293,11 +341,21 @@ fn object_fallback<T>(
     let check_returns = || {
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
+            let entry = &graph.modules[graph.entry];
+            let all_calls = !entry.optional_imports.is_empty()
+                || !graph.needs_object_runtime.get()
+                    && graph.object_builtin_errors.borrow().contains(&error);
+            let checked_calls = if all_calls {
+                analysis::FallbackCalls::All
+            } else if entry.has_entry_guard() {
+                analysis::FallbackCalls::Entry(graph.entry)
+            } else {
+                analysis::FallbackCalls::None
+            };
             graph.session.diagnostic_copy()?.check_fallback_contracts(
                 skipped.as_deref(),
                 &overloads,
-                !graph.needs_object_runtime.get()
-                    && graph.object_builtin_errors.borrow().contains(&error),
+                checked_calls,
                 graph
                     .modules
                     .iter()

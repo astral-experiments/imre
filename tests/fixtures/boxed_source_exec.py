@@ -169,6 +169,83 @@ class Case(Base):
     assert namespace["Broken"] is old and events[-2:] == ["decorated", "Broken"]
 
 
+def module_annotations():
+    events = []
+    ns = {"events": events, "alias": int}
+    exec("""def note(value):
+    events.append(value)
+    return value
+x: note(alias) = note(1)
+if False:
+    missing: never()
+if True:
+    x: note(str)
+    other: note(bytes)
+""", ns)
+    provider = ns["__annotate__"]
+    assert ns["x"] == 1 and "other" not in ns and events == [1]
+    assert provider.__name__ == provider.__qualname__ == "__annotate__"
+    assert provider.__globals__ is ns and provider.__closure__ is None
+    assert ns["__conditional_annotations__"] == {0, 2, 3}
+    assert "__annotations__" not in ns
+    ns["alias"] = float
+    assert provider(1) == {"x": str, "other": bytes}
+    assert events == [1, float, str, bytes]
+    ns["__conditional_annotations__"].remove(2)
+    assert provider(2) == {"x": float, "other": bytes}
+    assert events == [1, float, str, bytes, float, bytes]
+    try:
+        provider(3)
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("unsupported annotation format")
+
+    ns, local = {"alias": bytes}, {"alias": str}
+    exec(compile("x: alias = alias", "split.py", "single"), ns, local)
+    assert local["x"] is str and "x" not in ns and "__annotate__" not in ns
+    provider = local["__annotate__"]
+    assert provider.__globals__ is ns
+    try:
+        provider(1)
+    except NameError as exc:
+        assert exc.name == "__conditional_annotations__"
+    else:
+        raise AssertionError("module annotation captured exec locals")
+    ns["__conditional_annotations__"] = local["__conditional_annotations__"]
+    assert provider(1) == {"x": bytes}
+
+    ns = {}
+    try:
+        exec("ok: int = 3\nbad: str = missing()", ns)
+    except NameError as exc:
+        assert exc.name == "missing"
+    else:
+        raise AssertionError("missing right-hand side")
+    assert ns["__conditional_annotations__"] == {0}
+    assert ns["__annotate__"](1) == {"ok": int} and "bad" not in ns
+    exec("x: unknown", ns)
+    try:
+        ns["__annotate__"](1)
+    except NameError as exc:
+        assert exc.name == "unknown"
+    else:
+        raise AssertionError("missing lazy annotation")
+
+    annotations = {"saved": "old"}
+    local = {"__annotations__": annotations}
+    ns = {"__annotations__": {"unrelated": "global"}}
+    exec("from __future__ import annotations\nx: missing() = 8", ns, local)
+    assert local["x"] == 8 and "__annotate__" not in local
+    assert local["__conditional_annotations__"] == set()
+    assert local["__annotations__"] is annotations
+    assert annotations == {"saved": "old", "x": "missing()"}
+    assert ns["__annotations__"] == {"unrelated": "global"}
+    local = {}
+    exec("from __future__ import annotations\nif False:\n x: missing()", ns, local)
+    assert local["__annotations__"] == {}
+
+
 def source_annotations():
     from types import FunctionType
 
@@ -605,6 +682,25 @@ def source_eval():
         raise AssertionError("eval accepted a statement")
 
 
+def exec_caller_namespaces():
+    seen = []
+    value = 7
+    execute = exec
+    execute("seen.append(value)\nvalue = 99")
+    assert seen == [7] and value == 7
+
+    class C:
+        first = 11
+        exec("second = first + 1")
+        third = second
+
+    assert C.second == C.third == 12
+    separate = {}
+    assert exec(compile("40 + 2", "caller", "eval"), {}, separate) is None
+    exec("result = n", globals={"n": 8}, locals=separate, closure=None)
+    assert separate == {"result": 8}
+
+
 def starred_calls():
     events = []
 
@@ -791,9 +887,11 @@ def current():
     starred_calls()
     caller_namespaces(3)
     source_eval()
+    exec_caller_namespaces()
     method_argument_lifetime()
     named_bindings()
     source_annotations()
+    module_annotations()
     source_genexpr()
     source_listcomp()
     source_setcomp()

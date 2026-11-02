@@ -38,8 +38,47 @@ pub(super) struct Program {
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
+    // Declarations collected across module suites while lowering.
+    module_annotations: Vec<(String, ast::Expr)>,
     expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
     eager_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
+}
+
+/// The original source expression and line, with no references into the defining heap.
+pub(super) struct CapturedAcquire {
+    line: u32,
+    expression: ast::Expr,
+}
+
+impl CapturedAcquire {
+    pub(super) fn load(
+        self,
+        ctx: &mut Context,
+        scope: Id,
+        name: Id,
+        parameters: Id,
+        qualname: Id,
+        location: Location,
+    ) -> Result<Id> {
+        let mut program = Program::new(
+            Rc::from(location.file.as_ref()),
+            ctx.str_value(name)?,
+            false,
+        );
+        program.qualname = ctx.str_value(qualname)?.to_owned();
+        program.first_line = location.line;
+        program
+            .instructions
+            .push((self.line, Instruction::Eval(self.expression)));
+        program.prepare_strings(
+            &mut ctx.heap,
+            &mut SharedConstants::default(),
+            &StringReplacements::new(),
+            &|_| self.line,
+        )?;
+        let freevars = ctx.enclosing_freevars(scope, program.reads.iter().map(String::as_str));
+        Ok(ctx.box_source_closure(Rc::new(program), Some(parameters), freevars))
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -87,8 +126,10 @@ enum Instruction {
     CheckAnnotationFormat,
     Annotations {
         entries: Vec<(String, ast::Expr)>,
-        class: bool,
+        scope: annotations::AnnotationScope,
     },
+    ModuleAnnotations(Option<Rc<Program>>),
+    MarkModuleAnnotation(usize),
     StringAnnotation(String, ast::Expr),
     ClassAnnotator(Rc<Program>),
     ClassStart,
@@ -984,6 +1025,36 @@ fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result
 }
 
 impl Program {
+    /// A worker may replay one direct acquire on its one captured receiver.
+    pub(super) fn captured_acquire(&self, freevar: &str) -> Option<CapturedAcquire> {
+        let [(line, Instruction::Eval(expression))] = self.instructions.as_slice() else {
+            return None;
+        };
+        let call = expression.as_call_expr()?;
+        // Imported receiver spellings use ordinary attribute evaluation instead.
+        let field =
+            imre_ast::direct_method(call, &self.method_imports, self.private_names.as_deref())?;
+        if field.attr.as_str() != "acquire"
+            || field.value.as_name_expr()?.id.as_str() != freevar
+            || !call.arguments.is_empty()
+            || self.kind != FunctionKind::Plain
+            || self.interactive
+            || self.nested_global
+            || self.class_attributes.is_some()
+            || self.class_cell
+            || !self.locals.is_empty()
+            || !self.directives.is_empty()
+            || self.doc.is_some()
+            || self.string_roots != NONE
+        {
+            return None;
+        }
+        Some(CapturedAcquire {
+            line: *line,
+            expression: expression.clone(),
+        })
+    }
+
     /// Keep each code object's constants alive, including constants owned by unexecuted children.
     fn prepare_strings<'a>(
         &'a mut self,
@@ -1105,7 +1176,8 @@ impl Program {
                 Instruction::StringAnnotation(name, expr) => {
                     strings.annotation(name, expr, true)?
                 }
-                Instruction::ClassAnnotator(provider) => {
+                Instruction::ClassAnnotator(provider)
+                | Instruction::ModuleAnnotations(Some(provider)) => {
                     nested_reads.extend(
                         strings
                             .annotation_code(provider, class_locals, line_at)?
@@ -1142,7 +1214,9 @@ impl Program {
                         DefinitionKind::Class(None) | DefinitionKind::TypeAlias(_) => {}
                     }
                 }
-                Instruction::ClassStart
+                Instruction::ModuleAnnotations(None)
+                | Instruction::MarkModuleAnnotation(_)
+                | Instruction::ClassStart
                 | Instruction::ClassEnd
                 | Instruction::CheckAnnotationFormat => {}
                 Instruction::Yield(e) | Instruction::Return(e) | Instruction::Next(e, _) => {
@@ -1461,6 +1535,7 @@ impl Program {
             private_names: None,
             template_expressions: Rc::default(),
             instructions: Vec::new(),
+            module_annotations: Vec::new(),
             expression_functions: HashMap::new(),
             eager_comprehension_targets: HashMap::new(),
         }
@@ -1565,9 +1640,20 @@ impl Program {
             class && imre_ast::class_cell::needed(&body, self.string_annotations());
         self.needs_dict_cell =
             class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
+        let module_annotations =
+            !function && !class && imre_ast::annotations::has_variable_annotation(&body);
+        if module_annotations {
+            self.instructions
+                .push((self.first_line, Instruction::ModuleAnnotations(None)));
+        }
         self.lower_with_fields(body, lines, function, None, class.then_some(&mut fields))?;
+        if !self.module_annotations.is_empty() {
+            let entries = std::mem::take(&mut self.module_annotations);
+            let provider = self.annotation_provider(entries, None, self.first_line);
+            self.instructions[0].1 = Instruction::ModuleAnnotations(Some(provider));
+        }
         if !fields.is_empty() {
-            let provider = self.annotation_provider(fields, &self.qualname, self.first_line);
+            let provider = self.annotation_provider(fields, Some(&self.qualname), self.first_line);
             self.instructions
                 .push((self.first_line, Instruction::ClassAnnotator(provider)));
         }
@@ -1639,19 +1725,29 @@ impl Program {
                         None => Instruction::BindSent(s.targets),
                     }
                 }
-                Stmt::AnnAssign(s) if function || (self.class_attributes.is_some() && s.simple) => {
+                Stmt::AnnAssign(s)
+                    if function
+                        || s.simple
+                        || (self.class_attributes.is_none() && s.target.is_name_expr()) =>
+                {
                     let name = s.target.as_name_expr().map(|name| name.id.to_string());
                     if let Some(name) = &name {
                         if name == "__debug__" {
                             return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
                         }
-                        if let Some((kind, _)) = self.directives.get(name) {
+                        if let Some((kind, _)) = self.directives.get(name)
+                            && (function
+                                || self.class_attributes.is_some()
+                                || *kind != ScopeDirective::Global)
+                        {
                             return Err(Error::new(
                                 "SyntaxError",
                                 format!("annotated name '{name}' can't be {}", kind.keyword()),
                             ));
                         }
-                        self.locals.insert(name.clone());
+                        if function || s.simple || s.value.is_some() {
+                            self.locals.insert(name.clone());
+                        }
                     } else if s.value.is_none() {
                         return Err(unsupported("annotated assignment target"));
                     }
@@ -1664,15 +1760,19 @@ impl Program {
                         self.instructions.push((line, op));
                     }
                     // Function-local annotations never evaluate the annotation expression.
-                    if function {
+                    if function || !s.simple {
                         continue;
                     }
-                    let name = name.expect("simple class annotation");
+                    let name = name.expect("simple annotated name");
                     if self.string_annotations() {
                         Instruction::StringAnnotation(
                             name,
                             annotations::string_literal(&s.annotation),
                         )
+                    } else if self.class_attributes.is_none() {
+                        let index = self.module_annotations.len();
+                        self.module_annotations.push((name, *s.annotation));
+                        Instruction::MarkModuleAnnotation(index)
                     } else if let Some(entries) = &mut fields {
                         entries.push((name, *s.annotation));
                         continue;
@@ -1952,6 +2052,17 @@ impl Program {
                         }
                     }
                     continue;
+                }
+                Stmt::Try(_)
+                    if !function
+                        && self.class_attributes.is_none()
+                        && !self.string_annotations()
+                        && imre_ast::annotations::has_variable_annotation(
+                            std::slice::from_ref(&stmt),
+                        ) =>
+                {
+                    // CPython duplicates finally suites on unwind and numbers else before handlers.
+                    return Err(unsupported("deferred module annotations in try suites"));
                 }
                 Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
                     let entry = self.instructions.len();
@@ -2557,6 +2668,15 @@ impl Context {
     }
 
     fn box_source_code(&mut self, program: Rc<Program>, parameters: Option<Id>) -> Id {
+        self.box_source_closure(program, parameters, None)
+    }
+
+    fn box_source_closure(
+        &mut self,
+        program: Rc<Program>,
+        parameters: Option<Id>,
+        freevars: Option<Vec<String>>,
+    ) -> Id {
         let name = self.heap.code_name(&program.name);
         let qualname = self.heap.code_name(&program.qualname);
         let filename = self.text(program.filename.as_ref());
@@ -2576,8 +2696,8 @@ impl Context {
             flags: None,
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
-            freevars: Vec::new(),
-            closure_supported: false,
+            closure_supported: freevars.is_some(),
+            freevars: freevars.unwrap_or_default(),
         }))
     }
 
@@ -2829,24 +2949,37 @@ impl Context {
         let filename = self.text("<string>");
         let mode = self.text("eval");
         let code = self.compile_source(text, filename, mode, false)?;
-        self.run_in_namespace(code, globals, Some(locals), None, "eval")
+        self.run_in_namespace(code, globals, Some(locals), None, "eval", None)
     }
 
-    /// Evaluate an expression in the supplied namespaces or the active Python frame.
-    pub(super) fn eval_source(
+    /// Run eval or exec with explicit namespaces or the active Python frame.
+    pub(super) fn call_eval_exec(
         &mut self,
         scope: Id,
+        name: &str,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let Some((&source, namespaces)) = args.split_first() else {
+        let Some(&source) = args.first() else {
             return Err(Error::new(
                 "TypeError",
-                "eval expected at least 1 positional argument",
+                format!("{name}() takes at least 1 positional argument (0 given)"),
             ));
         };
-        let [globals, locals] =
-            builtins::bind_method_arguments("eval", namespaces, kwargs, ["globals", "locals"], 2)?;
+        let (globals, locals, closure) = if name == "exec" {
+            let [_, globals, locals, closure] = builtins::bind_method_arguments(
+                name,
+                args,
+                kwargs,
+                ["", "globals", "locals", "closure"],
+                3,
+            )?;
+            (globals, locals, closure.filter(|&value| value != NONE))
+        } else {
+            let [_, globals, locals] =
+                builtins::bind_method_arguments(name, args, kwargs, ["", "globals", "locals"], 3)?;
+            (globals, locals, None)
+        };
         let globals = globals.filter(|&g| g != NONE);
         let locals = match locals.filter(|&l| l != NONE) {
             Some(locals) => Some(locals),
@@ -2857,7 +2990,8 @@ impl Context {
             Some(globals) => globals,
             None => self.module_globals(scope)?,
         };
-        self.run_in_namespace(source, globals, locals, None, "eval")
+        let value = self.run_in_namespace(source, globals, locals, None, name, closure)?;
+        Ok(if name == "exec" { NONE } else { value })
     }
 
     /// Resolve the caller's namespace, copying bindings only for optimized frames.
@@ -2935,7 +3069,7 @@ impl Context {
         locals: Option<Id>,
         function: Option<Id>,
     ) -> Result<Id> {
-        self.run_in_namespace(source, globals, locals, function, "exec")
+        self.run_in_namespace(source, globals, locals, function, "exec", None)
             .map(|_| NONE)
     }
 
@@ -2946,6 +3080,7 @@ impl Context {
         locals: Option<Id>,
         function: Option<Id>,
         mode: &str,
+        closure: Option<Id>,
     ) -> Result<Id> {
         if self.dict_storage(globals).is_none() {
             let ty = self.type_name(globals);
@@ -3004,7 +3139,34 @@ impl Context {
                     "code object passed to eval() may not contain free variables",
                 ));
             }
+            Value::Code(code) if !code.freevars.is_empty() => {
+                let required = code.freevars.len();
+                if let Some(Value::Tuple(cells)) = closure.map(|id| self.heap.get(id))
+                    && cells.len() == required
+                    && cells
+                        .iter()
+                        .all(|&id| matches!(self.heap.get(id), Value::Cell(_)))
+                {
+                    return Err(unsupported("exec with an explicit closure"));
+                }
+                return Err(Error::new(
+                    "TypeError",
+                    format!("code object requires a closure of exactly length {required}"),
+                ));
+            }
+            Value::Code(_) if closure.is_some() => {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot use a closure with this code object",
+                ));
+            }
             Value::Code(_) => source,
+            _ if closure.is_some() => {
+                return Err(Error::new(
+                    "TypeError",
+                    "closure can only be used when source is a code object",
+                ));
+            }
             Value::Str(_) | Value::Bytes(_) | Value::ByteArray(_) => {
                 let filename = self.text("<string>");
                 let mode_id = self.text(mode);
@@ -3821,8 +3983,11 @@ impl Context {
         } = cursor;
         let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
         match op {
-            Instruction::Annotations { entries, class } => {
-                let values = self.source_annotations(code, scope, entries, *class)?;
+            Instruction::Annotations {
+                entries,
+                scope: annotation_scope,
+            } => {
+                let values = self.source_annotations(code, scope, entries, *annotation_scope)?;
                 return Ok(Some(Step::Return(values)));
             }
             Instruction::ReturnSent => return Ok(Some(Step::Return(*sent))),
@@ -4248,8 +4413,24 @@ impl Context {
                 let key = self.heap.code_name(name);
                 let spelling = self.source_expr(code, scope, expression)?;
                 // LOAD_NAME for this implicit store skips enclosing function locals.
-                let annotations = self.lookup_class_local(scope, "__annotations__")?;
+                let annotations = if code.class_attributes.is_some() {
+                    self.lookup_class_local(scope, "__annotations__")?
+                } else {
+                    self.module_annotation_name(scope, "__annotations__")?
+                };
                 self.put_item(annotations, key, spelling)?;
+            }
+            Instruction::ModuleAnnotations(provider) => {
+                self.start_module_annotations(code, owner, scope, provider.as_ref())?;
+            }
+            Instruction::MarkModuleAnnotation(index) => {
+                let active = self.module_annotation_name(scope, "__conditional_annotations__")?;
+                let set = self.scalar_value(active);
+                if !matches!(self.heap.get(set), Value::Set { frozen: false, .. }) {
+                    return Err(Error::new("TypeError", "expected a set"));
+                }
+                let index = self.int(*index as i64);
+                builtins::set_add(self, set, index)?;
             }
             Instruction::ClassAnnotator(provider) => {
                 let annotate = self.source_annotator(provider, owner, scope)?;
@@ -4415,14 +4596,7 @@ impl Context {
             } else {
                 None
             };
-            let id = self.box_source_code(child.clone(), Some(parameters));
-            if let Some(names) = freevars {
-                let Value::Code(nested) = self.heap.get_mut(id) else {
-                    unreachable!()
-                };
-                nested.freevars = names;
-                nested.closure_supported = true;
-            }
+            let id = self.box_source_closure(child.clone(), Some(parameters), freevars);
             let Value::Code(parent) = self.heap.get_mut(owner) else {
                 unreachable!()
             };
@@ -5134,7 +5308,7 @@ impl Context {
                 }
                 let result = self.call_in_scope(scope, f, args, kwargs)?;
                 self.finish_call_operands(mark, result);
-                Ok(result)
+                self.check_call_return(result)
             }
             _ => Err(unsupported(format!(
                 "{:?}",

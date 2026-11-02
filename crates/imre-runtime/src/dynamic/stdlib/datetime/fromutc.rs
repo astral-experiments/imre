@@ -7,6 +7,50 @@ fn invoke(ctx: &mut Context, tz: Id, dt: Id) -> Result<Id> {
     ctx.call(callback, vec![dt], vec![])
 }
 
+/// Date.today calls the public clock before looking up fromtimestamp on the receiving class.
+pub(super) fn date_constructor(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (&class, args) = args
+        .split_first()
+        .ok_or_else(|| Error::new("TypeError", "date class method requires a type"))?;
+    let name = ctx.class_name(class).rsplit('.').next().unwrap();
+    if method == "date.today" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}.today() takes no keyword arguments"),
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}.today() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        let mark = ctx.heap.temporary_mark();
+        let time = ctx.import_with_builtins("time")?;
+        ctx.heap.keep(time);
+        let clock = ctx.lookup_attr(time, "time")?;
+        ctx.finish_call_operands(mark, clock);
+        ctx.heap.keep(clock);
+        let stamp = ctx.call(clock, vec![], vec![])?;
+        // Releasing the last clock reference can replace the class's fromtimestamp method.
+        ctx.finish_call_operands(mark, stamp);
+        ctx.heap.keep(stamp);
+        let construct = ctx.lookup_attr(class, "fromtimestamp")?;
+        return ctx.call(construct, vec![stamp], vec![]);
+    }
+    let name = format!("{name}.fromtimestamp");
+    let stamp = crate::dynamic::builtins::one_positional_arg(&name, args, kwargs)?;
+    let parts = super::super::time::civil(ctx, Some(stamp), false)?;
+    let fields = parts.fields[..3].iter().map(|&n| ctx.int(n)).collect();
+    ctx.call(class, fields, vec![])
+}
+
 pub(super) fn constructor(
     ctx: &mut Context,
     method: &str,

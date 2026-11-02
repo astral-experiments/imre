@@ -8,6 +8,7 @@ use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::dynamic::builtins::bind;
 
 mod assertions;
+mod flags;
 mod group_names;
 mod lookahead;
 mod progress;
@@ -101,6 +102,62 @@ pub(in crate::dynamic) struct Pattern {
 }
 
 impl Pattern {
+    /// Synthetic Scanner patterns do not have a Python pattern object to compare.
+    pub(in crate::dynamic) fn same_program(&self, other: &Self) -> bool {
+        if self.source == NONE
+            || other.source == NONE
+            || self.flags != other.flags
+            || self.bytes != other.bytes
+            || self.assertions.len() != other.assertions.len()
+            || !self
+                .assertions
+                .iter()
+                .zip(&other.assertions)
+                .all(|((a, x), (b, y))| {
+                    a == b && x.kind == y.kind && x.width == y.width && x.program == y.program
+                })
+        {
+            return false;
+        }
+        // Scalar-only subjects cannot match any surrogate literal. The alternate
+        // program distinguishes the actual code points on surrogate-bearing subjects.
+        match (&self.surrogate_literals, &other.surrogate_literals) {
+            (None, None) => {}
+            (Some(a), Some(b)) if a.same_program(b) => {}
+            _ => return false,
+        }
+        if self.engine_source == other.engine_source {
+            return true;
+        }
+        // str subclasses may compare equal despite different spellings. Compare their
+        // compiled states, independent of spelling and capture names, before calling __eq__.
+        !matches!(self.regex, Matcher::Lookahead(_))
+            && !matches!(other.regex, Matcher::Lookahead(_))
+            && matches!((split::retry_nfa(self), split::retry_nfa(other)), (Ok(a), Ok(b)) if a.states() == b.states())
+    }
+
+    pub(in crate::dynamic) fn program_hash(&self) -> i64 {
+        // Equal state programs can have different spellings (for example noncapturing groups).
+        // The shared group layout is also invariant under capture renaming.
+        self.flags ^ i64::from(self.bytes) ^ (self.group_count() as i64).rotate_left(7)
+    }
+
+    // GroupInfo contains the synthetic final-newline capture as well as user names.
+    fn invalid_group_name(&self, spelling: &[u8]) -> Option<&str> {
+        let mut names = self
+            .regex
+            .group_info()
+            .pattern_names(PatternID::ZERO)
+            .flatten();
+        names.find(|name| {
+            (*name != "imre.eol"
+                || spelling
+                    .windows(b"(?P<imre.eol>".len())
+                    .any(|w| w == b"(?P<imre.eol>"))
+                && !group_names::valid(name, self.bytes)
+        })
+    }
+
     pub(in crate::dynamic) fn repr(&self, ctx: &Context) -> String {
         let mut source = ctx.repr(self.source);
         if let Some((end, _)) = source.char_indices().nth(200) {
@@ -333,10 +390,32 @@ fn raw_unicode_compatible(source: &str, ascii: bool, boundaries: &[usize]) -> bo
     true
 }
 
+// Python treats the first character after '[' or '[^' as a set member. A second
+// hyphen can then introduce a range. Leave later ambiguous operators alone.
+fn literal_operator_start(mut input: std::iter::Peekable<std::str::Chars<'_>>) -> bool {
+    let Some(first @ ('-' | '&' | '|' | '~')) = input.next() else {
+        return false;
+    };
+    if input.peek() != Some(&first) {
+        return false;
+    }
+    while let Some(c) = input.next() {
+        match c {
+            ']' => return true,
+            '\\' => {
+                input.next();
+            }
+            '-' | '&' | '|' | '~' if input.peek() == Some(&c) => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
-fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)> {
+fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, bool)> {
     if flags & VERBOSE != 0 {
         return None;
     }
@@ -344,6 +423,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
         pattern.contains("(?") && pattern.contains('u') && (ascii || pattern.contains('-'));
     let mut boundaries = Vec::new();
     let mut prefer_translation = false;
+    let mut possessive = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
@@ -361,13 +441,22 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
                     prefer_translation |= prefer_python_flags;
                 }
             }
+            // The regular backend reads a possessive modifier as another repetition.
+            // Ask the Python tokenizer to bind it to its operand.
+            possessive |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
                     prefer_translation = true;
-                } else if chars.peek() == Some(&',') {
-                    // Python treats an omitted lower bound as zero, including in {,}.
-                    result.push_str("{0");
-                    continue;
+                } else {
+                    let mut suffix = chars
+                        .clone()
+                        .skip_while(|c| c.is_ascii_digit() || *c == ',');
+                    possessive |= suffix.next() == Some('}') && suffix.next() == Some('+');
+                    if chars.peek() == Some(&',') {
+                        // Python treats an omitted lower bound as zero, including in {,}.
+                        result.push_str("{0");
+                        continue;
+                    }
                 }
             }
             if c == '$' && !in_class && flags & MULTILINE == 0 && chars.peek().is_none() {
@@ -388,6 +477,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
                 // A closing bracket in the first position is a literal member.
                 if chars.next_if_eq(&']').is_some() {
                     result.push(']');
+                } else if literal_operator_start(chars.clone()) {
+                    result.push('\\');
                 }
                 continue;
             }
@@ -435,7 +526,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
     if check_unicode && !raw_unicode_compatible(&result, ascii, &boundaries) {
         return None;
     }
-    Some((result, prefer_translation))
+    Some((result, prefer_translation, possessive))
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -610,27 +701,21 @@ fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
     }
 }
 
-/// Consume complete leading global matching flags before choosing the matcher and lowering anchors.
-fn leading_match_flags(mut pattern: &[u8], mut flags: i64) -> (&[u8], i64) {
-    while let Some(rest) = pattern.strip_prefix(b"(?") {
-        let mut added = 0;
-        let mut chars = rest.iter();
-        loop {
-            match chars.next() {
-                Some(b'i') => added |= IGNORECASE,
-                Some(b'm') => added |= MULTILINE,
-                Some(b's') => added |= DOTALL,
-                Some(b')') if added != 0 => break,
-                _ => return (pattern, flags),
-            }
+fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
+    let module = ctx.module("re")?;
+    match ctx.lookup_attr(module, "_compile_cached") {
+        Ok(cache) => {
+            let raw = ctx.builtin("re._compile_uncached");
+            let flags = flags.unwrap_or_else(|| ctx.int(0));
+            ctx.call(cache, vec![raw, id, flags], Vec::new())
         }
-        flags |= added;
-        pattern = chars.as_slice();
+        // Computed-only imports can expose the intrinsic module without its Python helpers.
+        Err(error) if ctx.is_attribute_error(&error) => compile_uncached(ctx, id, flags),
+        Err(error) => Err(error),
     }
-    (pattern, flags)
 }
 
-fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
+fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
         .transpose()?
@@ -644,7 +729,94 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         }
         return Ok(id);
     }
-    let bytes = matches!(ctx.heap.get(id), Value::Bytes(_));
+    let scalar = ctx.heap.get(ctx.scalar_value(id));
+    let bytes = matches!(scalar, Value::Bytes(_));
+    let projections = if let Value::SurrogateStr(points) = scalar {
+        match surrogate::literal_patterns(points) {
+            Ok(pair) => Some(pair),
+            Err(error) => {
+                check_flags(flags, false)?;
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+    // The encoded subject projection retains one scalar per original code point.
+    // Check placement and source positions there before compiling its scalar-only twin.
+    let spelling = match (&projections, scalar) {
+        (Some((_, encoded)), _) => encoded.as_bytes(),
+        (_, Value::Bytes(value)) => value.as_slice(),
+        _ => ctx.str_value(id)?.as_bytes(),
+    };
+    let parsed = match flags::parse(spelling, flags, bytes) {
+        Ok(parsed) => parsed,
+        Err((msg, pos)) => return Err(pattern_error_at(ctx, id, msg.into(), Some(pos))),
+    };
+    let supplied_flags = flags;
+    let inline_verbose = flags & VERBOSE == 0 && parsed.bits & VERBOSE != 0;
+    let flags = parsed.bits;
+    let spelling = &spelling[parsed.skip..];
+    if let Some(bad) = &parsed.deferred
+        && valid_prefix(id, &bad.prefix, flags, bytes, inline_verbose)
+    {
+        return Err(pattern_error_at(
+            ctx,
+            id,
+            bad.error.0.into(),
+            Some(bad.error.1),
+        ));
+    }
+    check_flags(flags, bytes)?;
+    let pattern = match prepare(id, spelling, flags, bytes, inline_verbose) {
+        Ok(pattern) => pattern,
+        Err(message) => return Err(pattern_error(ctx, id, flags, message)),
+    };
+    if let Some(name) = pattern.invalid_group_name(spelling) {
+        if let Some((message, position)) = syntax_diagnostic(ctx, id, flags) {
+            return Err(pattern_error_at(ctx, id, message, Some(position)));
+        }
+        if name != "imre.eol" {
+            return Err(pattern_error_at(
+                ctx,
+                id,
+                group_names::bad_name(name, bytes),
+                None,
+            ));
+        }
+    }
+    if let Some(bad) = parsed.deferred {
+        return Err(pattern_error_at(
+            ctx,
+            id,
+            bad.error.0.into(),
+            Some(bad.error.1),
+        ));
+    }
+    let pattern = if let Some((plain, _)) = projections {
+        // A surrogate inside a leading comment has a different byte width in the
+        // scalar-only program. Locate that program's own first significant byte.
+        let plain_flags = match flags::parse(plain.as_bytes(), supplied_flags, false) {
+            Ok(parsed) => parsed,
+            Err((msg, pos)) => return Err(pattern_error_at(ctx, id, msg.into(), Some(pos))),
+        };
+        let mut scalar_pattern = prepare(
+            id,
+            &plain.as_bytes()[plain_flags.skip..],
+            flags,
+            false,
+            inline_verbose,
+        )
+        .map_err(|message| pattern_error(ctx, id, flags, message))?;
+        scalar_pattern.surrogate_literals = Some(Box::new(pattern));
+        scalar_pattern
+    } else {
+        pattern
+    };
+    Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))))
+}
+
+fn check_flags(flags: i64, bytes: bool) -> Result<()> {
     if bytes && flags & UNICODE != 0 {
         return Err(Error::new(
             "ValueError",
@@ -675,44 +847,55 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             "unsupported native regular expression flags",
         ));
     }
-    let prepare = |spelling: &[u8]| {
-        let (spelling, flags) = leading_match_flags(spelling, flags);
-        let repeated = repeated_literal_capture(spelling, flags, bytes);
-        let spelling = repeated.as_deref().unwrap_or(spelling);
-        let source = if bytes {
-            byte_pattern(spelling)
-        } else {
-            std::str::from_utf8(spelling)
-                .expect("text pattern")
-                .to_owned()
-        };
-        (flags, source)
-    };
-    if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(id)) {
-        let (plain, encoded) = surrogate::literal_patterns(points)?;
-        let (flags, source) = prepare(encoded.as_bytes());
-        let encoded = compile_source(ctx, id, false, flags, source)?;
-        let (flags, source) = prepare(plain.as_bytes());
-        let mut pattern = compile_source(ctx, id, false, flags, source)?;
-        pattern.surrogate_literals = Some(Box::new(encoded));
-        return Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))));
-    }
-    let spelling = match ctx.heap.get(id) {
-        Value::Bytes(value) => value.as_slice(),
-        _ => ctx.str_value(id)?.as_bytes(),
-    };
-    let (flags, source) = prepare(spelling);
-    let pattern = compile_source(ctx, id, bytes, flags, source)?;
-    Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))))
+    Ok(())
 }
 
-fn compile_source(
-    ctx: &mut Context,
+fn valid_prefix(id: Id, prefix: &[u8], flags: i64, bytes: bool, inline_verbose: bool) -> bool {
+    if let Ok(pattern) = prepare(id, prefix, flags, bytes, inline_verbose) {
+        return pattern.invalid_group_name(prefix).is_none();
+    }
+    // A conditional with no other backtracking feature can be valid Python syntax
+    // even when there is no native matcher for the truncated expression.
+    if !prefix.windows(3).any(|w| w == b"(?(") {
+        return false;
+    }
+    let spelling = if bytes {
+        byte_pattern(prefix)
+    } else {
+        std::str::from_utf8(prefix).unwrap().to_owned()
+    };
+    let Ok((source, names)) = imre_regex::validation_source(
+        &spelling,
+        flags & VERBOSE != 0,
+        alphabet(bytes, bytes || flags & ASCII != 0, flags),
+        flags & DOTALL != 0,
+    ) else {
+        return false;
+    };
+    let mut seen = std::collections::HashSet::new();
+    names
+        .iter()
+        .flatten()
+        .all(|name| group_names::valid(name, bytes) && seen.insert(name))
+        && fancy_regex::Regex::new(&source).is_ok()
+}
+
+fn prepare(
     id: Id,
-    bytes: bool,
+    spelling: &[u8],
     flags: i64,
-    source: String,
-) -> Result<Pattern> {
+    bytes: bool,
+    inline_verbose: bool,
+) -> std::result::Result<Pattern, String> {
+    let repeated = repeated_literal_capture(spelling, flags, bytes);
+    let spelling = repeated.as_deref().unwrap_or(spelling);
+    let source = if bytes {
+        byte_pattern(spelling)
+    } else {
+        std::str::from_utf8(spelling)
+            .expect("text pattern")
+            .to_owned()
+    };
     let ascii = bytes || flags & ASCII != 0;
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
     // the literal guard without extending Python's word-category membership.
@@ -733,32 +916,55 @@ fn compile_source(
         Ok((source, matcher))
     };
     let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
-    let global_verbose = imre_regex::leading_verbose(&source);
-    let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
-        let original = || {
-            if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, false) {
-                return Err(msg.to_owned());
-            }
-            let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
-            if flags & IGNORECASE != 0 && !bytes {
-                build(imre_regex::expand_case(&raw, ascii)?)
-            } else {
-                build(raw)
-            }
-        };
-        if prefer_translation || global_verbose {
-            // Python has its own verbose layout and literal-brace rules. Keep the
-            // direct parser for features outside the subset translator.
-            translate(&source)
-                .and_then(build)
-                .or_else(backtrack)
-                .or_else(|_| original())
-        } else {
-            original()
-        }
-    } else {
-        translate(&source).and_then(build)
+    // Keep the raw fallback for inline verbose patterns beyond the Python tokenizer's
+    // current grammar. Its parser needs the flag in the spelling to interpret layout.
+    let raw_verbose = inline_verbose.then(|| format!("(?x){source}"));
+    let raw = match &raw_verbose {
+        Some(pattern) => raw_pattern(pattern, ascii, flags & !VERBOSE),
+        None => raw_pattern(&source, ascii, flags),
     };
+    let prepared =
+        if let Some((raw, prefer_translation, possessive)) = raw {
+            let original = || {
+                if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
+                    return Err(msg.to_owned());
+                }
+                let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
+                if flags & IGNORECASE != 0 && !bytes {
+                    build(imre_regex::expand_case(&raw, ascii)?)
+                } else {
+                    build(raw)
+                }
+            };
+            let committed = possessive.then(|| backtrack(String::new()).ok()).flatten();
+            match committed {
+                Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
+                    Ok((source, Matcher::Lookahead(matcher)))
+                }
+                fallback => {
+                    // Preserve the regular matcher's winning close trace when a repeated
+                    // capture has no fixed syntax order. The committed VM can still
+                    // handle such a pattern when the regular engine cannot compile it.
+                    let regular = if prefer_translation || inline_verbose {
+                        translate(&source)
+                            .and_then(build)
+                            .or_else(|err| {
+                                if fallback.is_some() {
+                                    Err(err)
+                                } else {
+                                    backtrack(err)
+                                }
+                            })
+                            .or_else(|_| original())
+                    } else {
+                        original()
+                    };
+                    regular.or_else(|err| fallback.ok_or(err))
+                }
+            }
+        } else {
+            translate(&source).and_then(build)
+        };
     let prepared = match prepared {
         Err(original)
             if !bytes
@@ -841,6 +1047,7 @@ fn compile_source(
                     name,
                     Guard {
                         regex: guard,
+                        program: hir.to_string(),
                         kind,
                         width,
                     },
@@ -860,31 +1067,7 @@ fn compile_source(
             assertions = guards;
             Ok((source, matcher))
         })
-        .or_else(backtrack)
-        .map_err(|message| pattern_error(ctx, id, flags, message))?;
-    // GroupInfo contains the synthetic final-newline capture as well as user names.
-    let names = regex.group_info().pattern_names(PatternID::ZERO).flatten();
-    if let Some(name) = names
-        .filter(|name| *name != "imre.eol" || source.contains("(?P<imre.eol>"))
-        .find(|name| !group_names::valid(name, bytes))
-    {
-        if let Some((message, position)) = syntax_diagnostic(ctx, id, flags) {
-            return Err(pattern_error_at(ctx, id, message, Some(position)));
-        }
-        if name != "imre.eol" {
-            return Err(pattern_error_at(
-                ctx,
-                id,
-                group_names::bad_name(name, bytes),
-                None,
-            ));
-        }
-    }
-    let flags = if global_verbose {
-        flags | VERBOSE
-    } else {
-        flags
-    };
+        .or_else(backtrack)?;
     Ok(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },
@@ -915,6 +1098,9 @@ pub(super) fn module_call(
         let [lexicon, flags] = bind(name, args, kwargs, ["lexicon", "flags"])?;
         return scanner::compile_lexicon(ctx, lexicon.ok_or_else(|| missing("lexicon"))?, flags);
     }
+    if name == "re._compile_uncached" {
+        return compile_uncached(ctx, argument(args, 0)?, args.get(1).copied());
+    }
     if name == "re.compile" {
         let [pattern, flags] = bind(name, args, kwargs, ["pattern", "flags"])?;
         return compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags);
@@ -937,10 +1123,15 @@ pub(super) fn module_call(
     let [pattern, string, flags] = bind(name, args, kwargs, ["pattern", "string", "flags"])?;
     let string = string.ok_or_else(|| missing("string"))?;
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
-    if let Some(method @ ("search" | "finditer" | "findall")) = name.strip_prefix("re.") {
-        return search(ctx, method, &[pattern, string], &[]);
+    match name.strip_prefix("re.") {
+        Some(method @ ("match" | "fullmatch" | "search" | "finditer" | "findall")) => {
+            search(ctx, method, &[pattern, string], &[])
+        }
+        _ => Err(Error::new(
+            "AttributeError",
+            format!("no regex operation {name}"),
+        )),
     }
-    call(ctx, name, &[pattern, string])
 }
 
 /// Hide the terminal dollar's synthetic capture and its consumed newline.
@@ -1168,7 +1359,10 @@ impl SearchSubject {
     fn new(ctx: &Context, pattern: &Pattern, id: Id, method: &str) -> Result<Self> {
         let projection = match ctx.heap.get(ctx.scalar_value(id)) {
             Value::SurrogateStr(points)
-                if matches!(ctx.heap.get(ctx.scalar_value(pattern.source)), Value::SurrogateStr(_)) =>
+                if matches!(
+                    ctx.heap.get(ctx.scalar_value(pattern.source)),
+                    Value::SurrogateStr(_)
+                ) =>
             {
                 Some(surrogate::Projection::for_literals(method, points)?)
             }
@@ -1254,7 +1448,10 @@ pub(super) fn search(
             ));
         }
     };
-    let pattern = if matches!(ctx.heap.get(ctx.scalar_value(string)), Value::SurrogateStr(_)) {
+    let pattern = if matches!(
+        ctx.heap.get(ctx.scalar_value(string)),
+        Value::SurrogateStr(_)
+    ) {
         pattern.surrogate_literals.as_deref().unwrap_or(&pattern)
     } else {
         &pattern
@@ -1343,45 +1540,34 @@ pub(super) fn search(
     }))))
 }
 
-pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
-    let first = argument(args, 0)?;
-    if name.starts_with("match.") {
-        let m = matched(ctx, first)?;
-        if name == "match.group" {
-            if args.len() == 1 {
-                return m.group(ctx, 0, NONE);
-            }
-            let mut values = Vec::with_capacity(args.len() - 1);
-            for &group in &args[1..] {
-                values.push(m.group_item(ctx, group)?);
-            }
-            return Ok(if values.len() == 1 {
-                values[0]
-            } else {
-                ctx.alloc(Value::Tuple(values))
-            });
+pub(super) fn match_method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
+    let m = matched(ctx, argument(args, 0)?)?;
+    if name == "match.group" {
+        if args.len() == 1 {
+            return m.group(ctx, 0, NONE);
         }
-        let index = args.get(1).map_or(Ok(0), |&id| m.group_index(ctx, id))?;
-        let (start, end) = m.bounds(ctx, index)?;
-        return Ok(match name {
-            "match.start" => ctx.int(start),
-            "match.end" => ctx.int(end),
-            "match.span" => {
-                let start = ctx.int(start);
-                let end = ctx.int(end);
-                ctx.alloc(Value::Tuple(vec![start, end]))
-            }
-            _ => unreachable!(),
+        let mut values = Vec::with_capacity(args.len() - 1);
+        for &group in &args[1..] {
+            values.push(m.group_item(ctx, group)?);
+        }
+        return Ok(if values.len() == 1 {
+            values[0]
+        } else {
+            ctx.alloc(Value::Tuple(values))
         });
     }
-    match name {
-        "re.match" => search(ctx, "match", args, &[]),
-        "re.fullmatch" => search(ctx, "fullmatch", args, &[]),
-        _ => Err(Error::new(
-            "AttributeError",
-            format!("no regex operation {name}"),
-        )),
-    }
+    let index = args.get(1).map_or(Ok(0), |&id| m.group_index(ctx, id))?;
+    let (start, end) = m.bounds(ctx, index)?;
+    Ok(match name {
+        "match.start" => ctx.int(start),
+        "match.end" => ctx.int(end),
+        "match.span" => {
+            let start = ctx.int(start);
+            let end = ctx.int(end);
+            ctx.alloc(Value::Tuple(vec![start, end]))
+        }
+        _ => unreachable!(),
+    })
 }
 
 /// Collect captures starting at a byte offset in the bounded subject.

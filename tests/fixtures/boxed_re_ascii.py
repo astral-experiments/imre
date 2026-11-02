@@ -4,6 +4,15 @@ import re
 def current():
     from string import Template
 
+    high = chr(0xd800)
+    assert "<%-4.2s>" % ("é" + high + "a") == "<é" + high + "  >"
+    members = "[%s]" % ("é" + high)
+    for char in ("é", high):
+        assert re.fullmatch(members, char).group() == char
+    assert re.fullmatch(members, chr(0xf0000)) is None
+    assert re.fullmatch("[^" + high + "]", chr(0xf0000))
+    assert re.fullmatch("[^" + high + "]", high) is None
+
     for flags in (re.I, re.I | re.X):
         pattern = re.compile(r"(?P<ascii>(?a:[a-z]))(?P<unicode>[a-z])", flags)
         assert pattern.fullmatch("KK").groups() == ("K", "K")
@@ -262,3 +271,15 @@ def current():
             assert (error.msg, error.pattern, error.pos) == (message, spelling, position)
         else:
             raise AssertionError("invalid group name accepted")
+
+    for flags in (0, re.X):
+        for spelling, expected in (
+            (r"[--1]", "-./01"),
+            (r"[&&1]", "1&"),
+            (r"[||1]", "1|"),
+            (r"[~~1]", "1~"),
+        ):
+            assert "".join(re.findall(spelling, "-./012&|~", flags)) == expected
+        negated = re.compile(rb"X([^--1])", flags)
+        assert negated.fullmatch(b"X2").group(1) == b"2"
+        assert negated.fullmatch(b"X/") is None

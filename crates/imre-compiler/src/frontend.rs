@@ -3884,9 +3884,12 @@ impl<'a> Checker<'a> {
         {
             return self.groupby_iteration(loop_, call);
         }
-        let mut input = match self.unpacked_list_enumeration(loop_)? {
-            Some(input) => input,
-            None => self.iteration_input(&loop_.iter)?,
+        let mut input = if let Some(items) = self.environ_items_loop(&loop_.iter)? {
+            items
+        } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
+            input
+        } else {
+            self.iteration_input(&loop_.iter)?
         };
         input = self.fuse_splitlines(input);
         if let Iteration::Container {
@@ -4574,6 +4577,15 @@ impl<'a> Checker<'a> {
             .map(|(_, kind)| *kind)
     }
 
+    fn checked_optional_name(&self, expression: &ast::Expr) -> bool {
+        expression.as_name_expr().is_some_and(|name| {
+            self.graph.modules[self.module]
+                .optional_imports
+                .values()
+                .any(|alias| alias == name.id.as_str())
+        })
+    }
+
     fn statement(
         &mut self,
         statement: &ast::Stmt,
@@ -4590,6 +4602,15 @@ impl<'a> Checker<'a> {
                     && !ast::helpers::any_over_body(later, |expr| matches!(
                         expr, ast::Expr::Name(name) if name.id == target.id
                     )))
+                }
+                // The complete assertion runs in the object program. A pure presence
+                // check has no result or binding needed by the following statements.
+                ast::Stmt::Assert(a) if self.module_scope && a.msg.is_none() => {
+                    matches!(&*a.test, ast::Expr::Compare(test)
+                        if matches!(test.ops.as_ref(), [ast::CmpOp::Is | ast::CmpOp::IsNot])
+                        && matches!(test.operands.as_ref(),
+                            [name, ast::Expr::NoneLiteral(_)] | [ast::Expr::NoneLiteral(_), name]
+                            if self.checked_optional_name(name)))
                 }
                 _ => false,
             };
@@ -5064,6 +5085,16 @@ impl<'a> Checker<'a> {
                 self.restore_state(successful);
                 self.apply_facts(&assert.test, true);
                 Some(result)
+            }
+            ast::Stmt::Try(_)
+                if self.graph.modules[self.module]
+                    .optional_imports
+                    .contains_key(&statement.range()) =>
+            {
+                let error =
+                    self.scoped_builtin_error("an optional standard-library import", statement);
+                self.defer_object_error(&error);
+                return Ok((Vec::new(), true));
             }
             ast::Stmt::Try(try_) if !try_.is_star => {
                 return self.try_statement(try_);
@@ -6188,6 +6219,12 @@ impl<'a> Checker<'a> {
         self.scoped_builtin_error(name, node)
     }
 
+    fn boxed_builtin_callable(&self, expression: &ast::Expr) -> Option<&'static str> {
+        ["exec", "hex"]
+            .into_iter()
+            .find(|name| self.unshadowed_builtin(expression, name))
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
         let error = self.object_export_error(name, node);
@@ -6235,8 +6272,8 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        if self.unshadowed_builtin(expression, "hex") {
-            return Err(self.scoped_builtin_error("hex", expression));
+        if let Some(name) = self.boxed_builtin_callable(expression) {
+            return Err(self.scoped_builtin_error(name, expression));
         }
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
@@ -6425,9 +6462,11 @@ impl<'a> Checker<'a> {
         }
         let binding = self.resolve(expression);
         if binding == Some(Binding::ConditionalValue) {
-            return Err(
-                self.object_runtime_export("a value selected by a module guard", expression)
-            );
+            let operation = "a value selected by a module guard";
+            if self.checked_optional_name(expression) {
+                return Err(self.object_export_error(operation, expression));
+            }
+            return Err(self.object_runtime_export(operation, expression));
         }
         if let Some(Binding::Intrinsic(symbol)) = binding {
             if let Some((flags, executable)) = &self.graph.command_startup {
@@ -7448,12 +7487,14 @@ impl<'a> Checker<'a> {
                 (Type::Bool, ExprKind::Compare(values, ops))
             }
             ast::Expr::Subscript(subscript) => {
-                if self.environ_item_type(&subscript.value) == Some(Type::Str) {
-                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                if let Some(ty) = self.environ_item_type(&subscript.value) {
+                    let key = self.expr_expected(&subscript.slice, ty)?;
                     return Ok(Expr {
-                        ty: Type::Str,
+                        ty,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::EnvironIndex),
+                            Builtin::Process(ir::ProcessOperation::EnvironIndex {
+                                bytes: ty == Type::Bytes,
+                            }),
                             vec![key],
                         ),
                     });
@@ -7585,26 +7626,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some((key, value)) = self.types.mapping(list.ty) {
-                    // Reading an ordinary enum-keyed dictionary may probe with an equal integer.
-                    // A default factory can insert the supplied key, which changes its stored type.
-                    let integer = (matches!(key, Type::IntEnum(_))
-                        && !self.types.is_default_list_dict(list.ty)
-                        && !self.types.is_counter(list.ty))
-                    .then_some(Type::Int);
-                    let key = self.expr_expected_or(&subscript.slice, key, integer)?;
-                    let required = self.required_group_key(&list, &key);
-                    let expression = self.projected_group(&list, &key).unwrap_or_else(|| Expr {
-                        ty: value,
-                        kind: ExprKind::Builtin(Builtin::DictGet, vec![list, key]),
-                    });
-                    return Ok(if required {
-                        Expr {
-                            ty: Type::Str,
-                            kind: ExprKind::Unwrap(Box::new(expression)),
-                        }
-                    } else {
-                        expression
-                    });
+                    return self.dict_subscript(list, &subscript.slice, key, value);
                 }
                 if matches!(list.ty, Type::VarTuple(_)) {
                     let (literal, negative) = match &*subscript.slice {
@@ -8454,8 +8476,8 @@ impl<'a> Checker<'a> {
             return Ok(method);
         }
 
-        if self.unshadowed_builtin(&call.func, "hex") {
-            return Err(self.scoped_builtin_error("hex", call));
+        if let Some(name) = self.boxed_builtin_callable(&call.func) {
+            return Err(self.scoped_builtin_error(name, call));
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
@@ -8657,6 +8679,37 @@ impl<'a> Checker<'a> {
             return Ok(expression);
         }
         self.call_with_key_view(call, None, receiver)
+    }
+
+    fn dict_subscript(
+        &mut self,
+        mapping: Expr,
+        index: &ast::Expr,
+        key: Type,
+        value: Type,
+    ) -> Result<Expr, String> {
+        // Reading an ordinary enum-keyed dictionary may probe with an equal integer.
+        // A default factory can insert the supplied key, which changes its stored type.
+        let integer = (matches!(key, Type::IntEnum(_))
+            && !self.types.is_default_list_dict(mapping.ty)
+            && !self.types.is_counter(mapping.ty))
+        .then_some(Type::Int);
+        let key = self.expr_expected_or(index, key, integer)?;
+        let required = self.required_group_key(&mapping, &key);
+        let expression = self
+            .projected_group(&mapping, &key)
+            .unwrap_or_else(|| Expr {
+                ty: value,
+                kind: ExprKind::Builtin(Builtin::DictGet, vec![mapping, key]),
+            });
+        Ok(if required {
+            Expr {
+                ty: Type::Str,
+                kind: ExprKind::Unwrap(Box::new(expression)),
+            }
+        } else {
+            expression
+        })
     }
 
     fn dict_popitem(
@@ -9305,11 +9358,12 @@ impl<'a> Checker<'a> {
                 self.defer_object_error(&error);
                 return Ok(Expr::none());
             }
-            Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
+            Some(Binding::Intrinsic(Intrinsic::GetCwd { bytes })) => {
                 self.arguments(call, &[], None)?;
+                let op = ir::ProcessOperation::GetCwd { bytes };
                 return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
+                    ty: if bytes { Type::Bytes } else { Type::Str },
+                    kind: ExprKind::Builtin(Builtin::Process(op), vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
@@ -9600,11 +9654,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(class) = self.class_reference(&call.func) {
             let result = self.construct(call, class);
-            if result.is_err()
-                && self.native_mock(class)
-                && call.arguments.args.is_empty()
-                && self.boxed_mock_keywords(call)?
-            {
+            if result.is_err() && self.native_mock(class) && self.boxed_mock_arguments(call)? {
                 return Err(self.object_runtime_export("configured unittest.mock.Mock", call));
             }
             return result;
@@ -9823,10 +9873,12 @@ impl<'a> Checker<'a> {
                     ),
                 ));
             }
+            self.check_namedtuple_asdict(attribute, None)?;
             let receiver = match receiver {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
             if let Some(result) =
                 self.url_result_method(&receiver, attribute.attr.as_str(), call)?
             {
@@ -10158,6 +10210,20 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
                 return Err(self.object_builtin_error("binary writelines", call));
+            }
+            if attribute.attr.as_str() == "__getitem__"
+                && let Some((key, value)) = self.types.mapping(receiver.ty)
+                && receiver.ty == self.types.dict(key, value)
+            {
+                if let [index] = call.arguments.args.as_ref()
+                    && call.arguments.keywords.is_empty()
+                {
+                    return self.dict_subscript(receiver, index, key, value);
+                }
+                let mut scope = calls::ArgumentScope::default();
+                scope.hold(self, receiver);
+                let error = self.one_positional_error(call, "dict.__getitem__", "key", value)?;
+                return Ok(scope.finish(error));
             }
             self.reject_builtin_keywords(call)?;
             if receiver.ty == Type::StringIO
@@ -10584,12 +10650,30 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::Bytes, vec![value]),
             });
         }
+        let tuple_dir = self.unshadowed_builtin(&call.func, "dir")
+            && call.arguments.keywords.is_empty()
+            && call.arguments.args.len() == 1;
+        if tuple_dir {
+            // Static tuple declarations may be used as constructors but not as first-class values.
+            let target = &call.arguments.args[0];
+            if self.unshadowed_builtin(target, "tuple")
+                || matches!(
+                    self.namedtuple_factory(target),
+                    Some((crate::types::TupleOrigin::Declaration(_), _))
+                )
+            {
+                return Err(self.object_builtin_error("dir", call));
+            }
+        }
         let args = call
             .arguments
             .args
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if tuple_dir && self.types.is_plain_or_declared_tuple(args[0].ty) {
+            return Err(self.object_builtin_error("dir", call));
+        }
         if let [operand] = args.as_slice()
             && matches!(operand.ty, Type::Str | Type::StrLiteral(_) | Type::Bytes)
             && self.unshadowed_builtin(&call.func, "type")
@@ -10954,6 +11038,13 @@ impl<'a> Checker<'a> {
             self.reject_builtin_keywords(call)?;
             let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
             return Ok(self.implementation_hasattr(receiver.clone(), key));
+        }
+        if self.unshadowed_builtin(&call.func, "getattr")
+            && let [receiver, attribute] = args.as_slice()
+            && let ExprKind::Str(member) = &attribute.kind
+            && calendar::boxed_comparison(receiver.ty, member)
+        {
+            return Err(self.object_runtime_export("datetime instance member", call));
         }
         if matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
             && args.first().is_some_and(|arg| arg.ty == Type::NativeModule)

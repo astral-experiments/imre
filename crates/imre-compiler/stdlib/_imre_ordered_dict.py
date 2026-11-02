@@ -10,6 +10,7 @@ from _collections import (
     _ordered_dict_popitem,
     _ordered_dict_repr,
     _ordered_dict_setdefault,
+    _ordered_dict_sizeof,
     _ordered_dict_view,
 )
 
@@ -67,6 +68,10 @@ class OrderedDict(dict):
 
     def update(self, /, *args, **kwargs):
         _ordered_dict_update_args(self, args, kwargs, "update")
+
+    def __sizeof__(self, /):
+        _ordered_dict_receiver(self, "__sizeof__")
+        return _ordered_dict_sizeof(self)
 
     def __setitem__(self, key, value, /):
         _ordered_dict_receiver(self, "__setitem__")

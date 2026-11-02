@@ -21,11 +21,16 @@ impl Context {
         let ignore = self.signal_sentinel("_signal.SIG_IGN", libc::SIG_IGN);
         let interrupt = self.builtin("_signal.default_int_handler");
         self.signal_handlers = vec![NONE; signals::nsig() as usize];
+        let main = signals::is_main();
         for (number, slot) in self.signal_handlers.iter_mut().enumerate().skip(1) {
-            *slot = match signals::disposition(number as i32) {
-                Ok(Some(Disposition::Default)) => default,
-                Ok(Some(Disposition::Ignore)) => ignore,
-                Ok(Some(Disposition::Python)) if number == libc::SIGINT as usize => interrupt,
+            let disposition = signals::disposition(number as i32).ok().flatten();
+            if main {
+                signals::record_handler(number, disposition);
+            }
+            *slot = match disposition {
+                Some(Disposition::Default) => default,
+                Some(Disposition::Ignore) => ignore,
+                Some(Disposition::Python) if number == libc::SIGINT as usize => interrupt,
                 _ => NONE,
             };
         }
@@ -46,6 +51,17 @@ impl Context {
                         signals::resume_dispatch();
                     }
                     result?;
+                } else {
+                    super::unraisable::report(
+                        self,
+                        Error::new(
+                            "OSError",
+                            format!("Signal {number} ignored due to race condition"),
+                        ),
+                        true,
+                        None,
+                        "Exception ignored while calling signal handler",
+                    );
                 }
             }
         }

@@ -14,6 +14,7 @@ impl Checker<'_> {
                 name,
                 "_at"
                     | "_child"
+                    | "_get_child"
                     | "_attach"
                     | "_record"
                     | "_name"
@@ -29,8 +30,15 @@ impl Checker<'_> {
 
     /// Check the argument expressions before selecting the boxed constructor. A
     /// type error inside an expression is independent of how Mock stores it.
-    pub(super) fn boxed_mock_keywords(&mut self, call: &ast::ExprCall) -> Result<bool, String> {
-        let mut boxed = false;
+    pub(super) fn boxed_mock_arguments(&mut self, call: &ast::ExprCall) -> Result<bool, String> {
+        let mut boxed = match &call.arguments.args[..] {
+            [] => false,
+            [spec] => {
+                self.evaluated_argument(spec)?;
+                true
+            }
+            _ => return Ok(false),
+        };
         for keyword in &call.arguments.keywords {
             match keyword.arg.as_deref() {
                 Some("name") => {

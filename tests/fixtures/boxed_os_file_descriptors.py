@@ -40,6 +40,8 @@ def current():
     finally:
         os.close(fd)
 
+    check_closerange()
+
     from posix import F_OK, R_OK, W_OK, X_OK
 
     assert (F_OK, R_OK, W_OK, X_OK) == (0, 4, 2, 1)
@@ -95,6 +97,44 @@ def current():
         assert error.filename == __file__
     else:
         raise AssertionError("rmdir removed a regular file")
+
+
+def check_closerange():
+    import errno
+
+    class Index:
+        def __init__(self, value):
+            self.value = value
+
+        def __index__(self):
+            return self.value
+
+    assert vars(os)["closerange"] is os.closerange is posix.closerange
+    read_fd, write_fd = os.pipe()
+    try:
+        assert os.closerange(read_fd, read_fd) is None
+        try:
+            os.closerange(read_fd, 1 << 64)
+        except OverflowError:
+            pass
+        else:
+            raise AssertionError("closerange accepted an out-of-range upper bound")
+        os.fstat(read_fd)
+        assert posix.closerange(Index(read_fd), Index(read_fd + 1)) is None
+        try:
+            os.fstat(read_fd)
+        except OSError as error:
+            assert error.errno == errno.EBADF
+        else:
+            raise AssertionError("closerange left the descriptor open")
+        assert os.closerange(read_fd, read_fd + 1) is None
+        os.fstat(write_fd)
+    finally:
+        os.close(write_fd)
+        try:
+            os.close(read_fd)
+        except OSError as error:
+            assert error.errno == errno.EBADF
 
 
 def check_open_audit(directory):

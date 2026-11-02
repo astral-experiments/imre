@@ -28,7 +28,6 @@ impl From<Error> for BoxedLaunchError {
 pub(crate) struct BoxedCommunication {
     pub(crate) streams: [Option<Vec<u8>>; 2],
     pub(crate) timed_out: bool,
-    pub(crate) wait_budget: Option<f64>,
 }
 
 impl PreparedHandles {
@@ -82,7 +81,7 @@ impl BoxedPopen {
         bufsize: Int,
         pipesize: Int,
         start_new_session: bool,
-        warn_line_buffering: &mut dyn FnMut() -> Result<()>,
+        umask: i32,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -123,6 +122,7 @@ impl BoxedPopen {
             config.cwd = crate::BytesOwner::as_ptr(path).cast();
             config.cwd_kind = 8;
         }
+        let mask = Int::from(i64::from(umask));
         let mut site = None;
         let mut extras = LaunchExtras {
             pipe_size: handles.is_none().then_some((pipesize.0, 2)),
@@ -130,10 +130,8 @@ impl BoxedPopen {
             failure_site: Some(&mut site),
             direct,
             search_path,
-            warn_line_buffering: Some(warn_line_buffering),
             environment: env,
-            // A new session uses the ordinary child-settings path with no group or umask change.
-            child: start_new_session.then_some((0, Int::small(-1).unwrap().0, true)),
+            child: (start_new_session || umask >= 0).then_some((0, mask.0, start_new_session)),
             ..Default::default()
         };
         for (i, ((mode, fd), shift)) in streams.iter().zip([12, 0, 4]).enumerate() {
@@ -208,34 +206,45 @@ impl BoxedPopen {
         cleanup()
     }
 
-    pub(crate) fn communicate(
+    pub(crate) fn begin_communication(
         &self,
         input: &[u8],
         seconds: Option<f64>,
         select: bool,
-    ) -> Result<BoxedCommunication> {
-        let mut process = self.0.borrow_mut();
-        let (streams, timed_out, wait_budget) = match process.communicate(
+    ) -> Result<communicate::PendingExchange> {
+        self.0.borrow_mut().begin_exchange(
             input,
             seconds.map(Deadline::Float).as_ref(),
             false,
             select,
-        )? {
+        )
+    }
+
+    pub(crate) fn finish_communication<E: From<Error>>(
+        &self,
+        pending: communicate::PendingExchange,
+        check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<BoxedCommunication, E> {
+        let exchange = pending.drain(
+            |timeout, select| {
+                self.0
+                    .borrow_mut()
+                    .exchange_pipes(&[], timeout, false, select)
+            },
+            check,
+        )?;
+        let process = self.0.borrow();
+        let (streams, timed_out) = match exchange {
             communicate::Exchange::Done([out, err]) => (
                 [
                     process.pipes[1].as_ref().map(|_| out),
                     process.pipes[2].as_ref().map(|_| err),
                 ],
                 false,
-                None,
             ),
-            communicate::Exchange::Timeout(streams, budget) => (streams, true, budget),
+            communicate::Exchange::Timeout(streams, _) => (streams, true),
         };
-        Ok(BoxedCommunication {
-            streams,
-            timed_out,
-            wait_budget,
-        })
+        Ok(BoxedCommunication { streams, timed_out })
     }
 }
 

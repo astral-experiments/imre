@@ -9,7 +9,7 @@ _registered_find_spec = PathFinder.__dict__['find_spec']
 
 class _RegisteredFileFinder(FileFinder):
     def __init__(self, path, registry_path):
-        super().__init__(path, (SourceFileLoader, SOURCE_SUFFIXES))
+        super().__init__(path, *_file_loader_defaults())
         # The compiler also registers virtual paths, such as '<imre stdlib>/unittest'.
         self._registry_path = registry_path
 
@@ -27,7 +27,7 @@ class _RegisteredFileFinder(FileFinder):
         return registered if registered is not None else on_disk
 
 
-_file_path_hook = FileFinder.path_hook((SourceFileLoader, SOURCE_SUFFIXES))
+_file_path_hook = FileFinder.path_hook(*_file_loader_defaults())
 
 
 def _registered_path_hook(path):

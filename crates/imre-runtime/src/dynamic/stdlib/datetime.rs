@@ -52,6 +52,10 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.datetime.utcnow"
             | "datetime.datetime.utcfromtimestamp"
             | "datetime.datetime.combine"
+            | "datetime.datetime.strptime"
+            | "datetime.date.today"
+            | "datetime.date.fromtimestamp"
+            | "datetime.date.fromordinal"
     )
 }
 
@@ -83,6 +87,12 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             "datetime.date",
             &FIELDS[..3],
             &[
+                "__eq__",
+                "__ne__",
+                "__lt__",
+                "__le__",
+                "__gt__",
+                "__ge__",
                 "__format__",
                 "__reduce__",
                 "__repr__",
@@ -93,6 +103,9 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "weekday",
                 "timetuple",
                 "strftime",
+                "fromordinal",
+                "fromtimestamp",
+                "today",
             ],
         ),
         "datetime.datetime" => (
@@ -131,6 +144,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "timetz",
                 "timestamp",
                 "timetuple",
+                "utctimetuple",
+                "strptime",
             ],
         ),
         "datetime.time" => (
@@ -773,7 +788,7 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if let Some((
-        kind @ ("datetime" | "time"),
+        kind @ ("date" | "datetime" | "time"),
         operation @ ("__eq__" | "__ne__" | "__lt__" | "__le__" | "__gt__" | "__ge__"),
     )) = method.split_once('.')
     {
@@ -880,14 +895,18 @@ pub(super) fn call(
         "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
             datetime_arithmetic(ctx, &method["datetime.".len()..], args, kwargs)
         }
+        "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
+        "date.fromordinal" => date_fromordinal(ctx, args, kwargs),
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
         "time.fromisoformat" => time_fromisoformat(ctx, args, kwargs),
         "time.strptime" => time_strptime(ctx, args, kwargs),
+        "datetime.strptime" => datetime_strptime(ctx, args, kwargs),
         "datetime.date"
         | "datetime.time"
         | "datetime.timetz"
+        | "datetime.utctimetuple"
         | "datetime.replace"
         | "datetime.__replace__"
         | "time.replace"
@@ -1295,20 +1314,25 @@ fn new_time(ctx: &mut Context, fields: [i32; 5], tz: Id) -> Result<Id> {
     ))
 }
 
-fn time_class_args<'a>(ctx: &mut Context, method: &str, args: &'a [Id]) -> Result<(Id, &'a [Id])> {
+fn calendar_class_args<'a>(
+    ctx: &mut Context,
+    owner: &'static str,
+    method: &str,
+    args: &'a [Id],
+) -> Result<(Id, &'a [Id])> {
     let Some((&class, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            format!("descriptor '{method}' of 'datetime.time' object needs an argument"),
+            format!("descriptor '{method}' of '{owner}' object needs an argument"),
         ));
     };
-    let base = ctx.builtin("datetime.time");
+    let base = ctx.builtin(owner);
     if !ctx.is_type_object(class) {
         let kind = ctx.exact_type(class)?;
         return Err(Error::new(
             "TypeError",
             format!(
-                "descriptor '{method}' for type 'datetime.time' needs a type, not a '{}' as arg 2",
+                "descriptor '{method}' for type '{owner}' needs a type, not a '{}' as arg 2",
                 ctx.class_name(kind)
             ),
         ));
@@ -1317,7 +1341,7 @@ fn time_class_args<'a>(ctx: &mut Context, method: &str, args: &'a [Id]) -> Resul
         return Err(Error::new(
             "TypeError",
             format!(
-                "descriptor '{method}' requires a subtype of 'datetime.time' but received '{}'",
+                "descriptor '{method}' requires a subtype of '{owner}' but received '{}'",
                 ctx.class_name(class)
             ),
         ));
@@ -1325,8 +1349,35 @@ fn time_class_args<'a>(ctx: &mut Context, method: &str, args: &'a [Id]) -> Resul
     Ok((class, args))
 }
 
-fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, args) = time_class_args(ctx, "strptime", args)?;
+fn date_fromordinal(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = calendar_class_args(ctx, "datetime.date", "fromordinal", args)?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "fromordinal() takes no keyword arguments",
+        ));
+    }
+    let &[ordinal] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "fromordinal() takes exactly 1 argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let fields = Calendar::ordinal_fields(ctx.index_c_int(ordinal)?)?;
+    let args = fields.into_iter().map(|n| ctx.int(i64::from(n))).collect();
+    ctx.call(class, args, vec![])
+}
+
+fn strptime_args(
+    ctx: &mut Context,
+    owner: &'static str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, Id, Id)> {
+    let (class, args) = calendar_class_args(ctx, owner, "strptime", args)?;
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -1356,13 +1407,47 @@ fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Res
         }
     }
 
+    Ok((class, text, format))
+}
+
+fn datetime_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, text, format) = strptime_args(ctx, "datetime.datetime", args, kwargs)?;
+    let module_mark = ctx.heap.temporary_mark();
+    let module = ctx.import_with_builtins("_strptime")?;
+    let parser_mark = ctx.heap.temporary_mark();
+    let result = ctx
+        .lookup_attr(module, "_strptime_datetime_datetime")
+        .and_then(|parser| {
+            ctx.heap.keep(parser);
+            ctx.call(parser, vec![class, text, format], vec![])
+        });
+    // Release the callable before its module, preserving the result or exception across finalizers.
+    for mark in [parser_mark, module_mark] {
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        match &result {
+            Ok(value) => ctx.heap.keep(*value),
+            Err(error) => {
+                for value in error.roots() {
+                    ctx.heap.keep(value);
+                }
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+    }
+    result
+}
+
+fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, text, format) = strptime_args(ctx, "datetime.time", args, kwargs)?;
     let module = ctx.module("_strptime")?;
     let parser = ctx.lookup_attr(module, "_strptime_datetime_time")?;
     ctx.call(parser, vec![class, text, format], vec![])
 }
 
 fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, args) = time_class_args(ctx, "fromisoformat", args)?;
+    let (class, args) = calendar_class_args(ctx, "datetime.time", "fromisoformat", args)?;
     let name = ctx.class_qualname(class);
     let input = crate::dynamic::builtins::one_positional_arg(
         &format!("{name}.fromisoformat"),
@@ -1444,6 +1529,31 @@ fn clock_method(
             ));
         }
         return match operation {
+            "utctimetuple" => {
+                let mark = ctx.heap.temporary_mark();
+                let offset = call_tzinfo(ctx, tz, "utcoffset", receiver)?;
+                let utc = if offset == NONE {
+                    value
+                } else {
+                    // Subtract through the native slot, including Python subtype construction.
+                    let shifted = datetime_arithmetic(ctx, "__sub__", &[receiver, offset], &[])?;
+                    ctx.finish_call_operands(mark, shifted);
+                    calendar(ctx, shifted, "datetime").ok_or_else(|| {
+                        Error::new(
+                            "TypeError",
+                            "datetime subtype constructor did not return a datetime",
+                        )
+                    })?
+                };
+                let mut fields = utc.timetuple();
+                fields[8] = 0;
+                ctx.finish_call_operands(mark, NONE);
+                let time = ctx.module("time")?;
+                let factory = ctx.lookup_attr(time, "struct_time")?;
+                let values = fields.map(|n| ctx.int(n));
+                let fields = ctx.alloc(Value::Tuple(values.into()));
+                ctx.call(factory, vec![fields], Vec::new())
+            }
             "date" => {
                 let [y, m, d, ..] = value.fields();
                 Ok(store(

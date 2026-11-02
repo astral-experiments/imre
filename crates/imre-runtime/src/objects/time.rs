@@ -14,6 +14,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
+#[cfg(target_os = "linux")]
+mod linux_clock;
+
 /// A signal delivered to the sleeping thread interrupts the native wait. A
 /// returning handler resumes against the same deadline, including callback time.
 pub(crate) fn sleep_ns<E: From<Error>>(
@@ -100,16 +103,64 @@ pub(crate) fn wall_time_ns() -> i128 {
     }
 }
 
+// CLOCK_UPTIME_RAW uses mach_absolute_time's time base on Apple platforms.
+#[cfg(target_vendor = "apple")]
+const MONOTONIC_CLOCK: (libc::clockid_t, &str) =
+    (libc::CLOCK_UPTIME_RAW, "clock_gettime(CLOCK_UPTIME_RAW)");
+#[cfg(not(target_vendor = "apple"))]
+const MONOTONIC_CLOCK: (libc::clockid_t, &str) =
+    (libc::CLOCK_MONOTONIC, "clock_gettime(CLOCK_MONOTONIC)");
+
+/// Return the POSIX clock provider and its measured resolution in seconds.
+pub(crate) fn clock_info(name: &[u8]) -> Result<(&'static str, bool, f64), Error> {
+    let (clock, implementation) = match name {
+        b"time" => (libc::CLOCK_REALTIME, "clock_gettime(CLOCK_REALTIME)"),
+        b"perf_counter" | b"monotonic" => MONOTONIC_CLOCK,
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_vendor = "apple",
+            target_os = "freebsd"
+        ))]
+        b"process_time" => (
+            libc::CLOCK_PROCESS_CPUTIME_ID,
+            "clock_gettime(CLOCK_PROCESS_CPUTIME_ID)",
+        ),
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_vendor = "apple",
+            target_os = "freebsd"
+        ))]
+        b"thread_time" => (
+            libc::CLOCK_THREAD_CPUTIME_ID,
+            "clock_gettime(CLOCK_THREAD_CPUTIME_ID)",
+        ),
+        _ => return Err(Error::new(Kind::ValueError, "unknown clock")),
+    };
+    #[cfg(target_os = "linux")]
+    let (implementation, resolution) = linux_clock::probe(clock, implementation)?;
+    #[cfg(not(target_os = "linux"))]
+    let resolution = clock_resolution(clock).map_err(super::errno_error)?;
+    Ok((implementation, clock != libc::CLOCK_REALTIME, resolution))
+}
+
+fn clock_resolution(clock: libc::clockid_t) -> io::Result<f64> {
+    let mut resolution = std::mem::MaybeUninit::<libc::timespec>::uninit();
+    // SAFETY: clock_getres initializes the timespec on success.
+    if unsafe { libc::clock_getres(clock, resolution.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the successful clock_getres call initialized both fields.
+    let resolution = unsafe { resolution.assume_init() };
+    Ok(resolution.tv_sec as f64 + resolution.tv_nsec as f64 * 1e-9)
+}
+
 /// Read the process-independent clock used by CPython's monotonic and performance counters.
 pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {
-    // CLOCK_UPTIME_RAW uses mach_absolute_time's time base on Apple platforms.
-    #[cfg(target_vendor = "apple")]
-    let clock = libc::CLOCK_UPTIME_RAW;
-    #[cfg(not(target_vendor = "apple"))]
-    let clock = libc::CLOCK_MONOTONIC;
     let mut stamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
     // SAFETY: clock_gettime initializes the supplied timespec on success.
-    if unsafe { libc::clock_gettime(clock, stamp.as_mut_ptr()) } != 0 {
+    if unsafe { libc::clock_gettime(MONOTONIC_CLOCK.0, stamp.as_mut_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     // SAFETY: the successful call initialized both fields.

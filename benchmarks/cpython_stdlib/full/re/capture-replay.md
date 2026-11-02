@@ -23,7 +23,7 @@ Each run selected the four IDs above in order and reported zero parent skips and
 | Merged O0 | 4 | 0 | 0 | `Ran 4 tests in 4.207s` | `OK` |
 | Merged O3 | 4 | 0 | 0 | `Ran 4 tests in 4.437s` | `OK` |
 
-The earlier intact 165-parent run recorded 162 passes and three skips on CPython. At Imre `ab6da8b93c62a20bb8d62126ee2afa50e9d99754`, each optimization level recorded 97 passes, 13 failures, 41 errors and 14 skips. The public record omits the full list of IDs behind the historical 136 paired passes. Membership of these four IDs remains unconfirmed, and this selected replay contributes zero new historical credit. [Intact-module results](https://github.com/astral-experiments/imre/pull/4035)
+The earlier intact 165-parent run recorded 162 passes and three skips on CPython. At Imre `ab6da8b93c62a20bb8d62126ee2afa50e9d99754`, each optimization level recorded 97 passes, 13 failures, 41 errors and 14 skips. All four IDs were already in the historical 136 paired passes, each at occurrence 1. The three repairs restore those registrations and add zero historical keys. The 10,521-byte historical ledger has SHA-256 `78de83317040441e0071866fd619b4403ce4d49930d824580bedf358a982781c`. [Parent ledger and selected follow-up](parent-ledger-linux.md) · [Intact-module results](https://github.com/astral-experiments/imre/pull/4035)
 
 ## Reproduce the selection
 

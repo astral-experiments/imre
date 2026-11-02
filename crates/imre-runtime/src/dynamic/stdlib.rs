@@ -60,6 +60,7 @@ pub(super) mod signal;
 mod socket;
 mod structure;
 mod subprocess;
+mod system_size;
 pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
@@ -453,6 +454,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
+        ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
         (
             "_imp",
             "is_frozen"
@@ -533,6 +535,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_ordered_dict_popitem"
             | "_ordered_dict_repr"
             | "_ordered_dict_setdefault"
+            | "_ordered_dict_sizeof"
             | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
@@ -564,6 +567,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_ConcatenateGenericAlias"
+            | "_get_type_annotations"
             | "_eval_type_expression"
             | "_protocol_mro"
             | "_protocol_member"
@@ -583,8 +587,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         (
             "time",
-            "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
-            | "mktime" | "strftime" | "ctime" | "struct_time" | "tzset",
+            "get_clock_info" | "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep"
+            | "gmtime" | "localtime" | "mktime" | "strftime" | "ctime" | "struct_time" | "tzset",
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
@@ -705,7 +709,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posix", "_create_environ" | "putenv" | "unsetenv") => {
             ctx.builtin(&format!("posix.{name}"))
         }
-        ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
+        ("os" | "posix", "abort" | "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os", "name") => ctx.text("posix"),
@@ -742,7 +746,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
-        | ("_imre_json", "loads" | "surrogate_text" | "encoder_state" | "encoder_call")
+        | ("_imre_json", "scan_once" | "surrogate_text" | "encoder_state" | "encoder_call")
         | ("_imre_linecache", "source_lines")
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
@@ -754,7 +758,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
-        | ("random", "random" | "choice" | "shuffle")
+        | ("random", "random" | "choice" | "choices" | "shuffle")
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -960,7 +964,10 @@ pub(super) fn call(
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
     }
     #[cfg(unix)]
-    if matches!(name, "_signal.sigpending" | "_imre_signal.make_signals") {
+    if matches!(
+        name,
+        "_signal.sigpending" | "_imre_signal.make_signals" | "_thread.interrupt_main"
+    ) {
         return signal::call(ctx, name, args, kwargs);
     }
     if name == "_thread.get_ident"
@@ -1211,20 +1218,25 @@ pub(super) fn call(
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
     }
-    if name == "sys.getrecursionlimit" {
+    if name == "sys.getsizeof" {
+        return system_size::getsizeof(ctx, &args[1..], kwargs);
+    }
+    if matches!(name, "sys.getrecursionlimit" | "sys.is_finalizing") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "sys.getrecursionlimit() takes no keyword arguments",
+                format!("{name}() takes no keyword arguments"),
             ));
         }
         if !args[1..].is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!(
-                    "sys.getrecursionlimit() takes no arguments ({} given)",
-                    args.len() - 1
-                ),
+                format!("{name}() takes no arguments ({} given)", args.len() - 1),
+            ));
+        }
+        if name == "sys.is_finalizing" {
+            return Ok(builtins::boolean(
+                ctx.finalizing.load(std::sync::atomic::Ordering::Acquire),
             ));
         }
         return Ok(ctx.int(i64::from(crate::sys::recursion_limit())));
@@ -1315,6 +1327,7 @@ pub(super) fn call(
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
+            | "posix.abort"
             | "posix.getpid"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
@@ -1353,6 +1366,9 @@ pub(super) fn call(
                 ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
             }
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
+            // SAFETY: C abort takes no arguments and terminates the calling process.
+            #[cfg(unix)]
+            "posix.abort" => unsafe { libc::abort() },
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
@@ -1392,6 +1408,9 @@ pub(super) fn call(
     }
     if name == "random.randrange" {
         return random::randrange(ctx, args, kwargs);
+    }
+    if name == "random.choices" {
+        return random::choices(ctx, args, kwargs);
     }
     if matches!(name, "random.choice" | "secrets.choice") {
         return random::choice(ctx, args, kwargs, name == "secrets.choice");
@@ -1566,6 +1585,10 @@ pub(super) fn call(
         && os::is_descriptor_function(op)
     {
         return os::descriptor(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.sysconf" {
+        return os::sysconf::call(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
@@ -1954,6 +1977,9 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
     }
+    if name == "collections.abc._CallableGenericAlias" {
+        return super::typing::abc_callable_alias(ctx, args, kwargs);
+    }
     if name == "types.GenericAlias" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -2253,7 +2279,7 @@ pub(super) fn call(
         "_imre_json.encoder_state" => return json::encoder_state(ctx, args, kwargs),
         "_imre_json.encoder_call" => return json::encoder_call(ctx, args, kwargs),
         "_imre_json.surrogate_text" => (1, &[]),
-        "_imre_json.loads" => (2, &[]),
+        "_imre_json.scan_once" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -2510,7 +2536,12 @@ pub(super) fn call(
                 NONE
             }
         }
-        "_imre_json.loads" => json::loads(ctx, argument(args, 0)?, argument(args, 1)?)?,
+        "_imre_json.scan_once" => json::scan_once(
+            ctx,
+            argument(args, 0)?,
+            argument(args, 1)?,
+            argument(args, 2)?,
+        )?,
         "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools._cache_wrapper" => functools::make_cache(
             ctx,
@@ -2599,8 +2630,8 @@ pub(super) fn call(
                 regex::match_groups(ctx, receiver, default)
             };
         }
-        name if name.starts_with("pattern.") || name.starts_with("match.") => {
-            return regex::call(ctx, name, args);
+        "match.group" | "match.start" | "match.end" | "match.span" => {
+            return regex::match_method(ctx, name, args);
         }
         _ => {
             return Err(Error::new(

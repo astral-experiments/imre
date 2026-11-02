@@ -81,6 +81,13 @@ pub(super) fn string_literal(expr: &ast::Expr) -> ast::Expr {
     .into()
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum AnnotationScope {
+    Function,
+    Class,
+    Module,
+}
+
 impl Program {
     pub(super) fn annotation_program(
         &self,
@@ -118,7 +125,7 @@ impl Program {
         }
         Ok(Some(self.annotation_provider(
             entries,
-            &body.qualname,
+            Some(&body.qualname),
             line,
         )))
     }
@@ -126,22 +133,29 @@ impl Program {
     pub(super) fn annotation_provider(
         &self,
         entries: Vec<(String, ast::Expr)>,
-        qualname: &str,
+        owner: Option<&str>,
         line: u32,
     ) -> Rc<Program> {
         let mut provider = self.nested_program("__annotate__");
-        provider.qualname = format!("{qualname}.__annotate__");
+        provider.qualname = owner.map_or_else(
+            || "__annotate__".into(),
+            |name| format!("{name}.__annotate__"),
+        );
         provider.first_line = line;
         provider.method_imports = self.method_imports.clone();
         provider.private_names = self.private_names.clone();
         provider.template_expressions = self.template_expressions.clone();
-        let class = self.class_attributes.is_some() && !self.string_annotations();
-        if class {
+        let scope = if owner.is_none() {
+            AnnotationScope::Module
+        } else if self.class_attributes.is_some() && !self.string_annotations() {
             provider.reads.insert("__classdict__".into());
-        }
+            AnnotationScope::Class
+        } else {
+            AnnotationScope::Function
+        };
         provider
             .instructions
-            .push((line, Instruction::Annotations { entries, class }));
+            .push((line, Instruction::Annotations { entries, scope }));
         Rc::new(provider)
     }
 }
@@ -254,12 +268,72 @@ impl Context {
         Ok(self.source_function(code, scope, defaults))
     }
 
+    /// Implicit annotation bytecode uses LOAD_NAME even for a declared global.
+    pub(in crate::dynamic) fn module_annotation_name(
+        &mut self,
+        scope: Id,
+        name: &str,
+    ) -> Result<Id> {
+        let locals = self.frame_locals(scope)?;
+        match self.load_exec_name(locals, name) {
+            Err(error) if self.is_builtin_error(&error, "KeyError") => {
+                self.lookup(self.root_scope(scope), name)
+            }
+            result => result,
+        }
+    }
+
+    pub(super) fn start_module_annotations(
+        &mut self,
+        code: &Program,
+        owner: Id,
+        scope: Id,
+        provider: Option<&Rc<Program>>,
+    ) -> Result<()> {
+        let frame = self.scope_data(scope);
+        let globals = if frame.exec_locals.is_some() {
+            frame.parent.expect("exec globals frame")
+        } else {
+            scope
+        };
+        if let Some(provider) = provider {
+            let annotate = self.source_annotator(provider, owner, globals)?;
+            self.bind_source_name(scope, "__annotate__", annotate)?;
+        }
+        self.setup_module_annotations(scope, code.string_annotations())
+    }
+
+    /// Initialize an annotated module's storage before executing its suite.
+    pub(in crate::dynamic) fn setup_module_annotations(
+        &mut self,
+        scope: Id,
+        string_annotations: bool,
+    ) -> Result<()> {
+        let active = self.op("set", NONE, NONE, NONE)?;
+        let locals = self.frame_locals(scope)?;
+        let key = self.heap.code_name("__conditional_annotations__");
+        self.put_item(locals, key, active)?;
+        if string_annotations {
+            match self.load_exec_name(locals, "__annotations__") {
+                Err(error) if self.is_builtin_error(&error, "KeyError") => {
+                    let annotations = self.dict(Vec::new());
+                    let key = self.heap.code_name("__annotations__");
+                    self.put_item(locals, key, annotations)?;
+                }
+                result => {
+                    result?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn source_annotations(
         &mut self,
         code: &Program,
         scope: Id,
         entries: &[(String, ast::Expr)],
-        class: bool,
+        annotation_scope: AnnotationScope,
     ) -> Result<Id> {
         let format = self.scope_name(scope, "format").expect("annotation format");
         let two = self.int(2);
@@ -269,7 +343,7 @@ impl Context {
         }
         // The synthetic argument 'format' is invisible to the expressions themselves.
         let mut environment = self.scope_data(scope).parent.expect("annotation globals");
-        if class {
+        if annotation_scope == AnnotationScope::Class {
             let dict = self.lookup(environment, "__classdict__")?;
             let globals = self.scope_data(scope).globals.clone();
             let locals = self.scope("", Some(environment));
@@ -281,7 +355,14 @@ impl Context {
             environment = locals;
         }
         let annotations = self.dict(Vec::new());
-        for (name, expr) in entries {
+        for (index, (name, expr)) in entries.iter().enumerate() {
+            if annotation_scope == AnnotationScope::Module {
+                let active = self.lookup(environment, "__conditional_annotations__")?;
+                let index = self.int(index as i64);
+                if !self.contains(index, active)? {
+                    continue;
+                }
+            }
             let value = self.source_expr(code, environment, expr)?;
             let key = self.heap.code_name(name);
             self.put_item(annotations, key, value)?;

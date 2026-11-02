@@ -1,5 +1,7 @@
 import logging
 import sys
+import warnings
+from logging import *
 
 
 class Stream:
@@ -16,6 +18,10 @@ class Stream:
 
 
 def current():
+    print(logging.__all__)
+    for name in logging.__all__:
+        assert globals()[name] is getattr(logging, name)
+    assert "root" not in globals()
     check_root_records()
     assert logging.StreamHandler().stream is sys.stderr
     stream = Stream()
@@ -133,6 +139,13 @@ def check_root_records():
         logging.critical("disk %s", "full")
         logging.log(logging.ERROR, "status %d", 7)
         assert stream.writes == ["WARNING less is more\n", "CRITICAL disk full\n", "ERROR status 7\n"]
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            fatal("disk %s", "full")
+            warn("limit %d", 7)
+        assert stream.writes[-2:] == ["CRITICAL disk full\n", "WARNING limit 7\n"]
+        assert len(seen) == 1 and seen[0].category is DeprecationWarning
+        assert seen[0].filename == __file__
         try:
             raise ValueError("root failure")
         except ValueError:

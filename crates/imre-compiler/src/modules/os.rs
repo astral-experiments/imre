@@ -63,6 +63,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         return Some(Intrinsic::IntConstant(i64::from(flag)));
     }
     Some(match name {
+        "abort" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.abort"),
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),
@@ -77,6 +78,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "sched_getscheduler" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
+        }
+        "posix_fallocate" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.posix_fallocate")
         }
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
@@ -97,6 +101,11 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
+        "fstat" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fstat"),
+        "sysconf" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sysconf"),
+        "sysconf_names" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sysconf_names")
+        }
         "statvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.statvfs"),
         "fstatvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.fstatvfs"),
         "statvfs_result" if cfg!(target_os = "linux") => {
@@ -104,7 +113,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "terminal_size" => Intrinsic::ObjectRuntimeExport("os.terminal_size"),
         "close" => Intrinsic::Fd(FdOperation::Close),
+        "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
         "read" => Intrinsic::Fd(FdOperation::Read),
+        "pread" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pread"),
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
@@ -114,6 +125,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "symlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.symlink"),
         "remove" => Intrinsic::Fd(FdOperation::Remove),
         "lseek" => Intrinsic::Fd(FdOperation::Seek),
+        "truncate" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.truncate"),
         "ftruncate" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.ftruncate"),
         "O_RDONLY" => Intrinsic::DescriptorConstant("o_rdonly"),
         "O_WRONLY" => Intrinsic::DescriptorConstant("o_wronly"),

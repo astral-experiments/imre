@@ -183,6 +183,18 @@ def test_time_strptime():
         raise AssertionError("invalid hour")
 
 
+def test_datetime_strptime():
+    class Stamp(dt):
+        pass
+
+    stamp = Stamp.strptime("2004-12-01 -00:02:01.000003", "%Y-%m-%d %z")
+    assert type(stamp) is Stamp
+    assert stamp.isoformat() == "2004-12-01T00:00:00-00:02:01.000003"
+    named = dt.strptime("+1234 UTC", "%z %Z")
+    assert named.utcoffset() == timedelta(hours=12, minutes=34)
+    assert named.tzname() == "UTC"
+
+
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
@@ -438,6 +450,70 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_fromordinal():
+    class Stamp(dt):
+        pass
+
+    class Parts(date):
+        def __new__(cls, *fields):
+            return fields
+
+    bound = Stamp(2000, 1, 1).fromordinal
+    value = bound(731319)
+    assert type(value) is Stamp and value == dt(2003, 4, 14)
+    assert date.fromordinal(True) == date(1, 1, 1)
+    assert Parts.fromordinal(2**31 - 1) == (5879611, 7, 11)
+
+
+def test_date_clock_constructors():
+    import time as clock
+
+    assert date.fromtimestamp(-0.0000001).timetuple()[:3] == clock.localtime(-1)[:3]
+
+    class Day(date):
+        @classmethod
+        def fromtimestamp(cls, stamp):
+            return cls, stamp
+
+    old = clock.time
+    token = object()
+    try:
+        clock.time = lambda: token
+        assert Day.today() == (Day, token)
+        assert Day(2001, 1, 1).today() == (Day, token)
+
+        class Clock:
+            def __call__(self):
+                clock.time = old
+                return token
+
+            def __del__(self):
+                Day.fromtimestamp = classmethod(lambda cls, stamp: stamp)
+
+        clock.time = Clock()
+        assert Day.today() is token
+    finally:
+        clock.time = old
+
+    def import_clock(name, caller, locals, fromlist, level):
+        assert (name, caller is locals, fromlist, level) == ("time", True, [], 0)
+        return object()
+
+    namespace = {"__builtins__": {"__import__": import_clock}, "Day": Day}
+    try:
+        clock.time = lambda: token
+        assert eval("Day.today()", namespace) is token
+        namespace["__builtins__"] = {}
+        try:
+            eval("Day.today()", namespace)
+        except KeyError as exc:
+            assert exc.args == ("__import__",)
+        else:
+            raise AssertionError("date.today ignored the caller's missing import hook")
+    finally:
+        clock.time = old
+
+
 def test_timedelta_remainder():
     unit = timedelta(microseconds=3)
     for left, right, quotient, remainder in ((7, 3, 2, 1), (-7, 3, -3, 2),
@@ -675,6 +751,9 @@ def test_explicit_zone_conversion():
     child = Child(2000, 1, 2)
     assert child.fromtimestamp(0, Hook()) == (Child, True, 0)
     assert type(child.combine(child, time())) is Child
+    shifted = Child(2000, 1, 1, 23, 45, tzinfo=zone).utctimetuple()
+    assert tuple(shifted) == (2000, 1, 2, 0, 15, 0, 6, 2, 0)
+    assert shifted.tm_zone is shifted.tm_gmtoff is None
 
 
 def test_astimezone_subtype():
@@ -779,10 +858,13 @@ def current():
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
     test_timedelta_remainder()
+    test_fromordinal()
+    test_date_clock_constructors()
     test_subclass_construction()
     test_now()
     test_time_fromisoformat()
     test_time_strptime()
+    test_datetime_strptime()
     test_time_of_day()
     test_http_date()
     test_module_exports()

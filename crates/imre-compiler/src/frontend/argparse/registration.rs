@@ -3,8 +3,9 @@
 use super::*;
 use ruff_python_ast::visitor::walk_stmt;
 
-pub(super) fn boolean_action(
+pub(super) fn is_intrinsic(
     expr: &ast::Expr,
+    intrinsic: Intrinsic,
     graph: &SourceGraph,
     id: ModuleId,
     locals: &HashSet<String>,
@@ -15,7 +16,7 @@ pub(super) fn boolean_action(
     }
     root.as_name_expr()
         .is_some_and(|name| !locals.contains(name.id.as_str()))
-        && graph.resolve(id, expr) == Some(Binding::Intrinsic(Intrinsic::BooleanOptionalAction))
+        && graph.resolve(id, expr) == Some(Binding::Intrinsic(intrinsic))
 }
 
 /// CPython formats the choices to validate an action's metavar during add_argument.
@@ -142,7 +143,13 @@ impl Calls<'_> {
             }
         }
         let action = action?;
-        let boolean = boolean_action(action, self.graph, self.module, self.locals);
+        let boolean = is_intrinsic(
+            action,
+            Intrinsic::BooleanOptionalAction,
+            self.graph,
+            self.module,
+            self.locals,
+        );
         let class = if boolean {
             "BooleanOptionalAction"
         } else {

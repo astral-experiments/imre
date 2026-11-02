@@ -6,7 +6,7 @@ use super::value::{
 };
 
 mod collections;
-mod dir;
+pub(super) mod dir;
 mod exceptions;
 mod float;
 mod round;
@@ -349,8 +349,8 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
-    "__add__", "__iadd__", "__init__", "__repr__", "append", "clear", "copy", "count", "extend",
-    "index", "insert", "pop", "remove", "reverse", "sort",
+    "__add__", "__getitem__", "__iadd__", "__init__", "__repr__", "append", "clear", "copy",
+    "count", "extend", "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
 const FROZENSET_OPERATORS: &[&str] = &[
@@ -423,6 +423,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "decode",
     "endswith",
     "find",
+    "index",
     "join",
     "lstrip",
     "rfind",
@@ -468,6 +469,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "removesuffix",
     "replace",
     "rfind",
+    "rindex",
     "rjust",
     "rpartition",
     "rsplit",
@@ -681,6 +683,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "unregister"
                     | "select"
                     | "get_key"
+                    | "get_map"
                     | "close"
                     | "__enter__"
                     | "__exit__"
@@ -1058,7 +1061,8 @@ impl Context {
             && let Value::Native(name) = self.heap.get(callable)
         {
             match name.as_str() {
-                "eval" => return self.eval_source(scope, &args, &kwargs),
+                "eval" => return self.call_eval_exec(scope, "eval", &args, &kwargs),
+                "exec" => return self.call_eval_exec(scope, "exec", &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
                     return self.frame_locals(scope);
                 }
@@ -1756,12 +1760,7 @@ pub(super) fn call(
             arity(name, args, 3, 3)?;
             ctx.compile_source(args[0], args[1], args[2], false)
         }
-        "eval" => ctx.eval_source(ctx.heap.current_scope(), args, kwargs),
-        "exec" => {
-            positional(name, kwargs)?;
-            arity(name, args, 2, 3)?;
-            ctx.exec_source(args[0], args[1], args.get(2).copied(), None)
-        }
+        "eval" | "exec" => ctx.call_eval_exec(ctx.heap.current_scope(), name, args, kwargs),
         "hex" => {
             let value = one_positional_arg("hex", args, kwargs)?;
             let number = ctx.index_integer(value)?;

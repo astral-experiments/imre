@@ -24,7 +24,20 @@ class Raw:
         return self.file.close()
 
 
-writer = BufferedWriter(Raw(sys.argv[1]), 8)
+def warn(source):
+    events.append(source)
+    if source is writer:
+        try:
+            source.flush()
+        except RuntimeError:
+            events.append("locked")
+    raise OSError("ignored warning hook")
+
+
+if sys.argv[2] == "file-finalize":
+    writer = BufferedWriter(FileIO(sys.argv[1], "wb"), 8)
+else:
+    writer = BufferedWriter(Raw(sys.argv[1]), 8)
 assert writer.write(b"abc") == 3
 if sys.argv[2] == "close":
     writer.close()
@@ -35,3 +48,11 @@ elif sys.argv[2] == "temporary-close":
     raw.temporarily_closed = False
     writer.flush()
     writer.close()
+elif sys.argv[2] in ("file-finalize", "callback-finalize"):
+    events = []
+    raw = writer.raw
+    raw._dealloc_warn = warn
+    assert writer._dealloc_warn(None) is None
+    writer.__del__()
+    writer.__del__()
+    assert events == [None, writer, "locked"] and raw.closed

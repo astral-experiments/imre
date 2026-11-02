@@ -1,0 +1,83 @@
+ordinal	registered_id	occurrence	cpython_stock	prior_O0	prior_O0_first_exception	O0	O0_first_exception	prior_O3	prior_O3_first_exception	O3	O3_first_exception
+1	test.test_hashlib.HashLibTestCase.test_algorithms_available	1	ok	ok		ok		ok		ok	
+2	test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed	1	ok	ok		ok		ok		ok	
+3	test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb	1	"skipped ""resource 'cpu' is not enabled"""	"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""	
+4	test.test_hashlib.HashLibTestCase.test_blake2b	1	ok	ok		ok		ok		ok	
+5	test.test_hashlib.HashLibTestCase.test_blake2b_vectors	1	"skipped ""Use of the 'urlfetch' resource not enabled"""	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""	
+6	test.test_hashlib.HashLibTestCase.test_blake2s	1	ok	ok		ok		ok		ok	
+7	test.test_hashlib.HashLibTestCase.test_blake2s_vectors	1	"skipped ""Use of the 'urlfetch' resource not enabled"""	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""	
+8	test.test_hashlib.HashLibTestCase.test_blocksize_and_name	1	ok	ok		ok		ok		ok	
+9	test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2	1	ok	ok		ok		ok		ok	
+10	test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3	1	ok	ok		ok		ok		ok	
+11	test.test_hashlib.HashLibTestCase.test_case_blake2b_0	1	ok	ok		ok		ok		ok	
+12	test.test_hashlib.HashLibTestCase.test_case_blake2b_1	1	ok	ok		ok		ok		ok	
+13	test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters	1	ok	ok		ok		ok		ok	
+14	test.test_hashlib.HashLibTestCase.test_case_blake2s_0	1	ok	ok		ok		ok		ok	
+15	test.test_hashlib.HashLibTestCase.test_case_blake2s_1	1	ok	ok		ok		ok		ok	
+16	test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters	1	ok	ok		ok		ok		ok	
+17	test.test_hashlib.HashLibTestCase.test_case_md5_0	1	ok	ok		ok		ok		ok	
+18	test.test_hashlib.HashLibTestCase.test_case_md5_1	1	ok	ok		ok		ok		ok	
+19	test.test_hashlib.HashLibTestCase.test_case_md5_2	1	ok	ok		ok		ok		ok	
+20	test.test_hashlib.HashLibTestCase.test_case_md5_huge	1	skipped 'not enough memory: 4.0G minimum needed'	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'	
+21	test.test_hashlib.HashLibTestCase.test_case_md5_uintmax	1	skipped 'not enough memory: 4.0G minimum needed'	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'	
+22	test.test_hashlib.HashLibTestCase.test_case_sha1_0	1	ok	ok		ok		ok		ok	
+23	test.test_hashlib.HashLibTestCase.test_case_sha1_1	1	ok	ok		ok		ok		ok	
+24	test.test_hashlib.HashLibTestCase.test_case_sha1_2	1	ok	ok		ok		ok		ok	
+25	test.test_hashlib.HashLibTestCase.test_case_sha1_3	1	ok	ok		ok		ok		ok	
+26	test.test_hashlib.HashLibTestCase.test_case_sha224_0	1	ok	ok		ok		ok		ok	
+27	test.test_hashlib.HashLibTestCase.test_case_sha224_1	1	ok	ok		ok		ok		ok	
+28	test.test_hashlib.HashLibTestCase.test_case_sha224_2	1	ok	ok		ok		ok		ok	
+29	test.test_hashlib.HashLibTestCase.test_case_sha224_3	1	ok	ok		ok		ok		ok	
+30	test.test_hashlib.HashLibTestCase.test_case_sha256_0	1	ok	ok		ok		ok		ok	
+31	test.test_hashlib.HashLibTestCase.test_case_sha256_1	1	ok	ok		ok		ok		ok	
+32	test.test_hashlib.HashLibTestCase.test_case_sha256_2	1	ok	ok		ok		ok		ok	
+33	test.test_hashlib.HashLibTestCase.test_case_sha256_3	1	ok	ok		ok		ok		ok	
+34	test.test_hashlib.HashLibTestCase.test_case_sha384_0	1	ok	ok		ok		ok		ok	
+35	test.test_hashlib.HashLibTestCase.test_case_sha384_1	1	ok	ok		ok		ok		ok	
+36	test.test_hashlib.HashLibTestCase.test_case_sha384_2	1	ok	ok		ok		ok		ok	
+37	test.test_hashlib.HashLibTestCase.test_case_sha384_3	1	ok	ok		ok		ok		ok	
+38	test.test_hashlib.HashLibTestCase.test_case_sha3_224_0	1	ok	ok		ok		ok		ok	
+39	test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector	1	"skipped ""Use of the 'urlfetch' resource not enabled"""	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""	
+40	test.test_hashlib.HashLibTestCase.test_case_sha3_256_0	1	ok	ok		ok		ok		ok	
+41	test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector	1	"skipped ""Use of the 'urlfetch' resource not enabled"""	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""	
+42	test.test_hashlib.HashLibTestCase.test_case_sha3_384_0	1	ok	ok		ok		ok		ok	
+43	test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector	1	"skipped ""Use of the 'urlfetch' resource not enabled"""	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""	
+44	test.test_hashlib.HashLibTestCase.test_case_sha3_512_0	1	ok	ok		ok		ok		ok	
+45	test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector	1	"skipped ""Use of the 'urlfetch' resource not enabled"""	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""	
+46	test.test_hashlib.HashLibTestCase.test_case_sha512_0	1	ok	ok		ok		ok		ok	
+47	test.test_hashlib.HashLibTestCase.test_case_sha512_1	1	ok	ok		ok		ok		ok	
+48	test.test_hashlib.HashLibTestCase.test_case_sha512_2	1	ok	ok		ok		ok		ok	
+49	test.test_hashlib.HashLibTestCase.test_case_sha512_3	1	ok	ok		ok		ok		ok	
+50	test.test_hashlib.HashLibTestCase.test_case_shake128_vector	1	"skipped ""Use of the 'urlfetch' resource not enabled"""	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""	
+51	test.test_hashlib.HashLibTestCase.test_case_shake256_vector	1	"skipped ""Use of the 'urlfetch' resource not enabled"""	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""	
+52	test.test_hashlib.HashLibTestCase.test_case_shake_128_0	1	ok	ok		ok		ok		ok	
+53	test.test_hashlib.HashLibTestCase.test_case_shake_256_0	1	ok	ok		ok		ok		ok	
+54	test.test_hashlib.HashLibTestCase.test_clinic_signature	1	ok	ok		ok		ok		ok	
+55	test.test_hashlib.HashLibTestCase.test_clinic_signature_errors	1	ok	ok		ok		ok		ok	
+56	test.test_hashlib.HashLibTestCase.test_digest_length_overflow	1	ok	ok		ok		ok		ok	
+57	test.test_hashlib.HashLibTestCase.test_disallow_instantiation	1	ok	skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'	
+58	test.test_hashlib.HashLibTestCase.test_extra_sha3	1	ok	ok		ok		ok		ok	
+59	test.test_hashlib.HashLibTestCase.test_get_builtin_constructor	1	ok	ok		ok		ok		ok	
+60	test.test_hashlib.HashLibTestCase.test_get_fips_mode	1	ok	ok		ok		ok		ok	
+61	test.test_hashlib.HashLibTestCase.test_gil	1	ok	ok		ok		ok		ok	
+62	test.test_hashlib.HashLibTestCase.test_hash_array	1	ok	ok		ok		ok		ok	
+63	test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation	1	ok	ok		ok		ok		ok	
+64	test.test_hashlib.HashLibTestCase.test_hexdigest	1	ok	ok		ok		ok		ok	
+65	test.test_hashlib.HashLibTestCase.test_large_update	1	ok	ok		ok		ok		ok	
+66	test.test_hashlib.HashLibTestCase.test_name_attribute	1	ok	ok		ok		ok		ok	
+67	test.test_hashlib.HashLibTestCase.test_new_upper_to_lower	1	ok	ok		ok		ok		ok	
+68	test.test_hashlib.HashLibTestCase.test_no_unicode	1	ok	ok		ok		ok		ok	
+69	test.test_hashlib.HashLibTestCase.test_no_unicode_blake2	1	ok	ok		ok		ok		ok	
+70	test.test_hashlib.HashLibTestCase.test_no_unicode_sha3	1	ok	ok		ok		ok		ok	
+71	test.test_hashlib.HashLibTestCase.test_readonly_types	1	ok	ok		ok		ok		ok	
+72	test.test_hashlib.HashLibTestCase.test_sha256_gil	1	ok	ok		ok		ok		ok	
+73	test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb	1	"skipped ""resource 'cpu' is not enabled"""	"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""	
+74	test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb	1	"skipped ""resource 'cpu' is not enabled"""	"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""	
+75	test.test_hashlib.HashLibTestCase.test_threaded_hashing	1	ok	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap
+76	test.test_hashlib.HashLibTestCase.test_unknown_hash	1	ok	ok		ok		ok		ok	
+77	test.test_hashlib.HashLibTestCase.test_usedforsecurity_false	1	ok	ok		ok		ok		ok	
+78	test.test_hashlib.HashLibTestCase.test_usedforsecurity_true	1	ok	ok		ok		ok		ok	
+79	test.test_hashlib.KDFTests.test_file_digest	1	ok	ok		ok		ok		ok	
+80	test.test_hashlib.KDFTests.test_normalized_name	1	ok	ok		ok		ok		ok	
+81	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	1	ok	ok		ok		ok		ok	
+82	test.test_hashlib.KDFTests.test_scrypt	1	ok	ok		ok		ok		ok	

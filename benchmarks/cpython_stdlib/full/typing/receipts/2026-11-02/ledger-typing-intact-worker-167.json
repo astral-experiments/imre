@@ -1,0 +1,1913 @@
+{
+  "schema": "imre.named-paired-supplement.v1",
+  "upstream": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 712,
+  "whole": false,
+  "historical_unidentified_floor": 107,
+  "baseline_immutable_ledger_size": 148,
+  "prior_129_to_148_capsule_sha256": "1f8a5f42236bb18c8e5eb408062a792d481724d4e408a0a544d786badb493ed2",
+  "input_ledgers": {
+    "129": {
+      "filename": "ledger-typing-129.json",
+      "sha256": "35f09b0b99e51bfac53fa2e99d5ca18f6b6599af517d8fcfd67d47619701d78a",
+      "unique_keys": 129
+    },
+    "148": {
+      "filename": "ledger-typing-intact-worker-148.json",
+      "sha256": "4d6bc22161270c2bec2a3ce7b271274da34e4bea937b7e0db3cabf4cf7d90df8",
+      "unique_keys": 148
+    },
+    "154": {
+      "filename": "ledger-typing-intact-worker-154.json",
+      "sha256": "5169de3019724fe8b13d3ea6331d4ba48d744fec023cd38a8bd89b11fd2cc00d",
+      "unique_keys": 154
+    }
+  },
+  "stock_ordered_outcomes_sha256": "bd8cdc988342751fda7c6c3228c5fa9004d164922e0cce64472431cf8a0b35ce",
+  "source_file_sha256": {
+    "typing.py": "5e7d4dc2812497e131b1f9f7d9b63014834740ef68da377ef2396c803da68e0d",
+    "test_typing.py": "28d17772f523800f02a5bf1e0cc012779d7df1f616fec7cc34d922dcba7ee1cc"
+  },
+  "additional_pairs_after_148": 19,
+  "additional_pairs_after_154": 13,
+  "overlap_with_129": [],
+  "overlap_with_148": [],
+  "overlap_with_154": [
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+      1
+    ]
+  ],
+  "profile_pass_counts_for_19": {
+    "stock": 19,
+    "ordinary-O0": 19,
+    "ordinary-O3": 19,
+    "boxed-O0": 8,
+    "boxed-O3": 8
+  },
+  "coordinator_unkeyed_14": {
+    "contribution_counted": 0,
+    "overlap": "unknown; source keys unavailable"
+  },
+  "union_pairs": 167,
+  "groups": {
+    "sets": {
+      "tested_imre": "1791943ed8bcb0fe8e30aaa0ec1a9f5f3b9c0c17",
+      "tested_parent": "2f966819cdd4e0b01e86e0f36b9496ce0f68dab4",
+      "pr": 4162,
+      "public_squash": "cde7ceaaed82be579cc60e2f97b15050c14cf061",
+      "selection": "Six original CollectionsAbcTests methods instantiated from the intact upstream test_typing.py.",
+      "raw": "raw/sets-1791943.tgz",
+      "runs": {
+        "stock": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "test.test_typing.CollectionsAbcTests.test_set",
+            "test.test_typing.CollectionsAbcTests.test_frozenset",
+            "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation"
+          ],
+          "evidence": "Explicit original parent START/PASS/STOP.",
+          "tests_run": 6,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        },
+        "ordinary-O0": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "test.test_typing.CollectionsAbcTests.test_set",
+            "test.test_typing.CollectionsAbcTests.test_frozenset",
+            "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation"
+          ],
+          "evidence": "Explicit original parent START/PASS/STOP.",
+          "tests_run": 6,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        },
+        "ordinary-O3": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "test.test_typing.CollectionsAbcTests.test_set",
+            "test.test_typing.CollectionsAbcTests.test_frozenset",
+            "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation"
+          ],
+          "evidence": "Explicit original parent START/PASS/STOP.",
+          "tests_run": 6,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        }
+      }
+    },
+    "helpers": {
+      "tested_imre": "45592962330e525aaadc75bc9901631055345bb9",
+      "tested_parent": "d2c653087e81cd51e948523e87e4548f6455a3c7",
+      "pr": 4154,
+      "public_squash": "f1392e99157962263f8b776730ac877bf45abda9",
+      "selection": "Two live finder-selected CPython documentation tests with six and nine original examples.",
+      "raw": "raw/helpers-4559296.tgz",
+      "runs": {
+        "stock": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing.get_args",
+            "typing.get_origin"
+          ],
+          "evidence": "Selected two unique live IDs; runner passed both without skips, errors or failures. Explicit parent STOP was not recorded.",
+          "test_count": 2,
+          "finder_count": 11,
+          "raw_exit_record": "stock original process completed successfully; archive records RESULT and OK"
+        },
+        "ordinary-O0": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing.get_args",
+            "typing.get_origin"
+          ],
+          "evidence": "Selected two unique live IDs; runner passed both without skips, errors or failures. Explicit parent STOP was not recorded.",
+          "test_count": 2,
+          "finder_count": 9,
+          "raw_exit_record": "native original.rc"
+        },
+        "ordinary-O3": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing.get_args",
+            "typing.get_origin"
+          ],
+          "evidence": "Selected two unique live IDs; runner passed both without skips, errors or failures. Explicit parent STOP was not recorded.",
+          "test_count": 2,
+          "finder_count": 9,
+          "raw_exit_record": "native original.rc"
+        },
+        "boxed-O0": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing.get_args",
+            "typing.get_origin"
+          ],
+          "evidence": "Selected two unique live IDs; runner passed both without skips, errors or failures. Explicit parent STOP was not recorded.",
+          "test_count": 2,
+          "finder_count": 9,
+          "raw_exit_record": "native original.rc"
+        },
+        "boxed-O3": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing.get_args",
+            "typing.get_origin"
+          ],
+          "evidence": "Selected two unique live IDs; runner passed both without skips, errors or failures. Explicit parent STOP was not recorded.",
+          "test_count": 2,
+          "finder_count": 9,
+          "raw_exit_record": "native original.rc"
+        }
+      }
+    },
+    "aggregate_docs": {
+      "tested_imre": "935cf6db407d04b9d0f08411fa1fc98922e7680e",
+      "tested_parent": "6574267b2b4043988d28a8a013d36353dcba2c16",
+      "pr": 4169,
+      "public_squash": "eaae6bc48b63c29a2d441d3279a4c59051c91fb2",
+      "selection": "Fresh, unfiltered DocTestSuite(typing); four new original IDs passed inside an aggregate that failed on 705 in both native modes.",
+      "raw": "raw/named-docs/",
+      "runs": {
+        "stock": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing._should_unflatten_callable_args",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "evidence": "Mid-run parent START/PASS for these four. No STOP observer; the aggregate exit is preserved.",
+          "discovered": [
+            "typing.ParamSpec",
+            "typing.ParamSpecArgs",
+            "typing.ParamSpecKwargs",
+            "typing.TypedDict",
+            "typing._collect_type_parameters",
+            "typing._should_unflatten_callable_args",
+            "typing.get_args",
+            "typing.get_origin",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "all_pass_ids": [
+            "typing.ParamSpec",
+            "typing.ParamSpecArgs",
+            "typing.ParamSpecKwargs",
+            "typing.TypedDict",
+            "typing._collect_type_parameters",
+            "typing._should_unflatten_callable_args",
+            "typing.get_args",
+            "typing.get_origin",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "all_fail_ids": [],
+          "skips": 0,
+          "errors": 0
+        },
+        "ordinary-O0": {
+          "process_exit": 1,
+          "paired_pass_ids": [
+            "typing._should_unflatten_callable_args",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "evidence": "Mid-run parent START/PASS for these four. No STOP observer; the aggregate exit is preserved.",
+          "discovered": [
+            "typing.ParamSpec",
+            "typing.ParamSpecArgs",
+            "typing.ParamSpecKwargs",
+            "typing.TypedDict",
+            "typing._should_unflatten_callable_args",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "all_pass_ids": [
+            "typing.ParamSpec",
+            "typing.ParamSpecArgs",
+            "typing.ParamSpecKwargs",
+            "typing._should_unflatten_callable_args",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "all_fail_ids": [
+            "typing.TypedDict"
+          ],
+          "skips": 0,
+          "errors": 0
+        },
+        "ordinary-O3": {
+          "process_exit": 1,
+          "paired_pass_ids": [
+            "typing._should_unflatten_callable_args",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "evidence": "Mid-run parent START/PASS for these four. No STOP observer; the aggregate exit is preserved.",
+          "discovered": [
+            "typing.ParamSpec",
+            "typing.ParamSpecArgs",
+            "typing.ParamSpecKwargs",
+            "typing.TypedDict",
+            "typing._should_unflatten_callable_args",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "all_pass_ids": [
+            "typing.ParamSpec",
+            "typing.ParamSpecArgs",
+            "typing.ParamSpecKwargs",
+            "typing._should_unflatten_callable_args",
+            "typing.get_protocol_members",
+            "typing.is_protocol",
+            "typing.is_typeddict"
+          ],
+          "all_fail_ids": [
+            "typing.TypedDict"
+          ],
+          "skips": 0,
+          "errors": 0
+        }
+      }
+    },
+    "typeddict": {
+      "tested_imre": "c29335c18bc9acec94e5aa7019e4b2e613cd6ef4",
+      "tested_parent": "cde7ceaaed82be579cc60e2f97b15050c14cf061",
+      "pr": 4192,
+      "public_squash": "39b49bfc4e64c7a0a67f01de084d1ab173534cc6",
+      "selection": "Single finder-selected typing.TypedDict testcase with all four pinned examples.",
+      "raw": "raw/typeddict-c29335c.tgz",
+      "runs": {
+        "stock": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing.TypedDict"
+          ],
+          "evidence": "Explicit original START/PASS/STOP, all four exact source/want pairs.",
+          "tests_run": 1,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        },
+        "ordinary-O0": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing.TypedDict"
+          ],
+          "evidence": "Explicit original START/PASS/STOP, all four exact source/want pairs.",
+          "tests_run": 1,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        },
+        "ordinary-O3": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "typing.TypedDict"
+          ],
+          "evidence": "Explicit original START/PASS/STOP, all four exact source/want pairs.",
+          "tests_run": 1,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        }
+      }
+    },
+    "concrete": {
+      "tested_imre": "04f03565a636530b351f8cac6a450278aa9e37c2",
+      "tested_parent": "5eecdbc0f961c5f2eee8987f726e96684586f578",
+      "pr": 4182,
+      "public_squash": null,
+      "selection": "Six unchanged CollectionsAbcTests method bodies staged with their original qualified IDs, followed by concrete-alias semantic controls.",
+      "raw": "raw/concrete-04f03565.tgz",
+      "runs": {
+        "stock": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+            "test.test_typing.CollectionsAbcTests.test_deque",
+            "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass"
+          ],
+          "evidence": "Registered original IDs each appear as ok in unittest; suite counts have zero failures/errors/skips. STOP callbacks were not logged.",
+          "tests_run": 6,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        },
+        "ordinary-O0": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+            "test.test_typing.CollectionsAbcTests.test_deque",
+            "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass"
+          ],
+          "evidence": "Registered original IDs each appear as ok in unittest; suite counts have zero failures/errors/skips. STOP callbacks were not logged.",
+          "tests_run": 6,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        },
+        "ordinary-O3": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+            "test.test_typing.CollectionsAbcTests.test_deque",
+            "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass"
+          ],
+          "evidence": "Registered original IDs each appear as ok in unittest; suite counts have zero failures/errors/skips. STOP callbacks were not logged.",
+          "tests_run": 6,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        },
+        "boxed-O0": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+            "test.test_typing.CollectionsAbcTests.test_deque",
+            "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass"
+          ],
+          "evidence": "Registered original IDs each appear as ok in unittest; suite counts have zero failures/errors/skips. STOP callbacks were not logged.",
+          "tests_run": 6,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        },
+        "boxed-O3": {
+          "process_exit": 0,
+          "paired_pass_ids": [
+            "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+            "test.test_typing.CollectionsAbcTests.test_deque",
+            "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+            "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass"
+          ],
+          "evidence": "Registered original IDs each appear as ok in unittest; suite counts have zero failures/errors/skips. STOP callbacks were not logged.",
+          "tests_run": 6,
+          "failures": 0,
+          "errors": 0,
+          "skips": 0
+        }
+      },
+      "branch_at_capture": "998ff230c75a549a5fbb00aff563d52043c41b3b",
+      "branch_note": "These results were recorded at 04f03565. A later merge of main on the PR branch is not credited by these runs.",
+      "other_process_exits": {
+        "base-c7295770-ordinary-O0.positive": 1,
+        "stock-wrong": 1,
+        "candidate-boxed-O0.wrong": 1,
+        "candidate-boxed-O3.wrong": 1
+      }
+    }
+  },
+  "additional_keys": [
+    [
+      "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_deque",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+      1
+    ],
+    [
+      "typing.TypedDict",
+      1
+    ],
+    [
+      "typing._should_unflatten_callable_args",
+      1
+    ],
+    [
+      "typing.get_args",
+      1
+    ],
+    [
+      "typing.get_origin",
+      1
+    ],
+    [
+      "typing.get_protocol_members",
+      1
+    ],
+    [
+      "typing.is_protocol",
+      1
+    ],
+    [
+      "typing.is_typeddict",
+      1
+    ]
+  ],
+  "details": [
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 55,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "concrete",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7638,
+          7643
+        ],
+        "source_sha256": "c7f4dd58f0ce0651a8c9828cd774e21d235ccde560343001437055a9d8d1e774"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+      "occurrence": 1,
+      "stock_ordinal": 56,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "concrete",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7645,
+          7654
+        ],
+        "source_sha256": "fb6d791b6b28de83a7caeb48cecda9e0bc6b85298492f44c1671cee2bc43445a"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_deque",
+      "occurrence": 1,
+      "stock_ordinal": 66,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "concrete",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7536,
+          7539
+        ],
+        "source_sha256": "e71b55494f3f509eb5b4ed7c35822e48ab8e45527317ac3733f52fed7147fa94"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 67,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "concrete",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7656,
+          7661
+        ],
+        "source_sha256": "9182ff35a09ea90737a19863e333f961e0beb6c686e428026fa3eec81cd455d0"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_frozenset",
+      "occurrence": 1,
+      "stock_ordinal": 71,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "sets",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7548,
+          7550
+        ],
+        "source_sha256": "6a9b3738d8bc957ede07b99a962b2a1ca9303cfe870f3450bb7e008266f567b9"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 72,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "sets",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7704,
+          7710
+        ],
+        "source_sha256": "cf42edc5ea285a4356a4d21f55f1334a8a90f757ebb84f45cc5aedd4857e8c6a"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 86,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "sets",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7696,
+          7702
+        ],
+        "source_sha256": "df4996100e3e3f65327549e9be048d08160f702398a22a36fbb2e96126faafe5"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 89,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "sets",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7680,
+          7686
+        ],
+        "source_sha256": "e9c4e8eb520268305e1c2def75c83e869cf97ddddc1e0dc9dce2a8eb530a53bc"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 92,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "concrete",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7622,
+          7625
+        ],
+        "source_sha256": "74c5c07d364e52a747c8cc24dc92561fdad51a77fe2bce06eb635e847513ea4f"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass",
+      "occurrence": 1,
+      "stock_ordinal": 93,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "concrete",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7627,
+          7636
+        ],
+        "source_sha256": "9b5853263f7469bf2b30b2b810e1492587aa9e46657cc9310e99fac6e94f9aa2"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_set",
+      "occurrence": 1,
+      "stock_ordinal": 95,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "sets",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7544,
+          7546
+        ],
+        "source_sha256": "48aa1282012d8d0f295b11db2f8314b9095391b33919a1dddc56a5c103f17496"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 96,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "sets",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7688,
+          7694
+        ],
+        "source_sha256": "48b5967645025d937217f2e82e5cbb4d9f04ec92b0e37f936213422e4e3c02f5"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "typing.TypedDict",
+      "occurrence": 1,
+      "stock_ordinal": 705,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "typeddict",
+      "source": {
+        "path": "Lib/typing.py",
+        "lines": [
+          3277,
+          3358
+        ],
+        "source_sha256": "36e83a7de14ffeaa2ab7d542a892c24b8c226309817d0d1130ab9381e9e7e15f"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "typing._should_unflatten_callable_args",
+      "occurrence": 1,
+      "stock_ordinal": 707,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "aggregate_docs",
+      "source": {
+        "path": "Lib/typing.py",
+        "lines": [
+          222,
+          243
+        ],
+        "source_sha256": "dd6eb3b8e0bd18a35f61745f0a36f80e004f80f26b2ea81a6137ee563a9ec60f"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 1,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 1,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "typing.get_args",
+      "occurrence": 1,
+      "stock_ordinal": 708,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "helpers",
+      "source": {
+        "path": "Lib/typing.py",
+        "lines": [
+          2517,
+          2540
+        ],
+        "source_sha256": "d638e074615f72923423b6d1938ac649e32d1fc2022d29967194891942ed0385"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "typing.get_origin",
+      "occurrence": 1,
+      "stock_ordinal": 709,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "helpers",
+      "source": {
+        "path": "Lib/typing.py",
+        "lines": [
+          2487,
+          2514
+        ],
+        "source_sha256": "ba48aa4dbf3c13ccfe6e0d0e759d2265e4935d10a0b06640c1e8c309c753cd1b"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O0": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "boxed-O3": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "typing.get_protocol_members",
+      "occurrence": 1,
+      "stock_ordinal": 710,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "aggregate_docs",
+      "source": {
+        "path": "Lib/typing.py",
+        "lines": [
+          3812,
+          3828
+        ],
+        "source_sha256": "6135d6a8890a4b10f72c5efca6b6eaad46abdee56c10c774443562f315f38335"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 1,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 1,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "typing.is_protocol",
+      "occurrence": 1,
+      "stock_ordinal": 711,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "aggregate_docs",
+      "source": {
+        "path": "Lib/typing.py",
+        "lines": [
+          3791,
+          3809
+        ],
+        "source_sha256": "e17d10696e31f8b40e7d1c6e734ab26e00b64a0ff5363c5b2475f9417b88df5d"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 1,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 1,
+          "skip_reason": null
+        }
+      }
+    },
+    {
+      "id": "typing.is_typeddict",
+      "occurrence": 1,
+      "stock_ordinal": 712,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "aggregate_docs",
+      "source": {
+        "path": "Lib/typing.py",
+        "lines": [
+          2543,
+          2558
+        ],
+        "source_sha256": "50ae85ec3604bbd6013247cddb4ca43fa2871e924f7d1ddcf1222bf8b63c12e9"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "original_group_process_exit": 0,
+          "skip_reason": null
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "original_group_process_exit": 1,
+          "skip_reason": null
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "original_group_process_exit": 1,
+          "skip_reason": null
+        }
+      }
+    }
+  ],
+  "keys": [
+    [
+      "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_annotated_mro",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_attr_passthrough",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_flatten",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_hash_eq",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_instantiate",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_instantiate_generic",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_new",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_order_in_union",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_pickle",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_special_form_containment",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_specialize",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_subst",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_too_few_type_args",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_typevar_subst",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_deque",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_invalid_uses",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_valid_uses",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_var_substitution",
+      1
+    ],
+    [
+      "test.test_typing.GetTypeHintsTests.test_get_type_hints_annotated",
+      1
+    ],
+    [
+      "test.test_typing.GetTypeHintsTests.test_get_type_hints_annotated_in_union",
+      1
+    ],
+    [
+      "test.test_typing.GetTypeHintsTests.test_get_type_hints_annotated_refs",
+      1
+    ],
+    [
+      "test.test_typing.GetTypeHintsTests.test_get_type_hints_annotated_with_none_default",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_args",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_cannot_init",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_does_not_flatten_enum",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_enum",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_equal",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_flatten",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_hash",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_illegal_parameters_do_not_raise_runtime_errors",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_literals_inside_other_types",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_no_isinstance_or_issubclass",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_no_multiple_subscripts",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_no_subclassing",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_annotation_type_check",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_annotation_usage",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_annotation_usage_with_default",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_annotation_usage_with_methods",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_copy_and_pickle",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_deferred_annotations",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_empty_namedtuple",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_future_annotations",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_generic",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_generic_pep695",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_multiple_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_namedtuple_errors",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_namedtuple_keyword_usage",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_namedtuple_special_keyword_names",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_non_generic_subscript",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_orig_bases",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_setname_called_on_values_in_class_dictionary",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_setname_raises_the_same_as_on_other_classes",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_strange_errors_when_accessing_set_name_itself",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_super_explicitly_disallowed",
+      1
+    ],
+    [
+      "test.test_typing.RevealTypeTests.test_reveal_type",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_cannot_init",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_no_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_cannot_init",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_no_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_annotations",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_basics_functional_syntax",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_can_make_readonly_key_mutable",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_cannot_make_mutable_key_readonly",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_combine_qualifiers",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_deferred_evaluation",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_generic_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_get_type_hints",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_get_type_hints_generic",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_implicit_any_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_inheritance_pep563",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_is_typeddict",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_keys_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_keys_inheritance_with_same_name",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_multiple_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_multiple_inheritance_with_same_key",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_non_generic_subscript",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_optional",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_optional_keys",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_orig_bases",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_pep695_generic_typeddict",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_pickle",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_pickle_generic",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_py36_class_syntax_usage",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_readonly_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_required_notrequired_keys",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_total",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_total_inherits_non_total",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_total_with_assigned_value",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_typeddict_create_errors",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_typeddict_errors",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_zero_fields_typeddicts",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_allow_non_types_in_or",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_base_class_kept",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_cannot_instantiate",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_empty",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_etree",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_function_repr_union",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_no_eval_union",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional_isinstance_type_error",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional_issubclass",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional_issubclass_type_error",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_single_class_disappears",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_any",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_compare_other",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_generalization",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_isinstance_type_error",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_issubclass",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_issubclass_type_error",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_object",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_of_literals",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_of_unhashable",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_str_pattern",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_union",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_unordered",
+      1
+    ],
+    [
+      "typing.ParamSpec",
+      1
+    ],
+    [
+      "typing.ParamSpecArgs",
+      1
+    ],
+    [
+      "typing.ParamSpecKwargs",
+      1
+    ],
+    [
+      "typing.TypedDict",
+      1
+    ],
+    [
+      "typing._should_unflatten_callable_args",
+      1
+    ],
+    [
+      "typing.get_args",
+      1
+    ],
+    [
+      "typing.get_origin",
+      1
+    ],
+    [
+      "typing.get_protocol_members",
+      1
+    ],
+    [
+      "typing.is_protocol",
+      1
+    ],
+    [
+      "typing.is_typeddict",
+      1
+    ]
+  ]
+}

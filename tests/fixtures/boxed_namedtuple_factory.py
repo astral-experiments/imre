@@ -46,6 +46,7 @@ def current():
 
     assert Declared.__orig_bases__ == (NamedTuple,)
     assert Declared("kept").label == "kept"
+    assert Declared("kept")._asdict() == {"label": "kept"}
 
     Point = namedtuple('Point', 'self y')
     class Pixel(Point):
@@ -54,6 +55,21 @@ def current():
     after = before._replace(self=3)
     assert type(after) is Pixel and tuple(after) == (3, 2) and tuple(before) == (1, 2)
     assert Point.__replace__ is Point._replace
+
+    items = []
+    bound = Point(items, items)._asdict
+    result = bound()
+    assert type(result) is dict and list(result) == ["self", "y"]
+    assert result["self"] is result["y"] is items and result is not bound()
+
+    class Reordered(Point):
+        _fields = ("a", "b", "a", "extra")
+
+        def __iter__(self):
+            return iter((2, 4, 6))
+
+    assert Point._asdict(self=Reordered(1, 2)) == {"a": 6, "b": 4}
+
     try:
         before._replace(y=4, width=5)
     except TypeError as error:

@@ -1,17 +1,9 @@
 # decoder.py and scanner.py come from CPython 3.14.5 at
 # 5607950ef232dad16d75c0cf53101d9649d89115 (see licenses/CPython.txt).
-# Both scanner factories use the same token parser.
 from . import decoder
 from .decoder import JSONDecoder, JSONDecodeError
-from _imre_json import loads as _native_loads
 
 _default_decoder = JSONDecoder()
-_has_accelerator = decoder.c_scanstring is not None
-
-
-def _raise_decode_error(message, document, position, bom, _decoder=decoder):
-    cls = JSONDecodeError if bom else _decoder.JSONDecodeError
-    raise cls(message, document, position)
 
 
 def detect_encoding(b):
@@ -56,11 +48,6 @@ def loads(s, *, cls=None, object_hook=None, parse_float=None,
         parse_int=None, parse_constant=None, object_pairs_hook=None, **kw):
     use_default = (cls is None and object_hook is None and parse_int is None and
                    parse_float is None and parse_constant is None and object_pairs_hook is None and not kw)
-    if use_default and _has_accelerator:
-        if type(s) is bytearray:
-            s = bytes(s)
-        if type(s) is str or type(s) is bytes:
-            return _native_loads(s, _raise_decode_error)
     if isinstance(s, str):
         if (s[:1] == '\ufeff' if type(s) is str else s.startswith('\ufeff')):
             raise JSONDecodeError("Unexpected UTF-8 BOM (decode using utf-8-sig)",

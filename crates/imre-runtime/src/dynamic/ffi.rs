@@ -22,8 +22,24 @@ impl Context {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
         let result = self.call_in_scope(scope, callable, args, kwargs)?;
-        if !self.heap.discard_scalar_call(mark, result, arguments) {
+        if !self
+            .heap
+            .discard_scalar_call(mark, result, arguments, callable)
+        {
             self.finish_call_operands(mark, result);
+        }
+        self.check_call_return(result)
+    }
+
+    /// A Python call expression checks for delivery after the callee's native work completes.
+    pub(super) fn check_call_return(&mut self, result: Id) -> Result<Id> {
+        #[cfg(unix)]
+        if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+            && crate::signals::is_main()
+        {
+            // A Python handler can delete the last other reference and force collection.
+            self.heap.keep(result);
+            self.dispatch_signals()?;
         }
         Ok(result)
     }
@@ -446,9 +462,16 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
+            "setup_module_string_annotations" => {
+                self.setup_module_annotations(a, true)?;
+                Ok(NONE)
+            }
             "annotate" => {
                 if self.scope_data(a).class_body.is_some() {
                     let mapping = self.lookup_class_local(a, "__annotations__")?;
+                    self.put_item(mapping, b, c)?;
+                } else if c != NONE {
+                    let mapping = self.module_annotation_name(a, "__annotations__")?;
                     self.put_item(mapping, b, c)?;
                 } else if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;
@@ -734,6 +757,7 @@ pub(super) fn new_context<S: Into<String>>(
         audit_hooks: Vec::new(),
         fault_file: None,
         exit_callbacks: Vec::new(),
+        finalizing: Default::default(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
@@ -877,6 +901,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     };
     ctx.workers.join_before_exit_callbacks();
     atexit::run(&mut ctx);
+    // Exit callbacks run before Python enters its finalization phase.
+    ctx.finalizing
+        .store(true, std::sync::atomic::Ordering::Release);
     if let Err(error) = ctx.finalize_shutdown_resources() {
         super::unraisable::report(
             &mut ctx,

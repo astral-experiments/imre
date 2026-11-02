@@ -30,6 +30,7 @@ mod namedtuple;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
+mod object_size;
 mod object_state;
 mod operators;
 mod os_error;
@@ -124,6 +125,7 @@ pub(crate) struct Context {
     // The fatal handler borrows its descriptor while Python retains the destination.
     fault_file: Option<Id>,
     exit_callbacks: Vec<Id>,
+    finalizing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
@@ -1129,7 +1131,7 @@ impl Context {
                 reverse,
             } => {
                 let (deque, state, mut remaining, reverse) = (*deque, *state, *remaining, *reverse);
-                let Value::Deque(ring) = self.heap.get(deque) else {
+                let Value::Deque(ring) = self.heap.get(self.scalar_value(deque)) else {
                     unreachable!()
                 };
                 let item = ring
@@ -2079,6 +2081,9 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == deque::CLASS {
+            deque::install(self);
+        }
         if let Some(owner) = stdlib::itertools::cursor_type(name) {
             stdlib::itertools::install_namespace(self, value, owner);
         }
@@ -2104,6 +2109,9 @@ impl Context {
             self.builtin(builtins::exception_initializer(name));
             self.builtin("BaseException.add_note");
             self.builtin("BaseException.with_traceback");
+        }
+        if let Some(symbol) = object_size::descriptor(name) {
+            self.builtin(symbol);
         }
         let methods = match name {
             "type" => &["mro"][..],
@@ -2776,6 +2784,7 @@ impl Context {
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
+                stdlib::os::sysconf::initialize(self, module, scope);
                 for (attr, flag) in [("O_PATH", libc::O_PATH), ("O_TMPFILE", libc::O_TMPFILE)] {
                     let value = self.int(i64::from(flag));
                     self.bind(scope, attr, value);
@@ -3005,10 +3014,14 @@ impl Context {
                     "big"
                 });
                 self.bind(scope, "byteorder", byteorder);
+                let thread_info = stdlib::fixed_structseq::thread_info(self);
+                self.bind(scope, "thread_info", thread_info);
                 for name in [
                     "audit",
                     "addaudithook",
+                    "getsizeof",
                     "getrecursionlimit",
+                    "is_finalizing",
                     "setrecursionlimit",
                     "_getframe",
                     "_getframemodulename",
@@ -3082,6 +3095,11 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
+            #[cfg(unix)]
+            {
+                let interrupt = self.builtin("_thread.interrupt_main");
+                self.bind(scope, "interrupt_main", interrupt);
+            }
             for function in ["start_new_thread", "_count", "get_ident"] {
                 let value = self.builtin(&format!("_thread.{function}"));
                 self.bind(scope, function, value);

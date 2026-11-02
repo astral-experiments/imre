@@ -366,13 +366,14 @@ impl Builtin {
                 | ProcessOperation::Semaphore
                 | ProcessOperation::Release
                 | ProcessOperation::EnvironCopy { .. }
-                | ProcessOperation::EnvironIndex
+                | ProcessOperation::EnvironKeys
+                | ProcessOperation::EnvironIndex { .. }
                 | ProcessOperation::EnvironDelete { .. }
                 | ProcessOperation::EnvironSet { .. }
                 | ProcessOperation::EnvironClear
                 | ProcessOperation::EnvironUpdate { .. }
                 | ProcessOperation::EnvironGet
-                | ProcessOperation::GetCwd
+                | ProcessOperation::GetCwd { .. }
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Credential(_)
                 | ProcessOperation::CredentialId { .. }
@@ -1104,8 +1105,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_environ_clear"
                 | "imre_environ_update"
                 | "imre_environ_get"
+                | "imre_environ_keys"
+                | "imre_environb_index"
                 | "imre_environ_index"
                 | "imre_getcwd"
+                | "imre_getcwdb"
                 | "imre_os_linesep"
                 | "imre_os_pathsep"
                 | "imre_shutil_which"

@@ -17,6 +17,13 @@ print(TextIO.__bases__ == (t.IO,), BinaryIO.__orig_bases__ == (t.IO[bytes],))
 print(t.IO.__parameters__ == (t.AnyStr,), TextIO.__parameters__, BinaryIO.__parameters__)
 V = t.TypeVar("V")
 T = t.TypeVar("T", bound=str, covariant=True)
+assert t.TypeVar("Forward", bound="Accessor").__bound__.__forward_arg__ == "Accessor"
+try:
+    t.TypeVar("Invalid", int, bound=(1, 2))
+except TypeError as error:
+    assert str(error) == "Bound must be a type. Got (1, 2)."
+else:
+    raise AssertionError("invalid TypeVar bound was accepted")
 print(K.__name__, K.__module__, K.__bound__ is None, K.__constraints__)
 print(K is t.TypeVar("K"), T.__bound__ is str, T.__covariant__, t.TYPE_CHECKING)
 

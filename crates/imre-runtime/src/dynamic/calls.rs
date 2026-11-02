@@ -140,7 +140,7 @@ fn excess_positional_error(
     )
 }
 
-fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
+pub(super) fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
     let count = missing.len();
     let unit = if count == 1 { "argument" } else { "arguments" };
     let names = match missing {
@@ -214,6 +214,14 @@ impl Context {
                 .get(parent)
                 .and_then(|&base| self.class_attr(base, name));
         }
+        if attr.is_none() && name == "__sizeof__" {
+            let owner = match self.heap.get(class) {
+                Value::Native(kind) if kind == "bool" => "int",
+                Value::Native(kind) if kind == defaultdict::CLASS => "dict",
+                _ => "object",
+            };
+            return self.builtins.get(object_size::descriptor(owner)?).copied();
+        }
         if attr.is_none()
             && name == "__reduce_ex__"
             && self.own_class_attr(class, "__reduce__").is_some()
@@ -266,6 +274,7 @@ impl Context {
             return Some(value);
         }
         match self.heap.get(class) {
+            Value::Native(kind) if name == "__sizeof__" => self.builtins.get(object_size::descriptor(kind)?).copied(),
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
             // The native generic alias inherits the same subclass hook as source special forms.
             Value::Native(kind) if kind == "typing._GenericAlias" && name == "__init_subclass__" => {
@@ -345,7 +354,8 @@ impl Context {
                         | "module"
                         | super::thread_local::CLASS
                         | weakref::REFERENCE_TYPE
-                ) || stdlib::datetime::members(kind)
+                ) || (kind == super::deque::CLASS && super::deque::owns(name))
+                    || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
@@ -877,6 +887,7 @@ impl Context {
                             | "bytes.count"
                             | "bytes.decode"
                             | "bytes.find"
+                            | "bytes.index"
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"
@@ -898,6 +909,7 @@ impl Context {
                         || name.starts_with("property.")
                         || (name.starts_with("dict.") && name != "dict.__new__")
                         || name.starts_with("abc.")
+                        || name.starts_with("selectors._SelectorMapping.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -1088,6 +1100,7 @@ impl Context {
     pub(super) fn native_base(class: &str) -> Option<&'static str> {
         Some(match class {
             "bool" => "int",
+            "collections.abc._CallableGenericAlias" => "types.GenericAlias",
             "datetime.datetime" => "datetime.date",
             "datetime.timezone" => stdlib::datetime::TZINFO,
             stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
@@ -1374,6 +1387,7 @@ impl Context {
                         class @ ("time.struct_time"
                         | stdlib::fixed_structseq::UNRAISABLE_ARGS
                         | stdlib::fixed_structseq::HASH_INFO
+                        | stdlib::fixed_structseq::THREAD_INFO
                         | stdlib::fixed_structseq::SCHED_PARAM
                         | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
@@ -1511,6 +1525,7 @@ impl Context {
             | (value::TEMPLATE_ITER_TYPE, Value::TemplateIter { .. })
             | (value::INTERPOLATION_TYPE, Value::Interpolation { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
+            ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
             ("typing._GenericAlias", Value::GenericAlias(alias))
                 if matches!(
                     alias.kind,
@@ -1528,6 +1543,7 @@ impl Context {
                             class @ ("time.struct_time"
                             | stdlib::fixed_structseq::UNRAISABLE_ARGS
                             | stdlib::fixed_structseq::HASH_INFO
+                            | stdlib::fixed_structseq::THREAD_INFO
                             | stdlib::fixed_structseq::SCHED_PARAM
                             | stdlib::fixed_structseq::TERMINAL_SIZE
                             | stdlib::flags::TYPE
@@ -2131,7 +2147,10 @@ impl Context {
             }
             Value::Native(ref class)
                 if ((builtins::is_builtin_type(class) && !class.contains('.'))
-                    || matches!(class.as_str(), "traceback" | "frame" | "mappingproxy"))
+                    || matches!(
+                        class.as_str(),
+                        "function" | "traceback" | "frame" | "mappingproxy"
+                    ))
                     && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
@@ -2450,6 +2469,9 @@ impl Context {
                         };
                         return Ok(self.text(doc));
                     }
+                    "__doc__" if symbol == "posix.abort" => {
+                        return Ok(self.text("Abort the interpreter immediately.\n\nThis function 'dumps core' or otherwise fails in the hardest way possible\non the hosting operating system.  This function never returns."));
+                    }
                     "__doc__" if symbol == "posix.kill" => {
                         return Ok(self.text("Kill a process with a signal."));
                     }
@@ -2465,7 +2487,8 @@ impl Context {
                     "__text_signature__"
                         if matches!(
                             symbol.as_str(),
-                            "posix.getpid"
+                            "posix.abort"
+                                | "posix.getpid"
                                 | "posix.getppid"
                                 | "gc.enable"
                                 | "gc.disable"
@@ -2657,6 +2680,12 @@ impl Context {
                     if let Value::Native(method) = self.heap.get(callable) {
                         let module_bound = matches!(self.heap.get(receiver), Value::Module { .. });
                         let value = match name {
+                            "__doc__" if method == "posix.sysconf" => {
+                                Some("Return an integer-valued system configuration variable.")
+                            }
+                            "__text_signature__" if method == "posix.sysconf" => {
+                                Some("($module, name, /)")
+                            }
                             "__qualname__" if module_bound => method.rsplit('.').next(),
                             "__module__" if module_bound => {
                                 method.rsplit_once('.').map(|(module, _)| module)
@@ -2789,7 +2818,7 @@ impl Context {
                 owner,
                 name: field,
                 ..
-            } if matches!(owner, "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
+            } if matches!(owner, "int" | super::deque::CLASS | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
@@ -2802,6 +2831,7 @@ impl Context {
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if owner == super::deque::CLASS => return Ok(self.text("maximum size of a deque or None if unbounded")),
                     "__doc__" if owner == "int" => {
                         return Ok(
                             self.text(format!("the {field} of a rational number in lowest terms"))
@@ -2930,7 +2960,7 @@ impl Context {
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
-                    _ if class == super::deque::CLASS && super::deque::member(name).is_some() => {
+                    _ if class == super::deque::CLASS && super::deque::owns(name) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}
@@ -3832,6 +3862,7 @@ impl Context {
                     owner @ ("time.struct_time"
                     | stdlib::fixed_structseq::UNRAISABLE_ARGS
                     | stdlib::fixed_structseq::HASH_INFO
+                    | stdlib::fixed_structseq::THREAD_INFO
                     | stdlib::fixed_structseq::SCHED_PARAM
                     | stdlib::fixed_structseq::TERMINAL_SIZE
                     | stdlib::flags::TYPE),
@@ -3905,6 +3936,23 @@ impl Context {
             if self.instance_of(obj, tuple) {
                 let init = self.builtin("object.__init__");
                 return self.bind_attribute(init, obj, tuple);
+            }
+        }
+        if name == "__sizeof__" {
+            let class = if self.builtin_type_name(obj) == Some("type") {
+                obj
+            } else {
+                self.exact_type(obj)?
+            };
+            if let Some(callable) = self.class_attr(class, name) {
+                if class == obj {
+                    return Ok(callable);
+                }
+                return Ok(self.alloc(Value::Method {
+                    callable,
+                    receiver: obj,
+                    explicit: false,
+                }));
             }
         }
         if name == "__getstate__" {
@@ -5211,6 +5259,7 @@ impl Context {
                         stdlib::io::NEWLINE_DECODER
                             | "BufferedRWPair"
                             | "BufferedReader"
+                            | "BufferedWriter"
                             | "IOBase"
                             | "BufferedIOBase"
                     )
@@ -5627,6 +5676,14 @@ impl Context {
                     return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
                 }
                 super::namedtuple::allocate(self, &args, &kwargs)
+            }
+            Value::Native(name)
+                if name
+                    .strip_suffix(".__sizeof__")
+                    .and_then(object_size::descriptor)
+                    .is_some() =>
+            {
+                self.native_sizeof(name.trim_end_matches(".__sizeof__"), &args, &kwargs)
             }
             Value::Native(name) if name == "object.__getstate__" => {
                 self.object_getstate(&args, &kwargs)

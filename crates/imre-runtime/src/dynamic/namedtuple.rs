@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::{Context, Error, Id, NONE, Result, Value, builtins};
+use super::{Context, Error, Id, NONE, Result, TRUE, Value, builtins};
 use ruff_python_stdlib::{identifiers::is_identifier, keyword::is_keyword};
 
 pub(super) const GETTER: &str = "collections._tuplegetter";
@@ -420,7 +420,6 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let scope = ctx.scope(&module_name, None);
     ctx.heap.keep(scope);
     let name = ctx.text(&typename);
-    ctx.bind(scope, "__name__", name);
     ctx.bind(scope, "__qualname__", name);
     ctx.bind(scope, "__module__", module);
     let fields = bind_field_metadata(ctx, scope, &names, &defaults);
@@ -566,8 +565,11 @@ pub(super) fn bind_new(
     let collections = ctx.module("collections")?;
     let factory = ctx.lookup_attr(collections, "_namedtuple_getnewargs")?;
     let name = ctx.text(typename);
-    let getargs = ctx.call(factory, vec![name], Vec::new())?;
-    ctx.bind(scope, "__getnewargs__", getargs);
+    let methods = ctx.call(factory, vec![name, TRUE], Vec::new())?;
+    ctx.heap.keep(methods);
+    let methods = ctx.unpack_items(methods, 2, None)?;
+    ctx.bind(scope, "__getnewargs__", methods[0]);
+    ctx.bind(scope, "_asdict", methods[1]);
     Ok(new)
 }
 

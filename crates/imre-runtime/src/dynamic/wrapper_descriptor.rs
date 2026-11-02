@@ -158,6 +158,7 @@ impl BuiltinDescriptor {
                 owner,
                 name,
                 method: !name.starts_with("__")
+                    || (owner == "list" && name == "__getitem__")
                     || (owner == defaultdict::CLASS && matches!(name, "__copy__" | "__missing__"))
                     || matches!(
                         name,
@@ -180,6 +181,14 @@ impl BuiltinDescriptor {
         let (owner, name) = match symbol {
             "type.__init__" => ("type", "__init__"),
             "object.__format__" => ("object", "__format__"),
+            "object.__sizeof__" => ("object", "__sizeof__"),
+            "dict.__sizeof__" => ("dict", "__sizeof__"),
+            "int.__sizeof__" => ("int", "__sizeof__"),
+            "str.__sizeof__" => ("str", "__sizeof__"),
+            "bytearray.__sizeof__" => ("bytearray", "__sizeof__"),
+            "list.__sizeof__" => ("list", "__sizeof__"),
+            "set.__sizeof__" => ("set", "__sizeof__"),
+            "frozenset.__sizeof__" => ("frozenset", "__sizeof__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
@@ -241,6 +250,7 @@ impl BuiltinDescriptor {
             method: matches!(
                 name,
                 "__format__"
+                    | "__sizeof__"
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
@@ -342,7 +352,7 @@ impl BuiltinDescriptor {
             }
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
-            deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
+            deque::CLASS => matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             _ => ctx.builtin_slot_accepts(receiver, self.owner),
         };
@@ -489,6 +499,8 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
+                    ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
                     ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",
@@ -513,7 +525,10 @@ impl BuiltinDescriptor {
                     ("__bytes__", "__doc__") => "Convert this value to exact type bytes.",
                     ("__complex__", "__doc__") => "Convert this value to exact type complex.",
                     ("__bytes__" | "__complex__", _) => "($self, /)",
-                    ("count" | "find", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
+                    ("index", "__doc__") if self.owner == "bytes" => {
+                        "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nRaise ValueError if the subsection is not found."
+                    }
+                    ("count" | "find" | "index", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }
@@ -556,6 +571,8 @@ impl BuiltinDescriptor {
                     ) => "($self, /)",
                     ("mro", "__doc__") => "Return a type's method resolution order.",
                     ("mro", _) => "($self, /)",
+                    ("__getitem__", "__doc__") if self.owner == "list" => "Return self[index].",
+                    ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

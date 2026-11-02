@@ -6,6 +6,34 @@ def current():
     from select import select
     from time import ctime, monotonic, perf_counter, time_ns
 
+    from types import SimpleNamespace
+    for name in ("time", "monotonic", "perf_counter"):
+        info = time.get_clock_info(name)
+        assert type(info) is SimpleNamespace and isinstance(info.implementation, str)
+        assert info.monotonic is (name != "time") and info.adjustable is (name == "time")
+        assert 0 < info.resolution <= 1
+    assert time.get_clock_info("monotonic") == time.get_clock_info("perf_counter")
+    for name, expected in (("time_ns", ValueError), (b"time", TypeError)):
+        try:
+            time.get_clock_info(name)
+        except expected:
+            pass
+        else:
+            raise AssertionError("invalid clock name accepted")
+
+    prefix = "get_clock_info() argument 1 must be str, not "
+    for kind, expected in (("x" * 60, TypeError), ("界" * 17, UnicodeDecodeError)):
+        try:
+            time.get_clock_info(type(kind, (), {})())
+        except expected as exc:
+            if expected is TypeError:
+                assert str(exc) == prefix + kind[:50]
+            else:
+                assert exc.object == prefix.encode() + kind.encode()[:50]
+                assert exc.reason == "unexpected end of data"
+        else:
+            raise AssertionError("invalid clock type accepted")
+
     first = monotonic()
     assert type(first) is float and time.monotonic is monotonic
     sleep = time.sleep

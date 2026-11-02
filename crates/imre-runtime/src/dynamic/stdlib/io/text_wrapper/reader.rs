@@ -1,9 +1,12 @@
-use super::{Codec, Context, Id, Result, StreamCodec};
+use super::{Codec, Context, FixedUnicode, Id, Result, StreamCodec};
+use crate::objects::Utf16Order;
 
 /// Keep incomplete encoding sequences and CRLF pairs across arbitrary binary read boundaries.
 pub(super) struct Reader {
     text: String,
     cursor: usize,
+    // CPython distinguishes no decoded chunk from an empty chunk at sized-read EOF.
+    pub(super) decoded_chunk_nonempty: Option<bool>,
     pub(super) tail: Vec<u8>,
     cr: bool,
     pub(super) beginning: bool,
@@ -48,6 +51,7 @@ impl Reader {
         Self {
             text: String::new(),
             cursor: 0,
+            decoded_chunk_nonempty: None,
             tail: Vec::new(),
             cr: false,
             beginning,
@@ -60,7 +64,33 @@ impl Reader {
             snapshot: Snapshot::None,
         }
     }
+    pub(super) fn final_chunk_has_text(&self) -> bool {
+        self.text.len() > self.chunk_start
+    }
+    pub(super) fn reset_decoder(&mut self) {
+        self.tail.clear();
+        self.cr = false;
+        self.seen = 0;
+        self.order = 0;
+        self.beginning = true;
+    }
+    pub(super) fn after_read_all(&mut self) {
+        // CPython clears decoded_chars on a full read or write only with a saved snapshot.
+        let retained = matches!(self.snapshot, Snapshot::None)
+            .then_some(self.decoded_chunk_nonempty)
+            .flatten();
+        self.discard();
+        self.decoded_chunk_nonempty = retained;
+    }
+    pub(super) fn after_write(&mut self) {
+        // An unseekable stream can still have unread decoded characters after a write.
+        if !matches!(self.snapshot, Snapshot::None) {
+            self.discard();
+        }
+        self.reset_decoder();
+    }
     pub(super) fn discard(&mut self) {
+        self.decoded_chunk_nonempty = None;
         self.text.clear();
         self.cursor = 0;
         self.tail.clear();
@@ -199,7 +229,7 @@ impl Reader {
         codec: StreamCodec,
         end: bool,
     ) -> Result<(StreamCodec, Vec<u8>)> {
-        if matches!(codec, StreamCodec::Utf16(_) | StreamCodec::Utf32 { .. }) {
+        if let StreamCodec::Wide { format, bom } = codec {
             let mut raw = Vec::new();
             raw.try_reserve(
                 self.tail
@@ -210,17 +240,15 @@ impl Reader {
             .map_err(|_| crate::Error::allocation())?;
             raw.extend_from_slice(&self.tail);
             raw.extend_from_slice(bytes);
-            let StreamCodec::Utf16(order) = codec else {
-                return Ok((codec, raw));
-            };
-            let order = if order != 0 || self.beginning {
-                order
-            } else if self.order != 0 {
-                self.order
+            let codec = if bom && !self.beginning {
+                StreamCodec::Wide {
+                    format: format.with_order(self.order),
+                    bom: false,
+                }
             } else {
-                super::NATIVE_ORDER
+                codec
             };
-            return Ok((StreamCodec::Utf16(order), raw));
+            return Ok((codec, raw));
         }
         let mut raw = std::mem::take(&mut self.tail);
         raw.try_reserve(bytes.len())
@@ -305,8 +333,11 @@ impl Reader {
                 _ => false,
             };
         let wide = match codec {
-            StreamCodec::Utf16(order) => {
-                let little = order < 0;
+            StreamCodec::Wide {
+                format: FixedUnicode::Utf16(order),
+                ..
+            } => {
+                let little = matches!(order, Utf16Order::Little);
                 decoded
                     .encode_utf16()
                     .flat_map(|c| {
@@ -318,11 +349,11 @@ impl Reader {
                     })
                     .eq(raw.iter().copied())
             }
-            StreamCodec::Utf32 { little } => decoded
+            StreamCodec::Wide { format, .. } => decoded
                 .chars()
                 .flat_map(|c| {
                     let point = u32::from(c);
-                    if little {
+                    if matches!(format, FixedUnicode::Utf32Le) {
                         point.to_le_bytes()
                     } else {
                         point.to_be_bytes()
@@ -331,18 +362,14 @@ impl Reader {
                 .eq(raw.iter().copied()),
             _ => false,
         };
-        let width = |c: char| {
-            if wide {
-                if matches!(codec, StreamCodec::Utf32 { .. }) {
-                    4
-                } else {
-                    c.len_utf16() * 2
-                }
-            } else if single_byte {
-                1
-            } else {
-                c.len_utf8()
-            }
+        let width = |c: char| match codec {
+            StreamCodec::Wide {
+                format: FixedUnicode::Utf16(_),
+                ..
+            } if wide => c.len_utf16() * 2,
+            StreamCodec::Wide { .. } if wide => 4,
+            _ if single_byte => 1,
+            _ => c.len_utf8(),
         };
         let universal = matches!(newline, None | Some(""));
         let pending = usize::from(self.cr);

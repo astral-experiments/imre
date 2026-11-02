@@ -1222,7 +1222,7 @@ impl Checker<'_> {
 
     /// List cursors re-read the live length; reverse cursors capture only their
     /// starting index. Dict/set/string cursors use the rooted runtime protocol.
-    fn prepare_container(
+    pub(super) fn prepare_container(
         &mut self,
         iterable: Expr,
         items: bool,

@@ -50,6 +50,21 @@ def current():
         print(name == constructor.__qualname__, constructor.__module__ == module.__name__)
         print(getattr(module, name) is constructor, type(constructor) is type(len))
         print(repr(constructor) == f"<built-in function {name}>")
+    cache = getattr(hashlib, "__builtin_constructor_cache")
+    calls = []
+
+    def factory(data=b"", *, usedforsecurity=True):
+        calls.append((data, usedforsecurity))
+        return hashlib.sha256(data)
+
+    cache["test-hash"] = factory
+    try:
+        result = hashlib.new("test-hash", b"abc", usedforsecurity=False)
+        assert result.hexdigest() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        assert calls == [(b"abc", False)]
+    finally:
+        del cache["test-hash"]
+
     available = hashlib.algorithms_available
     available.add("missing-hash")
     print(available is hashlib.algorithms_available, "missing-hash" in hashlib.algorithms_available,
