@@ -105,8 +105,10 @@ class Case(Base):
     events.append(('body', value))
     value = 'class'
     def label(self):
-        self.__seen = value
-        return super().label(), self.__seen
+        self.__seen: UnusedAnnotation = value
+        seen = {}
+        seen[0]: UnusedAnnotation = self.__seen
+        return super().label(), seen[0]
     def increment(self):
         self.previous += 1
     def nested(self):
@@ -222,12 +224,15 @@ def source_annotations():
     assert future.__annotate__.__closure__ is None
     assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
     for expr in ("(tmp := int)", "(yield int)", "(await T)"):
-        try:
-            compile("def f(arg: " + expr + "): pass", "<annotations>", "exec")
-        except SyntaxError:
-            pass
-        else:
-            raise AssertionError("invalid annotation expression compiled")
+        for source in ("def f(arg: " + expr + "): pass",
+                       "def f(obj): obj.field: " + expr + " = 1",
+                       "def f(obj): obj[0]: " + expr + " = 1"):
+            try:
+                compile(source, "<annotations>", "exec")
+            except SyntaxError:
+                pass
+            else:
+                raise AssertionError("invalid annotation expression compiled")
 
 
 def source_test_cases():

@@ -1481,17 +1481,22 @@ impl Program {
                     }
                 }
                 Stmt::AnnAssign(s) if function => {
-                    let ast::Expr::Name(name) = &*s.target else {
+                    if let ast::Expr::Name(name) = &*s.target {
+                        if let Some((kind, _)) = self.directives.get(name.id.as_str()) {
+                            return Err(Error::new(
+                                "SyntaxError",
+                                format!("annotated name '{}' can't be {}", name.id, kind.keyword()),
+                            ));
+                        }
+                        self.locals.insert(name.id.to_string());
+                    } else if s.value.is_none() {
                         return Err(unsupported("annotated assignment target"));
-                    };
-                    if let Some((kind, _)) = self.directives.get(name.id.as_str()) {
-                        return Err(Error::new(
-                            "SyntaxError",
-                            format!("annotated name '{}' can't be {}", name.id, kind.keyword()),
-                        ));
                     }
-                    self.locals.insert(name.id.to_string());
-                    // Local annotations establish the binding without evaluating the annotation.
+                    annotations::validate(
+                        &s.annotation,
+                        matches!(s.target.as_ref(), ast::Expr::Name(_)),
+                    )?;
+                    // Function-local annotations don't evaluate the annotation expression.
                     let Some(value) = s.value else { continue };
                     match self.lower_suspension(*value, line, function)? {
                         Some(value) => Instruction::Assign(vec![*s.target], value),
