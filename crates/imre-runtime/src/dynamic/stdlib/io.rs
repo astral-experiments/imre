@@ -19,6 +19,56 @@ pub(in crate::dynamic) enum MemoryStream {
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
+/// Select the default text encoding from the interpreter's startup configuration.
+pub(super) fn text_encoding(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_io.text_encoding() takes no keyword arguments",
+        ));
+    }
+    let (encoding, level) = match args {
+        [encoding] => (*encoding, 2),
+        [encoding, level] => {
+            let level = ctx
+                .index_integer(*level)?
+                .to_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?;
+            (*encoding, level)
+        }
+        [] => {
+            return Err(Error::new(
+                "TypeError",
+                "text_encoding expected at least 1 argument, got 0",
+            ));
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "text_encoding expected at most 2 arguments, got {}",
+                    args.len()
+                ),
+            ));
+        }
+    };
+    if encoding != NONE {
+        return Ok(encoding);
+    }
+    if ctx.config["warn_default_encoding"].as_bool() == Some(true) {
+        ctx.encoding_warning(level)?;
+    }
+    let name = if ctx.config["utf8_mode"].as_bool() == Some(true) {
+        "utf-8"
+    } else {
+        "locale"
+    };
+    Ok(ctx.heap.code_name(name))
+}
+
 pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let count = args.len() + kwargs.len();
     if count > 1 {
@@ -58,6 +108,8 @@ pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     let open = ctx.builtin("open");
     ctx.bind(module, "open", open);
+    let text_encoding = ctx.builtin("_io.text_encoding");
+    ctx.bind(module, "text_encoding", text_encoding);
     let unsupported = ctx.builtin("UnsupportedOperation");
     ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);

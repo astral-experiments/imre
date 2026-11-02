@@ -2053,6 +2053,8 @@ impl Context {
                 self.module("io")?;
                 let open = self.builtin("open");
                 self.bind(scope, "open", open);
+                let text_encoding = self.builtin("_io.text_encoding");
+                self.bind(scope, "text_encoding", text_encoding);
                 for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
                     let class = self.builtins[&format!("_io.{name}")];
                     self.bind(scope, name, class);

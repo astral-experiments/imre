@@ -48,6 +48,7 @@ mod socket;
 mod structure;
 mod traceback;
 pub(super) mod urllib;
+mod warnings;
 mod zipimport;
 
 /// The JIT observer is a sys attribute with its own namespace, outside the import cache.
@@ -817,6 +818,9 @@ pub(super) fn call(
 ) -> Result<Id> {
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
+    }
+    if name == "_io.text_encoding" {
+        return io::text_encoding(ctx, args, kwargs);
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);

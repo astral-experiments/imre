@@ -1028,6 +1028,18 @@ def main():
                 "os", "posix",
             )
 
+        for mode in ("0", "1"):
+            compare(
+                "-I", "-X", f"utf8={mode}", "-c",
+                "import io; print(io.text_encoding(None))",
+            )
+        compare(
+            "-I", "-X", "warn_default_encoding", "-W", "error::EncodingWarning", "-c",
+            "from _io import text_encoding\n"
+            "try: text_encoding(None)\n"
+            "except EncodingWarning as exc: print(str(exc))",
+        )
+
         subset_method = root / "set_issubset.py"
         for statement in (
             "print({1, 2}.issubset([2, 1]))",
@@ -1536,6 +1548,7 @@ def report(text):
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_io_text_encoding.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
