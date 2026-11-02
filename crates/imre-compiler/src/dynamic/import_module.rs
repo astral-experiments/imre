@@ -56,9 +56,17 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "urllib.error" => Some((
+            "urllib/error.py",
+            include_str!("../../stdlib/urllib/error.py"),
+        )),
         "urllib.request" => Some((
             "urllib/request.py",
             include_str!("../../stdlib/urllib/request.py"),
+        )),
+        "urllib.response" => Some((
+            "urllib/response.py",
+            include_str!("../../stdlib/urllib/response.py"),
         )),
         "urllib.parse" => Some((
             "urllib/parse.py",

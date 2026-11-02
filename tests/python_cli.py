@@ -1874,6 +1874,7 @@ def report(text):
             "boxed_os_walk.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
+            "boxed_urllib_request.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
