@@ -24,6 +24,18 @@ try:
         f.seek(0)
         assert f.read() == b"aZ"
     assert raw.closed and f.closed
+    for context in (Derived(io.FileIO(path,"r+"), 4), tempfile.TemporaryFile("w+b")):
+        marker = RuntimeError("context body")
+        try:
+            with context as stream:
+                assert stream is context
+                raise marker
+        except RuntimeError as caught:
+            assert caught is marker and context.closed
+        else: raise AssertionError("exception suppressed")
+        try: context.__enter__()
+        except ValueError: pass
+        else: raise AssertionError("closed stream entered")
     with io.open(path, "rb+") as opened:
         assert type(opened) is r and opened.read() == b"aZ"
     with tempfile.TemporaryFile("w+b") as tf:

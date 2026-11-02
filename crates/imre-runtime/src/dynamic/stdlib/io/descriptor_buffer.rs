@@ -57,13 +57,13 @@ pub(in crate::dynamic) fn prepare_writer_shutdown(ctx: &Context) {
         if !armed.get() || fd.closed() {
             continue;
         }
-        let owner = if fd.reading {
+        let kind = if fd.reading {
             "BufferedRandom"
         } else {
             "BufferedWriter"
         };
         let base = ctx.find_in_mro(class, |candidate| {
-            (ctx.heap.get(candidate).io_kind() == Some(owner)).then_some(candidate)
+            (ctx.heap.get(candidate).io_kind() == Some(kind)).then_some(candidate)
         });
         let native = base.is_some_and(|base| {
             ["__del__", "__getattribute__", "closed", "close", "flush"]

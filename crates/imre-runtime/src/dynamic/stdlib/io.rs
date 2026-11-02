@@ -792,6 +792,7 @@ pub(in super::super) fn call(
                     | "StringIO"
                     | "BufferedReader"
                     | "BufferedWriter"
+                    | "BufferedRandom"
             )
         });
     if layout == Some("BufferedRandom") && matches!(name, "__enter__" | "__exit__") {
