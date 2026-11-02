@@ -2199,6 +2199,7 @@ impl Context {
                 let disabled = self.int(0);
                 self.bind(scope, "ENABLE_SPECIALIZATION", disabled);
                 self.bind(scope, "ENABLE_SPECIALIZATION_FT", disabled);
+                stdlib::opcode::install(self, module, scope);
             }
             "_frozen_importlib" => {
                 let external = self.module("_frozen_importlib_external")?;

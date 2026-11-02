@@ -39,6 +39,7 @@ mod math;
 mod metadata;
 mod operator;
 mod ordered_dict;
+pub(super) mod opcode;
 pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
@@ -964,6 +965,9 @@ pub(super) fn call(
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_opcode.") {
+        return opcode::call(ctx, method, &args[1..], kwargs);
     }
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);

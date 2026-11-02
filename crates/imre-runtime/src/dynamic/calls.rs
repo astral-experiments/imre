@@ -2222,6 +2222,11 @@ impl Context {
                             "__text_signature__" if method == "sys._getframemodulename" => {
                                 Some("($module, /, depth=0)")
                             }
+                            "__text_signature__"
+                                if let Some(name) = method.strip_prefix("_opcode.") =>
+                            {
+                                Some(stdlib::opcode::signature(name))
+                            }
                             "__text_signature__" if method == "sys.audit" => {
                                 Some("($module, event, /, *args)")
                             }
