@@ -2238,6 +2238,7 @@ def report(text):
             "boxed_asyncio_policy.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
+            "boxed_dict_view_equality.py",
             "boxed_set_issubset.py",
             "boxed_set_operator_descriptors.py",
             "boxed_set_union.py",
