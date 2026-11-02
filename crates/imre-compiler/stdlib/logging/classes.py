@@ -3,7 +3,7 @@
 import logging
 import os.path
 import sys
-from logging import Formatter, Logger, LogRecord, getLevelName, getLevelNamesMapping, getLogger
+from logging import Formatter, Logger, LogRecord, getLevelNamesMapping, getLogger
 from imre._logging import (
     _Level, _Lock, _TextOutput, _fallback, _file_encoding_uses_utf8, _lookup_handler,
     _print_active_exception, _rename_handler,
