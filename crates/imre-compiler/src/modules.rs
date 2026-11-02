@@ -1864,8 +1864,14 @@ impl IntrinsicModule {
             (Self::IoNative, "TextIOWrapper") => {
                 Intrinsic::ObjectRuntimeExport("_io.TextIOWrapper")
             }
+            (Self::Io, "open") => Intrinsic::ObjectRuntimeExport("io.open"),
+            (Self::IoNative, "open") => Intrinsic::ObjectRuntimeExport("_io.open"),
             (Self::Io | Self::IoNative, "open_code") => {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
+            }
+            (Self::Io, "BufferedReader") => Intrinsic::ObjectRuntimeExport("io.BufferedReader"),
+            (Self::IoNative, "BufferedReader") => {
+                Intrinsic::ObjectRuntimeExport("_io.BufferedReader")
             }
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
             (Self::Io, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),

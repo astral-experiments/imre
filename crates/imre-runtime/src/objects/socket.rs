@@ -77,6 +77,18 @@ impl SocketInput {
         })
     }
 
+    /// Consume buffered input first, otherwise receive at most the requested bytes once.
+    pub(crate) fn read1(&mut self, target: &mut [u8]) -> io::Result<usize> {
+        if self.buffer.position() < self.buffer.get_ref().len() as u64 {
+            return io::Read::read(&mut self.buffer, target);
+        }
+        // SAFETY: target is writable for its length, and receive does not retain it.
+        match unsafe { receive(self.as_raw_fd(), target.as_mut_ptr(), target.len(), 0) } {
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
+            result => result,
+        }
+    }
+
     pub(crate) fn close(&mut self) -> io::Result<()> {
         let Some(socket) = self.socket.take() else {
             return Ok(());
