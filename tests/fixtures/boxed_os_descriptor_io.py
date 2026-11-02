@@ -138,6 +138,37 @@ def check_preadv():
     expect_errno(preadv, (fd, [head], 0), errno.EBADF)
 
 
+def check_writev():
+    from os import writev
+
+    assert writev is os.writev is posix.writev
+    data = bytearray(b"abc")
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        parts = (b"<", data, memoryview(data)[1:], memoryview(b"|>"))
+        assert writev(fd, parts) == 8
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+        assert os.pread(fd, 8, 0) == b"<abcbc|>"
+        assert writev(fd, []) == 0
+        probe = bytearray(b"unchanged")
+        try:
+            writev(fd, [probe, object()])
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writev accepted a non-buffer")
+        probe.append(0)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+    expect_errno(writev, (fd, [b"x"]), errno.EBADF)
+
+    reader, writer = os.pipe()
+    os.close(reader)
+    try:
+        expect_errno(writev, (writer, [b"x", b"y"]), errno.EPIPE)
+    finally:
+        os.close(writer)
+
+
 def check_splice():
     from os import splice
 
@@ -173,6 +204,7 @@ def current():
         check_splice()
         check_readv()
         check_preadv()
+        check_writev()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)

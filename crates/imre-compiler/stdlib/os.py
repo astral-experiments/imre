@@ -24,7 +24,7 @@ if sys.platform == "linux":
     from posix import RWF_HIPRI, RWF_NOWAIT, preadv
     from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
-    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv
+    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, writev
     for _name in vars(_posix):
         if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
             globals()[_name] = getattr(_posix, _name)
