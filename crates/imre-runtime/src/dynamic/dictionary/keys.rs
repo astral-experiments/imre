@@ -31,6 +31,12 @@ pub(super) struct Index {
     generation: usize,
 }
 
+impl Index {
+    pub(super) fn buffer_bytes(&self) -> usize {
+        self.slots.capacity() * size_of::<usize>() + self.hashes.capacity() * size_of::<i64>()
+    }
+}
+
 struct Probe {
     index: usize,
     perturb: usize,

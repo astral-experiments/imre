@@ -1816,6 +1816,7 @@ impl IntrinsicModule {
                 Intrinsic::TracebackFormatter("traceback.print_exception")
             }
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
+            (Self::Sys, "getsizeof") => Intrinsic::ObjectRuntimeExport("sys.getsizeof"),
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),

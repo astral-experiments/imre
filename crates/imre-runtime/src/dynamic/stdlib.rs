@@ -60,6 +60,7 @@ pub(super) mod signal;
 mod socket;
 mod structure;
 mod subprocess;
+mod system_size;
 pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
@@ -533,6 +534,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_ordered_dict_popitem"
             | "_ordered_dict_repr"
             | "_ordered_dict_setdefault"
+            | "_ordered_dict_sizeof"
             | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
@@ -1208,6 +1210,9 @@ pub(super) fn call(
     }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
+    }
+    if name == "sys.getsizeof" {
+        return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
     if name == "sys.getrecursionlimit" {
         if !kwargs.is_empty() {
