@@ -103,6 +103,7 @@ def current():
     assert callable_alias.__module__ == unpack_alias.__module__ == "typing"
     custom = type(callable_alias)(Origin, (int, str), inst=False)
     assert custom._name is None and custom._inst is False and custom.origin_only == 1
+    assert custom.copy_with.__name__ == generic.copy_with.__name__ == "copy_with"
     assert custom.copy_with.__self__ is custom and custom.copy_with((str, int)).__args__ == (str, int)
     assert unpack_alias.copy_with((typing.Tuple[str],)) == typing.Unpack[typing.Tuple[str]]
     missing = object()

@@ -1858,6 +1858,11 @@ class _SpecialGenericAlias(_NotIterable):
             return self._getitem(params)
 
     def copy_with(self, params):
+        cls = type(self)
+        if cls is _typing._UnpackGenericAlias:
+            return cls(self.__origin__, params)
+        if cls is _typing._CallableGenericAlias:
+            return cls(self.__origin__, params, name=self._name, inst=self._inst)
         return _typing._GenericAlias(self.__origin__, params, name=self._name, inst=self._inst)
 
     def __instancecheck__(self, value):
@@ -1980,13 +1985,6 @@ ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))
 
 
 # Reconstruction callables and arguments used by CPython's typing alias reducers.
-def _copy_generic_alias(alias, params):
-    cls = type(alias)
-    if cls is _typing._UnpackGenericAlias:
-        return cls(alias.__origin__, params)
-    return cls(alias.__origin__, params, name=alias._name, inst=alias._inst)
-
-
 def _reduce_generic_alias(alias):
     from operator import getitem
     origin = globals()[alias._name] if alias._name else alias.__origin__

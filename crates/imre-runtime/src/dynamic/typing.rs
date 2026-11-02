@@ -1118,7 +1118,7 @@ pub(super) fn include_generic_alias_methods(
 
 fn generic_alias_method(ctx: &Context, name: &str) -> Option<Id> {
     match name {
-        "copy_with" => ctx.module_value("typing", "_copy_generic_alias"),
+        "copy_with" => ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name),
         "__reduce__" => ctx.module_value("typing", "_reduce_generic_alias"),
         _ => None,
     }
