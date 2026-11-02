@@ -876,13 +876,32 @@ impl Context {
                 "issubclass() arg 2 must be a class, a tuple of classes, or a union",
             ));
         }
-        self.require_checkable_protocol(parent)?;
-        if self.has_abc_subclass_hook(parent)
-            && let Some(result) = self.abc_hook_result(child, parent)?
-        {
+        self.check_runtime_protocol(parent, true)?;
+        self.abc_subclass_check(child, parent)
+    }
+
+    /// Consult ABC hooks and registrations without the public protocol argument guards.
+    pub(super) fn abc_subclass_check(&mut self, child: Id, parent: Id) -> Result<bool> {
+        let protocol = self.is_protocol_declaration(parent);
+        let key = [parent, child];
+        if protocol && let Some(&result) = self.heap.protocol_subclass_cache.get(&key) {
             return Ok(result);
         }
-        Ok(self.subclass(child, parent))
+        let result = if self.has_abc_subclass_hook(parent)
+            && let Some(matched) = self.abc_hook_result(child, parent)?
+        {
+            matched
+        } else {
+            self.subclass(child, parent)
+        };
+        if protocol {
+            self.heap
+                .protocol_subclass_cache
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            self.heap.protocol_subclass_cache.insert(key, result);
+        }
+        Ok(result)
     }
 
     pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
@@ -3198,6 +3217,14 @@ impl Context {
                 }
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
+                }
+                if name == "_abc_caches_clear" && self.is_protocol_declaration(obj) {
+                    let callable = self.builtin("abc._abc_caches_clear");
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: true,
+                    }));
                 }
                 if name == "register"
                     && self.heap.get(obj).instance_class().is_none()
@@ -5774,6 +5801,11 @@ impl Context {
         if let Some(&protocol) = self.classes.get("typing.Protocol")
             && bases.iter().any(|&base| self.subclass(base, protocol))
         {
+            if self.scope_name(scope, "__subclasshook__").is_none()
+                && let Some(hook) = self.module_value("typing", "_proto_hook")
+            {
+                self.bind_local(scope, "__subclasshook__", hook);
+            }
             let declaration = bases.contains(&protocol);
             if declaration {
                 self.validate_protocol_bases(&bases)?;
@@ -5872,10 +5904,7 @@ impl Context {
         }
         self.init_abstract_class(class, scope)?;
         if self.is_protocol_declaration(class) {
-            let freeze = self
-                .module_value("typing", "_freeze_protocol_members")
-                .ok_or_else(|| Error::new("RuntimeError", "missing protocol initializer"))?;
-            self.call(freeze, vec![class, annotations], Vec::new())?;
+            self.call_typing_helper("_freeze_protocol_members", vec![class, annotations])?;
         }
         if let Some((parents, fields, annotate, generic)) = typed_dict_fields {
             if let Some(generic) = generic {

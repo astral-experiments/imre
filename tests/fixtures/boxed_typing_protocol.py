@@ -105,3 +105,39 @@ def current():
             assert str(error) == f"Protocols can only inherit from other protocols, got {base!r}"
         else:
             raise AssertionError(f"unexpected protocol base: {base!r}")
+
+    @typing.runtime_checkable
+    class HasLower(Protocol):
+        def lower(self): ...
+
+    assert issubclass(str, HasLower) and isinstance("text", HasLower)
+    assert not issubclass(object, HasLower)
+
+    class Candidate: pass
+    assert not issubclass(Candidate, HasLower)
+    Candidate.lower = str.lower
+    assert not issubclass(Candidate, HasLower)
+    assert isinstance(Candidate(), HasLower)
+    HasLower._abc_caches_clear()
+    assert issubclass(Candidate, HasLower)
+    Candidate.lower = None
+    assert issubclass(Candidate, HasLower) and isinstance(Candidate(), HasLower)
+    HasLower._abc_caches_clear()
+    assert not isinstance(Candidate(), HasLower)
+
+    class Registered: pass
+    assert not issubclass(Registered, HasLower)
+    HasLower.register(Registered)
+    assert issubclass(Registered, HasLower)
+
+    class Proxy:
+        @property
+        def __class__(self): return Registered
+
+    assert isinstance(Proxy(), HasLower)
+
+    @typing.runtime_checkable
+    class HasAddNote(Protocol):
+        def add_note(self, note): ...
+
+    assert issubclass(ValueError, HasAddNote)
