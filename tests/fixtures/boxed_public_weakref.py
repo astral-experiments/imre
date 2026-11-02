@@ -1,6 +1,6 @@
 from _weakref import ref as raw_ref
 from _weakrefset import WeakSet as raw_set
-from weakref import WeakKeyDictionary, WeakMethod, WeakSet, WeakValueDictionary, ref
+from weakref import CallableProxyType, ProxyType, WeakKeyDictionary, WeakMethod, WeakSet, WeakValueDictionary, ref
 
 
 class Key:
@@ -15,6 +15,8 @@ class Key:
 
 
 def current():
+    for cls in (ref, ProxyType, CallableProxyType):
+        assert cls.__qualname__ == cls.__name__
     print(ref is raw_ref, WeakSet is raw_set, WeakMethod.__bases__ == (ref,))
     first, equal, collision = Key("first"), Key("first"), Key("second")
     caches = [WeakKeyDictionary(), WeakKeyDictionary(), WeakKeyDictionary()]
