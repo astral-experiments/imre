@@ -79,6 +79,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "sched_getscheduler" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
         }
+        "posix_fallocate" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.posix_fallocate")
+        }
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),

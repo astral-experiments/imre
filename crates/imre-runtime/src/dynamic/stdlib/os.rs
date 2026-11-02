@@ -374,7 +374,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "link"
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux") && name == "sendfile")
+        || (cfg!(target_os = "linux") && matches!(name, "posix_fallocate" | "sendfile"))
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -811,6 +811,26 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix_fallocate" {
+        let [fd, offset, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix_fallocate expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let length = file_offset(ctx, *length)?;
+        loop {
+            // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
+            match unsafe { libc::posix_fallocate(fd, offset, length) } {
+                0 => return Ok(NONE),
+                libc::EINTR => ctx.dispatch_signals()?,
+                code => return Err(super::os_error(std::io::Error::from_raw_os_error(code))),
+            }
+        }
     }
     if name == "getppid" {
         if !args.is_empty() {
