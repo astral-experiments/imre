@@ -1445,10 +1445,9 @@ fn strptime_args(
             } else {
                 type_name(ctx, arg)
             };
-            return Err(Error::new(
-                "TypeError",
-                format!("strptime() argument {} must be str, not {kind}", i + 1),
-            ));
+            let text = string_argument_message("strptime", i + 1, &kind)
+                .map_err(|error| ctx.decode_error(error))?;
+            return Err(Error::new("TypeError", text));
         }
     }
 
