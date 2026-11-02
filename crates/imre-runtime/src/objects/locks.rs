@@ -48,6 +48,14 @@ impl PrimitiveLock {
     }
 }
 
+// CPython rounds up to microseconds. Windows reserves 0xffffffff milliseconds for INFINITE.
+const MAX_TIMEOUT_NS: i64 = if cfg!(windows) {
+    0xffff_fffe * 1_000_000
+} else {
+    i64::MAX / 1_000 * 1_000
+};
+pub(crate) const TIMEOUT_MAX: f64 = (MAX_TIMEOUT_NS / 1_000_000_000) as f64;
+
 /// Validate the requested wait before inspecting the lock, including nonblocking calls.
 fn wait_duration(blocking: bool, ns: i64) -> Result<Option<Duration>> {
     if ns == -1_000_000_000 {
@@ -65,13 +73,7 @@ fn wait_duration(blocking: bool, ns: i64) -> Result<Option<Duration>> {
             "timeout value must be a non-negative number",
         ));
     }
-    // CPython rounds up to microseconds. Windows reserves 0xffffffff milliseconds for INFINITE.
-    let limit = if cfg!(windows) {
-        0xffff_fffe * 1_000_000
-    } else {
-        i64::MAX / 1_000 * 1_000
-    };
-    if ns > limit {
+    if ns > MAX_TIMEOUT_NS {
         return Err(Error::new(
             Kind::OverflowError,
             "timeout value is too large",
