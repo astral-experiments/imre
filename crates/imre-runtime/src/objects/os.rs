@@ -14,6 +14,7 @@ use std::io;
 pub(super) mod links;
 pub(crate) mod scandir;
 pub(super) mod stat_result;
+pub(crate) use links::readlink_at;
 pub(crate) use stat_result::float_seconds;
 
 /// The target's primary or alternate separator, shared by typed and boxed imports.
@@ -32,6 +33,14 @@ pub extern "C" fn imre_os_separator(alternate: u32) -> *const Str {
         return std::ptr::null();
     };
     separator_string(sep)
+}
+
+pub(crate) const LINE_SEPARATOR: &str = if cfg!(windows) { "\r\n" } else { "\n" };
+
+/// Return the target operating system's text line separator.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_linesep() -> *const Str {
+    separator_string(LINE_SEPARATOR)
 }
 
 /// Return the target search-path separator as an interned one-character string.

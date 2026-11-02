@@ -29,12 +29,6 @@ pub(super) fn resolve(
         path.push(id);
         let mut base: Option<usize> = None;
         if let Some(args) = &node.arguments {
-            if !args.keywords.is_empty() {
-                return Err(module.error(
-                    node,
-                    "class metaclasses and keyword arguments are unsupported",
-                ));
-            }
             for argument in &args.args {
                 if mapping_base(graph, definition.module, argument)
                     || (args.args.len() == 1
@@ -54,8 +48,16 @@ pub(super) fn resolve(
                     other => other,
                 };
                 match graph.resolve(definition.module, origin) {
+                    Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                        "codecs.IncrementalDecoder",
+                    ))) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "codec base class requires object lowering")
+                        );
+                    }
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
-                        if args.args.len() == 1 => {}
+                        if args.args.len() == 1 && args.keywords.is_empty() => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}
                     Some(Binding::Definition(source)) if ids.contains_key(&source) => {
                         if source.module == definition.module
@@ -253,11 +255,11 @@ pub(super) fn infer_fields(
     module: usize,
     init: &ast::StmtFunctionDef,
     fields: &mut Vec<Field>,
-) -> Result<(), String> {
+) {
     let params = init
         .parameters
         .iter_non_variadic_params()
-        .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann.clone())))
+        .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann)))
         .collect::<HashMap<_, _>>();
     for stmt in &init.body {
         let ast::Stmt::Assign(assign) = stmt else {
@@ -274,7 +276,7 @@ pub(super) fn infer_fields(
             continue;
         }
         let ann = match &*assign.value {
-            ast::Expr::Name(name) => params.get(name.id.as_str()).cloned(),
+            ast::Expr::Name(name) => params.get(name.id.as_str()).map(|&ann| ann.clone()),
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "list")
                     && graph.resolve(module, &call.func).is_none()
@@ -332,5 +334,4 @@ pub(super) fn infer_fields(
             });
         }
     }
-    Ok(())
 }

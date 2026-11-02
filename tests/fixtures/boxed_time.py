@@ -4,7 +4,7 @@ import time
 
 def current():
     from select import select
-    from time import monotonic, perf_counter
+    from time import ctime, monotonic, perf_counter
 
     first = monotonic()
     assert type(first) is float and time.monotonic is monotonic
@@ -26,7 +26,9 @@ def current():
     assert len(time.gmtime(now)) == len(time.localtime(now)) == 9
     assert time.gmtime().tm_isdst == time.gmtime(None).tm_isdst == 0
     assert isinstance(time.localtime(None), time.struct_time)
+    assert ctime is time.ctime and type(ctime()) is type(ctime(None)) is str
     for stamp in (0, -1, json.loads("-0.125"), 951782400, 1699162200, 1699165800):
+        print(ctime(stamp))
         for convert in (time.gmtime, time.localtime):
             t = convert(stamp)
             assert type(t) is time.struct_time and isinstance(t, tuple)
@@ -41,6 +43,11 @@ def current():
         def __index__(self):
             return -1
 
+    class Seconds(float):
+        def __index__(self):
+            raise AssertionError("ctime read a float subclass through __index__")
+
+    assert ctime(Index()) == ctime(Seconds(-0.5)) == ctime(-1)
     assert time.gmtime(Index()) == time.gmtime(-1)
     custom = time.struct_time(time.gmtime(0), {"tm_zone": "custom", "tm_gmtoff": 30})
     assert tuple(custom) == tuple(time.gmtime(0))

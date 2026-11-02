@@ -50,6 +50,9 @@ impl Emitter<'_, '_> {
             TextOperation::Predicate(predicate) => {
                 let symbol = match predicate {
                     TextPredicate::Alnum => "imre_str_isalnum",
+                    TextPredicate::Ascii => "imre_str_is_ascii",
+                    TextPredicate::Alpha => "imre_str_isalpha",
+                    TextPredicate::Digit => "imre_str_isdigit",
                     TextPredicate::Space => "imre_str_isspace",
                     TextPredicate::Lower => "imre_str_is_lower",
                     TextPredicate::Upper => "imre_str_is_upper",

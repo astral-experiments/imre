@@ -1,0 +1,60 @@
+import sys
+
+
+def caller():
+    return sys._getframe(1)
+
+
+def suspended():
+    frame = sys._getframe()
+    yield frame, frame.f_back
+    yield sys._getframe(), frame.f_back
+
+
+def current():
+    frame = sys._getframe()
+    assert caller() is frame and frame.f_globals is globals()
+    assert frame.f_code.co_name == 'current' and frame.f_lineno > frame.f_code.co_firstlineno
+
+    def resume(generator):
+        return next(generator)
+
+    generator = suspended()
+    saved, first_caller = next(generator)
+    assert first_caller is frame and saved.f_back is None
+    same, second_caller = resume(generator)
+    assert same is saved and saved.f_back is None
+    assert second_caller.f_code is resume.__code__ and second_caller.f_back is frame
+    generator.close()
+    assert saved.f_back is None
+    saved.clear()
+    assert saved.f_globals is globals()
+    assert sys._getframe.__text_signature__ == '($module, depth=0, /)'
+    try:
+        sys._getframe(2**40)
+    except OverflowError:
+        pass
+    else:
+        raise AssertionError('depth did not fit in a C int')
+
+    observed = []
+    def hook(event, arguments):
+        if event == 'object.__getattr__' and arguments == (frame, 'f_code'):
+            raise PermissionError('blocked frame code')
+        if event == 'sys._getframe':
+            observed.extend(arguments)
+            raise PermissionError('blocked frame')
+    sys.addaudithook(hook)
+    assert second_caller.f_back is frame
+    try:
+        sys._getframe(0)
+    except PermissionError as exc:
+        assert str(exc) == 'blocked frame' and observed == [frame]
+    else:
+        raise AssertionError('audit hook veto ignored')
+    try:
+        frame.f_code
+    except PermissionError as exc:
+        assert str(exc) == 'blocked frame code'
+    else:
+        raise AssertionError('frame code audit hook veto ignored')

@@ -44,37 +44,67 @@ mod units;
 use units::Output;
 pub(crate) use units::emit_units;
 
+enum LlvmType {
+    I1,
+    I8,
+    I64,
+    Double,
+    Ptr,
+}
+
+/// Runtime descriptor tags for concrete words. Nullable is ORed with the payload tag.
+#[repr(u32)]
+enum WordKind {
+    None = 0,
+    Bool = 1,
+    Int = 2,
+    Str = 3,
+    IntList = 4,
+    Object = 5,
+    Record = 6,
+    Float = 7,
+    Bytes = 8,
+    Union = 9,
+    Enum = 10,
+    BuiltinClass = 11,
+    ForwardRef = 12,
+    AnnotationValue = 13,
+    Function = 14,
+    Nullable = 256,
+}
+
 impl Type {
-    fn llvm(self) -> &'static str {
+    /// Classifies the type once for LLVM values, retain/release calls, and field descriptors.
+    fn word_kind(self) -> WordKind {
         match self {
-            Self::Int
-            | Self::IntEnum(_)
-            | Self::StrEnum(_)
-            | Self::Enum(_)
-            | Self::Optional(_)
-            | Self::Union(_)
-            | Self::StringIterable => "i64",
-            Self::Float => "double",
-            Self::Bool => "i1",
-            Self::Str
-            | Self::ForwardRef(_)
-            | Self::AnnotationValue(_)
+            Self::None => WordKind::None,
+            Self::Bool => WordKind::Bool,
+            Self::Int => WordKind::Int,
+            Self::Float => WordKind::Float,
+            Self::Str | Self::StrLiteral(_) => WordKind::Str,
+            Self::BuiltinClass => WordKind::BuiltinClass,
+            Self::ForwardRef(_) => WordKind::ForwardRef,
+            Self::FunctionRef => WordKind::Function,
+            Self::AnnotationValue(_) => WordKind::AnnotationValue,
+            Self::IntEnum(_) | Self::StrEnum(_) | Self::Enum(_) => WordKind::Enum,
+            Self::Bytes => WordKind::Bytes,
+            Self::Union(_) | Self::StringIterable => WordKind::Union,
+            Self::ListInt => WordKind::IntList,
+            Self::Class(_)
+            | Self::VarTuple(_)
+            | Self::Tuple(_)
             | Self::CmpKey(..)
-            | Self::BuiltinClass
-            | Self::StrLiteral(_)
-            | Self::Bytes
-            | Self::ListInt
-            | Self::Class(_)
             | Self::Callable(_)
-            | Self::List(_)
+            | Self::ModuleSpec(_)
+            | Self::SysImplementation
+            | Self::CompletedProcess(..) => WordKind::Record,
+            Self::List(_)
             | Self::Dict(_)
             | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::FrozenStrings
             | Self::StringKeys
-            | Self::NativeModule
-            | Self::ModuleNamespace
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -87,9 +117,9 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
-            | Self::ModuleSpec(_)
-            | Self::SysImplementation
-            | Self::CompletedProcess(..)
+            | Self::TextIO
+            | Self::StringIO
+            | Self::HandlerLock
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -101,9 +131,8 @@ impl Type {
             | Self::Popen(..)
             | Self::ActivePopen
             | Self::AsyncProcess(_)
-            | Self::TextIO
-            | Self::StringIO
-            | Self::HandlerLock
+            | Self::NativeModule
+            | Self::ModuleNamespace
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -112,12 +141,11 @@ impl Type {
             | Self::CacheState(_)
             | Self::ProcessSelectorClass
             | Self::ClockTime
-            | Self::FunctionRef
-            | Self::OverloadStub
             | Self::Calendar(_)
-            | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::Placeholder(_)
+            | Self::OverloadStub
+            | Self::PlainObject
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
@@ -144,116 +172,45 @@ impl Type {
             | Self::RegexMatch
             | Self::SourceModule
             | Self::BytesIO
-            | Self::BinaryIO
-            | Self::VarTuple(_)
-            | Self::Tuple(_) => "ptr",
-            Self::None => "i8",
+            | Self::BinaryIO => WordKind::Object,
+            Self::Optional(_) => WordKind::Nullable,
+        }
+    }
+
+    fn llvm_type(self) -> LlvmType {
+        match self.word_kind() {
+            WordKind::None => LlvmType::I8,
+            WordKind::Bool => LlvmType::I1,
+            WordKind::Float => LlvmType::Double,
+            WordKind::Int | WordKind::Enum | WordKind::Nullable | WordKind::Union => LlvmType::I64,
+            WordKind::Str
+            | WordKind::IntList
+            | WordKind::Object
+            | WordKind::Record
+            | WordKind::Bytes
+            | WordKind::BuiltinClass
+            | WordKind::ForwardRef
+            | WordKind::AnnotationValue
+            | WordKind::Function => LlvmType::Ptr,
+        }
+    }
+
+    fn llvm(self) -> &'static str {
+        match self.llvm_type() {
+            LlvmType::I1 => "i1",
+            LlvmType::I8 => "i8",
+            LlvmType::I64 => "i64",
+            LlvmType::Double => "double",
+            LlvmType::Ptr => "ptr",
         }
     }
 
     fn initial(self) -> &'static str {
-        match self {
-            Self::Int => "1",
-            Self::Float => "0.0",
-            Self::Str
-            | Self::ForwardRef(_)
-            | Self::AnnotationValue(_)
-            | Self::CmpKey(..)
-            | Self::BuiltinClass
-            | Self::StrLiteral(_)
-            | Self::Bytes
-            | Self::ListInt
-            | Self::Class(_)
-            | Self::Callable(_)
-            | Self::List(_)
-            | Self::Dict(_)
-            | Self::ChainMap(_)
-            | Self::Set(_)
-            | Self::Deque(_)
-            | Self::FrozenStrings
-            | Self::StringKeys
-            | Self::NativeModule
-            | Self::ModuleNamespace
-            | Self::Iterator
-            | Self::Cursor(_)
-            | Self::ByteOutput
-            | Self::TupleBuffer
-            | Self::Exception
-            | Self::NamedException(_)
-            | Self::ObjectValue
-            | Self::ReadOnlyObjectMapping
-            | Self::ImportException
-            | Self::TimeoutExpired
-            | Self::Path
-            | Self::PurePath(_)
-            | Self::ModuleSpec(_)
-            | Self::SysImplementation
-            | Self::CompletedProcess(..)
-            | Self::EventLoop
-            | Self::Coroutine(_)
-            | Self::Task(_)
-            | Self::TaskGroup
-            | Self::Document(_)
-            | Self::GeneratorContext
-            | Self::DirectoryContext(_)
-            | Self::Semaphore
-            | Self::Popen(..)
-            | Self::ActivePopen
-            | Self::AsyncProcess(_)
-            | Self::TextIO
-            | Self::StringIO
-            | Self::HandlerLock
-            | Self::LogFormatter
-            | Self::LogRecord
-            | Self::Logger
-            | Self::LogManager
-            | Self::TimedFileHandler
-            | Self::CacheState(_)
-            | Self::ProcessSelectorClass
-            | Self::ClockTime
-            | Self::FunctionRef
-            | Self::OverloadStub
-            | Self::Calendar(_)
-            | Self::PlainObject
-            | Self::StrDescriptor(_)
-            | Self::Placeholder(_)
-            | Self::SimpleNamespace(_)
-            | Self::PathInfo
-            | Self::CodecInfo
-            | Self::Poll
-            | Self::Socket
-            | Self::CodecWriterClass
-            | Self::CodecWriter
-            | Self::TextOutput
-            | Self::Hash
-            | Self::JsonDecoder
-            | Self::ZipFile
-            | Self::ZipInfo
-            | Self::Context
-            | Self::ContextMissing
-            | Self::WeakProxy(_)
-            | Self::ContextVar(_)
-            | Self::ContextToken(_)
-            | Self::CsvReader
-            | Self::Patch(_)
-            | Self::RegexPattern
-            | Self::JsonRoot
-            | Self::JsonValue
-            | Self::JsonObject
-            | Self::RegexMatch
-            | Self::SourceModule
-            | Self::BytesIO
-            | Self::BinaryIO
-            | Self::VarTuple(_)
-            | Self::Tuple(_) => "null",
-            Self::Bool
-            | Self::None
-            | Self::IntEnum(_)
-            | Self::StrEnum(_)
-            | Self::Enum(_)
-            | Self::Optional(_)
-            | Self::Union(_)
-            | Self::StringIterable => "0",
+        match self.llvm_type() {
+            LlvmType::I64 if self == Self::Int => "1",
+            LlvmType::Double => "0.0",
+            LlvmType::Ptr => "null",
+            LlvmType::I1 | LlvmType::I8 | LlvmType::I64 => "0",
         }
     }
 }
@@ -845,111 +802,25 @@ impl Emitter<'_, '_> {
             return;
         }
         let ty = self.module.types.payload(value.ty).unwrap_or(value.ty);
-        if ty == Type::Float {
-            if value.ty != Type::Float {
-                self.void_call(&format!("imre_float_box_{operation}"), &[value]);
+        let family = match ty.word_kind() {
+            WordKind::Float => {
+                if value.ty != ty {
+                    self.void_call(&format!("imre_float_box_{operation}"), &[value]);
+                }
+                return;
             }
-            return;
-        }
-        let family = match ty {
-            Type::Int => "int",
-            Type::Union(_) | Type::StringIterable => "union",
-            Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
-            Type::Bytes => "bytes",
-            Type::ListInt => "list",
-            Type::Class(_)
-            | Type::Tuple(_)
-            | Type::Callable(_)
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::VarTuple(_)
-            | Type::ModuleSpec(_)
-            | Type::CmpKey(..)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..) => "record",
-            Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO => "object",
-            Type::Float
-            | Type::Bool
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::None => return,
-            Type::Optional(_) => unreachable!("optional types are flattened"),
+            WordKind::Int => "int",
+            WordKind::Union => "union",
+            WordKind::Str | WordKind::BuiltinClass => "str",
+            WordKind::Bytes => "bytes",
+            WordKind::IntList => "list",
+            WordKind::Record
+            | WordKind::ForwardRef
+            | WordKind::Function
+            | WordKind::AnnotationValue => "record",
+            WordKind::Object => "object",
+            WordKind::None | WordKind::Bool | WordKind::Enum => return,
+            WordKind::Nullable => unreachable!("optional types are flattened"),
         };
         let name = if value.ty == Type::Int {
             format!("{operation}_int_nonzero")
@@ -1970,6 +1841,8 @@ impl Emitter<'_, '_> {
             ));
             self.prepare_directory_frame(&value);
         }
+        let command_flags = self.module.command_flags.as_ref();
+        let ignore_env = command_flags.is_some_and(|flags| flags.ignore_environment);
         if entry {
             let startup = if self.uses_orig_argv {
                 "imre_seq_layout_with_orig_argv"
@@ -1982,24 +1855,43 @@ impl Emitter<'_, '_> {
             ));
             self.line(format!(
                 "call void @imre_integer_digits_init(i32 {})",
-                u32::from(self.module.ignore_python_environment)
+                u32::from(ignore_env)
+            ));
+            self.line(format!(
+                "call void @imre_context_warnings_init(i32 {})",
+                command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
-            if let Some(utf8) = self.module.command_utf8_mode {
+            if let Some(utf8_mode) = command_flags.and_then(|flags| flags.utf8_mode) {
                 self.line(format!(
                     "call void @imre_stdio_command_init(i32 {}, i32 {})",
-                    u32::from(self.module.ignore_python_environment),
-                    u32::from(utf8)
+                    u32::from(ignore_env),
+                    u32::from(utf8_mode)
                 ));
+            } else if ignore_env {
+                self.line("call void @imre_stdio_isolated_init()");
             } else {
                 self.line("call void @imre_stdio_init()");
             }
+            let warnoptions = command_flags.map_or(&[][..], |flags| flags.warnoptions.as_slice());
+            let options = if warnoptions.is_empty() {
+                "null".to_owned()
+            } else {
+                let mut json =
+                    serde_json::to_vec(warnoptions).expect("serializable Python -W options");
+                json.push(0);
+                format!("@{}", self.byte_array(json))
+            };
+            self.line(format!(
+                "call void @imre_warning_options_init(i32 {}, ptr {options})",
+                u32::from(ignore_env),
+            ));
             self.line("call void @imre_init_literals()");
         }
         if entry && self.uses_cache_paths {
             self.line(format!(
                 "call void @imre_cache_paths_init(i32 {})",
-                u32::from(!self.module.ignore_python_environment)
+                u32::from(!ignore_env)
             ));
         }
         if entry && self.uses_linecache {
@@ -5449,6 +5341,10 @@ impl Emitter<'_, '_> {
                 }
                 none()
             }
+            Builtin::SysContextAwareWarnings => {
+                let raw = self.instruction("call i64 @imre_sys_context_aware_warnings()");
+                self.tag_small(&raw)
+            }
             Builtin::SysGetRecursionLimit => {
                 self.call("imre_sys_getrecursionlimit", Type::Int, &[])
             }
@@ -5493,6 +5389,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
+            Builtin::OsLinesep => self.call("imre_os_linesep", returns, &[]),
             Builtin::OsPathsep => self.call("imre_os_pathsep", returns, &[]),
             Builtin::OsSeparator { alternate } => {
                 let operand = self.checked_instruction(format!(
@@ -6806,6 +6703,11 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::StructCyclePrefix => self.call(
+                "imre_struct_cycle_prefix",
+                Type::Int,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::ListReserveRange => {
                 let count = self.index_word(&args[4].value, true);
                 let name = if args[0].value.ty == Type::ByteOutput {
@@ -7770,16 +7672,6 @@ impl Emitter<'_, '_> {
                     Type::Str | Type::StrLiteral(_) => {
                         self.void_call("imre_print_str", &[&args[0].value])
                     }
-                    Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => {
-                        let text = if matches!(args[0].value.ty, Type::Enum(_)) {
-                            self.call("imre_enum_string", Type::Str, &[&args[0].value])
-                        } else {
-                            self.enum_text(&args[0].value, false)
-                        };
-                        let text = self.owned(text);
-                        self.void_call("imre_print_str", &[&text]);
-                        self.release(&text);
-                    }
                     Type::Bytes => self.void_call("imre_print_bytes", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
@@ -7787,99 +7679,7 @@ impl Emitter<'_, '_> {
                         self.checked_line(format!("call void @imre_print_bool(i32 {byte})"));
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
-                    Type::ListInt
-                    | Type::ForwardRef(_)
-                    | Type::FunctionRef
-                    | Type::AnnotationValue(_)
-                    | Type::CmpKey(..)
-                    | Type::BuiltinClass
-                    | Type::Class(_)
-                    | Type::List(_)
-                    | Type::Dict(_)
-                    | Type::ChainMap(_)
-                    | Type::Set(_)
-                    | Type::Deque(_)
-                    | Type::FrozenStrings
-                    | Type::StringKeys
-                    | Type::Iterator
-                    | Type::Cursor(_)
-                    | Type::ByteOutput
-                    | Type::TupleBuffer
-                    | Type::Exception
-                    | Type::NamedException(_)
-                    | Type::ObjectValue
-                    | Type::ReadOnlyObjectMapping
-                    | Type::ImportException
-                    | Type::TimeoutExpired
-                    | Type::Path
-                    | Type::PurePath(_)
-                    | Type::TextIO
-                    | Type::StringIO
-                    | Type::HandlerLock
-                    | Type::EventLoop
-                    | Type::Coroutine(_)
-                    | Type::Task(_)
-                    | Type::TaskGroup
-                    | Type::Document(_)
-                    | Type::GeneratorContext
-                    | Type::DirectoryContext(_)
-                    | Type::Semaphore
-                    | Type::Popen(..)
-                    | Type::ActivePopen
-                    | Type::AsyncProcess(_)
-                    | Type::NativeModule
-                    | Type::ModuleNamespace
-                    | Type::LogFormatter
-                    | Type::LogRecord
-                    | Type::Logger
-                    | Type::LogManager
-                    | Type::TimedFileHandler
-                    | Type::CacheState(_)
-                    | Type::ProcessSelectorClass
-                    | Type::ClockTime
-                    | Type::Calendar(_)
-                    | Type::StrDescriptor(_)
-                    | Type::Placeholder(_)
-                    | Type::OverloadStub
-                    | Type::PlainObject
-                    | Type::SimpleNamespace(_)
-                    | Type::PathInfo
-                    | Type::CodecInfo
-                    | Type::Poll
-                    | Type::Socket
-                    | Type::CodecWriterClass
-                    | Type::CodecWriter
-                    | Type::TextOutput
-                    | Type::Hash
-                    | Type::JsonDecoder
-                    | Type::ZipFile
-                    | Type::ZipInfo
-                    | Type::Context
-                    | Type::ContextMissing
-                    | Type::WeakProxy(_)
-                    | Type::ContextVar(_)
-                    | Type::ContextToken(_)
-                    | Type::CsvReader
-                    | Type::Patch(_)
-                    | Type::RegexPattern
-                    | Type::JsonRoot
-                    | Type::JsonValue
-                    | Type::JsonObject
-                    | Type::RegexMatch
-                    | Type::SourceModule
-                    | Type::BytesIO
-                    | Type::BinaryIO
-                    | Type::ModuleSpec(_)
-                    | Type::SysImplementation
-                    | Type::CompletedProcess(..)
-                    | Type::Tuple(_)
-                    | Type::VarTuple(_)
-                    | Type::Optional(_)
-                    | Type::Callable(_)
-                    | Type::Union(_)
-                    | Type::StringIterable => {
-                        unreachable!("container printing is rejected")
-                    }
+                    _ => unreachable!("print expects a scalar operand"),
                 }
                 none()
             }
@@ -8092,108 +7892,14 @@ impl Emitter<'_, '_> {
     }
 
     fn word(&mut self, value: &Value) -> String {
-        match value.ty {
-            Type::Int
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::Optional(_)
-            | Type::Union(_)
-            | Type::StringIterable => value.operand.clone(),
-            Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
-            Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
-            Type::None => "0".to_owned(),
-            Type::Str
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::CmpKey(..)
-            | Type::BuiltinClass
-            | Type::StrLiteral(_)
-            | Type::Bytes
-            | Type::ListInt
-            | Type::Class(_)
-            | Type::Callable(_)
-            | Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::ModuleSpec(_)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..)
-            | Type::VarTuple(_)
-            | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
+        match value.ty.llvm_type() {
+            LlvmType::I64 => value.operand.clone(),
+            LlvmType::Double => {
+                self.instruction(format!("bitcast double {} to i64", value.operand))
+            }
+            LlvmType::I1 => self.instruction(format!("zext i1 {} to i64", value.operand)),
+            LlvmType::Ptr => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
+            LlvmType::I8 => "0".to_owned(),
         }
     }
 
@@ -8206,108 +7912,12 @@ impl Emitter<'_, '_> {
 
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
-        let operand = match ty {
-            Type::Int
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::Optional(_)
-            | Type::Union(_)
-            | Type::StringIterable => word,
-            Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
-            Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
-            Type::None => "0".to_owned(),
-            Type::Str
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::CmpKey(..)
-            | Type::BuiltinClass
-            | Type::StrLiteral(_)
-            | Type::Bytes
-            | Type::ListInt
-            | Type::Class(_)
-            | Type::Callable(_)
-            | Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::ModuleSpec(_)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..)
-            | Type::VarTuple(_)
-            | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
+        let operand = match ty.llvm_type() {
+            LlvmType::I64 => word,
+            LlvmType::Double => self.instruction(format!("bitcast i64 {word} to double")),
+            LlvmType::I1 => self.instruction(format!("trunc i64 {word} to i1")),
+            LlvmType::Ptr => self.instruction(format!("inttoptr i64 {word} to ptr")),
+            LlvmType::I8 => "0".to_owned(),
         };
         Value {
             ty,
@@ -8713,84 +8323,17 @@ fn read_only_integer(expression: &Expr) -> bool {
 /// and expression scopes are each visited once, so nested scopes do not cause
 /// repeated recursive walks of their bodies.
 fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> bool {
-    fn expression_writes(expression: &Expr, written: &mut [bool]) {
-        match &expression.kind {
-            ExprKind::Scope { body, value, clear } => {
-                crate::list_specialization::mark_writes(body, written);
-                for &slot in clear {
-                    written[slot] = true;
-                }
-                crate::ir::walk_expressions(body, &mut |value| match &value.kind {
-                    ExprKind::Scope { body, clear, .. } => {
-                        crate::list_specialization::mark_writes(body, written);
-                        for &slot in clear {
-                            written[slot] = true;
-                        }
-                    }
-                    ExprKind::Bind(slot, _) => written[*slot] = true,
-                    _ => {}
-                });
-                expression_writes(value, written);
-            }
-            ExprKind::Bind(slot, value) => {
-                written[*slot] = true;
-                expression_writes(value, written);
-            }
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Callable {
-                receiver: Some(receiver),
-                ..
-            } => expression_writes(receiver, written),
-            ExprKind::Invoke { callable, args } => {
-                expression_writes(callable, written);
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression_writes(key, written);
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression_writes(left, written);
-                expression_writes(right, written);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression_writes(test, written);
-                expression_writes(yes, written);
-                expression_writes(no, written);
-            }
-            ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression_writes(value, written),
-            ExprKind::Exception {
-                message: Some(message),
-                ..
-            } => expression_writes(message, written),
-            _ => {}
-        }
-    }
     let mut written = vec![false; locals];
-    expression_writes(expression, &mut written);
+    crate::ir::walk_expression(expression, &mut |value| match &value.kind {
+        ExprKind::Scope { body, clear, .. } => {
+            crate::list_specialization::mark_writes(body, &mut written);
+            for &slot in clear {
+                written[slot] = true;
+            }
+        }
+        ExprKind::Bind(slot, _) => written[*slot] = true,
+        _ => {}
+    });
     !written[slot]
 }
 
@@ -8876,108 +8419,14 @@ fn iterable_mode(ty: Type) -> u32 {
     }
 }
 
-/// Must match the descriptor kinds in the runtime. Nullable words preserve the
-/// payload's ownership operation, with bit 8 allowing the absent zero value.
+/// Nullable words carry their payload's kind. Bare callbacks use the function descriptor.
 fn representation_kind(ty: Type, types: &Types) -> u32 {
     match ty {
-        Type::None => 0,
-        Type::Bool => 1,
-        Type::Int => 2,
-        Type::Float => 7,
-        Type::Str | Type::StrLiteral(_) => 3,
-        Type::BuiltinClass => 11,
-        Type::ForwardRef(_) => 12,
-        Type::FunctionRef => 14,
-        Type::AnnotationValue(_) => 13,
-        Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => 10,
-        Type::Bytes => 8,
-        Type::Union(_) | Type::StringIterable => 9,
-        Type::ListInt => 4,
-        Type::Callable(_) if types.is_plain_callback(ty) => 14,
-        Type::Class(_)
-        | Type::VarTuple(_)
-        | Type::Tuple(_)
-        | Type::CmpKey(..)
-        | Type::Callable(_)
-        | Type::ModuleSpec(_)
-        | Type::SysImplementation
-        | Type::CompletedProcess(..) => 6,
-        Type::List(_)
-        | Type::Dict(_)
-        | Type::ChainMap(_)
-        | Type::Set(_)
-        | Type::Deque(_)
-        | Type::FrozenStrings
-        | Type::StringKeys
-        | Type::Iterator
-        | Type::Cursor(_)
-        | Type::ByteOutput
-        | Type::TupleBuffer
-        | Type::Exception
-        | Type::NamedException(_)
-        | Type::ObjectValue
-        | Type::ReadOnlyObjectMapping
-        | Type::ImportException
-        | Type::TimeoutExpired
-        | Type::Path
-        | Type::PurePath(_)
-        | Type::TextIO
-        | Type::StringIO
-        | Type::HandlerLock
-        | Type::EventLoop
-        | Type::Coroutine(_)
-        | Type::Task(_)
-        | Type::TaskGroup
-        | Type::Document(_)
-        | Type::GeneratorContext
-        | Type::DirectoryContext(_)
-        | Type::Semaphore
-        | Type::Popen(..)
-        | Type::ActivePopen
-        | Type::AsyncProcess(_)
-        | Type::NativeModule
-        | Type::ModuleNamespace
-        | Type::LogFormatter
-        | Type::LogRecord
-        | Type::Logger
-        | Type::LogManager
-        | Type::TimedFileHandler
-        | Type::CacheState(_)
-        | Type::ProcessSelectorClass
-        | Type::ClockTime
-        | Type::Calendar(_)
-        | Type::StrDescriptor(_)
-        | Type::Placeholder(_)
-        | Type::OverloadStub
-        | Type::PlainObject
-        | Type::SimpleNamespace(_)
-        | Type::PathInfo
-        | Type::CodecInfo
-        | Type::Poll
-        | Type::Socket
-        | Type::CodecWriterClass
-        | Type::CodecWriter
-        | Type::TextOutput
-        | Type::Hash
-        | Type::JsonDecoder
-        | Type::ZipFile
-        | Type::ZipInfo
-        | Type::Context
-        | Type::ContextMissing
-        | Type::WeakProxy(_)
-        | Type::ContextVar(_)
-        | Type::ContextToken(_)
-        | Type::CsvReader
-        | Type::Patch(_)
-        | Type::RegexPattern
-        | Type::JsonRoot
-        | Type::JsonValue
-        | Type::JsonObject
-        | Type::RegexMatch
-        | Type::SourceModule
-        | Type::BytesIO
-        | Type::BinaryIO => 5,
-        Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
+        Type::Optional(_) => {
+            WordKind::Nullable as u32 | representation_kind(types.payload(ty).unwrap(), types)
+        }
+        Type::Callable(_) if types.is_plain_callback(ty) => WordKind::Function as u32,
+        _ => ty.word_kind() as u32,
     }
 }
 
@@ -9008,10 +8457,10 @@ fn record_name(ty: Type) -> String {
 /// types; booleans/None use word storage so descriptor offsets stay uniform
 /// within the runtime's existing 64-bit ABI.
 fn storage_type(ty: Type) -> &'static str {
-    match ty.llvm() {
-        "ptr" => "ptr",
-        "double" => "double",
-        _ => "i64",
+    match ty.llvm_type() {
+        LlvmType::Ptr => "ptr",
+        LlvmType::Double => "double",
+        LlvmType::I1 | LlvmType::I8 | LlvmType::I64 => "i64",
     }
 }
 
@@ -9198,7 +8647,7 @@ declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
-declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare i64 @imre_popen_poll(ptr)
 declare void @imre_popen_set_poll(ptr, ptr, i1 zeroext)
 declare void @imre_popen_del_poll(ptr)
 declare zeroext i1 @imre_popen_signal_override(ptr, i64)
@@ -9608,8 +9057,12 @@ declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
 declare void @imre_integer_digits_init(i32)
+declare void @imre_context_warnings_init(i32)
+declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
+declare void @imre_stdio_isolated_init()
+declare void @imre_warning_options_init(i32, ptr)
 declare i64 @imre_tuple_index(i64, i64)
 declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
@@ -9668,6 +9121,7 @@ declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
 declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
+declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
 declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
@@ -9750,16 +9204,9 @@ define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline 
   ret i64 %selected
 }
 
-; Reassociation is exact only if the integral term, count and every partial
-; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
-define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
-entry:
-  %single = icmp eq i64 %count, 1
-  br i1 %single, label %one, label %bounds
-one:
-  %single_sum = fadd double %sum, %term
-  ret double %single_sum
-bounds:
+; Bound the absolute value of every partial sum for an integral projection.
+; The strict comparison also rejects a rounded-up or rounded-down boundary.
+define internal i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count) alwaysinline nounwind {
   %n = uitofp i64 %count to double
   %ni = icmp ule i64 %count, 9007199254740992
   %t = call double @llvm.trunc.f64(double %term)
@@ -9774,8 +9221,23 @@ bounds:
   %integral = and i1 %ti, %si
   %fits = and i1 %ni, %bounded
   %exact = and i1 %integral, %fits
+  ret i1 %exact
+}
+
+; Reassociation is exact only if the integral term, count and every partial
+; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
+define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
+entry:
+  %single = icmp eq i64 %count, 1
+  br i1 %single, label %one, label %bounds
+one:
+  %single_sum = fadd double %sum, %term
+  ret double %single_sum
+bounds:
+  %exact = call i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count)
   br i1 %exact, label %bulk, label %ordered
 bulk:
+  %n = uitofp i64 %count to double
   %product = fmul double %term, %n
   %result = fadd double %sum, %product
   ret double %result
@@ -9943,6 +9405,8 @@ declare ptr @imre_str_splitlines(ptr)
 declare ptr @imre_str_splitlines_options(ptr, i32)
 declare i32 @imre_str_isspace(ptr)
 declare i32 @imre_str_isalnum(ptr)
+declare i32 @imre_str_isalpha(ptr)
+declare i32 @imre_str_isdigit(ptr)
 declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
@@ -10024,6 +9488,7 @@ declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
 declare ptr @imre_sys_stdlib_module_names()
+declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
@@ -10038,6 +9503,7 @@ declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
 declare i32 @imre_errno_member_contains(ptr,ptr)
 declare ptr @imre_sys_thread_text(i32)
 declare ptr @imre_os_name()
+declare ptr @imre_os_linesep()
 declare ptr @imre_os_pathsep()
 declare ptr @imre_os_separator(i32)
 declare void @imre_doctest_capture_start()
@@ -10261,7 +9727,6 @@ declare i32 @imre_bytes_truthy(ptr)
 declare i32 @imre_str_contains(ptr, ptr)
 declare i32 @imre_str_list_contains(ptr, ptr)
 declare i32 @imre_int_list_contains(i64, ptr)
-declare void @imre_str_enum_table(ptr, i64)
 declare void @imre_enum_display_table(ptr, i64, ptr)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare i64 @imre_enum_lookup_int(i64, i64, i64)

@@ -48,6 +48,49 @@ def assertNotIsInstance(self, obj, cls, msg=None):
         self.fail(self._formatMessage(msg, standardMsg))
 
 
+def assertIsSubclass(self, cls, superclass, msg=None):
+    try:
+        if issubclass(cls, superclass):
+            return
+    except TypeError:
+        if not isinstance(cls, type):
+            self.fail(self._formatMessage(msg, f'{cls!r} is not a class'))
+        raise
+    if isinstance(superclass, tuple):
+        standardMsg = f'{cls!r} is not a subclass of any of {superclass!r}'
+    else:
+        standardMsg = f'{cls!r} is not a subclass of {superclass!r}'
+    self.fail(self._formatMessage(msg, standardMsg))
+
+
+def assertNotIsSubclass(self, cls, superclass, msg=None):
+    try:
+        if not issubclass(cls, superclass):
+            return
+    except TypeError:
+        if not isinstance(cls, type):
+            self.fail(self._formatMessage(msg, f'{cls!r} is not a class'))
+        raise
+    if isinstance(superclass, tuple):
+        for x in superclass:
+            if issubclass(cls, x):
+                superclass = x
+                break
+    standardMsg = f'{cls!r} is a subclass of {superclass!r}'
+    self.fail(self._formatMessage(msg, standardMsg))
+
+
+def assertNotHasAttr(self, obj, name, msg=None):
+    if hasattr(obj, name):
+        if isinstance(obj, ModuleType):
+            standardMsg = f'module {obj.__name__!r} has unexpected attribute {name!r}'
+        elif isinstance(obj, type):
+            standardMsg = f'type object {obj.__name__!r} has unexpected attribute {name!r}'
+        else:
+            standardMsg = f'{type(obj).__name__!r} object has unexpected attribute {name!r}'
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
 def assertIs(self, expr1, expr2, msg=None):
     if expr1 is not expr2:
         _raise_identity_failure(self, _safe_repr(expr1), _safe_repr(expr2), msg)
@@ -63,6 +106,9 @@ TestCase.assertEqual = assertEqual
 TestCase.assertNotEqual = assertNotEqual
 TestCase.assertIsInstance = assertIsInstance
 TestCase.assertNotIsInstance = assertNotIsInstance
+TestCase.assertIsSubclass = assertIsSubclass
+TestCase.assertNotIsSubclass = assertNotIsSubclass
+TestCase.assertNotHasAttr = assertNotHasAttr
 TestCase.assertIs = assertIs
 TestCase.assertIsNot = assertIsNot
 
@@ -173,3 +219,89 @@ def assertNotIn(self, member, container, msg=None):
 
 TestCase.assertIn = assertIn
 TestCase.assertNotIn = assertNotIn
+
+
+# From CPython 3.14.5, Lib/unittest/case.py.
+def assertAlmostEqual(self, first, second, places=None, msg=None,
+                      delta=None):
+    """Fail if the two objects are unequal as determined by their
+       difference rounded to the given number of decimal places
+       (default 7) and comparing to zero, or by comparing that the
+       difference between the two objects is more than the given
+       delta.
+
+       Note that decimal places (from zero) are usually not the same
+       as significant digits (measured from the most significant digit).
+
+       If the two objects compare equal then they will automatically
+       compare almost equal.
+    """
+    if first == second:
+        # shortcut
+        return
+    if delta is not None and places is not None:
+        raise TypeError("specify delta or places not both")
+
+    diff = abs(first - second)
+    if delta is not None:
+        if diff <= delta:
+            return
+
+        standardMsg = '%s != %s within %s delta (%s difference)' % (
+            _safe_repr(first),
+            _safe_repr(second),
+            _safe_repr(delta),
+            _safe_repr(diff))
+    else:
+        if places is None:
+            places = 7
+
+        if round(diff, places) == 0:
+            return
+
+        standardMsg = '%s != %s within %r places (%s difference)' % (
+            _safe_repr(first),
+            _safe_repr(second),
+            places,
+            _safe_repr(diff))
+    msg = self._formatMessage(msg, standardMsg)
+    raise self.failureException(msg)
+
+
+TestCase.assertAlmostEqual = assertAlmostEqual
+
+
+# From CPython 3.14.5 unittest.case. See ../docstrings/LICENSE.
+def _tail_type_check(self, s, tails, msg):
+    if not isinstance(tails, tuple):
+        tails = (tails,)
+    for tail in tails:
+        if isinstance(tail, str):
+            if not isinstance(s, str):
+                self.fail(self._formatMessage(msg,
+                        f'Expected str, not {type(s).__name__}'))
+        elif isinstance(tail, (bytes, bytearray)):
+            if not isinstance(s, (bytes, bytearray)):
+                self.fail(self._formatMessage(msg,
+                        f'Expected bytes, not {type(s).__name__}'))
+
+
+def assertEndsWith(self, s, suffix, msg=None):
+    try:
+        if s.endswith(suffix):
+            return
+    except (AttributeError, TypeError):
+        self._tail_type_check(s, suffix, msg)
+        raise
+    from unittest.util import safe_repr
+    a = safe_repr(s, short=True)
+    b = safe_repr(suffix)
+    if isinstance(suffix, tuple):
+        standardMsg = f"{a} doesn't end with any of {b}"
+    else:
+        standardMsg = f"{a} doesn't end with {b}"
+    self.fail(self._formatMessage(msg, standardMsg))
+
+
+TestCase._tail_type_check = _tail_type_check
+TestCase.assertEndsWith = assertEndsWith

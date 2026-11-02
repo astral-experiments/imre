@@ -1,4 +1,4 @@
-"""Regex exception from CPython 3.14.5 Lib/re/_constants.py (PSF-2.0)."""
+"""Regex exception and scanner loop from CPython 3.14.5 Lib/re (PSF-2.0)."""
 
 class PatternError(Exception):
     """Exception raised for invalid regular expressions.
@@ -36,3 +36,31 @@ class PatternError(Exception):
 
 # Backward compatibility after renaming in 3.13
 error = PatternError
+
+
+class Scanner:
+    def __init__(self, lexicon, flags=0):
+        from re import _compile_scanner
+        self.lexicon = lexicon
+        self.scanner = _compile_scanner(lexicon, flags)
+
+    def scan(self, string):
+        result = []
+        append = result.append
+        match = self.scanner.scanner(string).match
+        i = 0
+        while True:
+            m = match()
+            if not m:
+                break
+            j = m.end()
+            if i == j:
+                break
+            action = self.lexicon[m.lastindex-1][1]
+            if callable(action):
+                self.match = m
+                action = action(self, m.group())
+            if action is not None:
+                append(action)
+            i = j
+        return result, string[i:]

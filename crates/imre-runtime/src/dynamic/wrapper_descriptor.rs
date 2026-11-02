@@ -40,6 +40,8 @@ impl BuiltinDescriptor {
                     "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__call__",
                 ][..],
             )),
+            Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
+            Some(("bytes", attr)) => Some(("bytes", attr, &["endswith"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
@@ -47,6 +49,9 @@ impl BuiltinDescriptor {
             Some(("frozenset", attr)) => Some(("frozenset", attr, &["issubset"][..])),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
+            Some((stdlib::os::stat::CLASS, attr)) => {
+                Some((stdlib::os::stat::CLASS, attr, &["__reduce__"][..]))
+            }
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
         };
@@ -67,9 +72,15 @@ impl BuiltinDescriptor {
             "object.__format__" => ("object", "__format__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
+            "str.isascii" => ("str", "isascii"),
+            "str.isalpha" => ("str", "isalpha"),
+            "str.isdigit" => ("str", "isdigit"),
             "str.islower" => ("str", "islower"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
+            "object.__repr__" => ("object", "__repr__"),
+            "function.__call__" => ("function", "__call__"),
+            "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
@@ -92,7 +103,10 @@ impl BuiltinDescriptor {
         Some(Self {
             owner,
             name,
-            method: matches!(name, "__format__" | "islower"),
+            method: matches!(
+                name,
+                "__format__" | "isascii" | "isalpha" | "isdigit" | "islower"
+            ),
         })
     }
 
@@ -123,12 +137,21 @@ impl BuiltinDescriptor {
                 ctx.type_name(receiver) == class
             }
             "object" => true,
+            "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
+            "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => {
                 ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
             }
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
+            stdlib::os::stat::CLASS => matches!(
+                ctx.heap.get(receiver),
+                Value::NamedTuple {
+                    class: Some(stdlib::os::stat::CLASS),
+                    ..
+                }
+            ),
             stdlib::os::scandir::ENTRY => matches!(ctx.heap.get(receiver), Value::DirEntry(_)),
             stdlib::os::scandir::ITER => matches!(ctx.heap.get(receiver), Value::Scandir(_)),
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
@@ -148,7 +171,8 @@ impl BuiltinDescriptor {
                     "descriptor '{}' for '{}' objects doesn't apply to a '{}' object",
                     self.name,
                     self.owner,
-                    ctx.type_name(receiver)
+                    ctx.builtin_type_name(receiver)
+                        .unwrap_or_else(|| ctx.type_name(receiver))
                 ),
             ));
         }
@@ -172,6 +196,7 @@ impl BuiltinDescriptor {
                     && let Some(receiver) = receiver
                 {
                     match ctx.heap.get(receiver) {
+                        Value::NamedTuple { class: Some(stdlib::os::stat::CLASS), .. } => "stat_result",
                         Value::Instance { class, .. } => ctx
                             .class_attr(*class, "__qualname__")
                             .and_then(|name| ctx.str_value(name).ok())
@@ -185,6 +210,10 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),
+            "__text_signature__" if self.name == "__call__" => {
+                ctx.text("($self, /, *args, **kwargs)")
+            }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
@@ -192,16 +221,38 @@ impl BuiltinDescriptor {
             "__text_signature__" if matches!(self.name, "__add__" | "__iadd__") => {
                 ctx.text("($self, value, /)")
             }
+            "__text_signature__" if self.name == "endswith" => {
+                ctx.text("($self, suffix[, start[, end]], /)")
+            }
+            "__doc__" if self.name == "endswith" => ctx.text(format!(
+                "Return True if the {owner} ends with the specified suffix, False otherwise.\n\n  suffix\n    A bytes or a tuple of bytes to try.\n  start\n    Optional start position. Default: start of the {owner}.\n  end\n    Optional stop position. Default: end of the {owner}.",
+                owner = self.owner
+            )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("__reduce__", "__doc__") if self.owner == stdlib::os::stat::CLASS => return Some(NONE),
+                    ("__reduce__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /)",
+                    ("isascii", "__doc__") => {
+                        "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
+                    }
+                    ("isalpha", "__doc__") => {
+                        "Return True if the string is an alphabetic string, False otherwise.\n\nA string is alphabetic if all characters in the string are alphabetic and there\nis at least one character in the string."
+                    }
+                    ("isdigit", "__doc__") => {
+                        "Return True if the string is a digit string, False otherwise.\n\nA string is a digit string if all characters in the string are digits and there\nis at least one character in the string."
+                    }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
-                    ("islower", _) => "($self, /)",
+                    ("isascii" | "isalpha" | "isdigit" | "islower", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
                     }
+                    ("as_integer_ratio", "__doc__") => {
+                        "Return a pair of integers, whose ratio is exactly equal to the original float.\n\nThe ratio is in lowest terms and has a positive denominator.  Raise\nOverflowError on infinities and a ValueError on NaNs.\n\n>>> (10.0).as_integer_ratio()\n(10, 1)\n>>> (0.0).as_integer_ratio()\n(0, 1)\n>>> (-.25).as_integer_ratio()\n(-1, 4)"
+                    }
+                    ("as_integer_ratio", _) => "($self, /)",
                     ("append", _) => "($self, object, /)",
                     _ => "($self, index=-1, /)",
                 };
@@ -226,20 +277,24 @@ pub(super) fn descriptor_get(
         ));
     };
     let slot = match ctx.heap.get(descriptor) {
-        Value::Native(symbol) => BuiltinDescriptor::lookup(symbol),
-        _ => None,
-    }
-    .filter(|slot| slot.class() == class)
-    .ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!(
-                "descriptor '__get__' requires a '{class}' object but received a '{}'",
-                ctx.builtin_type_name(descriptor)
-                    .unwrap_or_else(|| ctx.type_name(descriptor))
-            ),
-        )
-    })?;
+        Value::ClassMethod(_) if class == "classmethod" => None,
+        Value::Native(symbol)
+            if let Some(slot) = BuiltinDescriptor::lookup(symbol)
+                && slot.class() == class =>
+        {
+            Some(slot)
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__get__' requires a '{class}' object but received a '{}'",
+                    ctx.builtin_type_name(descriptor)
+                        .unwrap_or_else(|| ctx.type_name(descriptor))
+                ),
+            ));
+        }
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -252,7 +307,16 @@ pub(super) fn descriptor_get(
             "__get__ expected at least 1 argument, got 0",
         )),
         [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
-        [receiver] | [receiver, _] => slot.bind(ctx, descriptor, receiver),
+        [receiver] | [receiver, _] => {
+            if let Some(slot) = slot {
+                return slot.bind(ctx, descriptor, receiver);
+            }
+            let owner = match arguments.get(1) {
+                None | Some(&NONE) => ctx.exact_type(receiver)?,
+                Some(&owner) => owner,
+            };
+            ctx.bind_attribute(descriptor, receiver, owner)
+        }
         _ => Err(Error::new(
             "TypeError",
             format!(

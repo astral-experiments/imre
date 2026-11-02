@@ -169,6 +169,7 @@ impl Checker<'_> {
                                 | ast::Expr::NoneLiteral(_)
                         ) =>
                 {
+                    abstract_methods.remove(n.id.as_str());
                     attributes.insert(n.id.to_string(), Some(false));
                 }
                 _ => {

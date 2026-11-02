@@ -89,6 +89,9 @@ REJECTED = {
     }, "no static binding"),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
+    "unused_resource_function": ({
+        "main.py": "from importlib.resources import files\nx: int = 'wrong'\n",
+    }, "expected int"),
     "unused_traceback_import": ({
         "main.py": "import helper\n",
         "helper.py": "import traceback as tb\ndef bad() -> int:\n    return 'wrong'\n",
@@ -97,6 +100,29 @@ REJECTED = {
         "main.py": "from helper import bad\nprint(bad())\n",
         "helper.py": "from traceback import format_exc\ndef bad() -> int:\n    return 'wrong'\n",
     }, "expected int, got str"),
+    "contextmanager_wrong_generator_return": ({
+        "main.py": "import helper\nimport sys\nsys.exit(0)\n",
+        "helper.py": (
+            "import collections.abc\nfrom contextlib import contextmanager\n"
+            "@contextmanager\ndef values() -> collections.abc.Generator[int, None, int]:\n"
+            "    yield 1\n    return 'wrong'\n"
+        ),
+    }, 'expected `int`, found `Literal["wrong"]`'),
+    "contextmanager_generator_missing_return": ({
+        "main.py": "import helper\nimport sys\nsys.exit(0)\n",
+        "helper.py": (
+            "from collections.abc import Generator\nfrom contextlib import contextmanager\n"
+            "@contextmanager\ndef values() -> Generator[int, None, int]:\n    yield 1\n"
+        ),
+    }, "always implicitly returns `None`"),
+    "contextmanager_generator_can_fall_through": ({
+        "main.py": "import helper\nimport sys\nsys.exit(0)\n",
+        "helper.py": (
+            "from collections.abc import Generator as Gen\nfrom contextlib import contextmanager as cm\n"
+            "@cm\ndef values(flag: bool) -> Gen[int, None, int]:\n"
+            "    yield 1\n    if flag:\n        return 2\n"
+        ),
+    }, "can implicitly return `None`"),
     "live_traceback_and_invalid_return": ({
         "main.py": "from helper import bad, render\nprint(render())\nprint(bad())\n",
         "helper.py": "import traceback as tb\ndef render():\n    return tb.format_exc()\ndef bad() -> int:\n    return 'wrong'\n",
@@ -151,6 +177,24 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "optional_platform_import": {
+        "main.py": "import configure\nfrom adapter import present, absent\nprint(present, absent)\n",
+        "configure.py": "import sys\nsys.platform = 'test-platform'\nprint('configure')\n",
+        "adapter.py": (
+            "import sys\n"
+            "if sys.platform in {'test-platform'}:\n"
+            "    from provider import value as present\n"
+            "else:\n"
+            "    present = None\n"
+            "if sys.platform == 'missing-platform':\n"
+            "    from unavailable import value as absent\n"
+            "else:\n"
+            "    absent = None\n"
+            "import after\n"
+        ),
+        "provider.py": "print('provider')\nvalue = 42\n",
+        "after.py": "print('after')\n",
+    },
     "wildcard_native_namespaces": {
         "main.py": "import paths\nimport prepare\nimport codes\nimport computed\n",
         "paths.py": (
@@ -216,6 +260,21 @@ ACCEPTED = {
             "def initialize():\n    print('initialized')\n    return [41]\n"
             "if t.TYPE_CHECKING:\n    from unavailable_at_runtime import token\n"
             "else:\n    token = initialize()\n"
+        ),
+    },
+    "contextmanager_generator_annotation": {
+        "helper.py": (
+            "from contextlib import contextmanager as manager\n"
+            "@manager\ndef values(value: int) -> str:\n"
+            "    yield str(value)\n    return 'done'\n"
+        ),
+        "main.py": (
+            "import sys\nfrom helper import values\n"
+            "raw = sys.modules[values.__module__].values.__wrapped__\n"
+            "assert raw.__annotations__ == {'value': int, 'return': str}\n"
+            "with values(3) as value:\n    print(value)\n"
+            "generator = raw(4)\nprint(next(generator))\n"
+            "try:\n    next(generator)\nexcept StopIteration as exc:\n    print(exc.value)\n"
         ),
     },
     "weak_method_export": {
@@ -342,8 +401,9 @@ ACCEPTED = {
     },
     "zip_source_spec": {
         "main.py": (
-            "import sys\nimport zipimport\nfrom importlib import import_module\n"
+            "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
             "from importlib.util import find_spec\nfrom witness import seen\n"
+            "def refresh():\n    assert sys.exception() is None\n    refresh_finder()\n"
             "for name in ('stored', 'deflated'):\n"
             "    sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/' + name + '.zip')\n"
             "    assert find_spec(name) is not None and name not in seen\n"
@@ -352,6 +412,26 @@ ACCEPTED = {
             "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
             "    assert spec.submodule_search_locations is package.__path__\n"
             "    print(seen, spec.loader.get_data(package.__path__[0] + '/message.txt'))\n"
+            "finder = spec.loader\n"
+            "with open(finder.archive, \"rb\") as archive:\n"
+            "    original = archive.read()\n"
+            "with open(finder.archive.rsplit(\"/\", 1)[0] + \"/stored.zip\", \"rb\") as archive:\n"
+            "    replacement = archive.read()\n"
+            "refresh_finder = finder.invalidate_caches\n"
+            "finder.invalidate_caches = refresh\n"
+            "try:\n"
+            "    with open(finder.archive, \"wb\") as archive:\n"
+            "        archive.write(replacement)\n"
+            "    assert finder.find_spec(\"stored\") is None\n"
+            "    assert invalidate_caches() is None\n"
+            "    assert finder.find_spec(\"deflated\") is None\n"
+            "    assert finder.find_spec(\"stored\").loader is finder\n"
+            "    assert finder.get_data(\"stored/message.txt\") == b\"hello\"\n"
+            "finally:\n"
+            "    del finder.invalidate_caches\n"
+            "    with open(finder.archive, \"wb\") as archive:\n"
+            "        archive.write(original)\n"
+            "    finder.invalidate_caches()\n"
         ),
         "witness.py": "seen = []\n",
     },
@@ -384,6 +464,11 @@ ACCEPTED = {
             "try:\n    SourceFileLoader('other', path + '.missing').get_code('other')\n"
             "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
         ),
+    },
+    "filesystem_resources": {
+        "main.py": (FIXTURES.parent / "boxed_filesystem_resources.py").read_text(),
+        "data/__init__.py": "",
+        "data/nested/message.txt": "hello\n",
     },
     "source_loader_path_stats": {
         "main.py": (

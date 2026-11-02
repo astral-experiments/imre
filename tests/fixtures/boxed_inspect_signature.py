@@ -101,3 +101,6 @@ except ValueError:
 
 assert omitted() and not omitted(None) and not omitted(object())
 assert type(inspect._sentinel) is object
+
+assert inspect.ismodule(inspect)
+assert not inspect.ismodule(inspect.Parameter)

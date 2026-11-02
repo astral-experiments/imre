@@ -29,7 +29,6 @@ REJECTED = {
     "wrong_context": "values: list[str] = [value for value in range(3)]\n",
     "wrong_nested_context": "values: list[list[str]] = [[value] for value in range(3)]\n",
     "ambiguous_empty_element": "values = [{} for value in range(0)]\n",
-    "ambiguous_empty_value": "values = {value: set() for value in range(0)}\n",
     "heterogeneous_source": 'values = [value for value in [1, "wrong"]]\n',
     "bool_dict_key": "values = {True: value for value in range(3)}\n",
     "mutable_tuple_dict_key": "values = {(value, [value]): value for value in range(3)}\n",

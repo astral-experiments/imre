@@ -202,9 +202,103 @@ class Cases(unittest.TestCase):
     assert visited == ["setup", "fail", "teardown", "setup", "pass", "teardown"]
 
 
+def source_name_deletion():
+    import gc
+    import weakref
+
+    namespace = {"weakref": weakref, "gc": gc, "name": "global"}
+    exec(
+        "class Box:\n"
+        "    name = 'local'\n"
+        "    del name\n"
+        "    remaining = name\n"
+        "def check():\n"
+        "    value = Box()\n"
+        "    ref = weakref.ref(value)\n"
+        "    del value\n"
+        "    gc.collect()\n"
+        "    return ref()\n",
+        namespace,
+    )
+    assert namespace["Box"].remaining == "global"
+    assert not hasattr(namespace["Box"], "name")
+    assert namespace["check"]() is None
+    try:
+        exec("def f():\n    del name\nf()", namespace)
+    except UnboundLocalError as error:
+        assert str(error) == "cannot access local variable 'name' where it is not associated with a value"
+    else:
+        raise AssertionError("deleting an unbound local must raise")
+    exec("del name", namespace)
+    assert "name" not in namespace
+
+
+def relative_import_hooks():
+    import sys
+
+    calls = []
+    missing = ImportError("relative hook failed")
+
+    def importer(name, globals_, locals_, fromlist, level):
+        assert globals_ is namespace and locals_ is local
+        calls.append((name, fromlist, level))
+        if name == "missing":
+            raise missing
+        return sys
+
+    namespace = {"__builtins__": {"__import__": importer}}
+    local = {}
+    exec("from sys import argv as absolute\nfrom . import argv as sibling\nfrom ..helper import argv as parent",
+         namespace, local)
+    assert local["absolute"] is local["sibling"] is local["parent"] is sys.argv
+    try:
+        exec("from .missing import attr", namespace, local)
+    except ImportError as error:
+        assert error is missing
+    else:
+        raise AssertionError("relative import hook exception was lost")
+    assert calls == [("sys", ("argv",), 0), ("", ("argv",), 1),
+                     ("helper", ("argv",), 2), ("missing", ("attr",), 1)]
+
+
+def source_match():
+    class Labels:
+        first = "hit"
+
+    calls = []
+    def observe(value):
+        calls.append(value)
+        return value
+
+    scope = {"Labels": Labels, "observe": observe}
+    exec("""
+def choose(value, guard):
+    match observe(value):
+        case Labels.first if observe(guard):
+            return "first"
+        case str():
+            return "text"
+        case ValueError():
+            return "exception"
+        case _:
+            return "other"
+""", scope)
+    choose = scope["choose"]
+    assert choose("hit", True) == "first"
+    assert choose("hit", False) == "text"
+    assert choose(5, False) == "other"
+    assert calls == ["hit", True, "hit", False, 5]
+    assert choose(ValueError("matched"), False) == "exception"
+
+
 def current():
+    source_match()
+    relative_import_hooks()
+    source_name_deletion()
     source_classes()
     source_test_cases()
+    source_nested_functions()
+    check_source_lambdas()
     syntax_members()
     for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
         config = {}
@@ -328,6 +422,109 @@ def current():
             operation()
         except (ValueError, TypeError) as error:
             print(type(error).__name__, str(error))
+
+
+def source_nested_functions():
+    namespace = {"__name__": "closures", "left": "global"}
+    exec(compile("""def outer(first):
+    left = first
+    def mid():
+        def inner(arg=left):
+            return left, arg
+        return inner
+    def sibling():
+        return left
+    inner = mid()
+    left = first + 1
+    return inner, sibling
+
+def missing():
+    def read():
+        return left
+    return read
+    left = 1
+""", "closures.py", "exec"), namespace)
+    inner, sibling = namespace["outer"](7)
+    assert inner() == (8, 7)
+    assert sibling() == 8
+    assert inner.__closure__[0] is sibling.__closure__[0]
+    assert inner.__code__.co_freevars == ("left",)
+    assert inner.__qualname__ == "outer.<locals>.mid.<locals>.inner"
+    second = namespace["outer"](11)[0]
+    assert second.__code__ is inner.__code__
+    assert second.__closure__[0] is not inner.__closure__[0]
+    assert second() == (12, 11)
+    try:
+        namespace["missing"]()()
+    except NameError as error:
+        assert "free variable 'left'" in str(error)
+    else:
+        raise AssertionError("unbound closure read a global")
+
+
+
+def check_source_lambdas():
+    namespace = {}
+    source = """events = []
+def make(x):
+    def default():
+        events.append(x)
+        return x
+    cb = lambda arg=default(), /, *, suffix=2: (x, arg, suffix)
+    x += 1
+    return cb
+
+maker = lambda x: lambda y: x + y
+def shadow(x):
+    return lambda x=x: x
+gen = lambda: (yield "ready")
+
+class Example:
+    def callback(self):
+        return lambda: __class__
+
+def from_class(x):
+    class Inner:
+        x = 99
+        callback = lambda self: x
+    return Inner().callback
+"""
+    exec(compile(source, "callbacks.py", "exec"), namespace)
+    make = namespace["make"]
+    first = make(4)
+    second = make(7)
+    assert namespace["events"] == [4, 7]
+    assert first() == (5, 4, 2)
+    assert first(9, suffix=1) == (5, 9, 1)
+    assert second() == (8, 7, 2)
+    assert first.__code__ is second.__code__
+    assert first.__closure__[0] is not second.__closure__[0]
+    assert first.__code__.co_freevars == ("x",)
+    assert first.__name__ == "<lambda>"
+    assert first.__qualname__ == "make.<locals>.<lambda>"
+    assert first.__code__.co_firstlineno == 6
+    try:
+        first(arg=1)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted positional-only argument")
+    assert namespace["shadow"](9).__closure__ is None
+    assert namespace["shadow"](9)() == 9
+    assert namespace["maker"](10)(3) == 13
+    instance = namespace["Example"]()
+    assert instance.callback()() is type(instance)
+    callback = namespace["from_class"](3)
+    assert callback() == 3
+    assert callback.__func__.__code__.co_freevars == ("x",)
+    stream = namespace["gen"]()
+    assert next(stream) == "ready"
+    try:
+        stream.send(11)
+    except StopIteration as error:
+        assert error.value == 11
+    else:
+        raise AssertionError("generator did not return")
 
 
 if __name__ == "__main__":

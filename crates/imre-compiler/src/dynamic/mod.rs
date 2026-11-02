@@ -4,7 +4,7 @@ mod emit;
 mod import_module;
 pub(super) use import_module::{RegisteredImports, registered_imports};
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use ruff_python_ast::name::UnqualifiedName;
@@ -24,6 +24,7 @@ struct Imports {
     uses_import_builtin: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
+    signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
     pkgutil_names: HashSet<String>,
     get_data_names: HashSet<String>,
@@ -111,6 +112,7 @@ impl Imports {
                     | "importlib.machinery"
                     | "traceback"
                     | "unittest.case"
+                    | "string.templatelib"
             )
         {
             self.runtime_imports = true;
@@ -122,6 +124,19 @@ fn boxed_sys_export(name: &str) -> bool {
     matches!(
         name,
         "path" | "modules" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+    )
+}
+
+fn boxed_signal_export(module: &str, name: &str) -> bool {
+    use crate::modules::{Binding, Intrinsic, IntrinsicModule};
+    let provider = match module {
+        "signal" => IntrinsicModule::Signal,
+        "_signal" => IntrinsicModule::SignalNative,
+        _ => return false,
+    };
+    matches!(
+        provider.symbol(name),
+        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_)))
     )
 }
 
@@ -190,6 +205,10 @@ impl<'a> Visitor<'a> for Imports {
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
+                        "signal" | "_signal" if cfg!(unix) => self
+                            .signal_names
+                            .insert(bound.to_string(), name.to_owned())
+                            .is_none(),
                         "unittest" => self.unittest_names.insert(bound.to_string()),
                         "pkgutil" => self.pkgutil_names.insert(bound.to_string()),
                         "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
@@ -204,7 +223,10 @@ impl<'a> Visitor<'a> for Imports {
                 self.add(imp.level, name);
                 for a in &imp.names {
                     let suffix = a.name.as_str();
-                    if imp.level == 0 && name == "unittest" && boxed_unittest_cleanup(suffix) {
+                    if imp.level == 0
+                        && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || boxed_signal_export(name, suffix))
+                    {
                         self.runtime_imports = true;
                     }
                     if imp.level == 0 && name == "pkgutil" && suffix == "get_data" {
@@ -218,7 +240,8 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     if imp.level == 0
                         && ((name == "operator" && boxed_operator(suffix))
-                            || (name == "sys" && boxed_sys_export(suffix)))
+                            || (name == "sys" && boxed_sys_export(suffix))
+                            || (name == "string" && suffix == "templatelib"))
                     {
                         self.runtime_imports = true;
                     }
@@ -286,6 +309,10 @@ impl<'a> Visitor<'a> for Imports {
             && let Expr::Name(module) = &*attr.value
             && ((boxed_operator(attr.attr.as_str())
                 && self.operator_names.contains(module.id.as_str()))
+                || self
+                    .signal_names
+                    .get(module.id.as_str())
+                    .is_some_and(|name| boxed_signal_export(name, attr.attr.as_str()))
                 || (boxed_unittest_cleanup(attr.attr.as_str())
                     && self.unittest_names.contains(module.id.as_str())))
         {
@@ -346,7 +373,7 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
 
 pub(crate) enum ObjectOperation<'a> {
     Builtin,
-    ConditionalMethods(&'a crate::modules::SourceGraph),
+    ClassBody(&'a crate::modules::SourceGraph),
 }
 
 pub(crate) fn compile(
@@ -372,6 +399,7 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
+        && !(cfg!(unix) && src.contains("signal"))
         && ![
             "_imp",
             "sys",
@@ -385,6 +413,7 @@ pub(crate) fn compile(
             "unittest",
             "SystemExit",
             "__import__",
+            "templatelib",
         ]
         .iter()
         .any(|name| src.contains(name))
@@ -478,7 +507,7 @@ pub(crate) fn compile(
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
             && match operation {
-                Some(ObjectOperation::ConditionalMethods(graph)) => owner == "__main__"
+                Some(ObjectOperation::ClassBody(graph)) => owner == "__main__"
                     || graph.modules.iter().any(|m| m.name == owner),
                 _ => true,
             }
@@ -597,10 +626,16 @@ pub(crate) fn compile(
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
     for name in [
         "__hello__",
+        "_tokenize",
+        "ast",
+        "codecs",
         "genericpath",
         "platform",
         "re",
+        "signal",
         "stat",
+        "string",
+        "string.templatelib",
         "zipimport",
     ] {
         if !seen.contains(name)
@@ -621,6 +656,11 @@ pub(crate) fn compile(
         "implementation_version":env!("CARGO_PKG_VERSION"),
         "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
+        "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),
+        "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
+        "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
+        "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
+        "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),

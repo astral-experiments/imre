@@ -1,6 +1,7 @@
 """Decorator implementations from CPython 3.14.5 Lib/functools.py (PSF-2.0)."""
 
-from functools import WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, _CacheInfo, partial, reduce, update_wrapper
+from functools import Placeholder, WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, _CacheInfo, partial, reduce, update_wrapper
+from types import GenericAlias
 
 
 def wraps(wrapped,
@@ -16,6 +17,54 @@ def wraps(wrapped,
     """
     return partial(update_wrapper, wrapped=wrapped,
                    assigned=assigned, updated=updated)
+
+
+_NOT_FOUND = object()
+
+class cached_property:
+    def __init__(self, func):
+        self.func = func
+        self.attrname = None
+        self.__doc__ = func.__doc__
+        self.__module__ = func.__module__
+
+    def __set_name__(self, owner, name):
+        if self.attrname is None:
+            self.attrname = name
+        elif name != self.attrname:
+            raise TypeError(
+                "Cannot assign the same cached_property to two different names "
+                f"({self.attrname!r} and {name!r})."
+            )
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        if self.attrname is None:
+            raise TypeError(
+                "Cannot use cached_property instance without calling __set_name__ on it.")
+        try:
+            cache = instance.__dict__
+        except AttributeError:  # not all objects have __dict__ (e.g. class defines slots)
+            msg = (
+                f"No '__dict__' attribute on {type(instance).__name__!r} "
+                f"instance to cache {self.attrname!r} property."
+            )
+            raise TypeError(msg) from None
+        val = cache.get(self.attrname, _NOT_FOUND)
+        if val is _NOT_FOUND:
+            val = self.func(instance)
+            try:
+                cache[self.attrname] = val
+            except TypeError:
+                msg = (
+                    f"The '__dict__' attribute on {type(instance).__name__!r} instance "
+                    f"does not support item assignment for caching {self.attrname!r} property."
+                )
+                raise TypeError(msg) from None
+        return val
+
+    __class_getitem__ = classmethod(GenericAlias)
 
 
 # The total ordering functions all invoke the root magic method directly
@@ -149,3 +198,118 @@ def cache(user_function, /):
     'Simple lightweight unbounded cache.  Sometimes called "memoize".'
     from functools import lru_cache
     return lru_cache(maxsize=None)(user_function)
+
+
+def _partial_prepare_merger(args):
+    if not args:
+        return 0, None
+    nargs = len(args)
+    order = []
+    j = nargs
+    for i, a in enumerate(args):
+        if a is Placeholder:
+            order.append(j)
+            j += 1
+        else:
+            order.append(i)
+    phcount = j - nargs
+    if phcount:
+        from operator import itemgetter
+        return phcount, itemgetter(*order)
+    return 0, None
+
+
+class partialmethod:
+    """Method descriptor with partial application of the given arguments
+    and keywords.
+
+    Supports wrapping existing descriptors and handles non-descriptor
+    callables as instance methods.
+    """
+
+    def __new__(cls, func, /, *args, **keywords):
+        # func could be a descriptor like classmethod which isn't callable
+        if not callable(func) and not hasattr(func, "__get__"):
+            raise TypeError(f"the first argument {func!r} must be a callable "
+                            "or a descriptor")
+        if args and args[-1] is Placeholder:
+            raise TypeError("trailing Placeholders are not allowed")
+        for value in keywords.values():
+            if value is Placeholder:
+                raise TypeError("Placeholder cannot be passed as a keyword argument")
+        if isinstance(func, partialmethod):
+            pto_phcount = func._phcount
+            tot_args = func.args
+            if args:
+                tot_args += args
+                if pto_phcount:
+                    # Fill inner placeholders before appending leftover arguments.
+                    nargs = len(args)
+                    if nargs < pto_phcount:
+                        tot_args += (Placeholder,) * (pto_phcount - nargs)
+                    tot_args = func._merger(tot_args)
+                    if nargs > pto_phcount:
+                        tot_args += args[pto_phcount:]
+                phcount, merger = _partial_prepare_merger(tot_args)
+            else:
+                phcount, merger = pto_phcount, func._merger
+            keywords = {**func.keywords, **keywords}
+            func = func.func
+        else:
+            tot_args = args
+            phcount, merger = _partial_prepare_merger(tot_args)
+
+        self = object.__new__(cls)
+        self.func = func
+        self.args = tot_args
+        self.keywords = keywords
+        self._phcount = phcount
+        self._merger = merger
+        return self
+
+    def __repr__(self):
+        cls = type(self)
+        module = cls.__module__
+        qualname = cls.__qualname__
+        args = [repr(self.func)]
+        args.extend(map(repr, self.args))
+        args.extend(f"{k}={v!r}" for k, v in self.keywords.items())
+        return f"{module}.{qualname}({', '.join(args)})"
+
+    def _make_unbound_method(self):
+        def _method(cls_or_self, /, *args, **keywords):
+            phcount = self._phcount
+            if phcount:
+                try:
+                    pto_args = self._merger(self.args + args)
+                    args = args[phcount:]
+                except IndexError:
+                    raise TypeError("missing positional arguments "
+                                    "in 'partialmethod' call; expected "
+                                    f"at least {phcount}, got {len(args)}")
+            else:
+                pto_args = self.args
+            keywords = {**self.keywords, **keywords}
+            return self.func(cls_or_self, *pto_args, *args, **keywords)
+        _method.__isabstractmethod__ = self.__isabstractmethod__
+        _method.__partialmethod__ = self
+        return _method
+
+    def __get__(self, obj, cls=None):
+        get = getattr(self.func, "__get__", None)
+        if get is not None:
+            new_func = get(obj, cls)
+            if new_func is not self.func:
+                result = partial(new_func, *self.args, **self.keywords)
+                try:
+                    result.__self__ = new_func.__self__
+                except AttributeError:
+                    pass
+                return result
+        return self._make_unbound_method().__get__(obj, cls)
+
+    @property
+    def __isabstractmethod__(self):
+        return getattr(self.func, "__isabstractmethod__", False)
+
+    __class_getitem__ = classmethod(GenericAlias)

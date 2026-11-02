@@ -20,10 +20,42 @@ pub unsafe extern "C" fn imre_int_parse_hex(text: *const Str) -> usize {
 }
 
 /// Parse Python integer text at a validated radix, including prefixes and Unicode decimal digits.
-pub(crate) fn parse_radix(source: &str, mut base: u32) -> crate::Result<crate::Int> {
-    let original = source;
-    let original_base = base;
-    let error = || invalid_literal_in_base(original, original_base);
+pub(crate) fn parse_radix(source: &str, base: u32) -> crate::Result<crate::Int> {
+    let prefix = source.split('\0').next().unwrap_or_default();
+    parse_radix_or(prefix, base, prefix.len() != source.len(), || {
+        invalid_literal_in_base(source, base)
+    })
+}
+
+pub(crate) fn parse_bytes_radix(source: &[u8], base: u32) -> crate::Result<crate::Int> {
+    let invalid = || {
+        let mut repr = String::new();
+        // CPython clips the bytes before choosing repr quotes, then clips the ASCII repr.
+        crate::objects::write_bytes_repr(&mut repr, &source[..source.len().min(200)]);
+        repr.truncate(200);
+        Error::new(
+            Kind::ValueError,
+            format!("invalid literal for int() with base {base}: {repr}"),
+        )
+    };
+    let prefix = source.split(|&byte| byte == 0).next().unwrap_or_default();
+    if !prefix.is_ascii() {
+        return Err(invalid());
+    }
+    parse_radix_or(
+        std::str::from_utf8(prefix).expect("ASCII integer"),
+        base,
+        prefix.len() != source.len(),
+        invalid,
+    )
+}
+
+fn parse_radix_or(
+    source: &str,
+    mut base: u32,
+    has_nul: bool,
+    error: impl Fn() -> Error,
+) -> crate::Result<crate::Int> {
     let source = source.trim();
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
@@ -68,6 +100,16 @@ pub(crate) fn parse_radix(source: &str, mut base: u32) -> crate::Result<crate::I
     {
         return Err(error());
     }
+    if !base.is_power_of_two() {
+        let limit = decimal_digit_limit();
+        if limit != 0 && digits.len() > limit as usize {
+            check_digit_count(digits.bytes().filter(|&b| b != b'_').count(), limit)?;
+        }
+    }
+    // The length-aware Python APIs reject embedded NULs after validating the C-string prefix.
+    if has_nul {
+        return Err(error());
+    }
     let normalized = if digits.contains('_') {
         let mut text = String::new();
         text.try_reserve_exact(digits.len())
@@ -77,7 +119,7 @@ pub(crate) fn parse_radix(source: &str, mut base: u32) -> crate::Result<crate::I
     } else {
         Cow::Borrowed(digits)
     };
-    let value = BigInt::parse_bytes(normalized.as_bytes(), base).ok_or_else(error)?;
+    let value = BigInt::parse_bytes(normalized.as_bytes(), base).ok_or_else(&error)?;
     if guessed && !prefixed && digits.starts_with('0') && !value.is_zero() {
         return Err(error());
     }
@@ -145,6 +187,10 @@ pub(super) fn check_input_digits(digits: &str, limit: u32) -> crate::Result<()> 
         return Ok(());
     }
     let count = digits.bytes().filter(u8::is_ascii_digit).count();
+    check_digit_count(count, limit)
+}
+
+fn check_digit_count(count: usize, limit: u32) -> crate::Result<()> {
     if count <= limit as usize {
         return Ok(());
     }
@@ -321,6 +367,17 @@ pub(super) fn decimal_digit(value: char) -> Option<u8> {
     let end = ZEROES.partition_point(|zero| *zero <= codepoint);
     let digit = codepoint.checked_sub(*ZEROES.get(end.checked_sub(1)?)?)?;
     (digit < 10).then_some(digit as u8)
+}
+
+/// CPython accepts Unicode 16 Decimal and Digit characters in str.isdigit().
+pub(super) fn is_digit(c: char) -> bool {
+    decimal_digit(c).is_some()
+        || matches!(c as u32,
+        0xb2..=0xb3 | 0xb9 | 0x1369..=0x1371 | 0x19da | 0x2070 | 0x2074..=0x2079 |
+        0x2080..=0x2089 | 0x2460..=0x2468 | 0x2474..=0x247c | 0x2488..=0x2490 |
+        0x24ea | 0x24f5..=0x24fd | 0x24ff | 0x2776..=0x277e | 0x2780..=0x2788 |
+        0x278a..=0x2792 | 0x10a40..=0x10a43 | 0x10e60..=0x10e68 | 0x11052..=0x1105a |
+        0x1f100..=0x1f10a)
 }
 
 /// Identifies characters printable in locked ICU 2.3 data but not Unicode 16.

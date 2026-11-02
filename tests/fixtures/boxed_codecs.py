@@ -1,7 +1,25 @@
 import codecs
 
 
+class EchoDecoder(codecs.IncrementalDecoder):
+    def decode(self, input, final=False):
+        return self.errors, input, final
+
+
 def current():
+    decoder = codecs.IncrementalDecoder(errors="replace")
+    assert decoder.errors == "replace"
+    assert decoder.getstate() == (b"", 0)
+    assert decoder.reset() is None
+    assert decoder.setstate((b"", 0)) is None
+    try:
+        decoder.decode(b"")
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("base decoder accepted input")
+    assert EchoDecoder().decode(b"x", final=True) == ("strict", b"x", True)
+
     class Text(str):
         def encode(self, *args, **kwargs):
             raise AssertionError("codecs.encode called str.encode")
@@ -84,6 +102,10 @@ def current():
     print(b"\xffA\xff".decode("utf-8", "boxed_codec_retry"), seen[0][0].args)
 
     wire = bytes(range(256))
+    for name in ("cp437", "437", "ibm437", "cspc8codepage437"):
+        text = wire.decode(name)
+        assert text[128:131] == "Çüé" and text.encode(name) == wire
+        assert codecs.lookup(name).name == "cp437"
     text = entry.decode(wire)[0]
     for name in ("latin-1", "LATIN_1", "iso-8859-1", "cp819"):
         print(text.encode(name) == wire, text.encode(name, "strict") == wire)

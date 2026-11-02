@@ -1,5 +1,5 @@
-from _imre_dataclasses import load_global as _load_global, loaded_module as _loaded_module, members as _members, metadata as _metadata
-from types import GenericAlias
+from _imre_dataclasses import is_defaultdict as _is_defaultdict, load_global as _load_global, loaded_module as _loaded_module, members as _members, metadata as _metadata
+from types import FunctionType, GenericAlias
 
 __all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "asdict", "astuple", "replace",
            "MISSING", "KW_ONLY", "InitVar", "FrozenInstanceError"]
@@ -285,13 +285,32 @@ def _initializer(cls, data, positional, qualname, frozen):
             self.__post_init__(*[values.get(f.name, f.default) if f.init else _load_global(module, f.name)
                                  for f in initvars])
 
-    if receiver != 'self':
+    # Define the wrapper in the class's module while retaining the helpers
+    # used by the initializer above in the dataclasses module.
+    if receiver == 'self':
+        def forward(self, /, *args, **kwargs):
+            return __init__(self, *args, **kwargs)
+    else:
         if receiver in data and data[receiver].init:
             raise SyntaxError("duplicate argument '__dataclass_self__' in function definition")
-        def init_with_self_field(__dataclass_self__, /, *args, **kwargs):
-            __init__(__dataclass_self__, *args, **kwargs)
-        return init_with_self_field
-    return __init__
+        def forward(__dataclass_self__, /, *args, **kwargs):
+            return __init__(__dataclass_self__, *args, **kwargs)
+
+    owner = _loaded_module(cls.__module__)
+    namespace = owner.__dict__ if owner is not None else {}
+    init = FunctionType(forward.__code__, namespace, "__init__", closure=forward.__closure__)
+    names = tuple(f.name for f in data.values() if f.init)
+    def annotate(format, /):
+        if format != 1:
+            raise NotImplementedError(format)
+        annotations = {}
+        for base in reversed(cls.__mro__):
+            annotations.update(getattr(base, "__annotations__", {}))
+        result = {name: annotations[name] for name in names if name in annotations}
+        result["return"] = None
+        return result
+    init.__annotate__ = annotate
+    return init
 
 
 def _annotation_marker(cls, annotation):
@@ -492,6 +511,15 @@ def _convert(obj, factory, named):
         return type(obj)([_convert(x, factory, named) for x in obj])
     if type(obj) is dict:
         return {_convert(k, factory, named): _convert(v, factory, named) for k, v in obj.items()}
+    obj_type = type(obj)
+    if (issubclass(obj_type, dict) if named else isinstance(obj, dict)):
+        if hasattr(obj_type, 'default_factory') or _is_defaultdict(obj):
+            result = obj_type(obj.default_factory)
+            for k, v in obj.items():
+                result[_convert(k, factory, named)] = _convert(v, factory, named)
+            return result
+        return obj_type((_convert(k, factory, named), _convert(v, factory, named))
+                        for k, v in obj.items())
     if obj is None or type(obj) in (bool, int, float, str, bytes):
         return obj
     from copy import deepcopy

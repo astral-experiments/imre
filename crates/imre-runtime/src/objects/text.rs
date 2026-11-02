@@ -235,11 +235,50 @@ pub(crate) fn python_alnum(text: &str) -> bool {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
     }
     const RANGES: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alnum.rs"));
+    all_in_ranges(text, RANGES)
+}
+
+fn all_in_ranges(text: &str, ranges: &[(u32, u32)]) -> bool {
     text.chars().all(|ch| {
         let cp = u32::from(ch);
-        let index = RANGES.partition_point(|&(_, end)| end < cp);
-        RANGES.get(index).is_some_and(|&(start, _)| start <= cp)
+        let index = ranges.partition_point(|&(_, end)| end < cp);
+        ranges.get(index).is_some_and(|&(start, _)| start <= cp)
     })
+}
+
+pub(crate) fn python_isalpha(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphabetic());
+    }
+    const LETTERS: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alpha.rs"));
+    all_in_ranges(text, LETTERS)
+}
+
+pub(crate) fn python_isdigit(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    }
+    text.chars().all(crate::integer_text::is_digit)
+}
+
+/// Tests for a nonempty string of Unicode 16 letters.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isalpha(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_isalpha(unsafe { &*value }))
+}
+
+/// Tests for a nonempty string of Unicode 16 Decimal or Digit characters.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isdigit(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_isdigit(unsafe { &*value }))
 }
 
 /// Tests a native string with Python's alphanumeric predicate.
@@ -266,6 +305,16 @@ pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive and no character reference escapes.
     let value = unsafe { &*value };
     u32::from(python_isspace(value))
+}
+
+/// Returns whether every byte in the string is ASCII, including for empty strings.
+///
+/// # Safety
+/// The caller roots the immutable UTF-8 string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_ascii(value: *const Str) -> u32 {
+    // SAFETY: the caller supplies a rooted string.
+    u32::from(unsafe { &*value }.is_ascii())
 }
 
 /// Tests a native string with Python's lowercase predicate.
