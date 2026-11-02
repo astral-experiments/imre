@@ -226,9 +226,7 @@ pub(super) fn call(
         };
         return Ok(ctx.alloc(Value::Bytes(data)));
     }
-    let mut operands = vec![buffer];
-    operands.extend_from_slice(args);
-    let result = files::call(ctx, &format!("file.{name}"), &operands, kwargs)?;
+    let result = files::binary_method(ctx, buffer, name, args, kwargs)?;
     Ok(if name == "__enter__" {
         receiver
     } else {

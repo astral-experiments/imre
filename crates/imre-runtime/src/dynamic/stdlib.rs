@@ -2272,7 +2272,8 @@ pub(super) fn call(
         return tempfile::open(ctx, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("BufferedRandom.") {
-        return tempfile::method(ctx, method, args, kwargs);
+        let receiver = argument(args, 0)?;
+        return tempfile::method(ctx, receiver, method, &args[1..], kwargs);
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
@@ -2770,10 +2771,19 @@ pub(super) fn call(
             }
             return Err(ctx.exception("SystemExit", args));
         }
-        name if name.starts_with("os.path.")
-            || matches!(name, "file.__enter__" | "file.__exit__") =>
-        {
-            return files::call(ctx, name, args, kwargs);
+        "os.path.dirname" => {
+            let path = ctx.str_value(argument(args, 0)?)?;
+            return Ok(ctx.text(posixpath::dirname(path).to_owned()));
+        }
+        "file.__enter__" | "file.__exit__" => {
+            let receiver = argument(args, 0)?;
+            return files::binary_method(
+                ctx,
+                receiver,
+                name.trim_start_matches("file."),
+                &args[1..],
+                kwargs,
+            );
         }
         "match.groups" | "match.groupdict" => {
             let receiver = argument(args, 0)?;
