@@ -423,6 +423,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "coroutine") => ctx.builtin("types.coroutine"),
         ("types", "GeneratorType") => ctx.builtin("generator"),
+        ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
@@ -1344,6 +1345,9 @@ pub(super) fn call(
         }
         if let Value::Function { code, .. } = *ctx.heap.get(func) {
             let original = ctx.code_object(code);
+            if original.coroutine {
+                return Ok(func);
+            }
             if let Some(flags) = original.flags {
                 use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
                 if flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {

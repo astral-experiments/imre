@@ -1,4 +1,7 @@
 //! CPython 3.14 `code.co_flags` values shared by the compiler and boxed runtime.
+use ruff_python_ast as ast;
+use ruff_python_ast::visitor::{self, Visitor};
+
 pub const OPTIMIZED: u32 = 1;
 pub const NEWLOCALS: u32 = 2;
 pub const VARARGS: u32 = 4;
@@ -12,3 +15,39 @@ pub const FUTURE_BARRY_AS_BDFL: u32 = 0x0040_0000;
 pub const FUTURE_ANNOTATIONS: u32 = 0x0100_0000;
 pub const HAS_DOCSTRING: u32 = 0x0400_0000;
 pub const METHOD: u32 = 0x0800_0000;
+
+#[derive(Default)]
+struct Yields(bool);
+impl<'a> Visitor<'a> for Yields {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        if !self.0 && !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                visitor::walk_stmt(self, stmt)
+            });
+        }
+    }
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        match expr {
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => self.0 = true,
+            ast::Expr::Lambda(_) => {}
+            _ if !self.0 => stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                visitor::walk_expr(self, expr)
+            }),
+            _ => {}
+        }
+    }
+}
+
+/// Whether a function body yields in its own scope.
+pub fn is_generator(body: &[ast::Stmt]) -> bool {
+    let mut yields = Yields::default();
+    yields.visit_body(body);
+    yields.0
+}
+
+/// Whether an expression-bodied function yields in its own scope.
+pub fn yields_in_expression(expr: &ast::Expr) -> bool {
+    let mut yields = Yields::default();
+    yields.visit_expr(expr);
+    yields.0
+}

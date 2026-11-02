@@ -924,6 +924,7 @@ impl Context {
                             | "ellipsis"
                             | "float"
                             | "code"
+                            | "coroutine"
                             | "cell"
                             | "function"
                             | "module"
@@ -1848,6 +1849,11 @@ impl Context {
                 }
             }
             Value::Native(ref class)
+                if super::generator_protocol::coroutine_method(class, name) =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
+            Value::Native(ref class)
                 if class == "generator" && matches!(name, "send" | "throw" | "close") =>
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
@@ -1897,6 +1903,12 @@ impl Context {
                 return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
+            Value::Coroutine(frame) if name == "cr_code" => {
+                let Value::Generator { code, .. } = *self.heap.get(frame) else {
+                    unreachable!("coroutine frame")
+                };
+                return Ok(code);
+            }
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
             Value::Function {
                 scope,
@@ -4127,6 +4139,8 @@ impl Context {
                             "str"
                                 | "enumerate"
                                 | "generator"
+                                | "coroutine"
+                                | "coroutine_wrapper"
                                 | "dict"
                                 | "list"
                                 | "map"

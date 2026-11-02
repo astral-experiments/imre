@@ -688,6 +688,9 @@ pub(super) enum Value {
         kwdefaults: Id,
     },
     Code(CodeObject),
+    // The coroutine owns its private suspended frame. Each await iterator owns the coroutine.
+    Coroutine(Id),
+    CoroutineWrapper(Id),
     Generator {
         owner: FrameOwner,
         code: Id,
@@ -945,6 +948,8 @@ impl Value {
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
+            Self::Coroutine(_) => "coroutine",
+            Self::CoroutineWrapper(_) => "coroutine_wrapper",
             Self::NoDefault => "NoDefaultType",
             Self::Class { .. } => "type",
             Self::DictView { kind, ordered, .. } => match (kind, ordered) {
@@ -1143,6 +1148,7 @@ impl Value {
                 visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
+            Self::Coroutine(frame) | Self::CoroutineWrapper(frame) => visit.push(*frame),
             Self::Function {
                 closure,
                 scope,

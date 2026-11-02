@@ -253,6 +253,7 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
                 | "NotImplementedType"
                 | "ellipsis"
                 | "code"
+                | "coroutine"
                 | "cell"
                 | "function"
                 | "module"
@@ -279,6 +280,7 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
         name,
         "iterator"
             | "generator"
+            | "coroutine_wrapper"
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
@@ -433,6 +435,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
+        Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
+            "coroutine"
+        }
+        Value::CoroutineWrapper(_)
+            if super::generator_protocol::coroutine_method("coroutine_wrapper", attr) =>
+        {
+            "coroutine_wrapper"
+        }
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
@@ -963,6 +973,16 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "coroutine" | "coroutine_wrapper" => {
+                positional(name, kwargs)?;
+                let (min, max) = match method {
+                    "send" => (2, 2),
+                    "throw" => (2, 4),
+                    _ => (1, 1),
+                };
+                arity(name, args, min, max)?;
+                ctx.call_coroutine_method(owner, method, args)
+            }
             "generator" if method == "send" => {
                 let [generator, value] = args else {
                     return Err(type_error("generator.send() takes exactly one argument"));
