@@ -444,7 +444,9 @@ class _GlobberBase:
         filtering by pattern.
         """
 
-        if (type(self) is _StringGlobber and self.case_pedantic is True
+        if part == '*':
+            match = None
+        elif (type(self) is _StringGlobber and self.case_pedantic is True
                 and self.case_sensitive is True and type(part) is str
                 and magic_check.search(part) is None):
             # Explicit case sensitivity still requires scanning for the real spelling.
@@ -453,7 +455,7 @@ class _GlobberBase:
                     return name == part
                 return self.compile(part)(name)
         else:
-            match = None if part == '*' else self.compile(part)
+            match = self.compile(part)
         dir_only = bool(parts)
         if dir_only:
             select_next = self.selector(parts)
