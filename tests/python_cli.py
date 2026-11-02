@@ -1611,6 +1611,7 @@ def report(text):
             "boxed_typing_protocol.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
+            "boxed_typing_type.py",
             "boxed_typing_mapping.py",
             "boxed_formatter.py",
             "boxed_template_literals.py",
