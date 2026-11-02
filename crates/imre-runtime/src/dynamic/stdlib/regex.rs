@@ -1096,22 +1096,21 @@ pub(super) fn search(
         return findall(ctx, &pattern, &text, start);
     }
     if matches!(method, "scanner" | "finditer") {
-        // Resizing a bytearray or releasing a view requires a persistent scanner export.
-        if matches!(
-            ctx.heap.get(ctx.scalar_value(string)),
-            Value::ByteArray(_) | Value::MemoryView { .. }
-        ) {
-            return Err(Error::new(
-                "NotImplementedError",
-                format!(
-                    "exporting a {} to a regex scanner is unsupported",
-                    ctx.type_name(string)
-                ),
-            ));
-        }
+        let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
+            // Keep the export alive for the scanner's lifetime. A Match keeps only the subject.
+            Value::ByteArray(_) => Some(ctx.new_memoryview(string)?),
+            Value::MemoryView { .. } => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "exporting a memoryview to a regex scanner is unsupported",
+                ));
+            }
+            _ => None,
+        };
         let scanner = ctx.alloc(Value::RegexScanner {
             pattern: receiver,
             subject: string,
+            buffer_view,
             start: Some(start),
             end,
             retry: false,
