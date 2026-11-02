@@ -132,12 +132,8 @@ pub(super) fn call(
     if !kwargs.is_empty()
         && !(name == "__init__"
             && ctx
-                .heap
-                .get(receiver)
-                .instance_class()
-                .is_some_and(|class| {
-                    ctx.class_attr(class, "__new__") != ctx.class_attr(owner, "__new__")
-                }))
+                .slot(receiver, "__new__")
+                .is_some_and(|new| Some(&new) != ctx.builtins.get("object.__new__")))
     {
         let prefix = if name == "__init__" {
             "BufferedRWPair".into()

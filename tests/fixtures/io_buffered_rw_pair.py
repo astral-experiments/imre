@@ -78,6 +78,21 @@ try:
     with WithNew(io.FileIO(src, "r"), io.FileIO(dst, "w"), tag=True) as pair:
         assert pair.read(1) == b"a"
 
+    class Alias(NativePair):
+        __new__ = object.__new__
+    class Wrapped(NativePair):
+        __new__ = staticmethod(object.__new__)
+    with io.FileIO(src, "r") as raw, io.FileIO(dst, "w") as writer:
+        try:
+            NativePair.__init__(object.__new__(Alias), raw, writer, tag=True)
+        except TypeError as exc:
+            assert str(exc) == "BufferedRWPair() takes no keyword arguments"
+        else:
+            raise AssertionError("alias of the base allocator accepted keywords")
+        wrapped = object.__new__(Wrapped)
+        NativePair.__init__(wrapped, raw, writer, tag=True)
+        wrapped.close()
+
     with io.BufferedReader(io.FileIO(src, "r"), 2) as reader:
         assert reader.peek(0) == b"ab" and reader.read(1) == b"a"
         assert io.BufferedReader.peek(reader, 99) == b"b" and reader.raw.tell() == 2

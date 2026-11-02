@@ -4952,11 +4952,14 @@ impl Context {
         ))
     }
 
-    /// The decoder owns its native layout but inherits object.__new__.
+    /// These native layouts inherit object.__new__ for bare instance allocation.
     fn uses_object_new(&self, base: Option<Id>) -> bool {
         base == self.builtins.get("object").copied()
             || base.is_some_and(|base| {
-                self.heap.get(base).io_kind() == Some(stdlib::io::NEWLINE_DECODER)
+                matches!(
+                    self.heap.get(base).io_kind(),
+                    Some(stdlib::io::NEWLINE_DECODER | "BufferedRWPair")
+                )
             })
     }
 
