@@ -1716,6 +1716,15 @@ pub(super) fn call(
         }
         return Err(Error::new("TypeError", "invalid chain state arguments"));
     }
+    if let Some(class) = super::deque::iterator_class(name) {
+        return super::deque::construct_iterator(ctx, class, args);
+    }
+    if let Some((class, method)) = name.rsplit_once('.')
+        && super::deque::iterator_class(class).is_some()
+        && super::deque::ITERATOR_METHODS.contains(&method)
+    {
+        return super::deque::iterator_method(ctx, class, method, args, kwargs);
+    }
     if name == super::deque::CLASS {
         return super::deque::construct(ctx, args, kwargs);
     }

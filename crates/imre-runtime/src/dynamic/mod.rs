@@ -700,7 +700,7 @@ impl Context {
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::MappingProxy(_) => return self.iterator(self.mapping_proxy_target(id)),
             Value::Deque(ref ring) => {
-                let cursor = deque::iterator(id, ring, false);
+                let cursor = deque::iterator(id, ring, false, 0);
                 return Ok(self.alloc(cursor));
             }
             Value::GenericAlias(ref alias) if alias.is_builtin_alias() => {
@@ -2193,6 +2193,7 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
+            deque::ITERATOR | deque::REVERSE_ITERATOR => deque::ITERATOR_METHODS,
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
@@ -3081,6 +3082,16 @@ impl Context {
                 let sequence = self.lookup_attr(abc, "MutableSequence")?;
                 let register = self.lookup_attr(sequence, "register")?;
                 self.call(register, vec![array], Vec::new())?;
+            }
+            "_collections" => {
+                for (field, class) in [
+                    ("deque", deque::CLASS),
+                    ("_deque_iterator", deque::ITERATOR),
+                    ("_deque_reverse_iterator", deque::REVERSE_ITERATOR),
+                ] {
+                    let value = self.builtin(class);
+                    self.bind(scope, field, value);
+                }
             }
             "collections" => {
                 let deque = self.builtin(deque::CLASS);

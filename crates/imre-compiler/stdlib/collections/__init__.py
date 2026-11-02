@@ -13,6 +13,12 @@ except ImportError:
         for elem in iterable:
             mapping[elem] = mapping_get(elem, 0) + 1
 
+# Pickle resolves the forward iterator's factory in this module.
+try:
+    from _collections import _deque_iterator
+except ImportError:
+    pass
+
 _MutableSequence.register(deque)
 
 
