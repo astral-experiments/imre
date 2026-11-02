@@ -1142,6 +1142,13 @@ impl Context {
         Ok(None)
     }
 
+    /// Release the previous iteration's operands before collecting and advancing the iterator.
+    fn comprehension_step(&mut self, mark: usize) {
+        self.heap.release_temporaries_since(mark);
+        self.heap.reserve_slot_or_request_collection();
+        self.collect_garbage();
+    }
+
     /// Keep yielded values in a traced sequence while discarding each step's other temporaries.
     fn collect_generator(&mut self, generator: Id, tuple: bool) -> Result<Id> {
         let mark = self.heap.temporary_mark();
@@ -1158,9 +1165,7 @@ impl Context {
                     .try_reserve(1)
                     .map_err(|_| crate::Error::memory_error())?;
                 items.push(item);
-                self.heap.release_temporaries_since(step);
-                self.heap.reserve_slot_or_request_collection();
-                self.collect_garbage();
+                self.comprehension_step(step);
             }
             Ok(())
         })();
@@ -1386,6 +1391,14 @@ impl Context {
             .split_ascii_whitespace()
             .map(str::to_owned)
             .collect();
+        Ok(self.comprehension_scope_with_targets(parent, targets))
+    }
+
+    fn comprehension_scope_with_targets(
+        &mut self,
+        parent: Id,
+        targets: std::collections::HashSet<String>,
+    ) -> Id {
         let enclosing = self.scope_data(parent);
         let module = enclosing.module.clone();
         let (parent, kind) =
@@ -1404,7 +1417,18 @@ impl Context {
         frame.comprehension = Some(kind);
         frame.closure.declared = targets;
         frame.closure.declared_complete = true;
-        Ok(scope)
+        scope
+    }
+
+    /// A walrus binds in the first enclosing code unit outside any eager comprehension.
+    fn named_expression_scope(&self, mut scope: Id) -> Id {
+        while self.scope_data(scope).comprehension.is_some() {
+            scope = self
+                .scope_data(scope)
+                .parent
+                .expect("enclosing comprehension scope");
+        }
+        scope
     }
 
     fn scope_data(&self, scope: Id) -> &Scope {
