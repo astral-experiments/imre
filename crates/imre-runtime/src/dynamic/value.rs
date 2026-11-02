@@ -2761,29 +2761,33 @@ impl Heap {
     }
 
     /// Release inert call arguments and peers at the same boundary as the general discard.
-    pub(super) fn discard_scalar_call(&mut self, mark: usize, result: Id, arguments: Id) -> bool {
+    pub(super) fn discard_scalar_call(
+        &mut self,
+        mark: usize,
+        result: Id,
+        arguments: Id,
+        callable: Id,
+    ) -> bool {
         if !self.tracks_finalizers() {
             return false;
         }
         let Value::List(args) = self.get(arguments) else {
             return false;
         };
-        let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
-            return false;
-        };
-        if args.len() > 8 || dropped.len() > 64 || !dropped.contains(&arguments) {
+        let tuple_argument = (2..=8).contains(&args.len())
+            && args
+                .iter()
+                .any(|&id| matches!(self.get(id), Value::Tuple(_)));
+        let regex_call = matches!(self.get(callable), Value::Method { receiver, .. }
+            if matches!(self.get(*receiver), Value::RegexPattern(_) | Value::RegexMatch(_)))
+            && self.plain_regex_operand(callable);
+        if args.len() > 8 || !(tuple_argument || regex_call) {
             return false;
         }
         let weak = |id| self.has_weak_values && self.weak_edge(id);
         let scalar = |id| self.finalizer_free_scalar(id) && !weak(id);
         let flat = |items: &[Id]| items.len() <= 8 && items.iter().copied().all(scalar);
-        // Both a nested tuple argument and a regex operand trigger truncation in discard_operands.
-        let tuple_argument = args.len() >= 2
-            && args
-                .iter()
-                .any(|&id| matches!(self.get(id), Value::Tuple(_)));
-        if (!tuple_argument && !dropped.iter().any(|&id| self.plain_regex_operand(id)))
-            || weak(arguments)
+        if weak(arguments)
             || !args.iter().all(|&id| match self.get(id) {
                 Value::Tuple(items) => !weak(id) && flat(items),
                 _ => scalar(id),
@@ -2791,15 +2795,29 @@ impl Heap {
         {
             return false;
         }
-        // Other operands may own resources or weak targets. Leave uncertain cases to the collector.
-        if !dropped.iter().all(|&id| {
-            id == arguments
-                || match self.get(id) {
-                    Value::Tuple(items) | Value::List(items) => !weak(id) && flat(items),
-                    Value::Dict(items) => !weak(id) && items.is_empty(),
-                    _ => scalar(id) || self.plain_regex_operand(id),
-                }
-        }) {
+        let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
+            return false;
+        };
+        if dropped.len() > 64 {
+            return false;
+        }
+        let mut saw_arguments = false;
+        let mut would_truncate = tuple_argument;
+        for &id in dropped {
+            if id == arguments {
+                saw_arguments = true;
+                continue;
+            }
+            match self.get(id) {
+                Value::Tuple(items) | Value::List(items) if !weak(id) && flat(items) => {}
+                Value::Dict(items) if !weak(id) && items.is_empty() => {}
+                _ if scalar(id) => {}
+                _ if regex_call && self.plain_regex_operand(id) => would_truncate = true,
+                _ => return false,
+            }
+        }
+        // Without a nested tuple argument or a discarded regex operand, keep the original roots.
+        if !saw_arguments || !would_truncate {
             return false;
         }
         self.release_temporaries_since(mark);
@@ -3912,14 +3930,14 @@ mod tests {
         let owning = heap.alloc(Value::Tuple(vec![owner]));
         let arguments = heap.alloc(Value::List(vec![TRUE, types]));
         let mark = heap.temporary_mark();
-        assert!(!heap.discard_scalar_call(mark, TRUE, arguments));
+        assert!(!heap.discard_scalar_call(mark, TRUE, arguments, NONE));
         heap.keep(arguments);
         heap.keep(owning);
-        assert!(!heap.discard_scalar_call(mark, TRUE, arguments));
+        assert!(!heap.discard_scalar_call(mark, TRUE, arguments, NONE));
         heap.release_temporaries_since(mark);
         heap.keep(arguments);
         heap.keep(types);
-        assert!(heap.discard_scalar_call(mark, TRUE, arguments));
+        assert!(heap.discard_scalar_call(mark, TRUE, arguments, NONE));
         assert_eq!(&heap.frames.last().unwrap().live[mark..], &[TRUE]);
 
         let Value::List(items) = heap.get_mut(arguments) else {
@@ -3927,7 +3945,7 @@ mod tests {
         };
         items[1] = owning;
         heap.keep(arguments);
-        assert!(!heap.discard_scalar_call(mark, NONE, arguments));
+        assert!(!heap.discard_scalar_call(mark, NONE, arguments, NONE));
     }
 
     #[test]
