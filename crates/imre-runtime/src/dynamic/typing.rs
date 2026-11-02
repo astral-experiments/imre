@@ -697,7 +697,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     ));
                 }
             };
-            let origin = named_class(ctx, "collections.abc", "Callable");
+            let origin = super::mapping_abc::class(ctx, "Callable")?;
             return alias(ctx, kind, origin, actual);
         }
         alias(ctx, kind, target, args)
@@ -756,7 +756,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
         let base_tuple = bases;
         let bases = ctx.items(base_tuple)?;
-        let callable = named_class(ctx, "collections.abc", "Callable");
+        let callable = super::mapping_abc::class(ctx, "Callable")?;
         let generic = named_class(ctx, "typing", "Generic");
         let mut result = Vec::new();
         let mut has_callable = false;
@@ -1949,7 +1949,7 @@ pub(super) fn call(
             Value::Union(_) => super::union::class(ctx),
             Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(v) => *v,
             Value::Native(name) if name == "typing.Callable" => {
-                named_class(ctx, "collections.abc", "Callable")
+                super::mapping_abc::class(ctx, "Callable")?
             }
             _ => NONE,
         }),
@@ -2133,7 +2133,10 @@ impl Context {
                 "TypeError",
                 "typing.Any cannot be used with isinstance()",
             )),
-            Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
+            Value::Native(name) if name == "typing.Callable" => {
+                let origin = super::mapping_abc::class(self, "Callable")?;
+                self.python_instance_check(value, origin)
+            }
             _ => {
                 // An exact instance wins before the class's metaclass can intercept the check.
                 if self.heap.get(value).instance_class() == Some(class) {
@@ -2191,7 +2194,19 @@ impl Context {
     /// ABCMeta checks the instance's reported class first, then its actual type if different.
     pub(super) fn abc_meta_instance_check(&mut self, value: Id, class: Id) -> Result<Id> {
         super::mapping_abc::check_impl(self, class)?;
-        let reported = self.lookup_attr(value, "__class__")?;
+        let reported = match self.lookup_attr(value, "__class__") {
+            Ok(reported) => reported,
+            // A few native values can be called before the runtime can expose their type.
+            Err(error)
+                if error.kind == "NotImplementedError"
+                    && self.classes.get("collections.abc.Callable") == Some(&class)
+                    && self.heap.get(value).instance_class().is_none()
+                    && self.builtin_type_name(value).is_none() =>
+            {
+                return Ok(if self.callable(value) { TRUE } else { FALSE });
+            }
+            Err(error) => return Err(error),
+        };
         self.heap.keep(reported);
         let actual = self.exact_type(value)?;
         let check = |ctx: &mut Self, child| {
