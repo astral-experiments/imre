@@ -37,6 +37,25 @@ try:
 finally:
     sys.meta_path.remove(provider)
 
+original_meta_path = sys.meta_path
+finders = []
+try:
+    sys.meta_path = finders
+    pending = Distribution.discover(context=context)
+    sys.meta_path = []
+    finders.append(provider)
+    assert [d.version for d in pending] == ['7.9']
+
+    sys.meta_path = None
+    try:
+        Distribution.discover(context=context)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('discover should acquire the finder iterator immediately')
+finally:
+    sys.meta_path = original_meta_path
+
 later = Distribution.discover(name='sample-pkg')
 sys.path = ['second'] + sys.path[1:]
 assert next(later).version == '7.9'
