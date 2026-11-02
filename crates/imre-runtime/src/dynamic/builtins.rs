@@ -299,6 +299,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
+            | "generic_alias_iterator"
             | "bytes_iterator"
             | "bytearray_iterator"
             | "range_iterator"

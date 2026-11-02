@@ -15,8 +15,15 @@ pub(super) enum ClassLayout {
 /// Statements retain a callable evaluator. The constructor receives an already evaluated value.
 #[derive(Clone, Copy)]
 pub(super) enum AliasDefinition {
-    Lazy { evaluator: Id, cached: Option<Id> },
-    Eager { value: Id, module: Id },
+    Lazy {
+        parameters: Id,
+        evaluator: Id,
+        cached: Option<Id>,
+    },
+    Eager {
+        value: Id,
+        module: Id,
+    },
 }
 
 #[derive(Clone)]
@@ -136,7 +143,7 @@ impl Alias {
 
     /// Literal compares its type-sensitive members without regard to argument order.
     pub(super) fn comparison_parts(&self, other: &Self) -> Option<(Id, Id)> {
-        if self.origin != other.origin {
+        if self.origin != other.origin || self.unpacked != other.unpacked {
             return None;
         }
         match (self.kind, other.kind) {
@@ -155,9 +162,24 @@ pub(super) struct Alias {
     pub kind: AliasKind,
     pub name: Option<Id>,
     pub instantiable: bool,
+    pub unpacked: bool,
 }
 
 impl Alias {
+    pub(super) fn is_builtin_alias(&self) -> bool {
+        matches!(self.kind, AliasKind::Builtin | AliasKind::AbcCallable)
+    }
+
+    /// GenericAlias iteration yields a new base GenericAlias, including for an already-starred alias.
+    pub(super) fn unpacked_copy(&self) -> Self {
+        Self {
+            kind: AliasKind::Builtin,
+            unpacked: true,
+            name: None,
+            ..self.clone()
+        }
+    }
+
     /// Instance fields stored by the boxed Literal alias.
     pub(super) fn literal_fields(&self) -> [(&'static str, Id); 5] {
         [
@@ -283,6 +305,10 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
                 std::slice::from_ref(&arg)
             }
             Value::GenericAlias(Alias { parameters, .. })
+            | Value::TypeAlias {
+                definition: AliasDefinition::Lazy { parameters, .. },
+                ..
+            }
             | Value::Union(super::union::Union { parameters, .. }) => {
                 match ctx.heap.get(*parameters) {
                     Value::Tuple(members) => members.as_slice(),
@@ -357,6 +383,7 @@ fn allocate_alias(
         kind,
         name,
         instantiable,
+        unpacked: false,
     }))
 }
 
@@ -499,11 +526,23 @@ fn helper_method(ctx: &mut Context, receiver: Id, helper: &str) -> Option<Id> {
 /// Apply the subscription protocol for a supported type. Ordinary instance indexing
 /// continues through the object runtime.
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
-    if matches!(ctx.heap.get(target), Value::TypeAlias { .. }) {
+    if let Value::TypeAlias { definition, .. } = ctx.heap.get(target) {
+        if let AliasDefinition::Lazy { parameters, .. } = definition
+            && matches!(ctx.heap.get(*parameters), Value::Tuple(items) if !items.is_empty())
+        {
+            return Some(Ok(builtin_alias(ctx, target, index)));
+        }
         return Some(Err(Error::new(
             "TypeError",
             "Only generic type aliases are subscriptable",
         )));
+    }
+    if let Value::GenericAlias(alias) = ctx.heap.get(target)
+        && alias.kind == AliasKind::Builtin
+    {
+        return Some(ctx.module("typing").and_then(|_| {
+            ctx.call_typing_helper("_specialize_generic_alias_uncached", vec![target, index])
+        }));
     }
     if is_unpacked_pack(ctx, target) {
         return Some(Ok(index));
@@ -1021,7 +1060,12 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             definition,
         } => match (name, *definition) {
             ("__name__", _) => *label,
-            ("__parameters__" | "__type_params__", _) => ctx.heap.packed_tuple(Vec::new(), false),
+            ("__parameters__" | "__type_params__", AliasDefinition::Lazy { parameters, .. }) => {
+                parameters
+            }
+            ("__parameters__" | "__type_params__", AliasDefinition::Eager { .. }) => {
+                ctx.heap.packed_tuple(Vec::new(), false)
+            }
             ("__module__", AliasDefinition::Eager { module, .. }) => module,
             ("__module__", AliasDefinition::Lazy { evaluator, .. }) => {
                 return Some(ctx.lookup_attr(evaluator, "__module__"));
@@ -1113,6 +1157,20 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
         }
         Value::GenericAlias(a) => match name {
+            "__unpacked__" if a.is_builtin_alias() => {
+                if a.unpacked {
+                    TRUE
+                } else {
+                    FALSE
+                }
+            }
+            "__typing_unpacked_tuple_args__" if a.is_builtin_alias() => {
+                if a.unpacked && ctx.builtins.get("tuple") == Some(&a.origin) {
+                    a.args
+                } else {
+                    NONE
+                }
+            }
             "__typing_is_unpacked_typevartuple__" if a.kind == AliasKind::Unpack => {
                 if is_unpacked_pack(ctx, value) {
                     TRUE
@@ -1184,7 +1242,7 @@ pub(super) fn declared_pack(ctx: &mut Context, name: Id) -> Id {
     })
 }
 
-/// Create the lexical scope for a type parameter list at a class or function definition.
+/// Create the lexical scope for a declaration's type parameters.
 pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bool) -> Result<Id> {
     let enclosing = ctx.scope_data(outer);
     let parent = if enclosing.class_body.is_some() {
