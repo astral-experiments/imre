@@ -1626,6 +1626,12 @@ def report(text):
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
+        compare(
+            "-IB", "-c",
+            "from builtins import __import__ as load\n"
+            "mod = load(''.join(('i', 'o')))\n"
+            "print(mod.Reader[bytes].__origin__ is mod.Reader, mod.Writer.__module__)",
+        )
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",

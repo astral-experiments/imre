@@ -519,14 +519,6 @@ pub(crate) fn compile(
             return Ok(None);
         }
         let mut names = imports.names;
-        // _io initializes io, and a computed import can select it without a source-level name.
-        if imports.uses_import_builtin
-            || names
-                .iter()
-                .any(|(level, name)| *level == 0 && name == "_io")
-        {
-            names.push((0, "io".to_owned()));
-        }
         // Importing array registers its type with MutableSequence. A runtime
         // __import__ can select array without naming it in a static import.
         if imports.uses_import_builtin
@@ -635,11 +627,18 @@ pub(crate) fn compile(
             include_str!("../../stdlib/collections/namedtuple_repr.py").into(),
         ));
     }
+    // The sealed io module also needs its Python protocols when imported indirectly.
+    sources.push((
+        "io".into(),
+        Path::new(bundled_root).join("io.py"),
+        include_str!("../../stdlib/io.py").into(),
+    ));
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
     for name in [
         "__future__",
         "__hello__",
         "_tokenize",
+        "abc",
         "ast",
         "codecs",
         "genericpath",
