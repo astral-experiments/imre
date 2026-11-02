@@ -1,8 +1,8 @@
-//! A directly materialized group shares one live source cursor and keyed lookahead.
+//! A directly consumed group shares one live source cursor and keyed lookahead.
 
 use super::*;
 
-/// Recognize the only consumer of the private grouper.
+/// Recognize an immediate list assignment that consumes the private grouper.
 fn materialization<'a>(statement: &'a ast::Stmt, group: &str) -> Option<&'a ast::ExprName> {
     let ast::Stmt::Assign(assignment) = statement else {
         return None;
@@ -41,14 +41,26 @@ impl Checker<'_> {
         let Some((first, rest)) = loop_.body.split_first() else {
             unreachable!("a for body is nonempty")
         };
-        let members = materialization(first, group.id.as_str()).ok_or_else(|| {
-            error(
+        let members = materialization(first, group.id.as_str());
+        let nested = match first {
+            ast::Stmt::For(inner)
+                if !inner.is_async
+                    && matches!(inner.iter.as_ref(), ast::Expr::Name(name) if name.id == group.id) =>
+            {
+                Some(inner)
+            }
+            _ => None,
+        };
+        if members.is_none() && nested.is_none() {
+            return Err(error(
                 self.source,
                 first,
-                "the first statement of a groupby loop must assign list(group) to a name",
-            )
-        })?;
-        if key.id == group.id || members.id == key.id || members.id == group.id {
+                "a groupby loop must first iterate over its group or assign list(group) to a name",
+            ));
+        }
+        if key.id == group.id
+            || members.is_some_and(|name| name.id == key.id || name.id == group.id)
+        {
             return Err(error(
                 self.source,
                 first,
@@ -133,8 +145,6 @@ impl Checker<'_> {
         let next_key = self.hidden(key_type);
         let group_key = self.hidden(key_type);
         let have_group = self.hidden(Type::Bool);
-        let list_type = self.types.list(item_type);
-        let accumulating = self.hidden(list_type);
         let ready = input.ready;
         let mut pull = std::mem::take(&mut input.next);
         pull.push(Statement::If(
@@ -191,23 +201,10 @@ impl Checker<'_> {
             Vec::new(),
         )];
         input.value = next_key;
-        input
-            .clear
-            .extend([next_key, group_key, have_group, accumulating]);
+        input.clear.extend([next_key, group_key, have_group]);
         self.invalidate_loop_facts(&loop_.body, Some((&input, &loop_.iter)))?;
+        let writes = input.writes.clone();
         self.lower_prepared_iteration(key_target, input, &loop_.orelse, Vec::new(), |checker| {
-            let output = checker.declare(members.id.as_str(), list_type, members)?;
-            checker.assigned.insert(output);
-            checker.narrowed.remove_mut(&output);
-            let mut drain = vec![Statement::Expr(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(
-                    Builtin::Append,
-                    vec![checker.local(accumulating), checker.local(item)],
-                ),
-            })];
-            drain.append(&mut pull);
-            drain.push(Statement::If(boundary, vec![Statement::Break], Vec::new()));
             let mut body = Vec::new();
             if let Some(callback) = retained_callback {
                 body.push(Statement::Assign(grouper, checker.local(callback)));
@@ -215,17 +212,72 @@ impl Checker<'_> {
             body.extend([
                 Statement::Assign(have_group, Expr::boolean(true)),
                 Statement::Assign(group_key, checker.local(key)),
-                Statement::Assign(
-                    accumulating,
-                    Expr {
-                        ty: list_type,
-                        kind: ExprKind::List(Vec::new()),
-                    },
-                ),
-                Statement::While(Expr::boolean(true), drain, Vec::new()),
-                // If a pull raises, the old materialized list is still visible.
-                Statement::Move(output, accumulating),
             ]);
+            if let Some(inner) = nested {
+                // The outer pull buffered the first member. Subsequent pulls stop at
+                // the boundary, leaving that item and its key for the outer iterator.
+                pull.push(Statement::If(
+                    boundary,
+                    vec![Statement::Exhaust],
+                    Vec::new(),
+                ));
+                let group = Prepared {
+                    evaluate: Vec::new(),
+                    acquire: Vec::new(),
+                    next: vec![Statement::If(not(checker.local(ready)), pull, Vec::new())],
+                    value: item,
+                    ready,
+                    elementless: false,
+                    eager_list: None,
+                    writes,
+                    clear: Vec::new(),
+                };
+                checker.invalidate_loop_facts(&inner.body, Some((&group, &inner.iter)))?;
+                let (statements, _) = checker.lower_prepared_iteration(
+                    &inner.target,
+                    group,
+                    &inner.orelse,
+                    Vec::new(),
+                    |checker| {
+                        // A break leaves the outer iterator to skip the rest of this group.
+                        let mut each = vec![Statement::Assign(ready, Expr::boolean(false))];
+                        each.extend(checker.block(&inner.body)?.0);
+                        Ok(each)
+                    },
+                )?;
+                body.extend(statements);
+            } else {
+                let members = members.expect("validated group consumer");
+                let list_type = checker.types.list(item_type);
+                let accumulating = checker.hidden(list_type);
+                let output = checker.declare(members.id.as_str(), list_type, members)?;
+                checker.assigned.insert(output);
+                checker.narrowed.remove_mut(&output);
+                let mut drain = vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::Append,
+                        vec![checker.local(accumulating), checker.local(item)],
+                    ),
+                })];
+                drain.append(&mut pull);
+                drain.push(Statement::If(boundary, vec![Statement::Break], Vec::new()));
+                body.push(Statement::Scope {
+                    body: vec![
+                        Statement::Assign(
+                            accumulating,
+                            Expr {
+                                ty: list_type,
+                                kind: ExprKind::List(Vec::new()),
+                            },
+                        ),
+                        Statement::While(Expr::boolean(true), drain, Vec::new()),
+                        // If a pull raises, the old materialized list is still visible.
+                        Statement::Move(output, accumulating),
+                    ],
+                    clear: vec![accumulating],
+                });
+            }
             body.extend(checker.block(rest)?.0);
             Ok(body)
         })

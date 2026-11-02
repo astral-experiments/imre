@@ -101,6 +101,21 @@ def stop_early() -> None:
     print(len(Path("keys.txt").read_text()))
 
 
+def stream(values: list[int]) -> None:
+    key_calls: list[int] = []
+    for key, group in runs(values, Key(key_calls).observe):
+        for member in group:
+            print(f"member {key} {member} {len(key_calls)}")
+            if member == 1:
+                values[1] = 2
+                break
+            if member == 2:
+                continue
+        else:
+            print(f"drained {key}")
+    print(repr(key_calls))
+
+
 print(repr(sections(["alpha", "apple", "beta", "again"])))
 mutation_and_lookahead()
 failure([-1])
@@ -113,3 +128,4 @@ identity([1, 1, 2, 1])
 keep_groups()
 stop_early()
 print(len(Path("keys.txt").read_text()))
+stream([1, 1, 2, 3])
