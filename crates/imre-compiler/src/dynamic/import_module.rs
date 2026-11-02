@@ -120,6 +120,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/resources/__init__.py",
             include_str!("../../stdlib/importlib/resources/__init__.py"),
         )),
+        "importlib.resources.abc" => Some((
+            "importlib/resources/abc.py",
+            include_str!("../../stdlib/importlib/resources/abc.py"),
+        )),
         "importlib.resources._filesystem" => Some((
             "importlib/resources/_filesystem.py",
             include_str!("../../stdlib/importlib/resources/_filesystem.py"),

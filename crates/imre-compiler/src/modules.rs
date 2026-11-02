@@ -319,6 +319,7 @@ pub(crate) enum IntrinsicModule {
     ImportlibBootstrapExternal,
     ImportlibMetadata,
     ImportlibResources,
+    ImportlibResourcesAbc,
     ImportlibUtil,
     Array,
     Imp,
@@ -841,6 +842,7 @@ impl IntrinsicModule {
             }
             "importlib.metadata" => Some(Self::ImportlibMetadata),
             "importlib.resources" => Some(Self::ImportlibResources),
+            "importlib.resources.abc" => Some(Self::ImportlibResourcesAbc),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
             "_collections" => Some(Self::CollectionsNative),
@@ -933,6 +935,9 @@ impl IntrinsicModule {
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
+        }
+        if self == Self::ImportlibResources && name == "abc" {
+            return Some(Binding::IntrinsicModule(Self::ImportlibResourcesAbc));
         }
         if self == Self::Collections && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::CollectionsAbc));
@@ -1042,6 +1047,12 @@ impl IntrinsicModule {
             }
             (Self::Importlib, "invalidate_caches") => {
                 Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
+            }
+            (Self::ImportlibResourcesAbc, "ResourceReader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.abc.ResourceReader")
+            }
+            (Self::ImportlibResourcesAbc, "TraversableResources") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.abc.TraversableResources")
             }
             (Self::ImportlibResources, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.files")
@@ -3774,6 +3785,7 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
                     | IntrinsicModule::ImportlibBootstrapExternal
+                    | IntrinsicModule::ImportlibResourcesAbc
             );
         }
         if module == Some(IntrinsicModule::Dataclasses)

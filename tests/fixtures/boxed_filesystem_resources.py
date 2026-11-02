@@ -1,4 +1,5 @@
 from importlib import resources
+from importlib.resources.abc import ResourceReader, TraversableResources
 import data
 
 
@@ -9,6 +10,11 @@ class Loader:
 
     def files(self):
         return sentinel
+
+
+class Reader(TraversableResources):
+    def files(self):
+        return root
 
 
 root = resources.files(data)
@@ -26,6 +32,29 @@ except FileNotFoundError:
     pass
 else:
     raise AssertionError('opened a missing resource')
+
+
+for base in (ResourceReader, TraversableResources):
+    try:
+        base()
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('constructed an abstract reader')
+
+
+reader = Reader()
+assert isinstance(reader, ResourceReader)
+assert reader.is_resource('nested/message.txt')
+assert 'nested' in list(reader.contents())
+with reader.open_resource('nested/message.txt') as stream:
+    assert stream.read() == b'hello\n'
+try:
+    reader.resource_path('nested/message.txt')
+except FileNotFoundError as error:
+    assert error.args == ('nested/message.txt',)
+else:
+    raise AssertionError('reader unexpectedly provided a filesystem path')
 
 
 sentinel = object()
