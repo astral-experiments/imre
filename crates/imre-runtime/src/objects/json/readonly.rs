@@ -5,7 +5,7 @@
 use crate::StrOwner;
 mod arrays;
 mod constants;
-pub(crate) use deep::{DecodedJson, decode_json};
+pub(crate) use deep::{DecodedJson, decode_json_tokens};
 mod deep;
 mod deep_values;
 pub(in crate::objects) mod document;

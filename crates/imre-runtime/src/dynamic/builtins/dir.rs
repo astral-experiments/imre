@@ -1,4 +1,5 @@
 use super::{Context, Error, Id, NONE, Result, Value, collections, type_error};
+use crate::dynamic::typing::{Alias, AliasKind, forwards_to_origin, literal_origin};
 use std::collections::BTreeSet;
 
 /// Apply the type's special method and sort a fresh list, preserving duplicates and comparison errors.
@@ -36,6 +37,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut names = BTreeSet::new();
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
+        Value::GenericAlias(alias) if matches!(alias.kind, AliasKind::Literal(_)) => {
+            return literal_names(ctx, alias.clone());
+        }
         Value::ParamSpec(_) => {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")
@@ -112,6 +116,64 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         ctx.put_item(dictionary, key, NONE)?;
     }
     Ok(dictionary)
+}
+
+/// Literal delegates non-dunder names to its origin, including custom Python directory hooks.
+fn literal_names(ctx: &mut Context, alias: Alias) -> Result<Id> {
+    let (origin, nested) = literal_origin(ctx, alias.origin)?;
+    let mut names = call(ctx, &[origin], &[])?;
+    // Each enclosing alias filters the sorted dir() of the preceding alias.
+    for _ in 0..nested {
+        let merged = merge_literal_names(ctx, &alias, names)?;
+        names = collections::sorted(ctx, &[merged], &[])?;
+    }
+    merge_literal_names(ctx, &alias, names)
+}
+
+fn merge_literal_names(ctx: &mut Context, alias: &Alias, origin_names: Id) -> Result<Id> {
+    ctx.heap.keep(origin_names);
+    let fields = alias.literal_fields().map(|(name, _)| name);
+    let entries = fields
+        .into_iter()
+        .chain([
+            "__class__",
+            "__format__",
+            "__getstate__",
+            "__init_subclass__",
+            "__mro_entries__",
+        ])
+        .map(|name| (ctx.text(name), NONE))
+        .collect();
+    let names = ctx.dict(entries);
+    ctx.heap.keep(names);
+    let marker = ctx.text("__");
+    ctx.heap.keep(marker);
+    for name in ctx.items(origin_names)? {
+        if visible_origin_name(ctx, name, marker)? {
+            ctx.put_item(names, name, NONE)?;
+        }
+    }
+    Ok(names)
+}
+
+/// Keep exact Unicode string names on their native storage path, including lone surrogates.
+fn visible_origin_name(ctx: &mut Context, name: Id, marker: Id) -> Result<bool> {
+    match ctx.heap.get(name) {
+        Value::Str(text) => return Ok(forwards_to_origin(text)),
+        Value::SurrogateStr(points) => {
+            let underscores = [u32::from('_'); 2];
+            return Ok(!(points.starts_with(&underscores) && points.ends_with(&underscores)));
+        }
+        _ => {}
+    }
+    for method in ["startswith", "endswith"] {
+        let check = ctx.lookup_attr(name, method)?;
+        let matches = ctx.call(check, vec![marker], Vec::new())?;
+        if !ctx.truth(matches)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Collect each Python class's own names without evaluating class values or descriptors.

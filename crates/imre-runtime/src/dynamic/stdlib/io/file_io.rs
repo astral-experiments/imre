@@ -13,7 +13,7 @@ use crate::objects::{BoxedPipe, os};
 pub(super) const METHODS: &[&str] = &[
     "__init__", "__repr__", "closed", "mode", "closefd", "_blksize", "close", "fileno", "read",
     "readall", "readline", "readinto", "write", "seek", "tell", "truncate", "readable", "writable",
-    "seekable", "isatty",
+    "seekable", "isatty", "_dealloc_warn",
 ];
 
 pub(in crate::dynamic) struct RawFile {
@@ -905,7 +905,7 @@ pub(super) fn call(
         return initialize(ctx, receiver, args, kwargs);
     }
     let arity = match name {
-        "write" | "readinto" => 1..=1,
+        "write" | "readinto" | "_dealloc_warn" => 1..=1,
         "read" | "readline" | "truncate" => 0..=1,
         "seek" => 1..=2,
         "__exit__" => 3..=3,
@@ -920,6 +920,28 @@ pub(super) fn call(
     let raw = state(ctx, receiver);
     let is_closed = raw.as_ref().is_none_or(|raw| raw.live_fd().is_none());
     match name {
+        "_dealloc_warn" => {
+            let source = args[0];
+            if !is_closed && raw.as_ref().is_some_and(|raw| raw.closefd.get()) {
+                let result = ctx.checked_format(source, true).and_then(|repr| {
+                    ctx.emit_builtin_warning_with_source(
+                        crate::objects::exceptions::Kind::ResourceWarning,
+                        &format!("unclosed file {repr}"),
+                        1,
+                        source,
+                    )
+                });
+                if let Err(error) = result {
+                    let warning = ctx.builtin("Warning");
+                    if ctx.raised_error_matches(&error, warning) {
+                        super::super::super::unraisable::report(
+                            ctx, error, true, Some(receiver), "Exception ignored while finalizing file",
+                        );
+                    }
+                }
+            }
+            return Ok(NONE);
+        }
         "closed" => return Ok(builtins::boolean(is_closed)),
         "closefd" => {
             return Ok(builtins::boolean(
