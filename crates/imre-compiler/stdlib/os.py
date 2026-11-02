@@ -1,6 +1,7 @@
 """POSIX filesystem spellings for runtime-loaded modules."""
 import abc
 import sys
+from posix import openpty
 import posixpath as path
 import stat as st
 from posix import _exit
@@ -19,6 +20,7 @@ except ImportError:
 if sys.platform == "linux":
     from posix import MFD_CLOEXEC, memfd_create
     import posix as _posix
+    from posix import pipe2
     for _name in vars(_posix):
         if _name.startswith("RTLD_"):
             globals()[_name] = getattr(_posix, _name)

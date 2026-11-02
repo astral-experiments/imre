@@ -411,6 +411,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "truncate"
             | "ftruncate"
             | "pipe"
+            | "openpty"
             | "read"
             | "write"
             | "close"
@@ -979,18 +980,28 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
-    if name == "pipe" {
-        if !args.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                format!("posix.pipe() takes no arguments ({} given)", args.len()),
-            ));
-        }
+    if matches!(name, "openpty" | "pipe" | "pipe2") {
         let mut result = Vec::new();
         result
             .try_reserve_exact(2)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for fd in native::pipe(libc::O_CLOEXEC)? {
+        let fds = match (name, args) {
+            ("openpty", []) => native::openpty()?,
+            ("pipe", []) => native::pipe(libc::O_CLOEXEC)?,
+            ("pipe2", [flags]) => native::pipe(c_int(ctx, *flags)?)?,
+            _ => {
+                let arity = if name != "pipe2" {
+                    "no arguments"
+                } else {
+                    "exactly one argument"
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!("posix.{name}() takes {arity} ({} given)", args.len()),
+                ));
+            }
+        };
+        for fd in fds {
             result.push(ctx.int(i64::from(fd)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
